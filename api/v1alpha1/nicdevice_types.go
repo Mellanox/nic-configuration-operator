@@ -20,22 +20,63 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+// NicDeviceConfigurationSpec contains desired configuration of the NIC
+type NicDeviceConfigurationSpec struct {
+	// ResetToDefault specifies whether node agent needs to perform a reset flow
+	// The following operations will be performed:
+	// * Nvconfig reset of all non-volatile configurations
+	//   - Mstconfig -d <device> reset for each PF
+	//   - Mstconfig -d <device> set ADVANCED_PCI_SETTINGS=1
+	// * Node reboot
+	//   - Applies new NIC NV config
+	//   - Will undo any runtime configuration previously performed for the device/driver
+	ResetToDefault bool `json:"resetToDefault,omitempty"`
+	// Configuration template applied from the NicConfigurationTemplate CR
+	Template *NicConfigurationTemplateSpec `json:"template,omitempty"`
+}
 
 // NicDeviceSpec defines the desired state of NicDevice
 type NicDeviceSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// Configuration specifies the configuration requested by NicConfigurationTemplate
+	Configuration *NicDeviceConfigurationSpec `json:"configuration,omitempty"`
+}
 
-	// Foo is an example field of NicDevice. Edit nicdevice_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+// NicDevicePortSpec describes the ports of the NIC
+type NicDevicePortSpec struct {
+	// PCI is a PCI address of the port, e.g. 0000:3b:00.0
+	PCI string `json:"pci"`
+	// NetworkInterface is the name of the network interface for this port, e.g. eth1
+	NetworkInterface string `json:"networkInterface,omitempty"`
+	// RdmaInterface is the name of the rdma interface for this port, e.g. mlx5_1
+	RdmaInterface string `json:"rdmaInterface,omitempty"`
+}
+
+// NicDeviceConditionSpec specifies the conditions observed for the NIC
+type NicDeviceConditionSpec struct {
+	// Type of the condition, e.g. "ConfigUpdateInProgress"
+	Type string `json:"type"`
+	// Status of the condition, True|False|Unknown
+	Status string `json:"status"`
 }
 
 // NicDeviceStatus defines the observed state of NicDevice
 type NicDeviceStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// Node where the device is located
+	Node string `json:"node"`
+	// Type of device, e.g. ConnectX7
+	Type string `json:"type"`
+	// Serial number of the device, e.g. MT2116X09299
+	SerialNumber string `json:"serialNumber"`
+	// Part number of the device, e.g. MCX713106AEHEA_QP1
+	PartNumber string `json:"partNumber"`
+	// Product Serial ID of the device, e.g. MT_0000000221
+	PSID string `json:"psid"`
+	// Firmware version currently installed on the device, e.g. 22.31.1014
+	FirmwareVersion string `json:"firmwareVersion"`
+	// List of ports for the device
+	Ports []NicDevicePortSpec `json:"ports"`
+	// List of conditions observed for the device
+	Conditions []NicDeviceConditionSpec `json:"conditions"`
 }
 
 //+kubebuilder:object:root=true

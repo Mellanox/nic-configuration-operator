@@ -38,10 +38,10 @@ spec:
           metadata:
             type: object
           spec:
-            description: NicConfigurationTemplateSpec defines the desired state of
-              NicConfigurationTemplate
+            description: Defines the desired state of NICs
             properties:
               nicSelector:
+                description: NIC selector configuration
                 properties:
                   nicType:
                     description: Type of the NIC to be selected, e.g. ConnectX5|ConnectX6|ConnectX7
@@ -80,6 +80,7 @@ spec:
                 description: Configuration template to be applied to matching devices
                 properties:
                   gpuDirectOptimized:
+                    description: GPU Direct optimization settings
                     properties:
                       enabled:
                         description: Optimize GPU Direct
@@ -98,6 +99,7 @@ spec:
                     description: Number of VFs to be configured
                     type: integer
                   pciPerformanceOptimized:
+                    description: PCI performance optimization settings
                     properties:
                       enabled:
                         description: Specifies whether to enable PCI performance optimization
@@ -129,6 +131,7 @@ spec:
                       type: object
                     type: array
                   roceOptimized:
+                    description: RoCE optimization settings
                     properties:
                       enabled:
                         description: Optimize RoCE
@@ -161,8 +164,7 @@ spec:
             - template
             type: object
           status:
-            description: NicConfigurationTemplateStatus defines the observed state
-              of NicConfigurationTemplate
+            description: Defines the observed state of NicConfigurationTemplate
             properties:
               nicDevices:
                 description: NicDevice CRs matching this configuration template
