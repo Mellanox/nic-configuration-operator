@@ -21,15 +21,16 @@ COPY ./ ./
 # the docker BUILDPLATFORM arg will be linux/arm64 when for Apple x86 it will be linux/amd64. Therefore,
 # by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
 #RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/maintenance-manager/main.go
-RUN --mount=type=cache,target=/go/pkg/mod/ GO_GCFLAGS=${GCFLAGS} make build-manager
+RUN --mount=type=cache,target=/go/pkg/mod/ GO_GCFLAGS=${GCFLAGS} make build-daemon
 
-# Use distroless as minimal base image to package the manager binary
+# Use distroless as minimal base image to package the nic-configuration-daemon binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
-FROM gcr.io/distroless/static:nonroot
+#FROM gcr.io/distroless/static:nonroot
+FROM quay.io/centos/centos:stream9
 WORKDIR /
-COPY --from=builder /workspace/build/manager .
+COPY --from=builder /workspace/build/nic-configuration-daemon .
 USER 65532:65532
 
-ENTRYPOINT ["/manager"]
+ENTRYPOINT ["/nic-configuration-daemon"]
 
-LABEL org.opencontainers.image.source=https://github.com/Mellanox/nic-configuration-operator
+LABEL org.opencontainers.image.source=https://github.com/Mellanox/nic-configuration-daemon
