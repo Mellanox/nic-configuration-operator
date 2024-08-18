@@ -130,8 +130,13 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 ##@ Build
 
 .PHONY: build
-build: manifests generate fmt vet ## Build manager binary.
-	go build -o bin/manager cmd/main.go
+build: manifests generate fmt vet build-manager build-daemon
+
+build-manager: ## Build manager binary.
+	go build -o bin/manager cmd/manager/main.go
+
+build-daemon: ## Build nic-configuration-daemon binary.
+	go build -o bin/nic-configuration-daemon cmd/nic-configuration-daemon/main.go
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
