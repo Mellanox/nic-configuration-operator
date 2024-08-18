@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nic-configuration-daemon
+  namespace: system
+  labels:
+    app.kubernetes.io/name: nic-configuration-daemon
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  selector:
+    matchLabels:
+      control-plane: nic-configuration-daemon
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: nic-configuration-daemon
+      labels:
+        control-plane: nic-configuration-daemon
+    spec:
+      containers:
+        - image: nic-configuration-daemon:latest
+          imagePullPolicy: Never
+          name: nic-configuration-daemon
+          securityContext:
+            privileged: true
+          resources:
+            limits:
+              cpu: 500m
+              memory: 128Mi
+            requests:
+              cpu: 10m
+              memory: 64Mi
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+      serviceAccountName: controller-manager
+      terminationGracePeriodSeconds: 10

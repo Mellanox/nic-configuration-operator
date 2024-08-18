@@ -30,3 +30,29 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - configuration.net.nvidia.com
+  resources:
+  - nicdevices
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - configuration.net.nvidia.com
+  resources:
+  - nicdevices/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - configuration.net.nvidia.com
+  resources:
+  - nicdevices/status
+  verbs:
+  - get
+  - patch
+  - update
