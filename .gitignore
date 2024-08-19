@@ -21,5 +21,6 @@
 go.work
 go.work.sum
 
-# IDE directories
 .idea/
+bin/
+build/
