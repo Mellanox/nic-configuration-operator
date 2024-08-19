@@ -20,22 +20,106 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+// NicTypeEnum describes an enum of NIC types
+// +enum
+type NicTypeEnum string
+
+// NicSelectorSpec is a desired configuration for NICs
+type NicSelectorSpec struct {
+	// Type of the NIC to be selected, e.g. ConnectX5|ConnectX6|ConnectX7
+	NicType NicTypeEnum `json:"nicType"`
+	// Array of PCI addresses to be selected, e.g. "0000:03:00.0"
+	PciAddresses []string `json:"pciAddresses,omitempty"`
+	// Serial numbers of the NICs to be selected, e.g. MT2116X09299
+	SerialNumbers []string `json:"serialNumbers,omitempty"`
+}
+
+// LinkTypeEnum described the link type (Ethernet / Infiniband)
+// +enum
+type LinkTypeEnum string
+
+// PciPerformanceOptimizedSpec specifies PCI performace optimization settings
+type PciPerformanceOptimizedSpec struct {
+	// Specifies whether to enable PCI performance optimization
+	Enabled bool `json:"enabled"`
+	// Specifies the PCIe Max Accumulative Outstanding read bytes
+	MaxAccOutRead int `json:"maxAccOutRead,omitempty"`
+	// Specifies the size of a single PCI read request in bytes
+	MaxReadRequest int `json:"maxReadRequest,omitempty"`
+}
+
+// QosSpec specifies Quality of Service settings
+type QosSpec struct {
+	// Trust mode for QoS settings, e.g. trust-dscp
+	Trust string `json:"trust"`
+	// Priority-based Flow Control configuration, e.g. "0,0,0,1,0,0,0,0"
+	PFC string `json:"pfc"`
+}
+
+// RoceOptimizedSpec specifies RoCE optimization settings
+type RoceOptimizedSpec struct {
+	// Optimize RoCE
+	Enabled bool `json:"enabled"`
+	// Quality of Service settings
+	Qos *QosSpec `json:"qos"`
+}
+
+// GpuDirectOptimizedSpec specifies GPU Direct optimization settings
+type GpuDirectOptimizedSpec struct {
+	// Optimize GPU Direct
+	Enabled bool `json:"enabled"`
+	// GPU direct environment, e.g. Baremetal
+	Env string `json:"env"`
+}
+
+type NvConfigParam struct {
+	// Name of the arbitrary nvconfig parameter
+	Name string `json:"name"`
+	// Value of the arbitrary nvconfig parameter
+	Value string `json:"value"`
+}
+
+// ConfigurationTemplateSpec is a set of configurations for the NICs
+type ConfigurationTemplateSpec struct {
+	// Number of VFs to be configured
+	NumVfs int `json:"numVfs"`
+	// LinkType to be configured, Ethernet|Infiniband
+	LinkType LinkTypeEnum `json:"linkType"`
+	// PCI performance optimization settings
+	PciPerformanceOptimized *PciPerformanceOptimizedSpec `json:"pciPerformanceOptimized,omitempty"`
+	// RoCE optimization settings
+	RoceOptimized *RoceOptimizedSpec `json:"roceOptimized,omitempty"`
+	// GPU Direct optimization settings
+	GpuDirectOptimized *GpuDirectOptimizedSpec `json:"gpuDirectOptimized,omitempty"`
+	// List of arbitrary nv config parameters
+	RawNvConfig []NvConfigParam `json:"rawNvConfig,omitempty"`
+}
 
 // NicConfigurationTemplateSpec defines the desired state of NicConfigurationTemplate
 type NicConfigurationTemplateSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
-	// Foo is an example field of NicConfigurationTemplate. Edit nicconfigurationtemplate_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	// NodeSelector contains labels required on the node
+	NodeSelector map[string]string `json:"nodeSelector"`
+	// NIC selector configuration
+	NicSelector *NicSelectorSpec `json:"nicSelector"`
+	// ResetToDefault specifies whether node agent needs to perform a reset flow
+	// The following operations will be performed:
+	// * Nvconfig reset of all non-volatile configurations
+	//   - Mstconfig -d <device> reset for each PF
+	//   - Mstconfig -d <device> set ADVANCED_PCI_SETTINGS=1
+	// * Node reboot
+	//   - Applies new NIC NV config
+	//   - Will undo any runtime configuration previously performed for the device/driver
+	// +optional
+	// +kubebuilder:default:=false
+	ResetToDefault bool `json:"resetToDefault,omitempty"`
+	// Configuration template to be applied to matching devices
+	Template *ConfigurationTemplateSpec `json:"template"`
 }
 
 // NicConfigurationTemplateStatus defines the observed state of NicConfigurationTemplate
 type NicConfigurationTemplateStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// NicDevice CRs matching this configuration template
+	NicDevices []string `json:"nicDevices"`
 }
 
 //+kubebuilder:object:root=true
@@ -46,7 +130,9 @@ type NicConfigurationTemplate struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   NicConfigurationTemplateSpec   `json:"spec,omitempty"`
+	// Defines the desired state of NICs
+	Spec NicConfigurationTemplateSpec `json:"spec,omitempty"`
+	// Defines the observed state of NicConfigurationTemplate
 	Status NicConfigurationTemplateStatus `json:"status,omitempty"`
 }
 
