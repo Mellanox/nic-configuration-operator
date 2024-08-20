@@ -17,9 +17,11 @@ spec:
       labels:
         control-plane: nic-configuration-daemon
     spec:
+      hostNetwork: true
+      hostPID: true
+      priorityClassName: system-node-critical
       containers:
         - image: nic-configuration-daemon:latest
-          imagePullPolicy: Never
           name: nic-configuration-daemon
           securityContext:
             privileged: true
@@ -35,5 +37,13 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+          volumeMounts:
+            - name: sys
+              mountPath: /sys
+              readOnly: false
+      volumes:
+        - name: sys
+          hostPath:
+            path: /sys
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10

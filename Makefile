@@ -50,7 +50,7 @@ endif
 # This is useful for CI or a project to utilize a specific version of the operator-sdk toolkit.
 OPERATOR_SDK_VERSION ?= v1.36.0
 # Image URL to use all building/pushing image targets
-OPERATOR_IMAGE_TAG ?= controller:latest
+OPERATOR_IMAGE_TAG ?= nic-configuration-operator:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.31.0
 
@@ -157,6 +157,7 @@ docker-build: ## Build docker image with the manager.
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	$(CONTAINER_TOOL) push ${OPERATOR_IMAGE_TAG}
+	$(CONTAINER_TOOL) push ${CONFIG_DAEMON_IMAGE_TAG}
 
 # PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
 # architectures. (i.e. make docker-buildx OPERATOR_IMAGE_TAG=myregistry/mypoperator:0.0.1). To use this option you need to:
