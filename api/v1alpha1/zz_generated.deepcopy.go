@@ -217,7 +217,7 @@ func (in *NicDeviceConfigurationSpec) DeepCopyInto(out *NicDeviceConfigurationSp
 	*out = *in
 	if in.Template != nil {
 		in, out := &in.Template, &out.Template
-		*out = new(NicConfigurationTemplateSpec)
+		*out = new(ConfigurationTemplateSpec)
 		(*in).DeepCopyInto(*out)
 	}
 }

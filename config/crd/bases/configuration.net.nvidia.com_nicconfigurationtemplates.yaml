@@ -160,7 +160,6 @@ spec:
                 type: object
             required:
             - nicSelector
-            - nodeSelector
             - template
             type: object
           status:

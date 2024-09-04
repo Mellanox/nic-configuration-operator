@@ -19,14 +19,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// NicTypeEnum describes an enum of NIC types
-// +enum
-type NicTypeEnum string
-
 // NicSelectorSpec is a desired configuration for NICs
 type NicSelectorSpec struct {
 	// Type of the NIC to be selected, e.g. ConnectX5|ConnectX6|ConnectX7
-	NicType NicTypeEnum `json:"nicType"`
+	NicType string `json:"nicType"`
 	// Array of PCI addresses to be selected, e.g. "0000:03:00.0"
 	PciAddresses []string `json:"pciAddresses,omitempty"`
 	// Serial numbers of the NICs to be selected, e.g. MT2116X09299
@@ -97,7 +93,7 @@ type ConfigurationTemplateSpec struct {
 // NicConfigurationTemplateSpec defines the desired state of NicConfigurationTemplate
 type NicConfigurationTemplateSpec struct {
 	// NodeSelector contains labels required on the node
-	NodeSelector map[string]string `json:"nodeSelector"`
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
 	// NIC selector configuration
 	NicSelector *NicSelectorSpec `json:"nicSelector"`
 	// ResetToDefault specifies whether node agent needs to perform a reset flow
