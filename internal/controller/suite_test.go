@@ -22,6 +22,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -39,8 +40,9 @@ import (
 // http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
 
 var (
-	cfg     *rest.Config
-	testEnv *envtest.Environment
+	cfg       *rest.Config
+	testEnv   *envtest.Environment
+	k8sClient client.Client
 )
 
 func TestControllers(t *testing.T) {
@@ -51,6 +53,8 @@ func TestControllers(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
+
+	ncolog.SetLogLevel(2)
 
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
@@ -76,7 +80,7 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 
 	//+kubebuilder:scaffold:scheme
-	k8sClient, err := client.New(cfg, client.Options{Scheme: scheme.Scheme})
+	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
 

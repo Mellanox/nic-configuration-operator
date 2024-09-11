@@ -4,7 +4,6 @@ import (
 	"flag"
 	"os"
 
-	"github.com/Mellanox/nic-configuration-operator/internal/controller"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -12,7 +11,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
+	"github.com/Mellanox/nic-configuration-operator/internal/controller"
 	"github.com/Mellanox/nic-configuration-operator/pkg/host"
+	"github.com/Mellanox/nic-configuration-operator/pkg/maintenance"
 	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 )
 
@@ -60,10 +61,18 @@ func main() {
 
 	hostUtils := host.NewHostUtils()
 	hostManager := host.NewHostManager(hostUtils)
+	maintenanceManager := maintenance.New()
 
 	deviceDiscovery := controller.NewDeviceRegistry(mgr.GetClient(), hostManager, nodeName, namespace)
 	if err = mgr.Add(deviceDiscovery); err != nil {
 		log.Log.Error(err, "unable to add device discovery runnable")
+		os.Exit(1)
+	}
+
+	nicDeviceReconciler := controller.NewNicDeviceReconciler(mgr.GetClient(), mgr.GetScheme(), nodeName, namespace, hostManager, maintenanceManager)
+	err = nicDeviceReconciler.SetupWithManager(mgr)
+	if err != nil {
+		log.Log.Error(err, "unable to create controller", "controller", "NicDeviceReconciler")
 		os.Exit(1)
 	}
 

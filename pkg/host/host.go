@@ -16,6 +16,7 @@ limitations under the License.
 package host
 
 import (
+	"context"
 	"strconv"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -28,6 +29,18 @@ import (
 type HostManager interface {
 	// DiscoverNicDevices discovers Nvidia NIC devices on the host and returns back a map of serial numbers to device statuses
 	DiscoverNicDevices() (map[string]v1alpha1.NicDeviceStatus, error)
+	// ValidateDeviceNvSpec will validate device's non-volatile spec against already applied configuration on the host
+	// returns bool - nv config update required
+	// returns bool - reboot required
+	// returns error - there are errors in device's spec
+	ValidateDeviceNvSpec(ctx context.Context, device *v1alpha1.NicDevice) (bool, bool, error)
+	// ApplyDeviceNvSpec calculates device's missing nv spec configuration and applies it to the device on the host
+	// returns bool - reboot required
+	// returns error - there were errors while applying nv configuration
+	ApplyDeviceNvSpec(ctx context.Context, device *v1alpha1.NicDevice) (bool, error)
+	// ApplyDeviceRuntimeSpec calculates device's missing runtime spec configuration and applies it to the device on the host
+	// returns error - there were errors while applying nv configuration
+	ApplyDeviceRuntimeSpec(device *v1alpha1.NicDevice) error
 }
 
 type hostManager struct {
@@ -111,6 +124,32 @@ func (h hostManager) DiscoverNicDevices() (map[string]v1alpha1.NicDeviceStatus, 
 	}
 
 	return devices, nil
+}
+
+// ValidateDeviceNvSpec will validate device's non-volatile spec against already applied configuration on the host
+// returns bool - nv config update required
+// returns bool - reboot required
+// returns error - there are errors in device's spec
+func (h hostManager) ValidateDeviceNvSpec(ctx context.Context, device *v1alpha1.NicDevice) (bool, bool, error) {
+	return false, false, nil
+}
+
+// ApplyDeviceNvSpec calculates device's missing nv spec configuration and applies it to the device on the host
+// returns bool - reboot required
+// returns error - there were errors while applying nv configuration
+func (h hostManager) ApplyDeviceNvSpec(ctx context.Context, device *v1alpha1.NicDevice) (bool, error) {
+	// TODO first set ADVANCED_PCI_SETTINGS=true
+	// TODO then fwreset
+	// TODO then recalculate list of commands
+	// TODO then apply commands
+	return false, nil
+}
+
+// ApplyDeviceRuntimeSpec calculates device's missing runtime spec configuration and applies it to the device on the host
+// returns error - there were errors while applying nv configuration
+func (h hostManager) ApplyDeviceRuntimeSpec(device *v1alpha1.NicDevice) error {
+	// TODO check lastAppliedSpec
+	return nil
 }
 
 func NewHostManager(hostUtils HostUtils) HostManager {
