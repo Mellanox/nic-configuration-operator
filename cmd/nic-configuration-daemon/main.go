@@ -4,15 +4,17 @@ import (
 	"flag"
 	"os"
 
-	"github.com/Mellanox/nic-configuration-operator/internal/controller"
 	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
+	"github.com/Mellanox/nic-configuration-operator/internal/controller"
 	"github.com/Mellanox/nic-configuration-operator/pkg/host"
+	"github.com/Mellanox/nic-configuration-operator/pkg/maintenance"
 	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 )
 
@@ -25,17 +27,8 @@ func main() {
 	flag.Parse()
 	ncolog.InitLog()
 
-	err := clientgoscheme.AddToScheme(scheme)
-	if err != nil {
-		log.Log.Error(err, "failed to load client-go to scheme")
-		os.Exit(1)
-	}
-
-	err = v1alpha1.AddToScheme(scheme)
-	if err != nil {
-		log.Log.Error(err, "failed to load nic configuration CRDs to scheme")
-		os.Exit(1)
-	}
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(v1alpha1.AddToScheme(scheme))
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
@@ -60,10 +53,25 @@ func main() {
 
 	hostUtils := host.NewHostUtils()
 	hostManager := host.NewHostManager(hostUtils)
+	maintenanceManager := maintenance.New()
 
 	deviceDiscovery := controller.NewDeviceRegistry(mgr.GetClient(), hostManager, nodeName, namespace)
 	if err = mgr.Add(deviceDiscovery); err != nil {
 		log.Log.Error(err, "unable to add device discovery runnable")
+		os.Exit(1)
+	}
+
+	nicDeviceReconciler := controller.NicDeviceReconciler{
+		Client:             mgr.GetClient(),
+		Scheme:             mgr.GetScheme(),
+		NodeName:           nodeName,
+		NamespaceName:      namespace,
+		HostManager:        hostManager,
+		MaintenanceManager: maintenanceManager,
+	}
+	err = nicDeviceReconciler.SetupWithManager(mgr)
+	if err != nil {
+		log.Log.Error(err, "unable to create controller", "controller", "NicDeviceReconciler")
 		os.Exit(1)
 	}
 

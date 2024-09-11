@@ -21,7 +21,14 @@ const (
 	Ethernet   = "Ethernet"
 	Infiniband = "Infiniband"
 
-	ConfigUpdateInProgressCondition = "ConfigUpdateInProgress"
+	ConfigUpdateInProgressCondition     = "ConfigUpdateInProgress"
+	IncorrectSpecReason                 = "IncorrectSpec"
+	UpdateStartedReason                 = "UpdateStarted"
+	PendingRebootReason                 = "PendingReboot"
+	NonVolatileConfigUpdateFailedReason = "NonVolatileConfigUpdateFailed"
+	RuntimeConfigUpdateFailedReason     = "RuntimeConfigUpdateFailed"
+	UpdateSuccessfulReason              = "UpdateSuccessful"
+	SpecValidationFailed                = "SpecValidationFailed"
 
 	DeviceConfigSpecEmptyReason = "DeviceConfigSpecEmpty"
 
@@ -31,4 +38,6 @@ const (
 	PSIDPrefix            = "psid:"
 
 	NetClass = 0x02
+
+	LastAppliedStateAnnotation = "lastAppliedState"
 )
