@@ -12,3 +12,19 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
+
+package host
+
+import (
+	"testing"
+
+	"github.com/onsi/ginkgo/v2"
+	"github.com/onsi/gomega"
+)
+
+func TestHostManager(t *testing.T) {
+	// Register Gomega with Ginkgo
+	gomega.RegisterFailHandler(ginkgo.Fail)
+	// Run the test suite
+	ginkgo.RunSpecs(t, "HostManager Suite")
+}

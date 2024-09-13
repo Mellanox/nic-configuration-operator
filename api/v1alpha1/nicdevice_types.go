@@ -1,6 +1,5 @@
 /*
-Copyright 2024.
-
+2024 NVIDIA CORPORATION & AFFILIATES
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -51,14 +50,6 @@ type NicDevicePortSpec struct {
 	RdmaInterface string `json:"rdmaInterface,omitempty"`
 }
 
-// NicDeviceConditionSpec specifies the conditions observed for the NIC
-type NicDeviceConditionSpec struct {
-	// Type of the condition, e.g. "ConfigUpdateInProgress"
-	Type string `json:"type"`
-	// Status of the condition, True|False|Unknown
-	Status string `json:"status"`
-}
-
 // NicDeviceStatus defines the observed state of NicDevice
 type NicDeviceStatus struct {
 	// Node where the device is located
@@ -76,7 +67,7 @@ type NicDeviceStatus struct {
 	// List of ports for the device
 	Ports []NicDevicePortSpec `json:"ports"`
 	// List of conditions observed for the device
-	Conditions []NicDeviceConditionSpec `json:"conditions"`
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 //+kubebuilder:object:root=true

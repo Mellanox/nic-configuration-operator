@@ -5,6 +5,34 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - list
+- apiGroups:
+  - ""
+  resources:
+  - pods/eviction
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - configuration.net.nvidia.com
   resources:
   - nicconfigurationtemplates

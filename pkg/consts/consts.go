@@ -12,3 +12,23 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
+
+package consts
+
+const (
+	MellanoxVendor = "15b3"
+
+	Ethernet   = "Ethernet"
+	Infiniband = "Infiniband"
+
+	ConfigUpdateInProgressCondition = "ConfigUpdateInProgress"
+
+	DeviceConfigSpecEmptyReason = "DeviceConfigSpecEmpty"
+
+	PartNumberPrefix      = "pn:"
+	SerialNumberPrefix    = "sn:"
+	FirmwareVersionPrefix = "fw version:"
+	PSIDPrefix            = "psid:"
+
+	NetClass = 0x02
+)
