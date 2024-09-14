@@ -20,6 +20,20 @@ import (
 	"strings"
 )
 
+type NvConfigQuery struct {
+	DefaultConfig  map[string]string
+	CurrentConfig  map[string]string
+	NextBootConfig map[string]string
+}
+
+func NewNvConfigQuery() NvConfigQuery {
+	return NvConfigQuery{
+		DefaultConfig:  make(map[string]string),
+		CurrentConfig:  make(map[string]string),
+		NextBootConfig: make(map[string]string),
+	}
+}
+
 const IncorrectSpecErrorPrefix = "incorrect spec"
 
 func IncorrectSpecError(msg string) error {

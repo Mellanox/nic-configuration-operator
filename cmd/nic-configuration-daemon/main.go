@@ -52,7 +52,7 @@ func main() {
 	}
 
 	hostUtils := host.NewHostUtils()
-	hostManager := host.NewHostManager(hostUtils)
+	hostManager := host.NewHostManager(nodeName, hostUtils)
 	maintenanceManager := maintenance.New()
 
 	deviceDiscovery := controller.NewDeviceRegistry(mgr.GetClient(), hostManager, nodeName, namespace)
