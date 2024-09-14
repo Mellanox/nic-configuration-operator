@@ -31,7 +31,7 @@ type NicDeviceConfigurationSpec struct {
 	//   - Will undo any runtime configuration previously performed for the device/driver
 	ResetToDefault bool `json:"resetToDefault,omitempty"`
 	// Configuration template applied from the NicConfigurationTemplate CR
-	Template *NicConfigurationTemplateSpec `json:"template,omitempty"`
+	Template *ConfigurationTemplateSpec `json:"template,omitempty"`
 }
 
 // NicDeviceSpec defines the desired state of NicDevice
