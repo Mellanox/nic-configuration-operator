@@ -23,7 +23,31 @@ COPY ./ ./
 RUN --mount=type=cache,target=/go/pkg/mod/ GO_GCFLAGS=${GCFLAGS} make build-daemon
 
 FROM quay.io/centos/centos:stream9
-RUN yum -y install hwdata mstflint && yum clean all
+ARG TARGETARCH
+ENV RHEL_VERSION=9.4
+ENV OFED_PACKAGE_MAJOR_VERSION=24.07
+ENV OFED_PACKAGE_MINOR_VERSION=0.6.1.0
+ENV MFT_VERSION=4.29.0-131
+ENV MLNX_TOOLS_VERSION=0.2407061
+
+RUN yum -y install hwdata mstflint wget pciutils procps-ng && yum clean all
+
+RUN ARCH_SUFFIX="${TARGETARCH}" \
+    && ARCH_SUFFIX="${ARCH_SUFFIX//amd64/x86_64}" \
+    && ARCH_SUFFIX="${ARCH_SUFFIX//arm64/aarch64}" \
+    && wget https://linux.mellanox.com/public/repo/mlnx_ofed/${OFED_PACKAGE_MAJOR_VERSION}-${OFED_PACKAGE_MINOR_VERSION}/rhel${RHEL_VERSION}/${ARCH_SUFFIX}/mlnx-tools-${OFED_PACKAGE_MAJOR_VERSION}-${MLNX_TOOLS_VERSION}.${ARCH_SUFFIX}.rpm \
+    && rpm -i mlnx-tools-${OFED_PACKAGE_MAJOR_VERSION}-${MLNX_TOOLS_VERSION}.${ARCH_SUFFIX}.rpm \
+    && rm mlnx-tools-${OFED_PACKAGE_MAJOR_VERSION}-${MLNX_TOOLS_VERSION}.${ARCH_SUFFIX}.rpm
+
+RUN ARCH_SUFFIX1="${TARGETARCH}" \
+    && ARCH_SUFFIX1="${ARCH_SUFFIX1//amd64/x86_64}" \
+    && ARCH_SUFFIX1="${ARCH_SUFFIX1//arm64/aarch64}" \
+    && ARCH_SUFFIX2="${TARGETARCH}" \
+    && ARCH_SUFFIX2="${ARCH_SUFFIX2//amd64/x86_64}" \
+    && wget https://linux.mellanox.com/public/repo/mlnx_ofed/${OFED_PACKAGE_MAJOR_VERSION}-${OFED_PACKAGE_MINOR_VERSION}/rhel${RHEL_VERSION}/${ARCH_SUFFIX1}/mft-${MFT_VERSION}.${ARCH_SUFFIX2}.rpm \
+    && rpm -i mft-${MFT_VERSION}.${ARCH_SUFFIX2}.rpm \
+    && rm mft-${MFT_VERSION}.${ARCH_SUFFIX2}.rpm
+
 WORKDIR /
 COPY --from=builder /workspace/build/nic-configuration-daemon .
 
