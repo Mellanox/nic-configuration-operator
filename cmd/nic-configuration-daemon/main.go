@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 
+	maintenanceoperator "github.com/Mellanox/maintenance-operator/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -29,6 +30,12 @@ func main() {
 	err := clientgoscheme.AddToScheme(scheme)
 	if err != nil {
 		log.Log.Error(err, "failed to load client-go to scheme")
+		os.Exit(1)
+	}
+
+	err = maintenanceoperator.AddToScheme(scheme)
+	if err != nil {
+		log.Log.Error(err, "failed to load maintenance operator to scheme")
 		os.Exit(1)
 	}
 
@@ -61,7 +68,7 @@ func main() {
 
 	hostUtils := host.NewHostUtils()
 	hostManager := host.NewHostManager(nodeName, hostUtils)
-	maintenanceManager := maintenance.New()
+	maintenanceManager := maintenance.New(mgr.GetClient(), hostUtils, nodeName, namespace)
 
 	deviceDiscovery := controller.NewDeviceRegistry(mgr.GetClient(), hostManager, nodeName, namespace)
 	if err = mgr.Add(deviceDiscovery); err != nil {
@@ -70,7 +77,7 @@ func main() {
 	}
 
 	nicDeviceReconciler := controller.NewNicDeviceReconciler(mgr.GetClient(), mgr.GetScheme(), nodeName, namespace, hostManager, maintenanceManager)
-	err = nicDeviceReconciler.SetupWithManager(mgr)
+	err = nicDeviceReconciler.SetupWithManager(mgr, true)
 	if err != nil {
 		log.Log.Error(err, "unable to create controller", "controller", "NicDeviceReconciler")
 		os.Exit(1)

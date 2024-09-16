@@ -99,7 +99,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 		maintenanceManager = &maintenanceMocks.MaintenanceManager{}
 
 		reconciler = NewNicDeviceReconciler(mgr.GetClient(), mgr.GetScheme(), nodeName, namespaceName, hostManager, maintenanceManager)
-		Expect(reconciler.SetupWithManager(mgr)).To(Succeed())
+		Expect(reconciler.SetupWithManager(mgr, false)).To(Succeed())
 	})
 
 	AfterEach(func() {

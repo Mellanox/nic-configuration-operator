@@ -344,6 +344,24 @@ func (_m *HostUtils) ResetNvConfig(pciAddr string) error {
 	return r0
 }
 
+// ScheduleReboot provides a mock function with given fields:
+func (_m *HostUtils) ScheduleReboot() error {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ScheduleReboot")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func() error); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // SetMaxReadRequestSize provides a mock function with given fields: pciAddr, maxReadRequestSize
 func (_m *HostUtils) SetMaxReadRequestSize(pciAddr string, maxReadRequestSize int) error {
 	ret := _m.Called(pciAddr, maxReadRequestSize)
