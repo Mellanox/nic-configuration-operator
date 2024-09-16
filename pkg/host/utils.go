@@ -24,6 +24,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/Mellanox/rdmamap"
 	"github.com/jaypipes/ghw"
@@ -75,6 +76,8 @@ type HostUtils interface {
 	SetMaxReadRequestSize(pciAddr string, maxReadRequestSize int) error
 	// SetTrustAndPFC sets trust and PFC settings for a network interface
 	SetTrustAndPFC(interfaceName string, trust string, pfc string) error
+	// ScheduleReboot schedules reboot on the host
+	ScheduleReboot() error
 }
 
 type hostUtils struct {
@@ -557,6 +560,46 @@ func (h *hostUtils) SetTrustAndPFC(interfaceName string, trust string, pfc strin
 	if err != nil {
 		err = fmt.Errorf("failed to run mlnx_qos: %s", output)
 		log.Log.Error(err, "SetTrustAndPFC(): Failed to run mlnx_qos")
+		return err
+	}
+	return nil
+}
+
+func (h *hostUtils) ScheduleReboot() error {
+	log.Log.Info("HostUtils.ScheduleReboot()")
+	root, err := os.Open("/")
+	if err != nil {
+		log.Log.Error(err, "ScheduleReboot(): Failed to os.Open")
+		return err
+	}
+
+	if err := syscall.Chroot(consts.HostPath); err != nil {
+		err := root.Close()
+		if err != nil {
+			log.Log.Error(err, "ScheduleReboot(): Failed to syscall.Chroot")
+			return err
+		}
+		return err
+	}
+
+	defer func() {
+		if err := root.Close(); err != nil {
+			log.Log.Error(err, "ScheduleReboot(): Failed to os.Close")
+			return
+		}
+		if err := root.Chdir(); err != nil {
+			log.Log.Error(err, "ScheduleReboot(): Failed to os.Chdir")
+			return
+		}
+		if err = syscall.Chroot("."); err != nil {
+			log.Log.Error(err, "ScheduleReboot(): Failed to syscall.Chroot")
+		}
+	}()
+
+	cmd := h.execInterface.Command("shutdown", "-r", "now")
+	_, err = cmd.Output()
+	if err != nil {
+		log.Log.Error(err, "ScheduleReboot(): Failed to run shutdown -r now")
 		return err
 	}
 	return nil

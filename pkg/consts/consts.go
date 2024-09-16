@@ -67,4 +67,9 @@ const (
 	SecondPortPrefix = "P2"
 
 	EnvBaremetal = "Baremetal"
+
+	MaintenanceRequestor   = "configuration.nic.mellanox.com"
+	MaintenanceRequestName = "nic-configuration-operator-maintenance"
+
+	HostPath = "/host"
 )

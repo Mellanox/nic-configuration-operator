@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 
+	maintenanceoperator "github.com/Mellanox/maintenance-operator/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -28,6 +29,7 @@ func main() {
 	ncolog.InitLog()
 
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(maintenanceoperator.AddToScheme(scheme))
 	utilruntime.Must(v1alpha1.AddToScheme(scheme))
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
@@ -53,7 +55,7 @@ func main() {
 
 	hostUtils := host.NewHostUtils()
 	hostManager := host.NewHostManager(nodeName, hostUtils)
-	maintenanceManager := maintenance.New()
+	maintenanceManager := maintenance.New(mgr.GetClient(), hostUtils, nodeName, namespace)
 
 	deviceDiscovery := controller.NewDeviceRegistry(mgr.GetClient(), hostManager, nodeName, namespace)
 	if err = mgr.Add(deviceDiscovery); err != nil {
@@ -69,7 +71,7 @@ func main() {
 		HostManager:        hostManager,
 		MaintenanceManager: maintenanceManager,
 	}
-	err = nicDeviceReconciler.SetupWithManager(mgr)
+	err = nicDeviceReconciler.SetupWithManager(mgr, true)
 	if err != nil {
 		log.Log.Error(err, "unable to create controller", "controller", "NicDeviceReconciler")
 		os.Exit(1)

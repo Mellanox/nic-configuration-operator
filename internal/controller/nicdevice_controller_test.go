@@ -108,7 +108,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			HostManager:        hostManager,
 			MaintenanceManager: maintenanceManager,
 		}
-		Expect(reconciler.SetupWithManager(mgr)).To(Succeed())
+		Expect(reconciler.SetupWithManager(mgr, false)).To(Succeed())
 	})
 
 	AfterEach(func() {

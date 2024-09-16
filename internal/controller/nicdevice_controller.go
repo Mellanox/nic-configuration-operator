@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	maintenanceoperator "github.com/Mellanox/maintenance-operator/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -473,7 +474,7 @@ func (r *NicDeviceReconciler) updateDeviceStatusCondition(ctx context.Context, d
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *NicDeviceReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *NicDeviceReconciler) SetupWithManager(mgr ctrl.Manager, watchForMaintenance bool) error {
 	qHandler := func(q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 		q.Add(reconcile.Request{NamespacedName: k8sTypes.NamespacedName{
 			Namespace: "",
@@ -516,9 +517,30 @@ func (r *NicDeviceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		},
 	}
 
-	return ctrl.NewControllerManagedBy(mgr).
+	controller := ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.NicDevice{}).
-		Watches(&v1alpha1.NicDevice{}, eventHandler).
+		Watches(&v1alpha1.NicDevice{}, eventHandler)
+
+	if watchForMaintenance {
+		maintenanceEventHandler := handler.Funcs{
+			// We only want status update events
+			UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+				nm := e.ObjectNew.(*maintenanceoperator.NodeMaintenance)
+
+				if nm.Spec.RequestorID != consts.MaintenanceRequestor || nm.Spec.NodeName != r.NodeName {
+					// We want to skip event from maintenance not on the current node or not scheduled by us
+					return
+				}
+
+				log.Log.Info("Enqueuing sync for maintenance update event", "resource", e.ObjectNew.GetName())
+				qHandler(q)
+			},
+		}
+
+		controller.Watches(&maintenanceoperator.NodeMaintenance{}, maintenanceEventHandler)
+	}
+
+	return controller.
 		Named("nicDeviceReconciler").
 		Complete(r)
 }
