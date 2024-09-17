@@ -251,6 +251,24 @@ envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
 $(ENVTEST): $(LOCALBIN)
 	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
 
+YQ := $(abspath $(LOCALBIN)/yq)
+YQ_VERSION=v4.44.1
+.PHONY: yq
+yq: $(YQ) ## Download yq locally if necessary.
+$(YQ): | $(LOCALBIN)
+	@curl -fsSL -o $(YQ) https://github.com/mikefarah/yq/releases/download/$(YQ_VERSION)/yq_linux_amd64 && chmod +x $(YQ)
+
+HELM := $(abspath $(LOCALBIN)/helm)
+.PHONY: helm
+helm: $(HELM) ## Download helm (last release) locally if necessary.
+$(HELM): | $(LOCALBIN)
+	@{ \
+		curl -fsSL -o $(LOCALBIN)/get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 && \
+		chmod 700 $(LOCALBIN)/get_helm.sh && \
+		HELM_INSTALL_DIR=$(LOCALBIN) USE_SUDO=false $(LOCALBIN)/get_helm.sh && \
+		rm -f $(LOCALBIN)/get_helm.sh; \
+	}
+
 .PHONY: golangci-lint
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
 $(GOLANGCI_LINT): $(LOCALBIN)
@@ -342,3 +360,11 @@ catalog-build: opm ## Build a catalog image.
 .PHONY: catalog-push
 catalog-push: ## Push a catalog image.
 	$(MAKE) docker-push IMG=$(CATALOG_IMG)
+
+.PHONY: chart-prepare-release
+chart-prepare-release: | $(YQ) ## prepare helm chart for release
+	@GITHUB_TAG=$(GITHUB_TAG) GITHUB_REPO_OWNER=$(GITHUB_REPO_OWNER) hack/release/chart-update.sh
+
+.PHONY: chart-push-release
+chart-push-release: | $(HELM) ## push release helm chart
+	@GITHUB_TAG=$(GITHUB_TAG) GITHUB_TOKEN=$(GITHUB_TOKEN) GITHUB_REPO_OWNER=$(GITHUB_REPO_OWNER) hack/release/chart-push.sh
