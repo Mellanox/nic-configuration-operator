@@ -1,9 +1,12 @@
+# Version information
+include Makefile.version
+
 # VERSION defines the project version for the bundle.
 # Update this value when you upgrade the version of your project.
 # To re-generate a bundle for another specific version without changing the standard setup, you can:
 # - use the VERSION as arg of the bundle target (e.g make bundle VERSION=0.0.2)
 # - use environment variables to overwrite this value (e.g export VERSION=0.0.2)
-VERSION ?= 0.0.1
+# VERSION ?= 0.0.1
 
 # CHANNELS define the bundle channels used in the bundle.
 # Add a new line here if you would like to change its default config. (E.g CHANNELS = "candidate,fast,stable")
@@ -69,6 +72,13 @@ endif
 # tools. (i.e. podman)
 CONTAINER_TOOL ?= docker
 
+# Build args
+TARGETOS ?= $(shell go env GOOS)
+TARGETARCH ?= $(shell go env GOARCH)
+GO_BUILD_OPTS ?= CGO_ENABLED=0 GOOS=$(TARGETOS) GOARCH=$(TARGETARCH)
+GO_LDFLAGS ?= $(VERSION_LDFLAGS)
+GO_GCFLAGS ?=
+
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
 SHELL = /usr/bin/env bash -o pipefail
@@ -101,6 +111,7 @@ help: ## Display this help.
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	cp -f config/crd/bases/* deployment/nic-configuration-operator-chart/crds
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
@@ -137,7 +148,7 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 build: manifests generate fmt vet build-manager build-daemon
 
 build-manager: ## Build manager binary.
-	go build -o build/manager cmd/manager/main.go
+	$(GO_BUILD_OPTS) go build -ldflags $(GO_LDFLAGS) -gcflags="$(GO_GCFLAGS)" -o build/manager cmd/manager/main.go
 
 build-daemon: ## Build nic-configuration-daemon binary.
 	go build -o build/nic-configuration-daemon cmd/nic-configuration-daemon/main.go
@@ -165,7 +176,7 @@ docker-push: ## Push docker image with the manager.
 # - have enabled BuildKit. More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 # - be able to push the image to your registry (i.e. if you do not set a valid value via OPERATOR_IMAGE_TAG=<myregistry/image:<tag>> then the export will fail)
 # To adequately provide solutions that are compatible with multiple platforms, you should consider using this option.
-PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
+PLATFORMS ?= linux/arm64,linux/amd64
 .PHONY: docker-buildx
 docker-buildx: ## Build and push docker image for the manager for cross-platform support
 	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
@@ -175,6 +186,13 @@ docker-buildx: ## Build and push docker image for the manager for cross-platform
 	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${OPERATOR_IMAGE_TAG} -f Dockerfile.cross .
 	- $(CONTAINER_TOOL) buildx rm project-v3-builder
 	rm Dockerfile.cross
+	# same for config-daemon
+	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile.nic-configuration-daemon > Dockerfile.nic-configuration-daemon.cross
+	- $(CONTAINER_TOOL) buildx create --name project-v3-builder
+	$(CONTAINER_TOOL) buildx use project-v3-builder
+	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${CONFIG_DAEMON_IMAGE_TAG} -f Dockerfile.nic-configuration-daemon.cross .
+	- $(CONTAINER_TOOL) buildx rm project-v3-builder
+	rm Dockerfile.nic-configuration-daemon.cross
 
 .PHONY: build-installer
 build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
@@ -239,6 +257,24 @@ $(CONTROLLER_GEN): $(LOCALBIN)
 envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
 $(ENVTEST): $(LOCALBIN)
 	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
+
+YQ := $(abspath $(LOCALBIN)/yq)
+YQ_VERSION=v4.44.1
+.PHONY: yq
+yq: $(YQ) ## Download yq locally if necessary.
+$(YQ): | $(LOCALBIN)
+	@curl -fsSL -o $(YQ) https://github.com/mikefarah/yq/releases/download/$(YQ_VERSION)/yq_linux_amd64 && chmod +x $(YQ)
+
+HELM := $(abspath $(LOCALBIN)/helm)
+.PHONY: helm
+helm: $(HELM) ## Download helm (last release) locally if necessary.
+$(HELM): | $(LOCALBIN)
+	@{ \
+		curl -fsSL -o $(LOCALBIN)/get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 && \
+		chmod 700 $(LOCALBIN)/get_helm.sh && \
+		HELM_INSTALL_DIR=$(LOCALBIN) USE_SUDO=false $(LOCALBIN)/get_helm.sh && \
+		rm -f $(LOCALBIN)/get_helm.sh; \
+	}
 
 .PHONY: golangci-lint
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
@@ -331,3 +367,11 @@ catalog-build: opm ## Build a catalog image.
 .PHONY: catalog-push
 catalog-push: ## Push a catalog image.
 	$(MAKE) docker-push IMG=$(CATALOG_IMG)
+
+.PHONY: chart-prepare-release
+chart-prepare-release: | $(YQ) ## prepare helm chart for release
+	@GITHUB_TAG=$(GITHUB_TAG) GITHUB_REPO_OWNER=$(GITHUB_REPO_OWNER) hack/release/chart-update.sh
+
+.PHONY: chart-push-release
+chart-push-release: | $(HELM) ## push release helm chart
+	@GITHUB_TAG=$(GITHUB_TAG) GITHUB_TOKEN=$(GITHUB_TOKEN) GITHUB_REPO_OWNER=$(GITHUB_REPO_OWNER) hack/release/chart-push.sh
