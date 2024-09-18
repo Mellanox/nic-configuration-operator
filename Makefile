@@ -1,9 +1,12 @@
+# Version information
+include Makefile.version
+
 # VERSION defines the project version for the bundle.
 # Update this value when you upgrade the version of your project.
 # To re-generate a bundle for another specific version without changing the standard setup, you can:
 # - use the VERSION as arg of the bundle target (e.g make bundle VERSION=0.0.2)
 # - use environment variables to overwrite this value (e.g export VERSION=0.0.2)
-VERSION ?= 0.0.1
+# VERSION ?= 0.0.1
 
 # CHANNELS define the bundle channels used in the bundle.
 # Add a new line here if you would like to change its default config. (E.g CHANNELS = "candidate,fast,stable")
@@ -68,6 +71,13 @@ endif
 # scaffolded by default. However, you might want to replace it to use other
 # tools. (i.e. podman)
 CONTAINER_TOOL ?= docker
+
+# Build args
+TARGETOS ?= $(shell go env GOOS)
+TARGETARCH ?= $(shell go env GOARCH)
+GO_BUILD_OPTS ?= CGO_ENABLED=0 GOOS=$(TARGETOS) GOARCH=$(TARGETARCH)
+GO_LDFLAGS ?= $(VERSION_LDFLAGS)
+GO_GCFLAGS ?=
 
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
@@ -137,7 +147,7 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 build: manifests generate fmt vet build-manager build-daemon
 
 build-manager: ## Build manager binary.
-	go build -o build/manager cmd/manager/main.go
+	$(GO_BUILD_OPTS) go build -ldflags $(GO_LDFLAGS) -gcflags="$(GO_GCFLAGS)" -o build/manager cmd/manager/main.go
 
 build-daemon: ## Build nic-configuration-daemon binary.
 	go build -o build/nic-configuration-daemon cmd/nic-configuration-daemon/main.go
