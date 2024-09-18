@@ -21,14 +21,7 @@ const (
 	Ethernet   = "Ethernet"
 	Infiniband = "Infiniband"
 
-	ConfigUpdateInProgressCondition     = "ConfigUpdateInProgress"
-	IncorrectSpecReason                 = "IncorrectSpec"
-	UpdateStartedReason                 = "UpdateStarted"
-	PendingRebootReason                 = "PendingReboot"
-	NonVolatileConfigUpdateFailedReason = "NonVolatileConfigUpdateFailed"
-	RuntimeConfigUpdateFailedReason     = "RuntimeConfigUpdateFailed"
-	UpdateSuccessfulReason              = "UpdateSuccessful"
-	SpecValidationFailed                = "SpecValidationFailed"
+	ConfigUpdateInProgressCondition = "ConfigUpdateInProgress"
 
 	DeviceConfigSpecEmptyReason = "DeviceConfigSpecEmpty"
 
@@ -36,38 +29,6 @@ const (
 	SerialNumberPrefix    = "sn:"
 	FirmwareVersionPrefix = "fw version:"
 	PSIDPrefix            = "psid:"
-	LinkStatsPrefix       = "lnksta"
-	MaxReadReqPrefix      = "maxreadreq"
-	TrustStatePrefix      = "priority trust state:"
-	PfcEnabledPrefix      = "enabled"
 
 	NetClass = 0x02
-
-	LastAppliedStateAnnotation = "lastAppliedState"
-
-	NvParamFalse              = "0"
-	NvParamTrue               = "1"
-	NvParamLinkTypeInfiniband = "1"
-	NvParamLinkTypeEthernet   = "2"
-
-	SriovEnabledParam        = "SRIOV_EN"
-	SriovNumOfVfsParam       = "NUM_OF_VFS"
-	LinkTypeP1Param          = "LINK_TYPE_P1"
-	LinkTypeP2Param          = "LINK_TYPE_P2"
-	MaxAccOutReadParam       = "MAX_ACC_OUT_READ"
-	RoceCcPrioMaskP1Param    = "ROCE_CC_PRIO_MASK_P1"
-	RoceCcPrioMaskP2Param    = "ROCE_CC_PRIO_MASK_P2"
-	CnpDscpP1Param           = "CNP_DSCP_P1"
-	CnpDscpP2Param           = "CNP_DSCP_P2"
-	Cnp802pPrioP1Param       = "CNP_802P_PRIO_P1"
-	Cnp802pPrioP2Param       = "CNP_802P_PRIO_P2"
-	AtsEnabledParam          = "ATS_ENABLED"
-	AdvancedPCISettingsParam = "ADVANCED_PCI_SETTINGS"
-
-	SecondPortPrefix = "P2"
-
-	EnvBaremetal = "Baremetal"
-
-	MaintenanceRequestor   = "configuration.nic.mellanox.com"
-	MaintenanceRequestName = "nic-configuration-operator-maintenance"
 )

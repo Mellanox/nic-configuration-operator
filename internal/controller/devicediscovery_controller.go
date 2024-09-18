@@ -82,8 +82,6 @@ func (d *DeviceDiscovery) reconcile(ctx context.Context) error {
 		return err
 	}
 
-	log.Log.V(2).Info("listed devices", "devices", list.Items)
-
 	node := &v1.Node{}
 	err = d.Client.Get(ctx, types.NamespacedName{Name: d.nodeName}, node)
 	if err != nil {
@@ -95,7 +93,6 @@ func (d *DeviceDiscovery) reconcile(ctx context.Context) error {
 		observedDeviceStatus, exists := observedDevices[nicDeviceCR.Status.SerialNumber]
 
 		if !exists {
-			log.Log.V(2).Info("device doesn't exist on the node anymore, deleting", "device", nicDeviceCR.Name)
 			// Need to delete this CR, it doesn't represent the observedDevice on host anymore
 			err = d.Client.Delete(ctx, &nicDeviceCR)
 			if err != nil {
@@ -109,7 +106,6 @@ func (d *DeviceDiscovery) reconcile(ctx context.Context) error {
 		observedDeviceStatus.Conditions = nicDeviceCR.Status.Conditions
 
 		if !reflect.DeepEqual(nicDeviceCR.Status, observedDeviceStatus) {
-			log.Log.V(2).Info("device status changed, updating", "device", nicDeviceCR.Name, "crStatus", nicDeviceCR.Status, "observedStatus", observedDeviceStatus)
 			// Status of the device changes, need to update the CR
 			nicDeviceCR.Status = observedDeviceStatus
 

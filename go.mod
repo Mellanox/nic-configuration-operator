@@ -21,7 +21,6 @@ require (
 )
 
 require (
-	github.com/Mellanox/maintenance-operator/api v0.0.0-20240916123230-810ab7bb25f4 // indirect
 	github.com/StackExchange/wmi v1.2.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

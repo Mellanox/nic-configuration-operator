@@ -19,12 +19,15 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// NicTypeEnum describes an enum of NIC types
+// +enum
+type NicTypeEnum string
+
 // NicSelectorSpec is a desired configuration for NICs
 type NicSelectorSpec struct {
-	// Type of the NIC to be selected, e.g. 101d,1015,a2d6 etc.
-	NicType string `json:"nicType"`
+	// Type of the NIC to be selected, e.g. ConnectX5|ConnectX6|ConnectX7
+	NicType NicTypeEnum `json:"nicType"`
 	// Array of PCI addresses to be selected, e.g. "0000:03:00.0"
-	// +kubebuilder:validation:items:Pattern=`^0000:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]$`
 	PciAddresses []string `json:"pciAddresses,omitempty"`
 	// Serial numbers of the NICs to be selected, e.g. MT2116X09299
 	SerialNumbers []string `json:"serialNumbers,omitempty"`
@@ -41,7 +44,6 @@ type PciPerformanceOptimizedSpec struct {
 	// Specifies the PCIe Max Accumulative Outstanding read bytes
 	MaxAccOutRead int `json:"maxAccOutRead,omitempty"`
 	// Specifies the size of a single PCI read request in bytes
-	// +kubebuilder:validation:Enum=128;256;512;1024;2048;4096
 	MaxReadRequest int `json:"maxReadRequest,omitempty"`
 }
 
@@ -50,7 +52,6 @@ type QosSpec struct {
 	// Trust mode for QoS settings, e.g. trust-dscp
 	Trust string `json:"trust"`
 	// Priority-based Flow Control configuration, e.g. "0,0,0,1,0,0,0,0"
-	// +kubebuilder:validation:Pattern=`^([01],){7}[01]$`
 	PFC string `json:"pfc"`
 }
 
@@ -82,7 +83,6 @@ type ConfigurationTemplateSpec struct {
 	// Number of VFs to be configured
 	NumVfs int `json:"numVfs"`
 	// LinkType to be configured, Ethernet|Infiniband
-	// +kubebuilder:validation:Enum=Ethernet;Infiniband
 	LinkType LinkTypeEnum `json:"linkType"`
 	// PCI performance optimization settings
 	PciPerformanceOptimized *PciPerformanceOptimizedSpec `json:"pciPerformanceOptimized,omitempty"`
@@ -97,7 +97,7 @@ type ConfigurationTemplateSpec struct {
 // NicConfigurationTemplateSpec defines the desired state of NicConfigurationTemplate
 type NicConfigurationTemplateSpec struct {
 	// NodeSelector contains labels required on the node
-	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+	NodeSelector map[string]string `json:"nodeSelector"`
 	// NIC selector configuration
 	NicSelector *NicSelectorSpec `json:"nicSelector"`
 	// ResetToDefault specifies whether node agent needs to perform a reset flow
