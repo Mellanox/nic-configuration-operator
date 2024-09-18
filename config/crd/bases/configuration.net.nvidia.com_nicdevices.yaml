@@ -73,6 +73,9 @@ spec:
                         type: object
                       linkType:
                         description: LinkType to be configured, Ethernet|Infiniband
+                        enum:
+                        - Ethernet
+                        - Infiniband
                         type: string
                       numVfs:
                         description: Number of VFs to be configured
@@ -91,6 +94,13 @@ spec:
                           maxReadRequest:
                             description: Specifies the size of a single PCI read request
                               in bytes
+                            enum:
+                            - 128
+                            - 256
+                            - 512
+                            - 1024
+                            - 2048
+                            - 4096
                             type: integer
                         required:
                         - enabled
@@ -122,6 +132,7 @@ spec:
                               pfc:
                                 description: Priority-based Flow Control configuration,
                                   e.g. "0,0,0,1,0,0,0,0"
+                                pattern: ^([01],){7}[01]$
                                 type: string
                               trust:
                                 description: Trust mode for QoS settings, e.g. trust-dscp
