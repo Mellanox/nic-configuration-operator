@@ -245,7 +245,10 @@ var _ = Describe("NicConfigurationTemplate Controller", func() {
 					NicType: "ConnectX6",
 				},
 				ResetToDefault: false,
-				Template:       &v1alpha1.ConfigurationTemplateSpec{},
+				Template: &v1alpha1.ConfigurationTemplateSpec{
+					NumVfs:   2,
+					LinkType: consts.Ethernet,
+				},
 			},
 		}
 		Expect(k8sClient.Create(ctx, template)).To(Succeed())
@@ -298,7 +301,7 @@ var _ = Describe("NicConfigurationTemplate Controller", func() {
 					PciPerformanceOptimized: &v1alpha1.PciPerformanceOptimizedSpec{
 						Enabled:        true,
 						MaxAccOutRead:  4,
-						MaxReadRequest: 4,
+						MaxReadRequest: 1024,
 					},
 				},
 			},
@@ -346,7 +349,10 @@ var _ = Describe("NicConfigurationTemplate Controller", func() {
 				NicSelector: &v1alpha1.NicSelectorSpec{
 					NicType: "ConnectX6",
 				},
-				Template: &v1alpha1.ConfigurationTemplateSpec{NumVfs: 8},
+				Template: &v1alpha1.ConfigurationTemplateSpec{
+					NumVfs:   8,
+					LinkType: consts.Ethernet,
+				},
 			},
 		}
 		Expect(k8sClient.Create(ctx, template1)).To(Succeed())
@@ -360,14 +366,18 @@ var _ = Describe("NicConfigurationTemplate Controller", func() {
 				NicSelector: &v1alpha1.NicSelectorSpec{
 					NicType: "ConnectX6",
 				},
-				Template: &v1alpha1.ConfigurationTemplateSpec{NumVfs: 12},
+				Template: &v1alpha1.ConfigurationTemplateSpec{
+					NumVfs:   12,
+					LinkType: consts.Ethernet,
+				},
 			},
 		}
 		Expect(k8sClient.Create(ctx, template2)).To(Succeed())
 
 		device := &v1alpha1.NicDevice{
 			ObjectMeta: metav1.ObjectMeta{Name: deviceName, Namespace: namespaceName},
-			Spec:       v1alpha1.NicDeviceSpec{Configuration: &v1alpha1.NicDeviceConfigurationSpec{Template: &v1alpha1.ConfigurationTemplateSpec{NumVfs: 4}}},
+			Spec: v1alpha1.NicDeviceSpec{Configuration: &v1alpha1.NicDeviceConfigurationSpec{
+				Template: &v1alpha1.ConfigurationTemplateSpec{NumVfs: 4, LinkType: consts.Ethernet}}},
 		}
 		Expect(k8sClient.Create(ctx, device)).To(Succeed())
 		device.Status = v1alpha1.NicDeviceStatus{
