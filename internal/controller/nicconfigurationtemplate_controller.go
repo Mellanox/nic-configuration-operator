@@ -56,6 +56,7 @@ type NicConfigurationTemplateReconciler struct {
 //+kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;update;patch
 //+kubebuilder:rbac:groups="",resources=pods,verbs=list
 //+kubebuilder:rbac:groups="",resources=pods/eviction,verbs=create;delete;get;list;patch;update;watch
+//+kubebuilder:rbac:groups=maintenance.nvidia.com,resources=nodemaintenances,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile reconciles the NicConfigurationTemplate object
 func (r *NicConfigurationTemplateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -89,11 +90,13 @@ func (r *NicConfigurationTemplateReconciler) Reconcile(ctx context.Context, req 
 
 	nodeMap := map[string]*v1.Node{}
 	for _, node := range nodeList.Items {
+		node := node
 		nodeMap[node.Name] = &node
 	}
 
 	templates := []*v1alpha1.NicConfigurationTemplate{}
 	for _, template := range templateList.Items {
+		template := template
 		templates = append(templates, &template)
 	}
 
@@ -108,7 +111,7 @@ func (r *NicConfigurationTemplateReconciler) Reconcile(ctx context.Context, req 
 
 		for _, template := range templates {
 			if !deviceMatchesSelectors(&device, template, node) {
-				r.dropDeviceFromStatus(ctx, device.Name, template)
+				r.dropDeviceFromStatus(device.Name, template)
 
 				continue
 			}
@@ -129,7 +132,7 @@ func (r *NicConfigurationTemplateReconciler) Reconcile(ctx context.Context, req 
 
 		if len(matchingTemplates) > 1 {
 			for _, template := range matchingTemplates {
-				r.dropDeviceFromStatus(ctx, device.Name, template)
+				r.dropDeviceFromStatus(device.Name, template)
 			}
 
 			templateNames := []string{}
@@ -171,7 +174,7 @@ func (r *NicConfigurationTemplateReconciler) Reconcile(ctx context.Context, req 
 	return ctrl.Result{}, nil
 }
 
-func (r *NicConfigurationTemplateReconciler) dropDeviceFromStatus(ctx context.Context, deviceName string, template *v1alpha1.NicConfigurationTemplate) {
+func (r *NicConfigurationTemplateReconciler) dropDeviceFromStatus(deviceName string, template *v1alpha1.NicConfigurationTemplate) {
 	index := slices.Index(template.Status.NicDevices, deviceName)
 	if index != -1 {
 		// Device no longer matches template, drop it from the template's status

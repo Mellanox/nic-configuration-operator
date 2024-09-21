@@ -5,6 +5,7 @@ go 1.22.0
 toolchain go1.22.4
 
 require (
+	github.com/Mellanox/maintenance-operator/api v0.0.0-20240916123230-810ab7bb25f4
 	github.com/Mellanox/rdmamap v1.1.0
 	github.com/jaypipes/ghw v0.12.0
 	github.com/jaypipes/pcidb v1.0.1
