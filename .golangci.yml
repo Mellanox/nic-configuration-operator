@@ -16,6 +16,10 @@ issues:
       linters:
         - dupl
         - lll
+    - path: "pkg/*"
+      linters:
+        - dupl
+        - lll
 linters:
   disable-all: true
   enable:

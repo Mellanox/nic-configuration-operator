@@ -34,7 +34,7 @@ type NicSelectorSpec struct {
 // +enum
 type LinkTypeEnum string
 
-// PciPerformanceOptimizedSpec specifies PCI performace optimization settings
+// PciPerformanceOptimizedSpec specifies PCI performance optimization settings
 type PciPerformanceOptimizedSpec struct {
 	// Specifies whether to enable PCI performance optimization
 	Enabled bool `json:"enabled"`
