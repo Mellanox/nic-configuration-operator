@@ -78,6 +78,8 @@ type HostUtils interface {
 	SetTrustAndPFC(interfaceName string, trust string, pfc string) error
 	// ScheduleReboot schedules reboot on the host
 	ScheduleReboot() error
+	// GetOfedVersion retrieves installed OFED version
+	GetOfedVersion() (string, error)
 }
 
 type hostUtils struct {
@@ -603,6 +605,16 @@ func (h *hostUtils) ScheduleReboot() error {
 		return err
 	}
 	return nil
+}
+
+// GetOfedVersion retrieves installed OFED version
+func (h *hostUtils) GetOfedVersion() (string, error) {
+	version, err := os.ReadFile(filepath.Join(consts.HostPath, consts.Mlx5ModuleVersionPath))
+	if err != nil {
+		log.Log.Error(err, "GetOfedVersion(): failed to read mlx5_core version file")
+		return "", err
+	}
+	return string(version), nil
 }
 
 func NewHostUtils() HostUtils {

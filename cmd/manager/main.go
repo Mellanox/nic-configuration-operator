@@ -22,9 +22,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
-	"github.com/Mellanox/nic-configuration-operator/pkg/version"
-
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -39,6 +36,8 @@ import (
 
 	configurationnetv1alpha1 "github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/internal/controller"
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
+	"github.com/Mellanox/nic-configuration-operator/pkg/version"
 	//+kubebuilder:scaffold:imports
 )
 

@@ -7,6 +7,7 @@ import (
 	maintenanceoperator "github.com/Mellanox/maintenance-operator/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/internal/controller"
+	"github.com/Mellanox/nic-configuration-operator/pkg/helper"
 	"github.com/Mellanox/nic-configuration-operator/pkg/host"
 	"github.com/Mellanox/nic-configuration-operator/pkg/maintenance"
 	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
@@ -57,6 +59,11 @@ func main() {
 	hostManager := host.NewHostManager(nodeName, hostUtils)
 	maintenanceManager := maintenance.New(mgr.GetClient(), hostUtils, nodeName, namespace)
 
+	if err := initNicFwMap(namespace); err != nil {
+		log.Log.Error(err, "unable to init NicFwMap")
+		os.Exit(1)
+	}
+
 	deviceDiscovery := controller.NewDeviceRegistry(mgr.GetClient(), hostManager, nodeName, namespace)
 	if err = mgr.Add(deviceDiscovery); err != nil {
 		log.Log.Error(err, "unable to add device discovery runnable")
@@ -91,4 +98,13 @@ func main() {
 		log.Log.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+func initNicFwMap(namespace string) error {
+	kubeclient := kubernetes.NewForConfigOrDie(ctrl.GetConfigOrDie())
+	if err := helper.InitNicFwMapFromConfigMap(kubeclient, namespace); err != nil {
+		return err
+	}
+
+	return nil
 }
