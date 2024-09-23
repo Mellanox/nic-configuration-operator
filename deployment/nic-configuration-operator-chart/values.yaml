@@ -38,7 +38,7 @@ operator:
 configDaemon:
   image:
     repository: ghcr.io/mellanox
-    name: nic-configuration-daemon
+    name: nic-configuration-operator-daemon
     tag: latest
   nodeSelector: {}
   resources:
