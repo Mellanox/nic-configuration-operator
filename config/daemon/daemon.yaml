@@ -21,7 +21,7 @@ spec:
       hostPID: true
       priorityClassName: system-node-critical
       containers:
-        - image: nic-configuration-daemon:latest
+        - image: nic-configuration-operator-daemon:latest
           name: nic-configuration-daemon
           securityContext:
             privileged: true
