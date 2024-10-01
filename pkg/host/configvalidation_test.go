@@ -334,6 +334,113 @@ var _ = Describe("ConfigValidationImpl", func() {
 			Expect(nvParams).To(HaveKeyWithValue("TEST_P1", "test"))
 			Expect(nvParams).To(HaveKeyWithValue("TEST_P2", "test"))
 		})
+		It("should report an error when LinkType cannot be changed and template differs from the actual status", func() {
+			mockHostUtils.On("GetLinkType", mock.Anything).Return(consts.Ethernet)
+			mockHostUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
+
+			device := &v1alpha1.NicDevice{
+				Spec: v1alpha1.NicDeviceSpec{
+					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
+						Template: &v1alpha1.ConfigurationTemplateSpec{
+							NumVfs:   0,
+							LinkType: consts.Infiniband,
+							PciPerformanceOptimized: &v1alpha1.PciPerformanceOptimizedSpec{
+								Enabled: true,
+							},
+						},
+					},
+				},
+				Status: v1alpha1.NicDeviceStatus{
+					Ports: []v1alpha1.NicDevicePortSpec{
+						{
+							PCI:              "0000:03:00.0",
+							NetworkInterface: "enp3s0f0np0",
+						},
+						{
+							PCI:              "0000:03:00.1",
+							NetworkInterface: "enp3s0f1np1",
+						},
+					},
+				},
+			}
+
+			defaultValues := map[string]string{}
+
+			_, err := validator.ConstructNvParamMapFromTemplate(device, defaultValues)
+			Expect(err).To(MatchError("incorrect spec: device doesn't support link type change, wrong link type provided in the template, should be: Ethernet"))
+		})
+		It("should not report an error when LinkType can be changed and template differs from the actual status", func() {
+			mockHostUtils.On("GetLinkType", mock.Anything).Return(consts.Ethernet)
+			mockHostUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
+
+			device := &v1alpha1.NicDevice{
+				Spec: v1alpha1.NicDeviceSpec{
+					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
+						Template: &v1alpha1.ConfigurationTemplateSpec{
+							NumVfs:   0,
+							LinkType: consts.Infiniband,
+							PciPerformanceOptimized: &v1alpha1.PciPerformanceOptimizedSpec{
+								Enabled: true,
+							},
+						},
+					},
+				},
+				Status: v1alpha1.NicDeviceStatus{
+					Ports: []v1alpha1.NicDevicePortSpec{
+						{
+							PCI:              "0000:03:00.0",
+							NetworkInterface: "enp3s0f0np0",
+						},
+						{
+							PCI:              "0000:03:00.1",
+							NetworkInterface: "enp3s0f1np1",
+						},
+					},
+				},
+			}
+
+			defaultValues := map[string]string{
+				consts.LinkTypeP1Param: consts.Ethernet,
+			}
+
+			_, err := validator.ConstructNvParamMapFromTemplate(device, defaultValues)
+			Expect(err).NotTo(HaveOccurred())
+		})
+		It("should not report an error when LinkType cannot be changed and template matches the actual status", func() {
+			mockHostUtils.On("GetLinkType", mock.Anything).Return(consts.Infiniband)
+			mockHostUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
+
+			device := &v1alpha1.NicDevice{
+				Spec: v1alpha1.NicDeviceSpec{
+					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
+						Template: &v1alpha1.ConfigurationTemplateSpec{
+							NumVfs:   0,
+							LinkType: consts.Infiniband,
+							PciPerformanceOptimized: &v1alpha1.PciPerformanceOptimizedSpec{
+								Enabled: true,
+							},
+						},
+					},
+				},
+				Status: v1alpha1.NicDeviceStatus{
+					Ports: []v1alpha1.NicDevicePortSpec{
+						{
+							PCI:              "0000:03:00.0",
+							NetworkInterface: "enp3s0f0np0",
+						},
+						{
+							PCI:              "0000:03:00.1",
+							NetworkInterface: "enp3s0f1np1",
+						},
+					},
+				},
+			}
+
+			defaultValues := map[string]string{}
+
+			_, err := validator.ConstructNvParamMapFromTemplate(device, defaultValues)
+			Expect(err).NotTo(HaveOccurred())
+		})
 	})
 
 	Describe("ValidateResetToDefault", func() {

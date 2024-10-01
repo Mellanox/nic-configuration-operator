@@ -89,24 +89,26 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 		desiredParameters[consts.SriovNumOfVfsParam] = strconv.Itoa(template.NumVfs)
 	}
 
-	if template.LinkType != "" {
-		// Link type change is not allowed on some devices
-		if _, found := defaultValues[consts.LinkTypeP1Param]; found {
-			linkType := nvParamLinkTypeFromName(string(template.LinkType))
-			desiredParameters[consts.LinkTypeP1Param] = linkType
-			if secondPortPresent {
-				desiredParameters[consts.LinkTypeP2Param] = linkType
-			}
+	// Link type change is not allowed on some devices
+	_, canChangeLinkType := defaultValues[consts.LinkTypeP1Param]
+	if canChangeLinkType {
+		linkType := nvParamLinkTypeFromName(string(template.LinkType))
+		desiredParameters[consts.LinkTypeP1Param] = linkType
+		if secondPortPresent {
+			desiredParameters[consts.LinkTypeP2Param] = linkType
 		}
-		if device.Status.Ports[0].NetworkInterface != "" &&
-			v.utils.GetLinkType(device.Status.Ports[0].NetworkInterface) !=
-				string(device.Spec.Configuration.Template.LinkType) {
-			err := types.IncorrectSpecError(
-				fmt.Sprintf(
-					"device doesn't support link type change, wrong link type provided in the template, should be: %s",
-					v.utils.GetLinkType(pciAddr)))
-			log.Log.Error(err, "incorrect spec", "device", device.Name)
-			return desiredParameters, err
+	} else {
+		desiredLinkType := string(device.Spec.Configuration.Template.LinkType)
+
+		for _, port := range device.Status.Ports {
+			if port.NetworkInterface != "" && v.utils.GetLinkType(port.NetworkInterface) != desiredLinkType {
+				err := types.IncorrectSpecError(
+					fmt.Sprintf(
+						"device doesn't support link type change, wrong link type provided in the template, should be: %s",
+						v.utils.GetLinkType(port.NetworkInterface)))
+				log.Log.Error(err, "incorrect spec", "device", device.Name)
+				return desiredParameters, err
+			}
 		}
 	}
 
