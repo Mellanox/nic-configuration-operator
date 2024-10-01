@@ -165,6 +165,7 @@ var _ = Describe("DeviceDiscovery", func() {
 						FirmwareVersion: fwVersion,
 					},
 				}, nil)
+				hostManager.On("DiscoverOfedVersion").Return("00.00-0.0.0", nil)
 
 				startManager()
 
@@ -220,6 +221,7 @@ var _ = Describe("DeviceDiscovery", func() {
 						Ports:        []v1alpha1.NicDevicePortSpec{{PCI: "0000:81:00.0"}},
 					},
 				}, nil)
+				hostManager.On("DiscoverOfedVersion").Return("00.00-0.0.0", nil)
 
 				startManager()
 

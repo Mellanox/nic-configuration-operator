@@ -17,6 +17,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"time"
@@ -33,6 +34,7 @@ import (
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	"github.com/Mellanox/nic-configuration-operator/pkg/helper"
 	"github.com/Mellanox/nic-configuration-operator/pkg/host"
 )
 
@@ -61,6 +63,28 @@ func setInitialsConditionsForDevice(device *v1alpha1.NicDevice) {
 		Message: "Device configuration spec is empty, cannot update configuration",
 	}
 	meta.SetStatusCondition(&device.Status.Conditions, condition)
+}
+
+func setFwConfigConditionsForDevice(device *v1alpha1.NicDevice, recommendedFirmware string) {
+	currentFirmware := device.Status.FirmwareVersion
+
+	if currentFirmware == recommendedFirmware {
+		condition := metav1.Condition{
+			Type:    consts.FimwareConfigMatchCondition,
+			Status:  metav1.ConditionTrue,
+			Reason:  consts.DeviceFwMatchReason,
+			Message: fmt.Sprintf("Device firmware '%s' matches to recommended version '%s'", currentFirmware, recommendedFirmware),
+		}
+		meta.SetStatusCondition(&device.Status.Conditions, condition)
+	} else {
+		condition := metav1.Condition{
+			Type:    consts.FimwareConfigMatchCondition,
+			Status:  metav1.ConditionFalse,
+			Reason:  consts.DeviceFwMismatchReason,
+			Message: fmt.Sprintf("Device firmware '%s' doesn't match to recommended version '%s'", currentFirmware, recommendedFirmware),
+		}
+		meta.SetStatusCondition(&device.Status.Conditions, condition)
+	}
 }
 
 // reconcile reconciles the devices on the host by comparing the observed devices with the existing NicDevice custom resources (CRs).
@@ -159,6 +183,12 @@ func (d *DeviceDiscovery) reconcile(ctx context.Context) error {
 		device.Status = deviceStatus
 		device.Status.Node = d.nodeName
 		setInitialsConditionsForDevice(device)
+
+		ofedVersion, err := d.hostManager.DiscoverOfedVersion()
+		if err == nil {
+			recommendedFirmware := helper.GetRecommendedFwVersion(device.Status.Type, ofedVersion)
+			setFwConfigConditionsForDevice(device, recommendedFirmware)
+		}
 
 		err = d.Client.Status().Update(ctx, device)
 		if err != nil {

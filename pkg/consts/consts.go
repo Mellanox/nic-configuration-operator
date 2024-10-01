@@ -22,6 +22,7 @@ const (
 	Infiniband = "Infiniband"
 
 	ConfigUpdateInProgressCondition     = "ConfigUpdateInProgress"
+	FimwareConfigMatchCondition         = "FirmwareConfigMatch"
 	IncorrectSpecReason                 = "IncorrectSpec"
 	UpdateStartedReason                 = "UpdateStarted"
 	PendingRebootReason                 = "PendingReboot"
@@ -31,6 +32,8 @@ const (
 	SpecValidationFailed                = "SpecValidationFailed"
 
 	DeviceConfigSpecEmptyReason = "DeviceConfigSpecEmpty"
+	DeviceFwMatchReason         = "DeviceFirmwareConfigMatch"
+	DeviceFwMismatchReason      = "DeviceFirmwareConfigMismatch"
 
 	PartNumberPrefix      = "pn:"
 	SerialNumberPrefix    = "sn:"
@@ -72,4 +75,7 @@ const (
 	MaintenanceRequestName = "nic-configuration-operator-maintenance"
 
 	HostPath = "/host"
+
+	SupportedNicFirmwareConfigmap = "supported-nic-firmware"
+	Mlx5ModuleVersionPath         = "/sys/bus/pci/drivers/mlx5_core/module/version"
 )

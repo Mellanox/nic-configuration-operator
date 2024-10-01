@@ -43,6 +43,10 @@ type HostManager interface {
 	// ApplyDeviceRuntimeSpec calculates device's missing runtime spec configuration and applies it to the device on the host
 	// returns error - there were errors while applying nv configuration
 	ApplyDeviceRuntimeSpec(device *v1alpha1.NicDevice) error
+	// DiscoverOfedVersion retrieves installed OFED version
+	// returns string - installed OFED version
+	// returns error - OFED isn't installed or version couldn't be determined
+	DiscoverOfedVersion() (string, error)
 }
 
 type hostManager struct {
@@ -315,6 +319,13 @@ func (h hostManager) ApplyDeviceRuntimeSpec(device *v1alpha1.NicDevice) error {
 	//}
 
 	return nil
+}
+
+// DiscoverOfedVersion retrieves installed OFED version
+// returns string - installed OFED version
+// returns error - OFED isn't installed or version couldn't be determined
+func (h hostManager) DiscoverOfedVersion() (string, error) {
+	return h.hostUtils.GetOfedVersion()
 }
 
 func NewHostManager(nodeName string, hostUtils HostUtils) HostManager {
