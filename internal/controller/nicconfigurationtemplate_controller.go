@@ -54,6 +54,7 @@ type NicConfigurationTemplateReconciler struct {
 //+kubebuilder:rbac:groups=configuration.net.nvidia.com,resources=nicdevices,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=configuration.net.nvidia.com,resources=nicdevices/finalizers,verbs=update
 //+kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;update;patch
+//+kubebuilder:rbac:groups="",resources=configmaps,verbs=get
 //+kubebuilder:rbac:groups="",resources=pods,verbs=list
 //+kubebuilder:rbac:groups="",resources=pods/eviction,verbs=create;delete;get;list;patch;update;watch
 //+kubebuilder:rbac:groups=maintenance.nvidia.com,resources=nodemaintenances,verbs=get;list;watch;create;update;patch;delete
