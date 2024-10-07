@@ -144,6 +144,10 @@ generate-api-docs: gen-crd-api-reference-docs ## generate api documentation
 	hack/api-docs/fix_links.sh docs/api-reference.md
 	chmod a+w docs/api-reference.md
 
+.PHONY: generate-helm-docs
+generate-helm-docs: helm-docs ## generate helm documentation
+	cd deployment/nic-configuration-operator-chart && $(HELM_DOCS)
+
 ##@ Build
 
 .PHONY: build
@@ -288,6 +292,13 @@ GEN_CRD_API_REFERENCE_DOCS = $(LOCALBIN)/gen-crd-api-reference-docs
 gen-crd-api-reference-docs: $(GEN_CRD_API_REFERENCE_DOCS)
 $(GEN_CRD_API_REFERENCE_DOCS): | $(LOCALBIN)
 	@ GOBIN=$(LOCALBIN) go install github.com/ahmetb/gen-crd-api-reference-docs@latest
+
+HELM_DOCS = $(LOCALBIN)/helm-docs
+HELM_DOCS_VERSION ?= v1.14.2
+.PHONY: helm-docs ## Download helm-docs locally if necessary
+helm-docs: $(HELM_DOCS)
+$(HELM_DOCS): | $(LOCALBIN)
+	@ GOBIN=$(LOCALBIN) go install github.com/norwoodj/helm-docs/cmd/helm-docs@$(HELM_DOCS_VERSION)
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary (ideally with version)
