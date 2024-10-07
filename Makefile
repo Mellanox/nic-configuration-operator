@@ -135,6 +135,15 @@ lint: golangci-lint ## Run golangci-lint linter & yamllint
 lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 	$(GOLANGCI_LINT) run --fix
 
+.PHONY: generate-api-docs
+generate-api-docs: gen-crd-api-reference-docs ## generate api documentation
+	$(GEN_CRD_API_REFERENCE_DOCS) -api-dir=./api/v1alpha1 -config=${CURDIR}/hack/api-docs/config.json \
+	-template-dir=${CURDIR}/hack/api-docs/templates -out-file=build/api-reference.html
+	$(CONTAINER_TOOL) run --rm --volume "`pwd`:/data:Z" pandoc/minimal -f html -t markdown_strict \
+	--columns 200 /data/build/api-reference.html -o /data/docs/api-reference.md
+	hack/api-docs/fix_links.sh docs/api-reference.md
+	chmod a+w docs/api-reference.md
+
 ##@ Build
 
 .PHONY: build
@@ -273,6 +282,12 @@ $(HELM): | $(LOCALBIN)
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
 $(GOLANGCI_LINT): $(LOCALBIN)
 	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/cmd/golangci-lint,${GOLANGCI_LINT_VERSION})
+
+GEN_CRD_API_REFERENCE_DOCS = $(LOCALBIN)/gen-crd-api-reference-docs
+.PHONY: gen-crd-api-reference-docs ## Download gen-crd-api-reference-docs locally if necessary
+gen-crd-api-reference-docs: $(GEN_CRD_API_REFERENCE_DOCS)
+$(GEN_CRD_API_REFERENCE_DOCS): | $(LOCALBIN)
+	@ GOBIN=$(LOCALBIN) go install github.com/ahmetb/gen-crd-api-reference-docs@latest
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary (ideally with version)
