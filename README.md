@@ -131,7 +131,7 @@ The name of the device combines the node name, device type and its serial number
 
 for more information refer to [api-reference](docs/api-reference.md).
 
-#### Example NodeMaintenance
+#### Example NicDevice
 
 ```yaml
 apiVersion: configuration.net.nvidia.com/v1alpha1
