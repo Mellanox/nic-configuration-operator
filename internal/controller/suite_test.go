@@ -57,7 +57,7 @@ func TestControllers(t *testing.T) {
 var _ = BeforeSuite(func() {
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 
-	ncolog.SetLogLevel(2)
+	_ = ncolog.SetLogLevel("debug")
 
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{

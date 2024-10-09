@@ -25,6 +25,7 @@ import (
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -79,6 +80,15 @@ func main() {
 	}
 
 	ncolog.InitLog()
+
+	logLevel := os.Getenv("LOG_LEVEL")
+	if logLevel != "" {
+		err := ncolog.SetLogLevel(logLevel)
+		if err != nil {
+			log.Log.Error(err, "failed to set log level")
+			os.Exit(1)
+		}
+	}
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
