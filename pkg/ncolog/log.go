@@ -17,11 +17,17 @@ package ncolog
 
 import (
 	"flag"
+	"fmt"
 
 	zzap "go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+)
+
+const (
+	DebugLevel = 2
+	InfoLevel  = 0
 )
 
 // Options stores controller-runtime (zap) log config
@@ -51,13 +57,29 @@ func InitLog() {
 
 // SetLogLevel provides conversion from the operators LogLevel value ({0,1,2} where 2 is the most verbose) and sets
 // the current logging level accordingly.
-func SetLogLevel(operatorLevel int) {
+func SetLogLevel(level string) error {
+	operatorLevel, err := parseLevel(level)
+	if err != nil {
+		return err
+	}
 	newLevel := operatorToZapLevel(operatorLevel)
 	currLevel := Options.Level.(zzap.AtomicLevel).Level()
 	if newLevel != currLevel {
 		log.Log.Info("Set log verbose level", "new-level", operatorLevel, "current-level", zapToOperatorLevel(currLevel))
 		Options.Level.(zzap.AtomicLevel).SetLevel(newLevel)
 	}
+
+	return nil
+}
+
+func parseLevel(level string) (int, error) {
+	switch level {
+	case "debug", "DEBUG":
+		return DebugLevel, nil
+	case "info", "INFO", "": // make the zero value useful
+		return InfoLevel, nil
+	}
+	return 0, fmt.Errorf("unsupported log level: %s", level)
 }
 
 func zapToOperatorLevel(zapLevel zapcore.Level) int {

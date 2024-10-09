@@ -42,8 +42,6 @@ operator:
   serviceAccount:
     # -- set annotations for the operator service account
     annotations: {}
-  # -- log level configuration
-  logLevel: info
 
 configDaemon:
   image:
@@ -63,5 +61,7 @@ configDaemon:
       cpu: 10m
       memory: 64Mi
 
+# -- log level configuration (debug|info)
+logLevel: info
 # -- image pull secrets for both the operator and the config daemon
 imagePullSecrets: []

@@ -55,6 +55,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	logLevel := os.Getenv("LOG_LEVEL")
+	if logLevel != "" {
+		err = ncolog.SetLogLevel(logLevel)
+		if err != nil {
+			log.Log.Error(err, "failed to set log level")
+			os.Exit(1)
+		}
+	}
+
 	hostUtils := host.NewHostUtils()
 	hostManager := host.NewHostManager(nodeName, hostUtils)
 	maintenanceManager := maintenance.New(mgr.GetClient(), hostUtils, nodeName, namespace)
