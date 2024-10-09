@@ -24,7 +24,6 @@ spec:
       nodeSelector: {{- toYaml .Values.operator.nodeSelector | nindent 8 }}
       serviceAccountName: {{ include "nic-configuration-operator.serviceAccountName" . }}
       terminationGracePeriodSeconds: 10
-      hostNetwork: true
       hostPID: true
       priorityClassName: system-node-critical
       containers:

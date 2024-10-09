@@ -17,7 +17,6 @@ spec:
       labels:
         control-plane: nic-configuration-daemon
     spec:
-      hostNetwork: true
       hostPID: true
       priorityClassName: system-node-critical
       containers:
