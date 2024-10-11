@@ -67,8 +67,8 @@ func setInitialsConditionsForDevice(device *v1alpha1.NicDevice) {
 
 func setFwConfigConditionsForDevice(device *v1alpha1.NicDevice, recommendedFirmware string) {
 	currentFirmware := device.Status.FirmwareVersion
-
-	if currentFirmware == recommendedFirmware {
+	switch currentFirmware {
+	case recommendedFirmware:
 		condition := metav1.Condition{
 			Type:    consts.FimwareConfigMatchCondition,
 			Status:  metav1.ConditionTrue,
@@ -76,10 +76,18 @@ func setFwConfigConditionsForDevice(device *v1alpha1.NicDevice, recommendedFirmw
 			Message: fmt.Sprintf("Device firmware '%s' matches to recommended version '%s'", currentFirmware, recommendedFirmware),
 		}
 		meta.SetStatusCondition(&device.Status.Conditions, condition)
-	} else {
+	case "":
 		condition := metav1.Condition{
 			Type:    consts.FimwareConfigMatchCondition,
-			Status:  metav1.ConditionFalse,
+			Status:  metav1.ConditionUnknown,
+			Reason:  consts.DeviceFwMatchReason,
+			Message: "Can't get OFED version to check recommended firmware version",
+		}
+		meta.SetStatusCondition(&device.Status.Conditions, condition)
+	default:
+		condition := metav1.Condition{
+			Type:    consts.FimwareConfigMatchCondition,
+			Status:  metav1.ConditionUnknown,
 			Reason:  consts.DeviceFwMismatchReason,
 			Message: fmt.Sprintf("Device firmware '%s' doesn't match to recommended version '%s'", currentFirmware, recommendedFirmware),
 		}
