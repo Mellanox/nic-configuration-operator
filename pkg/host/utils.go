@@ -544,7 +544,7 @@ func (h *hostUtils) SetMaxReadRequestSize(pciAddr string, maxReadRequestSize int
 		return err
 	}
 
-	cmd := h.execInterface.Command("setpci", "-s", pciAddr, fmt.Sprintf("CAP_EXP+08.w=%d000:FFFF", valueToApply))
+	cmd := h.execInterface.Command("setpci", "-s", pciAddr, fmt.Sprintf("CAP_EXP+08.w=%d000:F000", valueToApply))
 	_, err := cmd.Output()
 	if err != nil {
 		log.Log.Error(err, "SetMaxReadRequestSize(): Failed to run setpci")

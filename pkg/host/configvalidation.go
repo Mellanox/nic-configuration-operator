@@ -245,9 +245,7 @@ func (v *configValidationImpl) AdvancedPCISettingsEnabled(currentConfig map[stri
 func (v *configValidationImpl) RuntimeConfigApplied(device *v1alpha1.NicDevice) (bool, error) {
 	ports := device.Status.Ports
 
-	// TODO uncomment after a fix to mlnx_qos command
-	//desiredMaxReadReqSize, desiredTrust, desiredPfc := v.CalculateDesiredRuntimeConfig(device)
-	desiredMaxReadReqSize, _, _ := v.CalculateDesiredRuntimeConfig(device)
+	desiredMaxReadReqSize, desiredTrust, desiredPfc := v.CalculateDesiredRuntimeConfig(device)
 
 	if desiredMaxReadReqSize != 0 {
 		for _, port := range ports {
@@ -262,17 +260,16 @@ func (v *configValidationImpl) RuntimeConfigApplied(device *v1alpha1.NicDevice) 
 		}
 	}
 
-	// TODO uncomment after a fix to mlnx_qos command
-	//for _, port := range ports {
-	//	actualTrust, actualPfc, err := v.utils.GetTrustAndPFC(port.NetworkInterface)
-	//	if err != nil {
-	//		log.Log.Error(err, "can't validate QoS settings", "device", device.Name)
-	//		return false, err
-	//	}
-	//	if actualTrust != desiredTrust || actualPfc != desiredPfc {
-	//		return false, nil
-	//	}
-	//}
+	for _, port := range ports {
+		actualTrust, actualPfc, err := v.utils.GetTrustAndPFC(port.NetworkInterface)
+		if err != nil {
+			log.Log.Error(err, "can't validate QoS settings", "device", device.Name)
+			return false, err
+		}
+		if actualTrust != desiredTrust || actualPfc != desiredPfc {
+			return false, nil
+		}
+	}
 
 	return true, nil
 }

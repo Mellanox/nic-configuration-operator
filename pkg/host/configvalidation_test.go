@@ -723,44 +723,42 @@ var _ = Describe("ConfigValidationImpl", func() {
 			})
 		})
 
-		// TODO uncomment after a fix to mlnx_qos command
-		//Context("when trust setting does not match on the first port", func() {
-		//	BeforeEach(func() {
-		//		desiredMaxReadReqSize, _, desiredPfc := validator.CalculateDesiredRuntimeConfig(device)
-		//
-		//		mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desiredMaxReadReqSize, nil)
-		//		mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.1").Return(desiredMaxReadReqSize, nil)
-		//
-		//		mockHostUtils.On("GetTrustAndPFC", "interface0").Return("differentTrust", desiredPfc, nil)
-		//		// The second port should not be called since the first port already fails
-		//	})
-		//
-		//	It("should return false with no error", func() {
-		//		applied, err = validator.RuntimeConfigApplied(device)
-		//		Expect(err).NotTo(HaveOccurred())
-		//		Expect(applied).To(BeFalse())
-		//	})
-		//})
-		//
-		// TODO uncomment after a fix to mlnx_qos command
-		//Context("when PFC setting does not match on the second port", func() {
-		//	BeforeEach(func() {
-		//		desiredMaxReadReqSize, desiredTrust, desiredPfc := validator.CalculateDesiredRuntimeConfig(device)
-		//
-		//		mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desiredMaxReadReqSize, nil)
-		//		mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.1").Return(desiredMaxReadReqSize, nil)
-		//
-		//		mockHostUtils.On("GetTrustAndPFC", "interface0").Return(desiredTrust, desiredPfc, nil)
-		//
-		//		mockHostUtils.On("GetTrustAndPFC", "interface1").Return(desiredTrust, "differentPfc", nil)
-		//	})
-		//
-		//	It("should return false with no error", func() {
-		//		applied, err = validator.RuntimeConfigApplied(device)
-		//		Expect(err).NotTo(HaveOccurred())
-		//		Expect(applied).To(BeFalse())
-		//	})
-		//})
+		Context("when trust setting does not match on the first port", func() {
+			BeforeEach(func() {
+				desiredMaxReadReqSize, _, desiredPfc := validator.CalculateDesiredRuntimeConfig(device)
+
+				mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desiredMaxReadReqSize, nil)
+				mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.1").Return(desiredMaxReadReqSize, nil)
+
+				mockHostUtils.On("GetTrustAndPFC", "interface0").Return("differentTrust", desiredPfc, nil)
+				// The second port should not be called since the first port already fails
+			})
+
+			It("should return false with no error", func() {
+				applied, err = validator.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeFalse())
+			})
+		})
+
+		Context("when PFC setting does not match on the second port", func() {
+			BeforeEach(func() {
+				desiredMaxReadReqSize, desiredTrust, desiredPfc := validator.CalculateDesiredRuntimeConfig(device)
+
+				mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desiredMaxReadReqSize, nil)
+				mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.1").Return(desiredMaxReadReqSize, nil)
+
+				mockHostUtils.On("GetTrustAndPFC", "interface0").Return(desiredTrust, desiredPfc, nil)
+
+				mockHostUtils.On("GetTrustAndPFC", "interface1").Return(desiredTrust, "differentPfc", nil)
+			})
+
+			It("should return false with no error", func() {
+				applied, err = validator.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeFalse())
+			})
+		})
 
 		Context("when GetMaxReadRequestSize returns an error", func() {
 			BeforeEach(func() {
@@ -789,24 +787,23 @@ var _ = Describe("ConfigValidationImpl", func() {
 			})
 		})
 
-		// TODO uncomment after a fix to mlnx_qos command
-		//Context("when GetTrustAndPFC returns an error on the first port", func() {
-		//	BeforeEach(func() {
-		//		desiredMaxReadReqSize, _, _ := validator.CalculateDesiredRuntimeConfig(device)
-		//
-		//		mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desiredMaxReadReqSize, nil)
-		//		mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.1").Return(desiredMaxReadReqSize, nil)
-		//
-		//		mockHostUtils.On("GetTrustAndPFC", "interface0").Return("", "", fmt.Errorf("failed to get trust and pfc"))
-		//	})
-		//
-		//	It("should return false with the error", func() {
-		//		applied, err = validator.RuntimeConfigApplied(device)
-		//		Expect(err).To(HaveOccurred())
-		//		Expect(err.Error()).To(ContainSubstring("failed to get trust and pfc"))
-		//		Expect(applied).To(BeFalse())
-		//	})
-		//})
+		Context("when GetTrustAndPFC returns an error on the first port", func() {
+			BeforeEach(func() {
+				desiredMaxReadReqSize, _, _ := validator.CalculateDesiredRuntimeConfig(device)
+
+				mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desiredMaxReadReqSize, nil)
+				mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.1").Return(desiredMaxReadReqSize, nil)
+
+				mockHostUtils.On("GetTrustAndPFC", "interface0").Return("", "", fmt.Errorf("failed to get trust and pfc"))
+			})
+
+			It("should return false with the error", func() {
+				applied, err = validator.RuntimeConfigApplied(device)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("failed to get trust and pfc"))
+				Expect(applied).To(BeFalse())
+			})
+		})
 
 		Context("when device has a single port and all settings are applied correctly", func() {
 			BeforeEach(func() {
@@ -828,25 +825,24 @@ var _ = Describe("ConfigValidationImpl", func() {
 			})
 		})
 
-		// TODO uncomment after a fix to mlnx_qos command
-		//Context("when device has a single port and trust setting does not match", func() {
-		//	BeforeEach(func() {
-		//		device := device
-		//		device.Status.Ports = []v1alpha1.NicDevicePortSpec{
-		//			{PCI: "0000:03:00.0", NetworkInterface: "interface0"},
-		//		}
-		//
-		//		desiredMaxReadReqSize, _, desiredPfc := validator.CalculateDesiredRuntimeConfig(device)
-		//
-		//		mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desiredMaxReadReqSize, nil)
-		//		mockHostUtils.On("GetTrustAndPFC", "interface0").Return("differentTrust", desiredPfc, nil)
-		//	})
-		//
-		//	It("should return false with no error", func() {
-		//		applied, err = validator.RuntimeConfigApplied(device)
-		//		Expect(err).NotTo(HaveOccurred())
-		//		Expect(applied).To(BeFalse())
-		//	})
-		//})
+		Context("when device has a single port and trust setting does not match", func() {
+			BeforeEach(func() {
+				device := device
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:03:00.0", NetworkInterface: "interface0"},
+				}
+
+				desiredMaxReadReqSize, _, desiredPfc := validator.CalculateDesiredRuntimeConfig(device)
+
+				mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desiredMaxReadReqSize, nil)
+				mockHostUtils.On("GetTrustAndPFC", "interface0").Return("differentTrust", desiredPfc, nil)
+			})
+
+			It("should return false with no error", func() {
+				applied, err = validator.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeFalse())
+			})
+		})
 	})
 })
