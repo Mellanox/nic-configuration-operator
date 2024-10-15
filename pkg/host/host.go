@@ -293,9 +293,7 @@ func (h hostManager) ApplyDeviceRuntimeSpec(device *v1alpha1.NicDevice) error {
 		return nil
 	}
 
-	// TODO uncomment after a fix to mlnx_qos command
-	//desiredMaxReadReqSize, desiredTrust, desiredPfc := h.configValidation.CalculateDesiredRuntimeConfig(device)
-	desiredMaxReadReqSize, _, _ := h.configValidation.CalculateDesiredRuntimeConfig(device)
+	desiredMaxReadReqSize, desiredTrust, desiredPfc := h.configValidation.CalculateDesiredRuntimeConfig(device)
 
 	ports := device.Status.Ports
 
@@ -309,14 +307,13 @@ func (h hostManager) ApplyDeviceRuntimeSpec(device *v1alpha1.NicDevice) error {
 		}
 	}
 
-	// TODO uncomment after a fix to mlnx_qos command
-	//for _, port := range ports {
-	//	err = h.hostUtils.SetTrustAndPFC(port.NetworkInterface, desiredTrust, desiredPfc)
-	//	if err != nil {
-	//		log.Log.Error(err, "failed to apply runtime configuration", "device", device)
-	//		return err
-	//	}
-	//}
+	for _, port := range ports {
+		err = h.hostUtils.SetTrustAndPFC(port.NetworkInterface, desiredTrust, desiredPfc)
+		if err != nil {
+			log.Log.Error(err, "failed to apply runtime configuration", "device", device)
+			return err
+		}
+	}
 
 	return nil
 }

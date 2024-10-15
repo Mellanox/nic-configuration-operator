@@ -634,7 +634,7 @@ Device type:    ConnectX4
 
 				fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
 					Expect(cmd).To(Equal("setpci"))
-					Expect(args).To(Equal([]string{"-s", pciAddr, fmt.Sprintf("CAP_EXP+08.w=%d000:FFFF", valueToApply)}))
+					Expect(args).To(Equal([]string{"-s", pciAddr, fmt.Sprintf("CAP_EXP+08.w=%d000:F000", valueToApply)}))
 					return fakeCmd
 				})
 
@@ -670,7 +670,7 @@ Device type:    ConnectX4
 
 				fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
 					Expect(cmd).To(Equal("setpci"))
-					Expect(args).To(Equal([]string{"-s", pciAddr, fmt.Sprintf("CAP_EXP+08.w=%d000:FFFF", valueToApply)}))
+					Expect(args).To(Equal([]string{"-s", pciAddr, fmt.Sprintf("CAP_EXP+08.w=%d000:F000", valueToApply)}))
 					return fakeCmd
 				})
 
