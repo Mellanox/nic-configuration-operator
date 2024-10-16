@@ -12,6 +12,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/internal/controller"
@@ -36,6 +37,9 @@ func main() {
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
+		// Setting bind address to 0 disables the health probe / metrics server
+		HealthProbeBindAddress: "0",
+		Metrics:                metricsserver.Options{BindAddress: "0"},
 	})
 	if err != nil {
 		log.Log.Error(err, "unable to create manager")
