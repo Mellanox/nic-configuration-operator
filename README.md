@@ -7,7 +7,7 @@
 
 # NVIDIA Nic Configuration Operator
 
-NVIDIA Maintenance Operator provides Kubernetes API(Custom Resource Definition) to allow FW configuration on Nvidia NICs
+NVIDIA Nic Configuration Operator provides Kubernetes API(Custom Resource Definition) to allow FW configuration on Nvidia NICs
 in a coordinated manner. It deploys a configuration daemon on each of the desired nodes to configure Nvidia NICs there. 
 NVIDIA Nic Configuration operator uses [maintenance operator](https://github.com/Mellanox/maintenance-operator) to prepare a node for maintenance before the actual configuration.
 
