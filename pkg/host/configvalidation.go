@@ -135,6 +135,13 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 	}
 
 	if template.RoceOptimized != nil && template.RoceOptimized.Enabled {
+		if template.LinkType == consts.Infiniband {
+			err := types.IncorrectSpecError(
+				"RoceOptimized settings can only be used with link type Ethernet")
+			log.Log.Error(err, "incorrect spec", "device", device.Name)
+			return desiredParameters, err
+		}
+
 		desiredParameters[consts.RoceCcPrioMaskP1Param] = "255"
 		desiredParameters[consts.CnpDscpP1Param] = "4"
 		desiredParameters[consts.Cnp802pPrioP1Param] = "6"
@@ -280,8 +287,6 @@ func (v *configValidationImpl) RuntimeConfigApplied(device *v1alpha1.NicDevice) 
 // returns string - qos pfc settings
 func (v *configValidationImpl) CalculateDesiredRuntimeConfig(device *v1alpha1.NicDevice) (int, string, string) {
 	maxReadRequestSize := 0
-	trust := "pcp"
-	pfc := "0,0,0,0,0,0,0,0"
 
 	template := device.Spec.Configuration.Template
 
@@ -292,6 +297,14 @@ func (v *configValidationImpl) CalculateDesiredRuntimeConfig(device *v1alpha1.Ni
 			maxReadRequestSize = 4096
 		}
 	}
+
+	// QoS settings are not available for IB devices
+	if template.LinkType == consts.Infiniband {
+		return maxReadRequestSize, "", ""
+	}
+
+	trust := "pcp"
+	pfc := "0,0,0,0,0,0,0,0"
 
 	if template.RoceOptimized != nil && template.RoceOptimized.Enabled {
 		trust = "dscp"

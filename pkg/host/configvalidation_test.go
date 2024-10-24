@@ -259,7 +259,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 			defaultValues := map[string]string{}
 
 			_, err := validator.ConstructNvParamMapFromTemplate(device, defaultValues)
-			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError("incorrect spec: GpuDirectOptimized should only be enabled together with PciPerformanceOptimized"))
 		})
 		It("should ignore raw config for the second port if device is single port", func() {
 			mockHostUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
@@ -441,6 +441,33 @@ var _ = Describe("ConfigValidationImpl", func() {
 			_, err := validator.ConstructNvParamMapFromTemplate(device, defaultValues)
 			Expect(err).NotTo(HaveOccurred())
 		})
+		It("should return an error when RoceOptimized is enabled with linkType Infiniband", func() {
+			mockHostUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
+
+			device := &v1alpha1.NicDevice{
+				Spec: v1alpha1.NicDeviceSpec{
+					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
+						Template: &v1alpha1.ConfigurationTemplateSpec{
+							NumVfs:   0,
+							LinkType: consts.Infiniband,
+							RoceOptimized: &v1alpha1.RoceOptimizedSpec{
+								Enabled: true,
+							},
+						},
+					},
+				},
+				Status: v1alpha1.NicDeviceStatus{
+					Ports: []v1alpha1.NicDevicePortSpec{
+						{PCI: "0000:03:00.0"},
+					},
+				},
+			}
+
+			defaultValues := map[string]string{}
+
+			_, err := validator.ConstructNvParamMapFromTemplate(device, defaultValues)
+			Expect(err).To(MatchError("incorrect spec: RoceOptimized settings can only be used with link type Ethernet"))
+		})
 	})
 
 	Describe("ValidateResetToDefault", func() {
@@ -620,6 +647,34 @@ var _ = Describe("ConfigValidationImpl", func() {
 			Expect(maxReadRequestSize).To(Equal(256))
 			Expect(trust).To(Equal("customTrust"))
 			Expect(pfc).To(Equal("1,1,1,1,1,1,1,1"))
+		})
+
+		It("should not calculate desired QoS settings for an IB configuration", func() {
+			device := &v1alpha1.NicDevice{
+				Spec: v1alpha1.NicDeviceSpec{
+					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
+						Template: &v1alpha1.ConfigurationTemplateSpec{
+							LinkType: consts.Infiniband,
+							PciPerformanceOptimized: &v1alpha1.PciPerformanceOptimizedSpec{
+								Enabled:        true,
+								MaxReadRequest: 256,
+							},
+							RoceOptimized: &v1alpha1.RoceOptimizedSpec{
+								Enabled: true,
+								Qos: &v1alpha1.QosSpec{
+									Trust: "customTrust",
+									PFC:   "1,1,1,1,1,1,1,1",
+								},
+							},
+						},
+					},
+				},
+			}
+
+			maxReadRequestSize, trust, pfc := validator.CalculateDesiredRuntimeConfig(device)
+			Expect(maxReadRequestSize).To(Equal(256))
+			Expect(trust).To(BeEmpty())
+			Expect(pfc).To(BeEmpty())
 		})
 	})
 
