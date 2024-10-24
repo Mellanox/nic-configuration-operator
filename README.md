@@ -116,6 +116,7 @@ spec:
   * Configure pfc (Priority Flow Control) for priority 3 and set trust to dscp on each PF
     * Non-persistent (need to be applied after each boot)
     * Users can override values via `trust` and `pfc` parameters
+  * Can only be enabled with `linkType=Ethernet`
 * `gpuDirectOptimized`: performs gpu direct optimizations. ATM only optimizations for Baremetal environment are supported. If enabled perform the following:
   * Set nvconfig `ATS_ENABLED=0`
   * Can only be enabled when `pciPerformanceOptimized` is enabled
