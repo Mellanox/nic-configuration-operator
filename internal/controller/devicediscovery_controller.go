@@ -87,7 +87,7 @@ func setFwConfigConditionsForDevice(device *v1alpha1.NicDevice, recommendedFirmw
 	default:
 		condition := metav1.Condition{
 			Type:    consts.FimwareConfigMatchCondition,
-			Status:  metav1.ConditionUnknown,
+			Status:  metav1.ConditionFalse,
 			Reason:  consts.DeviceFwMismatchReason,
 			Message: fmt.Sprintf("Device firmware '%s' doesn't match to recommended version '%s'", currentFirmware, recommendedFirmware),
 		}
