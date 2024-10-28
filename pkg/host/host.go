@@ -18,7 +18,9 @@ package host
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -155,7 +157,7 @@ func (h hostManager) ValidateDeviceNvSpec(ctx context.Context, device *v1alpha1.
 		return h.configValidation.ValidateResetToDefault(nvConfig)
 	}
 
-	desiredConfig, err := h.configValidation.ConstructNvParamMapFromTemplate(device, nvConfig.DefaultConfig)
+	desiredConfig, err := h.configValidation.ConstructNvParamMapFromTemplate(device, nvConfig)
 	if err != nil {
 		log.Log.Error(err, "failed to calculate desired nvconfig parameters", "device", device.Name)
 		return false, false, err
@@ -165,19 +167,19 @@ func (h hostManager) ValidateDeviceNvSpec(ctx context.Context, device *v1alpha1.
 	rebootNeeded := false
 
 	// If ADVANCED_PCI_SETTINGS are enabled in current config, unknown parameters are treated as spec error
-	advancedPciSettingsEnabled := h.configValidation.AdvancedPCISettingsEnabled(nvConfig.CurrentConfig)
+	advancedPciSettingsEnabled := h.configValidation.AdvancedPCISettingsEnabled(nvConfig)
 
 	for parameter, desiredValue := range desiredConfig {
-		currentValue, foundInCurrent := nvConfig.CurrentConfig[parameter]
-		nextValue, foundInNextBoot := nvConfig.NextBootConfig[parameter]
+		currentValues, foundInCurrent := nvConfig.CurrentConfig[parameter]
+		nextValues, foundInNextBoot := nvConfig.NextBootConfig[parameter]
 		if advancedPciSettingsEnabled && !foundInCurrent {
 			err = types.IncorrectSpecError(fmt.Sprintf("Parameter %s unsupported for device %s", parameter, device.Name))
 			log.Log.Error(err, "can't set nv config parameter for device")
 			return false, false, err
 		}
 
-		if foundInNextBoot && nextValue == desiredValue {
-			if !foundInCurrent || currentValue != desiredValue {
+		if foundInNextBoot && slices.Contains(nextValues, strings.ToLower(desiredValue)) {
+			if !foundInCurrent || !slices.Contains(currentValues, strings.ToLower(desiredValue)) {
 				rebootNeeded = true
 			}
 		} else {
@@ -220,7 +222,7 @@ func (h hostManager) ApplyDeviceNvSpec(ctx context.Context, device *v1alpha1.Nic
 		return false, err
 	}
 
-	if !h.configValidation.AdvancedPCISettingsEnabled(nvConfig.CurrentConfig) {
+	if !h.configValidation.AdvancedPCISettingsEnabled(nvConfig) {
 		log.Log.V(2).Info("AdvancedPciSettings not enabled, fw reset required", "device", device.Name)
 		err = h.hostUtils.SetNvConfigParameter(pciAddr, consts.AdvancedPCISettingsParam, consts.NvParamTrue)
 		if err != nil {
@@ -242,7 +244,7 @@ func (h hostManager) ApplyDeviceNvSpec(ctx context.Context, device *v1alpha1.Nic
 		}
 	}
 
-	desiredConfig, err := h.configValidation.ConstructNvParamMapFromTemplate(device, nvConfig.DefaultConfig)
+	desiredConfig, err := h.configValidation.ConstructNvParamMapFromTemplate(device, nvConfig)
 	if err != nil {
 		log.Log.Error(err, "failed to calculate desired nvconfig parameters", "device", device.Name)
 		return false, err
@@ -251,14 +253,14 @@ func (h hostManager) ApplyDeviceNvSpec(ctx context.Context, device *v1alpha1.Nic
 	paramsToApply := map[string]string{}
 
 	for param, value := range desiredConfig {
-		nextVal, found := nvConfig.NextBootConfig[param]
+		nextValues, found := nvConfig.NextBootConfig[param]
 		if !found {
 			err = types.IncorrectSpecError(fmt.Sprintf("Parameter %s unsupported for device %s", param, device.Name))
 			log.Log.Error(err, "can't set nv config parameter for device")
 			return false, err
 		}
 
-		if nextVal != value {
+		if !slices.Contains(nextValues, value) {
 			paramsToApply[param] = value
 		}
 	}

@@ -20,17 +20,18 @@ import (
 	"strings"
 )
 
+// NvConfigQuery contains a nv config query for a single device, values can contain both the string alias and the numeric value
 type NvConfigQuery struct {
-	DefaultConfig  map[string]string
-	CurrentConfig  map[string]string
-	NextBootConfig map[string]string
+	DefaultConfig  map[string][]string
+	CurrentConfig  map[string][]string
+	NextBootConfig map[string][]string
 }
 
 func NewNvConfigQuery() NvConfigQuery {
 	return NvConfigQuery{
-		DefaultConfig:  make(map[string]string),
-		CurrentConfig:  make(map[string]string),
-		NextBootConfig: make(map[string]string),
+		DefaultConfig:  make(map[string][]string),
+		CurrentConfig:  make(map[string][]string),
+		NextBootConfig: make(map[string][]string),
 	}
 }
 

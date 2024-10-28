@@ -323,7 +323,7 @@ Configurations:                              Default         Current         Nex
 *        KEEP_IB_LINK_UP_P2                  False(0)        True(1)         True(1)
          KEEP_LINK_UP_ON_BOOT_P2             False(0)        False(0)        False(0)
          ESWITCH_HAIRPIN_DESCRIPTORS         Array[0..7]     Array[0..7]     Array[0..7]
-*        MEMIC_SIZE_LIMIT                    _256KB(1)       _256KB(1)       _256KB(0)
+*        MEMIC_SIZE_LIMIT                    _256KB(1)       _256KB(1)       DISABLED(0)
 The '*' shows parameters with next value different from default/current value.
 `
 					return []byte(output), nil, nil
@@ -372,24 +372,24 @@ Configurations:                              Default         Current         Nex
 			Expect(err).ToNot(HaveOccurred())
 
 			// Verify regular parameters
-			Expect(query.DefaultConfig).To(HaveKeyWithValue("KEEP_IB_LINK_UP_P2", "0"))
-			Expect(query.CurrentConfig).To(HaveKeyWithValue("KEEP_IB_LINK_UP_P2", "1"))
-			Expect(query.NextBootConfig).To(HaveKeyWithValue("KEEP_IB_LINK_UP_P2", "1"))
+			Expect(query.DefaultConfig).To(HaveKeyWithValue("KEEP_IB_LINK_UP_P2", []string{"false", "0"}))
+			Expect(query.CurrentConfig).To(HaveKeyWithValue("KEEP_IB_LINK_UP_P2", []string{"true", "1"}))
+			Expect(query.NextBootConfig).To(HaveKeyWithValue("KEEP_IB_LINK_UP_P2", []string{"true", "1"}))
 
-			Expect(query.DefaultConfig).To(HaveKeyWithValue("MEMIC_SIZE_LIMIT", "1"))
-			Expect(query.CurrentConfig).To(HaveKeyWithValue("MEMIC_SIZE_LIMIT", "1"))
-			Expect(query.NextBootConfig).To(HaveKeyWithValue("MEMIC_SIZE_LIMIT", "0"))
+			Expect(query.DefaultConfig).To(HaveKeyWithValue("MEMIC_SIZE_LIMIT", []string{"_256kb", "1"}))
+			Expect(query.CurrentConfig).To(HaveKeyWithValue("MEMIC_SIZE_LIMIT", []string{"_256kb", "1"}))
+			Expect(query.NextBootConfig).To(HaveKeyWithValue("MEMIC_SIZE_LIMIT", []string{"disabled", "0"}))
 
-			Expect(query.DefaultConfig).To(HaveKeyWithValue("KEEP_LINK_UP_ON_BOOT_P2", "0"))
-			Expect(query.CurrentConfig).To(HaveKeyWithValue("KEEP_LINK_UP_ON_BOOT_P2", "0"))
-			Expect(query.NextBootConfig).To(HaveKeyWithValue("KEEP_LINK_UP_ON_BOOT_P2", "0"))
+			Expect(query.DefaultConfig).To(HaveKeyWithValue("KEEP_LINK_UP_ON_BOOT_P2", []string{"false", "0"}))
+			Expect(query.CurrentConfig).To(HaveKeyWithValue("KEEP_LINK_UP_ON_BOOT_P2", []string{"false", "0"}))
+			Expect(query.NextBootConfig).To(HaveKeyWithValue("KEEP_LINK_UP_ON_BOOT_P2", []string{"false", "0"}))
 
 			// Verify array parameters
 			for i := 0; i <= 7; i++ {
 				key := fmt.Sprintf("ESWITCH_HAIRPIN_DESCRIPTORS[%d]", i)
-				Expect(query.DefaultConfig).To(HaveKeyWithValue(key, "128"))
-				Expect(query.CurrentConfig).To(HaveKeyWithValue(key, "128"))
-				Expect(query.NextBootConfig).To(HaveKeyWithValue(key, "128"))
+				Expect(query.DefaultConfig).To(HaveKeyWithValue(key, []string{"128"}))
+				Expect(query.CurrentConfig).To(HaveKeyWithValue(key, []string{"128"}))
+				Expect(query.NextBootConfig).To(HaveKeyWithValue(key, []string{"128"}))
 			}
 		})
 

@@ -60,18 +60,21 @@ var _ = Describe("ConfigValidationImpl", func() {
 					},
 				},
 			}
-			defaultValues := map[string]string{
-				consts.MaxAccOutReadParam:    "testMaxAccOutRead",
-				consts.RoceCcPrioMaskP1Param: "testRoceCcP1",
-				consts.CnpDscpP1Param:        "testDscpP1",
-				consts.Cnp802pPrioP1Param:    "test802PrioP1",
-				consts.RoceCcPrioMaskP2Param: "testRoceCcP2",
-				consts.CnpDscpP2Param:        "testDscpP2",
-				consts.Cnp802pPrioP2Param:    "test802PrioP2",
-				consts.AtsEnabledParam:       "testAts",
-			}
 
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, defaultValues)
+			defaultValues := map[string][]string{
+				consts.MaxAccOutReadParam:    {"testMaxAccOutRead"},
+				consts.RoceCcPrioMaskP1Param: {"testRoceCcP1"},
+				consts.CnpDscpP1Param:        {"testDscpP1"},
+				consts.Cnp802pPrioP1Param:    {"test802PrioP1"},
+				consts.RoceCcPrioMaskP2Param: {"testRoceCcP2"},
+				consts.CnpDscpP2Param:        {"testDscpP2"},
+				consts.Cnp802pPrioP2Param:    {"test802PrioP2"},
+				consts.AtsEnabledParam:       {"testAts"},
+			}
+			query := types.NewNvConfigQuery()
+			query.DefaultConfig = defaultValues
+
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(HaveKeyWithValue(consts.SriovEnabledParam, consts.NvParamFalse))
 			Expect(nvParams).To(HaveKeyWithValue(consts.SriovNumOfVfsParam, "0"))
@@ -101,18 +104,20 @@ var _ = Describe("ConfigValidationImpl", func() {
 					},
 				},
 			}
-			defaultValues := map[string]string{
-				consts.MaxAccOutReadParam:    "testMaxAccOutRead",
-				consts.RoceCcPrioMaskP1Param: "testRoceCcP1",
-				consts.CnpDscpP1Param:        "testDscpP1",
-				consts.Cnp802pPrioP1Param:    "test802PrioP1",
-				consts.RoceCcPrioMaskP2Param: "testRoceCcP2",
-				consts.CnpDscpP2Param:        "testDscpP2",
-				consts.Cnp802pPrioP2Param:    "test802PrioP2",
-				consts.AtsEnabledParam:       "testAts",
+			defaultValues := map[string][]string{
+				consts.MaxAccOutReadParam:    {"testMaxAccOutRead"},
+				consts.RoceCcPrioMaskP1Param: {"testRoceCcP1"},
+				consts.CnpDscpP1Param:        {"testDscpP1"},
+				consts.Cnp802pPrioP1Param:    {"test802PrioP1"},
+				consts.RoceCcPrioMaskP2Param: {"testRoceCcP2"},
+				consts.CnpDscpP2Param:        {"testDscpP2"},
+				consts.Cnp802pPrioP2Param:    {"test802PrioP2"},
+				consts.AtsEnabledParam:       {"testAts"},
 			}
+			query := types.NewNvConfigQuery()
+			query.DefaultConfig = defaultValues
 
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, defaultValues)
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(HaveKeyWithValue(consts.SriovEnabledParam, consts.NvParamFalse))
 			Expect(nvParams).To(HaveKeyWithValue(consts.SriovNumOfVfsParam, "0"))
@@ -162,9 +167,9 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			defaultValues := map[string]string{}
+			query := types.NewNvConfigQuery()
 
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, defaultValues)
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(HaveKeyWithValue(consts.MaxAccOutReadParam, "1337"))
 			Expect(nvParams).To(HaveKeyWithValue(consts.AtsEnabledParam, "0"))
@@ -198,9 +203,9 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			defaultValues := map[string]string{}
+			query := types.NewNvConfigQuery()
 
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, defaultValues)
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(HaveKeyWithValue(consts.MaxAccOutReadParam, "44"))
 		})
@@ -227,9 +232,9 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			defaultValues := map[string]string{}
+			query := types.NewNvConfigQuery()
 
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, defaultValues)
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(HaveKeyWithValue(consts.MaxAccOutReadParam, "0"))
 		})
@@ -256,9 +261,9 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			defaultValues := map[string]string{}
+			query := types.NewNvConfigQuery()
 
-			_, err := validator.ConstructNvParamMapFromTemplate(device, defaultValues)
+			_, err := validator.ConstructNvParamMapFromTemplate(device, query)
 			Expect(err).To(MatchError("incorrect spec: GpuDirectOptimized should only be enabled together with PciPerformanceOptimized"))
 		})
 		It("should ignore raw config for the second port if device is single port", func() {
@@ -290,9 +295,9 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			defaultValues := map[string]string{}
+			query := types.NewNvConfigQuery()
 
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, defaultValues)
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(HaveKeyWithValue("TEST_P1", "test"))
 			Expect(nvParams).NotTo(HaveKey("TEST_P2"))
@@ -327,9 +332,9 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			defaultValues := map[string]string{}
+			query := types.NewNvConfigQuery()
 
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, defaultValues)
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(HaveKeyWithValue("TEST_P1", "test"))
 			Expect(nvParams).To(HaveKeyWithValue("TEST_P2", "test"))
@@ -364,9 +369,9 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			defaultValues := map[string]string{}
+			query := types.NewNvConfigQuery()
 
-			_, err := validator.ConstructNvParamMapFromTemplate(device, defaultValues)
+			_, err := validator.ConstructNvParamMapFromTemplate(device, query)
 			Expect(err).To(MatchError("incorrect spec: device does not support link type change, wrong link type provided in the template, should be: Ethernet"))
 		})
 		It("should not report an error when LinkType can be changed and template differs from the actual status", func() {
@@ -399,11 +404,13 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			defaultValues := map[string]string{
-				consts.LinkTypeP1Param: consts.Ethernet,
+			defaultValues := map[string][]string{
+				consts.LinkTypeP1Param: {consts.Ethernet},
 			}
+			query := types.NewNvConfigQuery()
+			query.DefaultConfig = defaultValues
 
-			_, err := validator.ConstructNvParamMapFromTemplate(device, defaultValues)
+			_, err := validator.ConstructNvParamMapFromTemplate(device, query)
 			Expect(err).NotTo(HaveOccurred())
 		})
 		It("should not report an error when LinkType cannot be changed and template matches the actual status", func() {
@@ -436,9 +443,9 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			defaultValues := map[string]string{}
+			query := types.NewNvConfigQuery()
 
-			_, err := validator.ConstructNvParamMapFromTemplate(device, defaultValues)
+			_, err := validator.ConstructNvParamMapFromTemplate(device, query)
 			Expect(err).NotTo(HaveOccurred())
 		})
 		It("should return an error when RoceOptimized is enabled with linkType Infiniband", func() {
@@ -463,22 +470,67 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			defaultValues := map[string]string{}
+			query := types.NewNvConfigQuery()
 
-			_, err := validator.ConstructNvParamMapFromTemplate(device, defaultValues)
+			_, err := validator.ConstructNvParamMapFromTemplate(device, query)
 			Expect(err).To(MatchError("incorrect spec: RoceOptimized settings can only be used with link type Ethernet"))
+		})
+
+		It("should take numeric values when both numeric values and string aliases are present in nv config query", func() {
+			device := &v1alpha1.NicDevice{
+				Spec: v1alpha1.NicDeviceSpec{
+					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
+						Template: &v1alpha1.ConfigurationTemplateSpec{
+							NumVfs:   0,
+							LinkType: consts.Ethernet,
+						},
+					},
+				},
+				Status: v1alpha1.NicDeviceStatus{
+					Ports: []v1alpha1.NicDevicePortSpec{
+						{PCI: "0000:03:00.0"},
+						{PCI: "0000:03:00.1"},
+					},
+				},
+			}
+
+			defaultValues := map[string][]string{
+				consts.MaxAccOutReadParam:    {"testMaxAccOutRead", "1"},
+				consts.RoceCcPrioMaskP1Param: {"testRoceCcP1", "2"},
+				consts.CnpDscpP1Param:        {"testDscpP1", "3"},
+				consts.Cnp802pPrioP1Param:    {"test802PrioP1", "4"},
+				consts.RoceCcPrioMaskP2Param: {"testRoceCcP2", "5"},
+				consts.CnpDscpP2Param:        {"testDscpP2", "6"},
+				consts.Cnp802pPrioP2Param:    {"test802PrioP2", "7"},
+				consts.AtsEnabledParam:       {"testAts", "8"},
+			}
+			query := types.NewNvConfigQuery()
+			query.DefaultConfig = defaultValues
+
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(nvParams).To(HaveKeyWithValue(consts.SriovEnabledParam, consts.NvParamFalse))
+			Expect(nvParams).To(HaveKeyWithValue(consts.SriovNumOfVfsParam, "0"))
+			Expect(nvParams).To(HaveKeyWithValue(consts.MaxAccOutReadParam, "1"))
+			Expect(nvParams).To(HaveKeyWithValue(consts.RoceCcPrioMaskP1Param, "2"))
+			Expect(nvParams).To(HaveKeyWithValue(consts.CnpDscpP1Param, "3"))
+			Expect(nvParams).To(HaveKeyWithValue(consts.Cnp802pPrioP1Param, "4"))
+			Expect(nvParams).To(HaveKeyWithValue(consts.RoceCcPrioMaskP2Param, "5"))
+			Expect(nvParams).To(HaveKeyWithValue(consts.CnpDscpP2Param, "6"))
+			Expect(nvParams).To(HaveKeyWithValue(consts.Cnp802pPrioP2Param, "7"))
+			Expect(nvParams).To(HaveKeyWithValue(consts.AtsEnabledParam, "8"))
 		})
 	})
 
 	Describe("ValidateResetToDefault", func() {
 		It("should return false, false if device is already reset in current and next boot", func() {
 			nvConfigQuery := types.NewNvConfigQuery()
-			nvConfigQuery.CurrentConfig[consts.AdvancedPCISettingsParam] = consts.NvParamTrue
-			nvConfigQuery.NextBootConfig[consts.AdvancedPCISettingsParam] = consts.NvParamTrue
+			nvConfigQuery.CurrentConfig[consts.AdvancedPCISettingsParam] = []string{consts.NvParamTrue}
+			nvConfigQuery.NextBootConfig[consts.AdvancedPCISettingsParam] = []string{consts.NvParamTrue}
 
-			nvConfigQuery.DefaultConfig["RandomParam"] = testVal
-			nvConfigQuery.CurrentConfig["RandomParam"] = testVal
-			nvConfigQuery.NextBootConfig["RandomParam"] = testVal
+			nvConfigQuery.DefaultConfig["RandomParam"] = []string{testVal}
+			nvConfigQuery.CurrentConfig["RandomParam"] = []string{testVal}
+			nvConfigQuery.NextBootConfig["RandomParam"] = []string{testVal}
 
 			nvConfigChangeRequired, rebootRequired, err := validator.ValidateResetToDefault(nvConfigQuery)
 			Expect(nvConfigChangeRequired).To(Equal(false))
@@ -488,12 +540,12 @@ var _ = Describe("ConfigValidationImpl", func() {
 
 		It("should return false, true if reset will complete after reboot", func() {
 			nvConfigQuery := types.NewNvConfigQuery()
-			nvConfigQuery.CurrentConfig[consts.AdvancedPCISettingsParam] = consts.NvParamTrue
-			nvConfigQuery.NextBootConfig[consts.AdvancedPCISettingsParam] = consts.NvParamTrue
+			nvConfigQuery.CurrentConfig[consts.AdvancedPCISettingsParam] = []string{consts.NvParamTrue}
+			nvConfigQuery.NextBootConfig[consts.AdvancedPCISettingsParam] = []string{consts.NvParamTrue}
 
-			nvConfigQuery.DefaultConfig["RandomParam"] = testVal
-			nvConfigQuery.CurrentConfig["RandomParam"] = anotherTestVal
-			nvConfigQuery.NextBootConfig["RandomParam"] = testVal
+			nvConfigQuery.DefaultConfig["RandomParam"] = []string{testVal}
+			nvConfigQuery.CurrentConfig["RandomParam"] = []string{anotherTestVal}
+			nvConfigQuery.NextBootConfig["RandomParam"] = []string{testVal}
 
 			nvConfigChangeRequired, rebootRequired, err := validator.ValidateResetToDefault(nvConfigQuery)
 			Expect(nvConfigChangeRequired).To(Equal(false))
@@ -503,12 +555,12 @@ var _ = Describe("ConfigValidationImpl", func() {
 
 		It("should return true, true if reset is required", func() {
 			nvConfigQuery := types.NewNvConfigQuery()
-			nvConfigQuery.CurrentConfig[consts.AdvancedPCISettingsParam] = consts.NvParamTrue
-			nvConfigQuery.NextBootConfig[consts.AdvancedPCISettingsParam] = consts.NvParamTrue
+			nvConfigQuery.CurrentConfig[consts.AdvancedPCISettingsParam] = []string{consts.NvParamTrue}
+			nvConfigQuery.NextBootConfig[consts.AdvancedPCISettingsParam] = []string{consts.NvParamTrue}
 
-			nvConfigQuery.DefaultConfig["RandomParam"] = testVal
-			nvConfigQuery.CurrentConfig["RandomParam"] = anotherTestVal
-			nvConfigQuery.NextBootConfig["RandomParam"] = anotherTestVal
+			nvConfigQuery.DefaultConfig["RandomParam"] = []string{testVal}
+			nvConfigQuery.CurrentConfig["RandomParam"] = []string{anotherTestVal}
+			nvConfigQuery.NextBootConfig["RandomParam"] = []string{anotherTestVal}
 
 			nvConfigChangeRequired, rebootRequired, err := validator.ValidateResetToDefault(nvConfigQuery)
 			Expect(nvConfigChangeRequired).To(Equal(true))

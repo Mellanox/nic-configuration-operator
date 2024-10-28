@@ -18,6 +18,7 @@ package host
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -32,14 +33,14 @@ type configValidation interface {
 	// ConstructNvParamMapFromTemplate translates a configuration template into a set of nvconfig parameters
 	// operates under the assumption that spec validation was already carried out
 	ConstructNvParamMapFromTemplate(
-		device *v1alpha1.NicDevice, defaultValues map[string]string) (map[string]string, error)
+		device *v1alpha1.NicDevice, nvConfigQuery types.NvConfigQuery) (map[string]string, error)
 	// ValidateResetToDefault checks if device's nv config has been reset to default in current and next boots
 	// returns bool - need to perform reset
 	// returns bool - reboot required
 	// returns error - if an error occurred during validation
 	ValidateResetToDefault(nvConfig types.NvConfigQuery) (bool, bool, error)
 	// AdvancedPCISettingsEnabled returns true if ADVANCED_PCI_SETTINGS param is enabled for current config
-	AdvancedPCISettingsEnabled(currentConfig map[string]string) bool
+	AdvancedPCISettingsEnabled(nvConfig types.NvConfigQuery) bool
 	// RuntimeConfigApplied checks if desired runtime config is applied
 	RuntimeConfigApplied(device *v1alpha1.NicDevice) (bool, error)
 	// CalculateDesiredRuntimeConfig returns desired values for runtime config
@@ -64,18 +65,19 @@ func nvParamLinkTypeFromName(linkType string) string {
 }
 
 func applyDefaultNvConfigValueIfExists(
-	paramName string, desiredParameters map[string]string, defaultValues map[string]string) {
-	defaultValue, found := defaultValues[paramName]
+	paramName string, desiredParameters map[string]string, query types.NvConfigQuery) {
+	defaultValues, found := query.DefaultConfig[paramName]
 	// Default values might not yet be available if ENABLE_PCI_OPTIMIZATIONS is disabled
 	if found {
-		desiredParameters[paramName] = defaultValue
+		// Take the default numeric value
+		desiredParameters[paramName] = defaultValues[len(defaultValues)-1]
 	}
 }
 
 // ConstructNvParamMapFromTemplate translates a configuration template into a set of nvconfig parameters
 // operates under the assumption that spec validation was already carried out
 func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
-	device *v1alpha1.NicDevice, defaultValues map[string]string) (map[string]string, error) {
+	device *v1alpha1.NicDevice, query types.NvConfigQuery) (map[string]string, error) {
 	desiredParameters := map[string]string{}
 
 	template := device.Spec.Configuration.Template
@@ -90,7 +92,7 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 	}
 
 	// Link type change is not allowed on some devices
-	_, canChangeLinkType := defaultValues[consts.LinkTypeP1Param]
+	_, canChangeLinkType := query.DefaultConfig[consts.LinkTypeP1Param]
 	if canChangeLinkType {
 		linkType := nvParamLinkTypeFromName(string(template.LinkType))
 		desiredParameters[consts.LinkTypeP1Param] = linkType
@@ -131,7 +133,7 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 
 		// maxReadRequest is applied as runtime configuration
 	} else {
-		applyDefaultNvConfigValueIfExists(consts.MaxAccOutReadParam, desiredParameters, defaultValues)
+		applyDefaultNvConfigValueIfExists(consts.MaxAccOutReadParam, desiredParameters, query)
 	}
 
 	if template.RoceOptimized != nil && template.RoceOptimized.Enabled {
@@ -154,13 +156,13 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 
 		// qos settings are applied as runtime configuration
 	} else {
-		applyDefaultNvConfigValueIfExists(consts.RoceCcPrioMaskP1Param, desiredParameters, defaultValues)
-		applyDefaultNvConfigValueIfExists(consts.CnpDscpP1Param, desiredParameters, defaultValues)
-		applyDefaultNvConfigValueIfExists(consts.Cnp802pPrioP1Param, desiredParameters, defaultValues)
+		applyDefaultNvConfigValueIfExists(consts.RoceCcPrioMaskP1Param, desiredParameters, query)
+		applyDefaultNvConfigValueIfExists(consts.CnpDscpP1Param, desiredParameters, query)
+		applyDefaultNvConfigValueIfExists(consts.Cnp802pPrioP1Param, desiredParameters, query)
 		if secondPortPresent {
-			applyDefaultNvConfigValueIfExists(consts.RoceCcPrioMaskP2Param, desiredParameters, defaultValues)
-			applyDefaultNvConfigValueIfExists(consts.CnpDscpP2Param, desiredParameters, defaultValues)
-			applyDefaultNvConfigValueIfExists(consts.Cnp802pPrioP2Param, desiredParameters, defaultValues)
+			applyDefaultNvConfigValueIfExists(consts.RoceCcPrioMaskP2Param, desiredParameters, query)
+			applyDefaultNvConfigValueIfExists(consts.CnpDscpP2Param, desiredParameters, query)
+			applyDefaultNvConfigValueIfExists(consts.Cnp802pPrioP2Param, desiredParameters, query)
 		}
 	}
 
@@ -179,7 +181,7 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 			return desiredParameters, err
 		}
 	} else {
-		applyDefaultNvConfigValueIfExists(consts.AtsEnabledParam, desiredParameters, defaultValues)
+		applyDefaultNvConfigValueIfExists(consts.AtsEnabledParam, desiredParameters, query)
 	}
 
 	for _, rawParam := range template.RawNvConfig {
@@ -207,7 +209,7 @@ func (v *configValidationImpl) ValidateResetToDefault(nvConfig types.NvConfigQue
 	willResetInNextBoot := false
 
 	advancedPciSettingsEnabledInCurrentConfig := false
-	if value, found := nvConfig.CurrentConfig[consts.AdvancedPCISettingsParam]; found && value == consts.NvParamTrue {
+	if values, found := nvConfig.CurrentConfig[consts.AdvancedPCISettingsParam]; found && slices.Contains(values, consts.NvParamTrue) {
 		advancedPciSettingsEnabledInCurrentConfig = true
 	}
 	if advancedPciSettingsEnabledInCurrentConfig {
@@ -218,7 +220,7 @@ func (v *configValidationImpl) ValidateResetToDefault(nvConfig types.NvConfigQue
 	}
 
 	advancedPciSettingsEnabledInNextBootConfig := false
-	if value, found := nvConfig.NextBootConfig[consts.AdvancedPCISettingsParam]; found && value == consts.NvParamTrue {
+	if values, found := nvConfig.NextBootConfig[consts.AdvancedPCISettingsParam]; found && slices.Contains(values, consts.NvParamTrue) {
 		advancedPciSettingsEnabledInNextBootConfig = true
 	}
 	if advancedPciSettingsEnabledInNextBootConfig {
@@ -241,8 +243,8 @@ func (v *configValidationImpl) ValidateResetToDefault(nvConfig types.NvConfigQue
 }
 
 // AdvancedPCISettingsEnabled returns true if ADVANCED_PCI_SETTINGS param is enabled for current config
-func (v *configValidationImpl) AdvancedPCISettingsEnabled(currentConfig map[string]string) bool {
-	if value, found := currentConfig[consts.AdvancedPCISettingsParam]; found && value == consts.NvParamTrue {
+func (v *configValidationImpl) AdvancedPCISettingsEnabled(nvConfig types.NvConfigQuery) bool {
+	if values, found := nvConfig.CurrentConfig[consts.AdvancedPCISettingsParam]; found && slices.Contains(values, consts.NvParamTrue) {
 		return true
 	}
 	return false

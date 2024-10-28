@@ -375,7 +375,7 @@ func (h *hostUtils) GetRDMADeviceName(pciAddr string) string {
 // might run recursively to expand array parameters' values
 func (h *hostUtils) queryMSTConfig(ctx context.Context, query types.NvConfigQuery, pciAddr string, additionalParameter string) error {
 	log.Log.Info(fmt.Sprintf("mstconfig -d %s query %s", pciAddr, additionalParameter)) //TODO change verbosity
-	valueInBracketsRegex := regexp.MustCompile(`\(([^)]*)\)$`)
+	valueInBracketsRegex := regexp.MustCompile(`^(.*?)\(([^)]*)\)$`)
 
 	var cmd execUtils.Cmd
 	if additionalParameter == "" {
@@ -446,21 +446,31 @@ func (h *hostUtils) queryMSTConfig(ctx context.Context, query types.NvConfigQuer
 				continue
 			}
 
-			// If the actual value is wrapped in brackets, we want to extract it
+			// If the actual value is wrapped in brackets, we want to save both it and its string alias
 			match := valueInBracketsRegex.FindStringSubmatch(defaultVal)
-			if len(match) == 2 {
-				defaultVal = match[1]
+			if len(match) == 3 {
+				for i, v := range match {
+					match[i] = strings.ToLower(v)
+				}
+				query.DefaultConfig[paramName] = match[1:]
 
 				match = valueInBracketsRegex.FindStringSubmatch(currentVal)
-				currentVal = match[1]
+				for i, v := range match {
+					match[i] = strings.ToLower(v)
+				}
+				query.CurrentConfig[paramName] = match[1:]
 
 				match = valueInBracketsRegex.FindStringSubmatch(nextBootVal)
-				nextBootVal = match[1]
+				for i, v := range match {
+					match[i] = strings.ToLower(v)
+				}
+				query.NextBootConfig[paramName] = match[1:]
+			} else {
+				query.DefaultConfig[paramName] = []string{defaultVal}
+				query.CurrentConfig[paramName] = []string{currentVal}
+				query.NextBootConfig[paramName] = []string{nextBootVal}
 			}
 
-			query.DefaultConfig[paramName] = defaultVal
-			query.CurrentConfig[paramName] = currentVal
-			query.NextBootConfig[paramName] = nextBootVal
 		}
 	}
 
