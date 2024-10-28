@@ -367,7 +367,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 			defaultValues := map[string]string{}
 
 			_, err := validator.ConstructNvParamMapFromTemplate(device, defaultValues)
-			Expect(err).To(MatchError("incorrect spec: device doesn't support link type change, wrong link type provided in the template, should be: Ethernet"))
+			Expect(err).To(MatchError("incorrect spec: device does not support link type change, wrong link type provided in the template, should be: Ethernet"))
 		})
 		It("should not report an error when LinkType can be changed and template differs from the actual status", func() {
 			mockHostUtils.On("GetLinkType", mock.Anything).Return(consts.Ethernet)

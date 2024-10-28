@@ -104,7 +104,7 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 			if port.NetworkInterface != "" && v.utils.GetLinkType(port.NetworkInterface) != desiredLinkType {
 				err := types.IncorrectSpecError(
 					fmt.Sprintf(
-						"device doesn't support link type change, wrong link type provided in the template, should be: %s",
+						"device does not support link type change, wrong link type provided in the template, should be: %s",
 						v.utils.GetLinkType(port.NetworkInterface)))
 				log.Log.Error(err, "incorrect spec", "device", device.Name)
 				return desiredParameters, err

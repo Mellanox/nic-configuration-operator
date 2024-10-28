@@ -80,9 +80,11 @@ type NvConfigParam struct {
 // ConfigurationTemplateSpec is a set of configurations for the NICs
 type ConfigurationTemplateSpec struct {
 	// Number of VFs to be configured
+	// +required
 	NumVfs int `json:"numVfs"`
 	// LinkType to be configured, Ethernet|Infiniband
 	// +kubebuilder:validation:Enum=Ethernet;Infiniband
+	// +required
 	LinkType LinkTypeEnum `json:"linkType"`
 	// PCI performance optimization settings
 	PciPerformanceOptimized *PciPerformanceOptimizedSpec `json:"pciPerformanceOptimized,omitempty"`
@@ -99,6 +101,7 @@ type NicConfigurationTemplateSpec struct {
 	// NodeSelector contains labels required on the node
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
 	// NIC selector configuration
+	// +required
 	NicSelector *NicSelectorSpec `json:"nicSelector"`
 	// ResetToDefault specifies whether node agent needs to perform a reset flow
 	// The following operations will be performed:
