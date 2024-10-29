@@ -62,7 +62,6 @@ var _ = Describe("ConfigValidationImpl", func() {
 			}
 
 			defaultValues := map[string][]string{
-				consts.MaxAccOutReadParam:    {"testMaxAccOutRead"},
 				consts.RoceCcPrioMaskP1Param: {"testRoceCcP1"},
 				consts.CnpDscpP1Param:        {"testDscpP1"},
 				consts.Cnp802pPrioP1Param:    {"test802PrioP1"},
@@ -73,12 +72,10 @@ var _ = Describe("ConfigValidationImpl", func() {
 			}
 			query := types.NewNvConfigQuery()
 			query.DefaultConfig = defaultValues
-
 			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(HaveKeyWithValue(consts.SriovEnabledParam, consts.NvParamFalse))
 			Expect(nvParams).To(HaveKeyWithValue(consts.SriovNumOfVfsParam, "0"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.MaxAccOutReadParam, "testMaxAccOutRead"))
 			Expect(nvParams).To(HaveKeyWithValue(consts.RoceCcPrioMaskP1Param, "testRoceCcP1"))
 			Expect(nvParams).To(HaveKeyWithValue(consts.CnpDscpP1Param, "testDscpP1"))
 			Expect(nvParams).To(HaveKeyWithValue(consts.Cnp802pPrioP1Param, "test802PrioP1"))
@@ -105,7 +102,6 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 			defaultValues := map[string][]string{
-				consts.MaxAccOutReadParam:    {"testMaxAccOutRead"},
 				consts.RoceCcPrioMaskP1Param: {"testRoceCcP1"},
 				consts.CnpDscpP1Param:        {"testDscpP1"},
 				consts.Cnp802pPrioP1Param:    {"test802PrioP1"},
@@ -121,7 +117,6 @@ var _ = Describe("ConfigValidationImpl", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(HaveKeyWithValue(consts.SriovEnabledParam, consts.NvParamFalse))
 			Expect(nvParams).To(HaveKeyWithValue(consts.SriovNumOfVfsParam, "0"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.MaxAccOutReadParam, "testMaxAccOutRead"))
 			Expect(nvParams).To(HaveKeyWithValue(consts.AtsEnabledParam, "testAts"))
 			Expect(nvParams).To(HaveKeyWithValue(consts.RoceCcPrioMaskP1Param, "testRoceCcP1"))
 			Expect(nvParams).To(HaveKeyWithValue(consts.CnpDscpP1Param, "testDscpP1"))
@@ -181,7 +176,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 			Expect(nvParams).To(HaveKeyWithValue(consts.Cnp802pPrioP2Param, "6"))
 		})
 
-		It("should return the correct MaxAccOutRead param for PCIgen4", func() {
+		It("should skip the MaxAccOutRead if the default is not 0", func() {
 			mockHostUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
 
 			device := &v1alpha1.NicDevice{
@@ -203,15 +198,19 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
+			defaultValues := map[string][]string{
+				consts.MaxAccOutReadParam: {"notZero"},
+			}
 			query := types.NewNvConfigQuery()
+			query.DefaultConfig = defaultValues
 
 			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(nvParams).To(HaveKeyWithValue(consts.MaxAccOutReadParam, "44"))
+			Expect(nvParams).NotTo(HaveKeyWithValue(consts.MaxAccOutReadParam, consts.NvParamZero))
 		})
 
-		It("should return the correct MaxAccOutRead param for PCIgen5", func() {
-			mockHostUtils.On("GetPCILinkSpeed", mock.Anything).Return(64, nil)
+		It("should apply MaxAccOutRead if the default is 0", func() {
+			mockHostUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
 
 			device := &v1alpha1.NicDevice{
 				Spec: v1alpha1.NicDeviceSpec{
@@ -232,12 +231,51 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
+			defaultValues := map[string][]string{
+				consts.MaxAccOutReadParam: {consts.NvParamZero},
+			}
+			currentValues := map[string][]string{
+				consts.AdvancedPCISettingsParam: {consts.NvParamTrue},
+			}
+			query := types.NewNvConfigQuery()
+			query.DefaultConfig = defaultValues
+			query.CurrentConfig = currentValues
+
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(nvParams).To(HaveKeyWithValue(consts.MaxAccOutReadParam, consts.NvParamZero))
+		})
+
+		It("should not apply MaxAccOutRead if the default is unavailable", func() {
+			mockHostUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
+
+			device := &v1alpha1.NicDevice{
+				Spec: v1alpha1.NicDeviceSpec{
+					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
+						Template: &v1alpha1.ConfigurationTemplateSpec{
+							NumVfs:   0,
+							LinkType: consts.Ethernet,
+							PciPerformanceOptimized: &v1alpha1.PciPerformanceOptimizedSpec{
+								Enabled: true,
+							},
+						},
+					},
+				},
+				Status: v1alpha1.NicDeviceStatus{
+					Ports: []v1alpha1.NicDevicePortSpec{
+						{PCI: "0000:03:00.0"},
+					},
+				},
+			}
+
+			// MAX_ACC_OUT_READ param is unavailable if ADVANCED_PCI_SETTINGS is disabled
 			query := types.NewNvConfigQuery()
 
 			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(nvParams).To(HaveKeyWithValue(consts.MaxAccOutReadParam, "0"))
+			Expect(nvParams).ToNot(HaveKeyWithValue(consts.MaxAccOutReadParam, consts.NvParamZero))
 		})
+
 		It("should return an error when GpuOptimized is enabled without PciPerformanceOptimized", func() {
 			mockHostUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
 
@@ -483,6 +521,9 @@ var _ = Describe("ConfigValidationImpl", func() {
 						Template: &v1alpha1.ConfigurationTemplateSpec{
 							NumVfs:   0,
 							LinkType: consts.Ethernet,
+							PciPerformanceOptimized: &v1alpha1.PciPerformanceOptimizedSpec{
+								Enabled: true,
+							},
 						},
 					},
 				},
@@ -495,30 +536,20 @@ var _ = Describe("ConfigValidationImpl", func() {
 			}
 
 			defaultValues := map[string][]string{
-				consts.MaxAccOutReadParam:    {"testMaxAccOutRead", "1"},
-				consts.RoceCcPrioMaskP1Param: {"testRoceCcP1", "2"},
-				consts.CnpDscpP1Param:        {"testDscpP1", "3"},
-				consts.Cnp802pPrioP1Param:    {"test802PrioP1", "4"},
-				consts.RoceCcPrioMaskP2Param: {"testRoceCcP2", "5"},
-				consts.CnpDscpP2Param:        {"testDscpP2", "6"},
-				consts.Cnp802pPrioP2Param:    {"test802PrioP2", "7"},
-				consts.AtsEnabledParam:       {"testAts", "8"},
+				consts.MaxAccOutReadParam: {"testMaxAccOutRead", "0"},
+			}
+			currentValues := map[string][]string{
+				consts.AdvancedPCISettingsParam: {"testAdvancedPCISettings", "1"},
 			}
 			query := types.NewNvConfigQuery()
 			query.DefaultConfig = defaultValues
+			query.CurrentConfig = currentValues
 
 			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(HaveKeyWithValue(consts.SriovEnabledParam, consts.NvParamFalse))
 			Expect(nvParams).To(HaveKeyWithValue(consts.SriovNumOfVfsParam, "0"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.MaxAccOutReadParam, "1"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.RoceCcPrioMaskP1Param, "2"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.CnpDscpP1Param, "3"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.Cnp802pPrioP1Param, "4"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.RoceCcPrioMaskP2Param, "5"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.CnpDscpP2Param, "6"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.Cnp802pPrioP2Param, "7"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.AtsEnabledParam, "8"))
+			Expect(nvParams).To(HaveKeyWithValue(consts.MaxAccOutReadParam, "0"))
 		})
 	})
 

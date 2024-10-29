@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
@@ -327,6 +328,6 @@ func (h hostManager) DiscoverOfedVersion() (string, error) {
 	return h.hostUtils.GetOfedVersion()
 }
 
-func NewHostManager(nodeName string, hostUtils HostUtils) HostManager {
-	return hostManager{nodeName: nodeName, hostUtils: hostUtils, configValidation: newConfigValidation(hostUtils)}
+func NewHostManager(nodeName string, hostUtils HostUtils, eventRecorder record.EventRecorder) HostManager {
+	return hostManager{nodeName: nodeName, hostUtils: hostUtils, configValidation: newConfigValidation(hostUtils, eventRecorder)}
 }
