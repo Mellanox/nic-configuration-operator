@@ -75,7 +75,7 @@ func (m maintenanceManager) ScheduleMaintenance(ctx context.Context) error {
 
 	maintenanceRequest := &maintenanceoperator.NodeMaintenance{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      consts.MaintenanceRequestName,
+			Name:      consts.MaintenanceRequestName + "-" + m.nodeName,
 			Namespace: m.namespace,
 		},
 		Spec: maintenanceoperator.NodeMaintenanceSpec{
