@@ -531,8 +531,8 @@ var _ = Describe("ConfigValidationImpl", func() {
 
 			maxReadRequestSize, trust, pfc := validator.CalculateDesiredRuntimeConfig(device)
 			Expect(maxReadRequestSize).To(Equal(0))
-			Expect(trust).To(Equal("pcp"))
-			Expect(pfc).To(Equal("0,0,0,0,0,0,0,0"))
+			Expect(trust).To(BeEmpty())
+			Expect(pfc).To(BeEmpty())
 		})
 
 		It("should calculate maxReadRequestSize when PciPerformanceOptimized is enabled with MaxReadRequest", func() {
@@ -552,8 +552,8 @@ var _ = Describe("ConfigValidationImpl", func() {
 
 			maxReadRequestSize, trust, pfc := validator.CalculateDesiredRuntimeConfig(device)
 			Expect(maxReadRequestSize).To(Equal(1024))
-			Expect(trust).To(Equal("pcp"))
-			Expect(pfc).To(Equal("0,0,0,0,0,0,0,0"))
+			Expect(trust).To(BeEmpty())
+			Expect(pfc).To(BeEmpty())
 		})
 
 		It("should default maxReadReqSize to 4096 when PciPerformanceOptimized is enabled without MaxReadRequest", func() {
@@ -573,8 +573,8 @@ var _ = Describe("ConfigValidationImpl", func() {
 
 			maxReadRequestSize, trust, pfc := validator.CalculateDesiredRuntimeConfig(device)
 			Expect(maxReadRequestSize).To(Equal(4096))
-			Expect(trust).To(Equal("pcp"))
-			Expect(pfc).To(Equal("0,0,0,0,0,0,0,0"))
+			Expect(trust).To(BeEmpty())
+			Expect(pfc).To(BeEmpty())
 		})
 
 		It("should calculate trust and pfc when RoceOptimized is enabled with Qos", func() {
@@ -676,6 +676,29 @@ var _ = Describe("ConfigValidationImpl", func() {
 			Expect(trust).To(BeEmpty())
 			Expect(pfc).To(BeEmpty())
 		})
+		It("should not calculate desired QoS settings if RoCE optimizations are disabled", func() {
+			device := &v1alpha1.NicDevice{
+				Spec: v1alpha1.NicDeviceSpec{
+					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
+						Template: &v1alpha1.ConfigurationTemplateSpec{
+							LinkType: consts.Infiniband,
+							PciPerformanceOptimized: &v1alpha1.PciPerformanceOptimizedSpec{
+								Enabled:        true,
+								MaxReadRequest: 256,
+							},
+							RoceOptimized: &v1alpha1.RoceOptimizedSpec{
+								Enabled: false,
+							},
+						},
+					},
+				},
+			}
+
+			maxReadRequestSize, trust, pfc := validator.CalculateDesiredRuntimeConfig(device)
+			Expect(maxReadRequestSize).To(Equal(256))
+			Expect(trust).To(BeEmpty())
+			Expect(pfc).To(BeEmpty())
+		})
 	})
 
 	Describe("RuntimeConfigApplied", func() {
@@ -689,7 +712,9 @@ var _ = Describe("ConfigValidationImpl", func() {
 			device = &v1alpha1.NicDevice{
 				Spec: v1alpha1.NicDeviceSpec{
 					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
-						Template: &v1alpha1.ConfigurationTemplateSpec{},
+						Template: &v1alpha1.ConfigurationTemplateSpec{
+							RoceOptimized: &v1alpha1.RoceOptimizedSpec{Enabled: true},
+						},
 					},
 				},
 				Status: v1alpha1.NicDeviceStatus{
@@ -896,6 +921,25 @@ var _ = Describe("ConfigValidationImpl", func() {
 			It("should return false with no error", func() {
 				applied, err = validator.RuntimeConfigApplied(device)
 				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeFalse())
+			})
+		})
+
+		Context("when device's port doesn't have a network interface", func() {
+			BeforeEach(func() {
+				device := device
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:03:00.0", NetworkInterface: ""},
+				}
+
+				desiredMaxReadReqSize, _, _ := validator.CalculateDesiredRuntimeConfig(device)
+
+				mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desiredMaxReadReqSize, nil)
+			})
+
+			It("should return an error", func() {
+				applied, err = validator.RuntimeConfigApplied(device)
+				Expect(err).To(MatchError("cannot apply QoS settings for device port 0000:03:00.0, network interface is missing"))
 				Expect(applied).To(BeFalse())
 			})
 		})

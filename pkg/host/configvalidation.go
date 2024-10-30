@@ -267,10 +267,20 @@ func (v *configValidationImpl) RuntimeConfigApplied(device *v1alpha1.NicDevice) 
 		}
 	}
 
+	// Don't validate QoS settings if neither trust nor pfc changes are requested
+	if desiredTrust == "" && desiredPfc == "" {
+		return true, nil
+	}
+
 	for _, port := range ports {
+		if port.NetworkInterface == "" {
+			err := fmt.Errorf("cannot apply QoS settings for device port %s, network interface is missing", port.PCI)
+			log.Log.Error(err, "cannot validate QoS settings", "device", device.Name, "port", port.PCI)
+			return false, err
+		}
 		actualTrust, actualPfc, err := v.utils.GetTrustAndPFC(port.NetworkInterface)
 		if err != nil {
-			log.Log.Error(err, "can't validate QoS settings", "device", device.Name)
+			log.Log.Error(err, "cannot validate QoS settings", "device", device.Name, "port", port.PCI)
 			return false, err
 		}
 		if actualTrust != desiredTrust || actualPfc != desiredPfc {
@@ -303,8 +313,7 @@ func (v *configValidationImpl) CalculateDesiredRuntimeConfig(device *v1alpha1.Ni
 		return maxReadRequestSize, "", ""
 	}
 
-	trust := "pcp"
-	pfc := "0,0,0,0,0,0,0,0"
+	var trust, pfc string
 
 	if template.RoceOptimized != nil && template.RoceOptimized.Enabled {
 		trust = "dscp"
