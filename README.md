@@ -97,9 +97,11 @@ spec:
 #### Configuration details
 
 * `numVFs`: if provided, configure SR-IOV VFs via nvconfig.
+  * This is a mandatory parameter.
   * E.g: if `numVFs=2` then `SRIOV_EN=1` and `SRIOV_NUM_OF_VFS=2`.
   * If `numVFs=0` then `SRIOV_EN=0` and `SRIOV_NUM_OF_VFS=0`.
 * `linkType`: if provided configure `linkType` for the NIC for all NIC ports.
+  * This is a mandatory parameter.
   * E.g `linkType = Infiniband` then set `LINK_TYPE_P1=IB` and `LINK_TYPE_P2=IB` if second PCI function is present
 * `pciPerformanceOptimized`: performs PCI performance optimizations. If enabled then by default the following will happen:
   * Set nvconfig `MAX_ACC_OUT_READ` nvconfig parameter.
@@ -121,6 +123,7 @@ spec:
   * Set nvconfig `ATS_ENABLED=0`
   * Can only be enabled when `pciPerformanceOptimized` is enabled
 * `rawNvConfig`: a `map[string]string` which contains NVConfig parameters to apply for a NIC on all of its PFs.
+  * Both the numeric values and their string aliases, supported by NVConfig, are allowed (e.g. `REAL_TIME_CLOCK_ENABLE=False`, `REAL_TIME_CLOCK_ENABLE=0`).
   * For per port parameters (suffix `_P1`, `_P2`) parameters with `_P2` suffix are ignored if the device is single port.
 
 ### NicDevice
