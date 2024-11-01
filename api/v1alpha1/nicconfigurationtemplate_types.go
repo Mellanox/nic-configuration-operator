@@ -59,7 +59,7 @@ type RoceOptimizedSpec struct {
 	// Optimize RoCE
 	Enabled bool `json:"enabled"`
 	// Quality of Service settings
-	Qos *QosSpec `json:"qos"`
+	Qos *QosSpec `json:"qos,omitempty"`
 }
 
 // GpuDirectOptimizedSpec specifies GPU Direct optimization settings
