@@ -43,7 +43,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 	})
 
 	Describe("ConstructNvParamMapFromTemplate", func() {
-		It("should return default values if optional config is disabled", func() {
+		It("should not return default values if optional config is disabled", func() {
 			device := &v1alpha1.NicDevice{
 				Spec: v1alpha1.NicDeviceSpec{
 					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
@@ -78,57 +78,14 @@ var _ = Describe("ConfigValidationImpl", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(HaveKeyWithValue(consts.SriovEnabledParam, consts.NvParamFalse))
 			Expect(nvParams).To(HaveKeyWithValue(consts.SriovNumOfVfsParam, "0"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.MaxAccOutReadParam, "testMaxAccOutRead"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.RoceCcPrioMaskP1Param, "testRoceCcP1"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.CnpDscpP1Param, "testDscpP1"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.Cnp802pPrioP1Param, "test802PrioP1"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.RoceCcPrioMaskP2Param, "testRoceCcP2"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.CnpDscpP2Param, "testDscpP2"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.Cnp802pPrioP2Param, "test802PrioP2"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.AtsEnabledParam, "testAts"))
-		})
-
-		It("should omit parameters for the second port if device is single port", func() {
-			device := &v1alpha1.NicDevice{
-				Spec: v1alpha1.NicDeviceSpec{
-					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
-						Template: &v1alpha1.ConfigurationTemplateSpec{
-							NumVfs:   0,
-							LinkType: consts.Ethernet,
-						},
-					},
-				},
-				Status: v1alpha1.NicDeviceStatus{
-					Ports: []v1alpha1.NicDevicePortSpec{
-						{PCI: "0000:03:00.0"},
-					},
-				},
-			}
-			defaultValues := map[string][]string{
-				consts.MaxAccOutReadParam:    {"testMaxAccOutRead"},
-				consts.RoceCcPrioMaskP1Param: {"testRoceCcP1"},
-				consts.CnpDscpP1Param:        {"testDscpP1"},
-				consts.Cnp802pPrioP1Param:    {"test802PrioP1"},
-				consts.RoceCcPrioMaskP2Param: {"testRoceCcP2"},
-				consts.CnpDscpP2Param:        {"testDscpP2"},
-				consts.Cnp802pPrioP2Param:    {"test802PrioP2"},
-				consts.AtsEnabledParam:       {"testAts"},
-			}
-			query := types.NewNvConfigQuery()
-			query.DefaultConfig = defaultValues
-
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(nvParams).To(HaveKeyWithValue(consts.SriovEnabledParam, consts.NvParamFalse))
-			Expect(nvParams).To(HaveKeyWithValue(consts.SriovNumOfVfsParam, "0"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.MaxAccOutReadParam, "testMaxAccOutRead"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.AtsEnabledParam, "testAts"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.RoceCcPrioMaskP1Param, "testRoceCcP1"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.CnpDscpP1Param, "testDscpP1"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.Cnp802pPrioP1Param, "test802PrioP1"))
-			Expect(nvParams).To(Not(HaveKey(consts.RoceCcPrioMaskP2Param)))
-			Expect(nvParams).To(Not(HaveKey(consts.CnpDscpP2Param)))
-			Expect(nvParams).To(Not(HaveKey(consts.Cnp802pPrioP2Param)))
+			Expect(nvParams).ToNot(HaveKeyWithValue(consts.MaxAccOutReadParam, "testMaxAccOutRead"))
+			Expect(nvParams).ToNot(HaveKeyWithValue(consts.RoceCcPrioMaskP1Param, "testRoceCcP1"))
+			Expect(nvParams).ToNot(HaveKeyWithValue(consts.CnpDscpP1Param, "testDscpP1"))
+			Expect(nvParams).ToNot(HaveKeyWithValue(consts.Cnp802pPrioP1Param, "test802PrioP1"))
+			Expect(nvParams).ToNot(HaveKeyWithValue(consts.RoceCcPrioMaskP2Param, "testRoceCcP2"))
+			Expect(nvParams).ToNot(HaveKeyWithValue(consts.CnpDscpP2Param, "testDscpP2"))
+			Expect(nvParams).ToNot(HaveKeyWithValue(consts.Cnp802pPrioP2Param, "test802PrioP2"))
+			Expect(nvParams).ToNot(HaveKeyWithValue(consts.AtsEnabledParam, "testAts"))
 		})
 
 		It("should construct the correct nvparam map with optional optimizations enabled", func() {
@@ -179,6 +136,55 @@ var _ = Describe("ConfigValidationImpl", func() {
 			Expect(nvParams).To(HaveKeyWithValue(consts.RoceCcPrioMaskP2Param, "255"))
 			Expect(nvParams).To(HaveKeyWithValue(consts.CnpDscpP2Param, "4"))
 			Expect(nvParams).To(HaveKeyWithValue(consts.Cnp802pPrioP2Param, "6"))
+		})
+
+		It("should omit parameters for the second port if device is single port", func() {
+			mockHostUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
+
+			device := &v1alpha1.NicDevice{
+				Spec: v1alpha1.NicDeviceSpec{
+					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
+						Template: &v1alpha1.ConfigurationTemplateSpec{
+							NumVfs:   0,
+							LinkType: consts.Ethernet,
+							PciPerformanceOptimized: &v1alpha1.PciPerformanceOptimizedSpec{
+								Enabled:        true,
+								MaxAccOutRead:  1337,
+								MaxReadRequest: 1339,
+							},
+							GpuDirectOptimized: &v1alpha1.GpuDirectOptimizedSpec{
+								Enabled: true,
+								Env:     consts.EnvBaremetal,
+							},
+							RoceOptimized: &v1alpha1.RoceOptimizedSpec{
+								Enabled: true,
+								Qos: &v1alpha1.QosSpec{
+									Trust: "testTrust",
+									PFC:   "testPFC",
+								},
+							},
+						},
+					},
+				},
+				Status: v1alpha1.NicDeviceStatus{
+					Ports: []v1alpha1.NicDevicePortSpec{
+						{PCI: "0000:03:00.0"},
+					},
+				},
+			}
+
+			query := types.NewNvConfigQuery()
+
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(nvParams).To(HaveKeyWithValue(consts.MaxAccOutReadParam, "1337"))
+			Expect(nvParams).To(HaveKeyWithValue(consts.AtsEnabledParam, "0"))
+			Expect(nvParams).To(HaveKeyWithValue(consts.RoceCcPrioMaskP1Param, "255"))
+			Expect(nvParams).To(HaveKeyWithValue(consts.CnpDscpP1Param, "4"))
+			Expect(nvParams).To(HaveKeyWithValue(consts.Cnp802pPrioP1Param, "6"))
+			Expect(nvParams).ToNot(HaveKeyWithValue(consts.RoceCcPrioMaskP2Param, "255"))
+			Expect(nvParams).ToNot(HaveKeyWithValue(consts.CnpDscpP2Param, "4"))
+			Expect(nvParams).ToNot(HaveKeyWithValue(consts.Cnp802pPrioP2Param, "6"))
 		})
 
 		It("should return the correct MaxAccOutRead param for PCIgen4", func() {
@@ -474,51 +480,6 @@ var _ = Describe("ConfigValidationImpl", func() {
 
 			_, err := validator.ConstructNvParamMapFromTemplate(device, query)
 			Expect(err).To(MatchError("incorrect spec: RoceOptimized settings can only be used with link type Ethernet"))
-		})
-
-		It("should take numeric values when both numeric values and string aliases are present in nv config query", func() {
-			device := &v1alpha1.NicDevice{
-				Spec: v1alpha1.NicDeviceSpec{
-					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
-						Template: &v1alpha1.ConfigurationTemplateSpec{
-							NumVfs:   0,
-							LinkType: consts.Ethernet,
-						},
-					},
-				},
-				Status: v1alpha1.NicDeviceStatus{
-					Ports: []v1alpha1.NicDevicePortSpec{
-						{PCI: "0000:03:00.0"},
-						{PCI: "0000:03:00.1"},
-					},
-				},
-			}
-
-			defaultValues := map[string][]string{
-				consts.MaxAccOutReadParam:    {"testMaxAccOutRead", "1"},
-				consts.RoceCcPrioMaskP1Param: {"testRoceCcP1", "2"},
-				consts.CnpDscpP1Param:        {"testDscpP1", "3"},
-				consts.Cnp802pPrioP1Param:    {"test802PrioP1", "4"},
-				consts.RoceCcPrioMaskP2Param: {"testRoceCcP2", "5"},
-				consts.CnpDscpP2Param:        {"testDscpP2", "6"},
-				consts.Cnp802pPrioP2Param:    {"test802PrioP2", "7"},
-				consts.AtsEnabledParam:       {"testAts", "8"},
-			}
-			query := types.NewNvConfigQuery()
-			query.DefaultConfig = defaultValues
-
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(nvParams).To(HaveKeyWithValue(consts.SriovEnabledParam, consts.NvParamFalse))
-			Expect(nvParams).To(HaveKeyWithValue(consts.SriovNumOfVfsParam, "0"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.MaxAccOutReadParam, "1"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.RoceCcPrioMaskP1Param, "2"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.CnpDscpP1Param, "3"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.Cnp802pPrioP1Param, "4"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.RoceCcPrioMaskP2Param, "5"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.CnpDscpP2Param, "6"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.Cnp802pPrioP2Param, "7"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.AtsEnabledParam, "8"))
 		})
 	})
 

@@ -64,16 +64,6 @@ func nvParamLinkTypeFromName(linkType string) string {
 	return ""
 }
 
-func applyDefaultNvConfigValueIfExists(
-	paramName string, desiredParameters map[string]string, query types.NvConfigQuery) {
-	defaultValues, found := query.DefaultConfig[paramName]
-	// Default values might not yet be available if ENABLE_PCI_OPTIMIZATIONS is disabled
-	if found {
-		// Take the default numeric value
-		desiredParameters[paramName] = defaultValues[len(defaultValues)-1]
-	}
-}
-
 // ConstructNvParamMapFromTemplate translates a configuration template into a set of nvconfig parameters
 // operates under the assumption that spec validation was already carried out
 func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
@@ -132,8 +122,6 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 		}
 
 		// maxReadRequest is applied as runtime configuration
-	} else {
-		applyDefaultNvConfigValueIfExists(consts.MaxAccOutReadParam, desiredParameters, query)
 	}
 
 	if template.RoceOptimized != nil && template.RoceOptimized.Enabled {
@@ -155,15 +143,6 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 		}
 
 		// qos settings are applied as runtime configuration
-	} else {
-		applyDefaultNvConfigValueIfExists(consts.RoceCcPrioMaskP1Param, desiredParameters, query)
-		applyDefaultNvConfigValueIfExists(consts.CnpDscpP1Param, desiredParameters, query)
-		applyDefaultNvConfigValueIfExists(consts.Cnp802pPrioP1Param, desiredParameters, query)
-		if secondPortPresent {
-			applyDefaultNvConfigValueIfExists(consts.RoceCcPrioMaskP2Param, desiredParameters, query)
-			applyDefaultNvConfigValueIfExists(consts.CnpDscpP2Param, desiredParameters, query)
-			applyDefaultNvConfigValueIfExists(consts.Cnp802pPrioP2Param, desiredParameters, query)
-		}
 	}
 
 	if template.GpuDirectOptimized != nil && template.GpuDirectOptimized.Enabled {
@@ -180,8 +159,6 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 			log.Log.Error(err, "incorrect spec", "device", device.Name)
 			return desiredParameters, err
 		}
-	} else {
-		applyDefaultNvConfigValueIfExists(consts.AtsEnabledParam, desiredParameters, query)
 	}
 
 	for _, rawParam := range template.RawNvConfig {
