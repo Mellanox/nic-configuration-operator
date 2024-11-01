@@ -52,6 +52,7 @@ const (
 	NvParamTrue               = "1"
 	NvParamLinkTypeInfiniband = "1"
 	NvParamLinkTypeEthernet   = "2"
+	NvParamZero               = "0"
 
 	SriovEnabledParam        = "SRIOV_EN"
 	SriovNumOfVfsParam       = "NUM_OF_VFS"
