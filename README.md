@@ -104,11 +104,14 @@ spec:
   * This is a mandatory parameter.
   * E.g `linkType = Infiniband` then set `LINK_TYPE_P1=IB` and `LINK_TYPE_P2=IB` if second PCI function is present
 * `pciPerformanceOptimized`: performs PCI performance optimizations. If enabled then by default the following will happen:
-  * Set nvconfig `MAX_ACC_OUT_READ` nvconfig parameter.
-  * Set the value of `MAX_ACC_OUT_READ` to `44` if PCI link is gen4
-  * Set the value of `MAX_ACC_OUT_READ` to `0` (use device defaults) if PCI link is gen5 or newer
+  * Set nvconfig `MAX_ACC_OUT_READ` nvconfig parameter to `0` (use device defaults)
   * Set PCI max read request size for each PF to `4096` (note: this is a runtime config and is not persistent)
   * Users can override values via `maxAccOutRead` and `maxReadRequest`
+> [!IMPORTANT]
+> According to the PRM, setting MAX_ACC_OUT_READ to zero enables the auto mode, 
+> which applies the best suitable optimizations. 
+> However, there is a bug in certain FW versions, where the zero value is not available. 
+> In this case, until the fix is available, MAX_ACC_OUT_READ will not be set and a warning event will be emitted for this device's CR.
 * roceOptimized: performs RoCE related optimizations. If enabled performs the following by default:
   * Nvconfig set for both ports (can be applied from PF0)
     * Conditionally applied for second port if present
@@ -125,6 +128,9 @@ spec:
 * `rawNvConfig`: a `map[string]string` which contains NVConfig parameters to apply for a NIC on all of its PFs.
   * Both the numeric values and their string aliases, supported by NVConfig, are allowed (e.g. `REAL_TIME_CLOCK_ENABLE=False`, `REAL_TIME_CLOCK_ENABLE=0`).
   * For per port parameters (suffix `_P1`, `_P2`) parameters with `_P2` suffix are ignored if the device is single port.
+* If a configuration is not set in spec, its non-volatile configuration parameters (if any) should be set to device default.
+  * Parameters in rawNvConfig are regarded as having no default for this flow
+
 
 ### NicDevice
 
