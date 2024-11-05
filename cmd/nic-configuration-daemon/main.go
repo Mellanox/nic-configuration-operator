@@ -68,8 +68,10 @@ func main() {
 		}
 	}
 
+	eventRecorder := mgr.GetEventRecorderFor("NicDeviceReconciler")
+
 	hostUtils := host.NewHostUtils()
-	hostManager := host.NewHostManager(nodeName, hostUtils, mgr.GetEventRecorderFor("NicDeviceReconciler"))
+	hostManager := host.NewHostManager(nodeName, hostUtils, eventRecorder)
 	maintenanceManager := maintenance.New(mgr.GetClient(), hostUtils, nodeName, namespace)
 
 	if err := initNicFwMap(namespace); err != nil {
@@ -90,6 +92,7 @@ func main() {
 		NamespaceName:      namespace,
 		HostManager:        hostManager,
 		MaintenanceManager: maintenanceManager,
+		EventRecorder:      eventRecorder,
 	}
 	err = nicDeviceReconciler.SetupWithManager(mgr, true)
 	if err != nil {

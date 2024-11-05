@@ -21,6 +21,8 @@ import (
 	"sync"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/stretchr/testify/mock"
@@ -52,6 +54,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 		reconciler         *NicDeviceReconciler
 		hostManager        *hostMocks.HostManager
 		maintenanceManager *maintenanceMocks.MaintenanceManager
+		hostUtils          *hostMocks.HostUtils
 		nodeName           = "test-node"
 		deviceName         = "test-device"
 		ctx                context.Context
@@ -99,6 +102,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 		deviceDiscoveryReconcileTime = 1 * time.Second
 		hostManager = &hostMocks.HostManager{}
 		maintenanceManager = &maintenanceMocks.MaintenanceManager{}
+		hostUtils = &hostMocks.HostUtils{}
 
 		reconciler = &NicDeviceReconciler{
 			Client:             mgr.GetClient(),
@@ -107,6 +111,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 			NamespaceName:      namespaceName,
 			HostManager:        hostManager,
 			MaintenanceManager: maintenanceManager,
+			HostUtils:          hostUtils,
+			EventRecorder:      mgr.GetEventRecorderFor("testReconciler"),
 		}
 		Expect(reconciler.SetupWithManager(mgr, false)).To(Succeed())
 	})
@@ -212,7 +218,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 	})
 
 	Describe("reconcile a single device", func() {
-		var createDevice = func(setLastSpecAnnotation bool) {
+		var createDevice = func(setLastSpecAnnotation bool) *v1alpha1.NicDevice {
 			device := &v1alpha1.NicDevice{
 				ObjectMeta: metav1.ObjectMeta{Name: deviceName, Namespace: namespaceName},
 				Spec: v1alpha1.NicDeviceSpec{
@@ -245,6 +251,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 				}},
 			}
 			Expect(k8sClient.Status().Update(ctx, device)).To(Succeed())
+
+			return device
 		}
 
 		It("Should not reconcile device not from its node", func() {
@@ -507,6 +515,80 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Reason: consts.PendingRebootReason,
 			}))
 
+			hostManager.AssertNotCalled(GinkgoT(), "ApplyDeviceNvSpec", mock.Anything, mock.Anything)
+			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
+			hostManager.AssertExpectations(GinkgoT())
+			maintenanceManager.AssertExpectations(GinkgoT())
+		})
+		It("Should not request another reboot if nv config failed to apply after the first one", func() {
+			hostManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, true, nil)
+			hostUtils.On("GetHostUptimeSeconds").Return(time.Second*0, nil)
+
+			device := createDevice(false)
+
+			cond := metav1.Condition{
+				Type:               consts.ConfigUpdateInProgressCondition,
+				Status:             metav1.ConditionTrue,
+				ObservedGeneration: device.Generation,
+				Reason:             consts.PendingRebootReason,
+				Message:            "",
+			}
+			meta.SetStatusCondition(&device.Status.Conditions, cond)
+			Expect(k8sClient.Status().Update(ctx, device)).To(Succeed())
+
+			startManager()
+
+			Eventually(func() []metav1.Condition {
+				device := &v1alpha1.NicDevice{}
+				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
+				return device.Status.Conditions
+			}, timeout).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.ConfigUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.FirmwareError,
+				Message: consts.FwConfigNotAppliedAfterRebootErrorMsg,
+			}))
+
+			hostManager.AssertNotCalled(GinkgoT(), "ApplyDeviceRuntimeSpec", mock.Anything)
+			maintenanceManager.AssertNotCalled(GinkgoT(), "ScheduleMaintenance", mock.Anything)
+			maintenanceManager.AssertNotCalled(GinkgoT(), "MaintenanceAllowed", mock.Anything)
+			hostManager.AssertNotCalled(GinkgoT(), "ApplyDeviceNvSpec", mock.Anything, mock.Anything)
+			maintenanceManager.AssertNotCalled(GinkgoT(), "Reboot")
+			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
+			hostManager.AssertExpectations(GinkgoT())
+			maintenanceManager.AssertExpectations(GinkgoT())
+		})
+
+		It("Should not fail on an not applied nv config when reboot hasn't happened yet", func() {
+			hostManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, true, nil)
+			hostUtils.On("GetHostUptimeSeconds").Return(time.Second*1000, nil)
+
+			device := createDevice(false)
+
+			cond := metav1.Condition{
+				Type:               consts.ConfigUpdateInProgressCondition,
+				Status:             metav1.ConditionTrue,
+				ObservedGeneration: device.Generation,
+				Reason:             consts.PendingRebootReason,
+				Message:            "",
+			}
+			meta.SetStatusCondition(&device.Status.Conditions, cond)
+			Expect(k8sClient.Status().Update(ctx, device)).To(Succeed())
+
+			startManager()
+
+			Consistently(func() []metav1.Condition {
+				device := &v1alpha1.NicDevice{}
+				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
+				return device.Status.Conditions
+			}, timeout).ShouldNot(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.ConfigUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.FirmwareError,
+				Message: consts.FwConfigNotAppliedAfterRebootErrorMsg,
+			}))
+
+			hostManager.AssertNotCalled(GinkgoT(), "ApplyDeviceRuntimeSpec", mock.Anything)
 			hostManager.AssertNotCalled(GinkgoT(), "ApplyDeviceNvSpec", mock.Anything, mock.Anything)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
 			hostManager.AssertExpectations(GinkgoT())

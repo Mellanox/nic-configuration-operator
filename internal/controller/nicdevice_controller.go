@@ -17,8 +17,12 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
+
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/tools/record"
 
 	maintenanceoperator "github.com/Mellanox/maintenance-operator/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -55,7 +59,10 @@ type NicDeviceReconciler struct {
 	NamespaceName string
 
 	HostManager        host.HostManager
+	HostUtils          host.HostUtils
 	MaintenanceManager maintenance.MaintenanceManager
+
+	EventRecorder record.EventRecorder
 }
 
 type nicDeviceConfigurationStatuses []*nicDeviceConfigurationStatus
@@ -432,16 +439,57 @@ func (r *NicDeviceReconciler) handleSpecValidation(ctx context.Context, statuses
 					}
 				}
 			}
+
+			status.nvConfigUpdateRequired = nvConfigUpdateRequired
+			status.rebootRequired = rebootRequired
+
 			if nvConfigUpdateRequired {
 				log.Log.V(2).Info("update started for device", "device", status.device.Name)
 				err = r.updateDeviceStatusCondition(ctx, status.device, consts.UpdateStartedReason, metav1.ConditionTrue, "")
 				if err != nil {
 					status.lastStageError = err
 				}
-			}
+			} else if rebootRequired {
+				// There might be a case where FW config didn't apply after a reboot because of some error in FW. In this case
+				// we don't want the node to be kept in a reboot loop (FW configured -> reboot -> Config was not applied -> FW configured -> etc.).
+				// To break the reboot loop, we should compare the last time the status was changed to PendingReboot to the node's uptime.
+				// If the node started after the status was changed, we assume the node was rebooted and the config couldn't apply.
+				// In this case, we indicate the error to the user with the status change and emit an error event.
+				statusCondition := meta.FindStatusCondition(status.device.Status.Conditions, consts.ConfigUpdateInProgressCondition)
+				if statusCondition == nil {
+					return
+				}
 
-			status.nvConfigUpdateRequired = nvConfigUpdateRequired
-			status.rebootRequired = rebootRequired
+				switch statusCondition.Reason {
+				case consts.PendingRebootReason:
+					// We need to determine, whether a reboot has happened since the PendingReboot status has been set
+					uptime, err := r.HostUtils.GetHostUptimeSeconds()
+					if err != nil {
+						status.lastStageError = err
+						return
+					}
+
+					sinceStatusUpdate := time.Since(statusCondition.LastTransitionTime.Time)
+
+					// If more time has passed since boot than since the status update, the reboot hasn't happened yet
+					if uptime > sinceStatusUpdate {
+						return
+					}
+
+					log.Log.Info("nv config failed to update after reboot for device", "device", status.device.Name)
+					r.EventRecorder.Event(status.device, v1.EventTypeWarning, consts.FirmwareError, consts.FwConfigNotAppliedAfterRebootErrorMsg)
+					err = r.updateDeviceStatusCondition(ctx, status.device, consts.FirmwareError, metav1.ConditionFalse, consts.FwConfigNotAppliedAfterRebootErrorMsg)
+					if err != nil {
+						status.lastStageError = err
+					}
+
+					fallthrough
+				case consts.FirmwareError:
+					status.nvConfigUpdateRequired = false
+					status.rebootRequired = false
+					status.lastStageError = errors.New(consts.FwConfigNotAppliedAfterRebootErrorMsg)
+				}
+			}
 		}(i)
 	}
 

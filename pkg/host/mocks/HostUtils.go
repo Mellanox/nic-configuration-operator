@@ -9,6 +9,8 @@ import (
 
 	pci "github.com/jaypipes/ghw/pkg/pci"
 
+	time "time"
+
 	types "github.com/Mellanox/nic-configuration-operator/pkg/types"
 )
 
@@ -50,6 +52,34 @@ func (_m *HostUtils) GetFirmwareVersionAndPSID(pciAddr string) (string, string, 
 	}
 
 	return r0, r1, r2
+}
+
+// GetHostUptimeSeconds provides a mock function with given fields:
+func (_m *HostUtils) GetHostUptimeSeconds() (time.Duration, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetHostUptimeSeconds")
+	}
+
+	var r0 time.Duration
+	var r1 error
+	if rf, ok := ret.Get(0).(func() (time.Duration, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() time.Duration); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(time.Duration)
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // GetInterfaceName provides a mock function with given fields: pciAddr
