@@ -223,6 +223,8 @@ func (h hostManager) ApplyDeviceNvSpec(ctx context.Context, device *v1alpha1.Nic
 		return false, err
 	}
 
+	// if ADVANCED_PCI_SETTINGS == 0, not all nv config parameters are available for configuration
+	// we enable this parameter first to unlock them
 	if !h.configValidation.AdvancedPCISettingsEnabled(nvConfig) {
 		log.Log.V(2).Info("AdvancedPciSettings not enabled, fw reset required", "device", device.Name)
 		err = h.hostUtils.SetNvConfigParameter(pciAddr, consts.AdvancedPCISettingsParam, consts.NvParamTrue)
@@ -233,8 +235,11 @@ func (h hostManager) ApplyDeviceNvSpec(ctx context.Context, device *v1alpha1.Nic
 
 		err = h.hostUtils.ResetNicFirmware(ctx, pciAddr)
 		if err != nil {
-			log.Log.Error(err, "Failed to reset NIC firmware", "device", device.Name)
-			return false, err
+			log.Log.Error(err, "Failed to reset NIC firmware, reboot required to apply ADVANCED_PCI_SETTINGS", "device", device.Name)
+			// We try to perform FW reset after setting the ADVANCED_PCI_SETTINGS to save us a reboot
+			// However, if the soft FW reset fails for some reason, we need to perform a reboot to unlock
+			// all the nv config parameters
+			return true, nil
 		}
 
 		// Query nv config again, additional options could become available
