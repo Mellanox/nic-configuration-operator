@@ -67,32 +67,32 @@ func setInitialsConditionsForDevice(device *v1alpha1.NicDevice) {
 
 func setFwConfigConditionsForDevice(device *v1alpha1.NicDevice, recommendedFirmware string) {
 	currentFirmware := device.Status.FirmwareVersion
-	switch currentFirmware {
-	case recommendedFirmware:
-		condition := metav1.Condition{
+	log.Log.V(2).Info("setFwConfigConditionsForDevice()", "recommendedFirmware", recommendedFirmware, "currentFirmware", currentFirmware)
+	var condition metav1.Condition
+	switch recommendedFirmware {
+	case currentFirmware:
+		condition = metav1.Condition{
 			Type:    consts.FimwareConfigMatchCondition,
 			Status:  metav1.ConditionTrue,
 			Reason:  consts.DeviceFwMatchReason,
 			Message: fmt.Sprintf("Device firmware '%s' matches to recommended version '%s'", currentFirmware, recommendedFirmware),
 		}
-		meta.SetStatusCondition(&device.Status.Conditions, condition)
 	case "":
-		condition := metav1.Condition{
+		condition = metav1.Condition{
 			Type:    consts.FimwareConfigMatchCondition,
 			Status:  metav1.ConditionUnknown,
 			Reason:  consts.DeviceFwMatchReason,
 			Message: "Can't get OFED version to check recommended firmware version",
 		}
-		meta.SetStatusCondition(&device.Status.Conditions, condition)
 	default:
-		condition := metav1.Condition{
+		condition = metav1.Condition{
 			Type:    consts.FimwareConfigMatchCondition,
 			Status:  metav1.ConditionFalse,
 			Reason:  consts.DeviceFwMismatchReason,
 			Message: fmt.Sprintf("Device firmware '%s' doesn't match to recommended version '%s'", currentFirmware, recommendedFirmware),
 		}
-		meta.SetStatusCondition(&device.Status.Conditions, condition)
 	}
+	meta.SetStatusCondition(&device.Status.Conditions, condition)
 }
 
 // reconcile reconciles the devices on the host by comparing the observed devices with the existing NicDevice custom resources (CRs).
@@ -192,11 +192,9 @@ func (d *DeviceDiscovery) reconcile(ctx context.Context) error {
 		device.Status.Node = d.nodeName
 		setInitialsConditionsForDevice(device)
 
-		ofedVersion, err := d.hostManager.DiscoverOfedVersion()
-		if err == nil {
-			recommendedFirmware := helper.GetRecommendedFwVersion(device.Status.Type, ofedVersion)
-			setFwConfigConditionsForDevice(device, recommendedFirmware)
-		}
+		ofedVersion := d.hostManager.DiscoverOfedVersion()
+		recommendedFirmware := helper.GetRecommendedFwVersion(device.Status.Type, ofedVersion)
+		setFwConfigConditionsForDevice(device, recommendedFirmware)
 
 		err = d.Client.Status().Update(ctx, device)
 		if err != nil {

@@ -79,7 +79,7 @@ type HostUtils interface {
 	// ScheduleReboot schedules reboot on the host
 	ScheduleReboot() error
 	// GetOfedVersion retrieves installed OFED version
-	GetOfedVersion() (string, error)
+	GetOfedVersion() string
 }
 
 type hostUtils struct {
@@ -618,13 +618,16 @@ func (h *hostUtils) ScheduleReboot() error {
 }
 
 // GetOfedVersion retrieves installed OFED version
-func (h *hostUtils) GetOfedVersion() (string, error) {
-	version, err := os.ReadFile(filepath.Join(consts.HostPath, consts.Mlx5ModuleVersionPath))
+func (h *hostUtils) GetOfedVersion() string {
+	log.Log.Info("HostUtils.GetOfedVersion()")
+	versionBytes, err := os.ReadFile(filepath.Join(consts.HostPath, consts.Mlx5ModuleVersionPath))
 	if err != nil {
-		log.Log.Error(err, "GetOfedVersion(): failed to read mlx5_core version file")
-		return "", err
+		log.Log.Error(err, "GetOfedVersion(): failed to read mlx5_core version file, OFED isn't installed")
+		return ""
 	}
-	return string(version), nil
+	version := strings.TrimSuffix(string(versionBytes), "\n")
+	log.Log.Info("HostUtils.GetOfedVersion(): OFED version", "version", version)
+	return version
 }
 
 func NewHostUtils() HostUtils {

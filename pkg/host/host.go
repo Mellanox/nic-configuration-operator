@@ -48,8 +48,8 @@ type HostManager interface {
 	ApplyDeviceRuntimeSpec(device *v1alpha1.NicDevice) error
 	// DiscoverOfedVersion retrieves installed OFED version
 	// returns string - installed OFED version
-	// returns error - OFED isn't installed or version couldn't be determined
-	DiscoverOfedVersion() (string, error)
+	// returns empty string - OFED isn't installed or version couldn't be determined
+	DiscoverOfedVersion() string
 }
 
 type hostManager struct {
@@ -324,7 +324,7 @@ func (h hostManager) ApplyDeviceRuntimeSpec(device *v1alpha1.NicDevice) error {
 // DiscoverOfedVersion retrieves installed OFED version
 // returns string - installed OFED version
 // returns error - OFED isn't installed or version couldn't be determined
-func (h hostManager) DiscoverOfedVersion() (string, error) {
+func (h hostManager) DiscoverOfedVersion() string {
 	return h.hostUtils.GetOfedVersion()
 }
 
