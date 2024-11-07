@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 
@@ -58,7 +59,9 @@ func getMatchedDevicesFromStatus(ctx context.Context, name string, namespace str
 	return func() []string {
 		templateObj := &v1alpha1.NicConfigurationTemplate{}
 		Expect(client.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, templateObj)).To(Succeed())
-		return templateObj.Status.NicDevices
+		devices := templateObj.Status.NicDevices
+		slices.Sort(devices)
+		return devices
 	}
 }
 
