@@ -54,7 +54,7 @@ If more than one template match a single device, none will be applied and the er
 
 for more information refer to [api-reference](docs/api-reference.md).
 
-#### Example NICConfigurationTemplate
+#### [Example NICConfigurationTemplate](docs/examples/example-nicconfigurationtemplate-connectx6.yaml):
 
 ```yaml
 apiVersion: configuration.net.nvidia.com/v1alpha1
@@ -66,7 +66,7 @@ spec:
    nodeSelector:
       feature.node.kubernetes.io/network-sriov.capable: "true"
    nicSelector:
-      # nicType selector is mandatory the rest are optional only a single type can be specified.
+      # nicType selector is mandatory the rest are optional. Only a single type can be specified.
       nicType: 101b
       pciAddresses:
          - "0000:03:00.0"
@@ -80,7 +80,7 @@ spec:
       pciPerformanceOptimized:
          enabled: true
          maxAccOutRead: 44
-         maxReadRequest: 5
+         maxReadRequest: 4096
       roceOptimized:
          enabled: true
          qos:
@@ -90,8 +90,10 @@ spec:
          enabled: true
          env: Baremetal
       rawNvConfig:
-         THIS_IS_A_SPECIAL_NVCONFIG_PARAM: "55"
-         SOME_ADVANCED_NVCONFIG_PARAM: "true"
+         - name: THIS_IS_A_SPECIAL_NVCONFIG_PARAM
+           value: "55"
+         - name: SOME_ADVANCED_NVCONFIG_PARAM
+           value: "true"
 ```
 
 #### Configuration details
