@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/Mellanox/rdmamap"
 	"github.com/jaypipes/ghw"
@@ -80,6 +81,8 @@ type HostUtils interface {
 	ScheduleReboot() error
 	// GetOfedVersion retrieves installed OFED version
 	GetOfedVersion() string
+	// GetHostUptimeSeconds returns the host uptime in seconds
+	GetHostUptimeSeconds() (time.Duration, error)
 }
 
 type hostUtils struct {
@@ -628,6 +631,20 @@ func (h *hostUtils) GetOfedVersion() string {
 	version := strings.TrimSuffix(string(versionBytes), "\n")
 	log.Log.Info("HostUtils.GetOfedVersion(): OFED version", "version", version)
 	return version
+}
+
+// GetHostUptimeSeconds returns the host uptime in seconds
+func (h *hostUtils) GetHostUptimeSeconds() (time.Duration, error) {
+	log.Log.V(2).Info("HostUtils.GetHostUptimeSeconds()")
+	output, err := os.ReadFile("/proc/uptime")
+	if err != nil {
+		log.Log.Error(err, "HostUtils.GetHostUptimeSeconds(): failed to read the system's uptime")
+		return 0, err
+	}
+	uptimeStr := strings.Split(string(output), " ")[0]
+	uptimeSeconds, _ := strconv.ParseFloat(uptimeStr, 64)
+
+	return time.Duration(uptimeSeconds) * time.Second, nil
 }
 
 func NewHostUtils() HostUtils {
