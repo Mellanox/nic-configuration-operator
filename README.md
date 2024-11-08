@@ -58,7 +58,7 @@ for more information refer to [api-reference](docs/api-reference.md).
 
 ```yaml
 apiVersion: configuration.net.nvidia.com/v1alpha1
-kind: NICConfigurationTemplate
+kind: NicConfigurationTemplate
 metadata:
    name: connectx6-config
    namespace: nic-configuration-operator
@@ -68,7 +68,7 @@ spec:
    nicSelector:
       # nicType selector is mandatory the rest are optional only a single type can be specified.
       nicType: 101b
-      pciAddress:
+      pciAddresses:
          - "0000:03:00.0"
          - “0000:04:00.0”
       serialNumbers:
