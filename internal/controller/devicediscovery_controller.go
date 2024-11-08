@@ -137,6 +137,8 @@ func (d *DeviceDiscovery) reconcile(ctx context.Context) error {
 			continue
 		}
 
+		d.updateFwCondition(nicDeviceCR)
+
 		// Need to nullify conditions for deep equal
 		observedDeviceStatus.Conditions = nicDeviceCR.Status.Conditions
 
@@ -192,17 +194,20 @@ func (d *DeviceDiscovery) reconcile(ctx context.Context) error {
 		device.Status.Node = d.nodeName
 		setInitialsConditionsForDevice(device)
 
-		ofedVersion := d.hostManager.DiscoverOfedVersion()
-		recommendedFirmware := helper.GetRecommendedFwVersion(device.Status.Type, ofedVersion)
-		setFwConfigConditionsForDevice(device, recommendedFirmware)
-
+		d.updateFwCondition(*device)
 		err = d.Client.Status().Update(ctx, device)
 		if err != nil {
-			log.Log.Error(err, "failed to update NicDevice CR status", "device", deviceName)
+			log.Log.Error(err, "failed to update FimwareConfigMatchCondition", "device", device.Name)
 			continue
 		}
 	}
 	return nil
+}
+
+func (d *DeviceDiscovery) updateFwCondition(nicDeviceCR v1alpha1.NicDevice) {
+	ofedVersion := d.hostManager.DiscoverOfedVersion()
+	recommendedFirmware := helper.GetRecommendedFwVersion(nicDeviceCR.Status.Type, ofedVersion)
+	setFwConfigConditionsForDevice(&nicDeviceCR, recommendedFirmware)
 }
 
 // Start starts the device discovery process by reconciling devices on the host.
