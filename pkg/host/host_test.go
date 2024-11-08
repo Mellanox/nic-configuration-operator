@@ -858,7 +858,7 @@ var _ = Describe("HostManager", func() {
 						mockConfigValidation.AssertExpectations(GinkgoT())
 					})
 
-					It("should return error if ResetNicFirmware fails", func() {
+					It("should request reboot if ResetNicFirmware fails", func() {
 						nvConfig := types.NvConfigQuery{
 							CurrentConfig:  map[string][]string{"param1": {"value1"}},
 							NextBootConfig: map[string][]string{"param1": {"value1"}},
@@ -873,8 +873,8 @@ var _ = Describe("HostManager", func() {
 						mockHostUtils.On("ResetNicFirmware", ctx, pciAddress).Return(resetFirmwareErr)
 
 						reboot, err := manager.ApplyDeviceNvSpec(ctx, device)
-						Expect(reboot).To(BeFalse())
-						Expect(err).To(MatchError(resetFirmwareErr))
+						Expect(reboot).To(BeTrue())
+						Expect(err).To(BeNil())
 
 						mockHostUtils.AssertExpectations(GinkgoT())
 						mockConfigValidation.AssertExpectations(GinkgoT())
