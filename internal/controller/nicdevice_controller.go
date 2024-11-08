@@ -159,6 +159,14 @@ func (r *NicDeviceReconciler) getDevices(ctx context.Context) (nicDeviceConfigur
 
 	for i, device := range devices.Items {
 		if device.Spec.Configuration == nil {
+			statusCondition := meta.FindStatusCondition(device.Status.Conditions, consts.ConfigUpdateInProgressCondition)
+			if statusCondition.Reason != consts.DeviceConfigSpecEmptyReason {
+				err = r.updateDeviceStatusCondition(ctx, &device, consts.DeviceConfigSpecEmptyReason, metav1.ConditionFalse, "")
+				if err != nil {
+					log.Log.Error(err, "failed to update status condition", "device", device.Name)
+					return nil, err
+				}
+			}
 			continue
 		}
 
