@@ -1,0 +1,40 @@
+# Change this template first as it only provides an example of configuration
+apiVersion: configuration.net.nvidia.com/v1alpha1
+kind: NicConfigurationTemplate
+metadata:
+  name: connectx6-config
+  namespace: nic-configuration-operator
+spec:
+  nodeSelector:
+    feature.node.kubernetes.io/network-sriov.capable: "true"
+  nicSelector:
+    # nicType selector is mandatory the rest are optional. Only a single type can be specified.
+    nicType: 101b
+    pciAddresses:
+      - "0000:03:00.0"
+      - “0000:04:00.0”
+    serialNumbers:
+      - "MT2116X09299"
+  resetToDefault: false # if set, template is ignored, device configuration should reset
+  template:
+    numVfs: 2
+    linkType: Ethernet
+    pciPerformanceOptimized:
+      enabled: true
+      # default values for maxAccOutRead and maxReadRequest listed below, can be omitted
+      maxAccOutRead: 44
+      maxReadRequest: 4096
+    roceOptimized:
+      enabled: true
+      # default values for qos listed below, can be omitted
+      qos:
+        trust: dscp
+        pfc: "0,0,0,1,0,0,0,0"
+    gpuDirectOptimized:
+      enabled: true
+      env: Baremetal
+    rawNvConfig:
+      - name: THIS_IS_A_SPECIAL_NVCONFIG_PARAM
+        value: "55"
+      - name: SOME_ADVANCED_NVCONFIG_PARAM
+        value: "true"
