@@ -93,6 +93,7 @@ func main() {
 		HostManager:        hostManager,
 		MaintenanceManager: maintenanceManager,
 		EventRecorder:      eventRecorder,
+		HostUtils:          hostUtils,
 	}
 	err = nicDeviceReconciler.SetupWithManager(mgr, true)
 	if err != nil {
