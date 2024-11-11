@@ -55,6 +55,37 @@ ConfigurationTemplateSpec is a set of configurations for the NICs
 </tbody>
 </table>
 
+### FirmwareTemplateSpec
+
+(*Appears on:*[NicFirmwareTemplateSpec](#NicFirmwareTemplateSpec))
+
+FirmwareTemplateSpec specifies a FW update policy for a given FW source ref
+
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nicFirmwareSourceRef</code><br />
+<em>string</em></td>
+<td><p>NicFirmwareSourceRef refers to existing NicFirmwareSource CR on where to get the FW from</p></td>
+</tr>
+<tr>
+<td><code>updatePolicy</code><br />
+<em>string</em></td>
+<td><p>UpdatePolicy indicates whether the operator needs to validate installed FW or upgrade it</p></td>
+</tr>
+</tbody>
+</table>
+
 ### GpuDirectOptimizedSpec
 
 (*Appears on:*[ConfigurationTemplateSpec](#ConfigurationTemplateSpec))
@@ -128,7 +159,7 @@ NicConfigurationTemplate is the Schema for the nicconfigurationtemplates API
 <tr>
 <td><code>nodeSelector</code><br />
 <em>map[string]string</em></td>
-<td><p>NodeSelector contains labels required on the node</p></td>
+<td><p>NodeSelector contains labels required on the node. When empty, the template will be applied to matching devices on all nodes.</p></td>
 </tr>
 <tr>
 <td><code>nicSelector</code><br />
@@ -179,7 +210,7 @@ NicConfigurationTemplateSpec defines the desired state of NicConfigurationTempla
 <tr>
 <td><code>nodeSelector</code><br />
 <em>map[string]string</em></td>
-<td><p>NodeSelector contains labels required on the node</p></td>
+<td><p>NodeSelector contains labels required on the node. When empty, the template will be applied to matching devices on all nodes.</p></td>
 </tr>
 <tr>
 <td><code>nicSelector</code><br />
@@ -431,9 +462,240 @@ NicDeviceStatus defines the observed state of NicDevice
 </tbody>
 </table>
 
+### NicFirmwareSource
+
+NicFirmwareSource is the Schema for the nicfirmwaresources API
+
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>metadata</code><br />
+<em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta">Kubernetes meta/v1.ObjectMeta</a></em></td>
+<td>Refer to the Kubernetes API documentation for the fields of the <code>metadata</code> field.</td>
+</tr>
+<tr>
+<td><code>spec</code><br />
+<em><a href="#NicFirmwareSourceSpec">NicFirmwareSourceSpec</a></em></td>
+<td><br />
+<br />
+&#10;<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<tbody>
+<tr>
+<td><code>binUrlSources</code><br />
+<em>[]string</em></td>
+<td><p>BinUrlSources represents a list of url sources for FW</p></td>
+</tr>
+</tbody>
+</table></td>
+</tr>
+<tr>
+<td><code>status</code><br />
+<em><a href="#NicFirmwareSourceStatus">NicFirmwareSourceStatus</a></em></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+
+### NicFirmwareSourceSpec
+
+(*Appears on:*[NicFirmwareSource](#NicFirmwareSource))
+
+NicFirmwareSourceSpec represents a list of url sources for FW
+
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>binUrlSources</code><br />
+<em>[]string</em></td>
+<td><p>BinUrlSources represents a list of url sources for FW</p></td>
+</tr>
+</tbody>
+</table>
+
+### NicFirmwareSourceStatus
+
+(*Appears on:*[NicFirmwareSource](#NicFirmwareSource))
+
+NicFirmwareSourceStatus represents the status of the FW from given sources, e.g. version available for PSIDs
+
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>state</code><br />
+<em>string</em></td>
+<td><p>State represents the firmware processing state</p></td>
+</tr>
+<tr>
+<td><code>reason</code><br />
+<em>string</em></td>
+<td><p>Reason shows an error message if occurred</p></td>
+</tr>
+<tr>
+<td><code>versions</code><br />
+<em>map[string][]string</em></td>
+<td><p>Versions is a map of available FW versions to PSIDs a PSID should have only a single FW version available for it</p></td>
+</tr>
+</tbody>
+</table>
+
+### NicFirmwareTemplate
+
+NicFirmwareTemplate is the Schema for the nicfirmwaretemplates API
+
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>metadata</code><br />
+<em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta">Kubernetes meta/v1.ObjectMeta</a></em></td>
+<td>Refer to the Kubernetes API documentation for the fields of the <code>metadata</code> field.</td>
+</tr>
+<tr>
+<td><code>spec</code><br />
+<em><a href="#NicFirmwareTemplateSpec">NicFirmwareTemplateSpec</a></em></td>
+<td><br />
+<br />
+&#10;<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<tbody>
+<tr>
+<td><code>nodeSelector</code><br />
+<em>map[string]string</em></td>
+<td><p>NodeSelector contains labels required on the node. When empty, the template will be applied to matching devices on all nodes.</p></td>
+</tr>
+<tr>
+<td><code>nicSelector</code><br />
+<em><a href="#NicSelectorSpec">NicSelectorSpec</a></em></td>
+<td><p>NIC selector configuration</p></td>
+</tr>
+<tr>
+<td><code>template</code><br />
+<em><a href="#FirmwareTemplateSpec">FirmwareTemplateSpec</a></em></td>
+<td><p>Firmware update template</p></td>
+</tr>
+</tbody>
+</table></td>
+</tr>
+<tr>
+<td><code>status</code><br />
+<em><a href="#NicFirmwareTemplateStatus">NicFirmwareTemplateStatus</a></em></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+
+### NicFirmwareTemplateSpec
+
+(*Appears on:*[NicFirmwareTemplate](#NicFirmwareTemplate))
+
+NicFirmwareTemplateSpec defines the FW templates and node/nic selectors for it
+
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nodeSelector</code><br />
+<em>map[string]string</em></td>
+<td><p>NodeSelector contains labels required on the node. When empty, the template will be applied to matching devices on all nodes.</p></td>
+</tr>
+<tr>
+<td><code>nicSelector</code><br />
+<em><a href="#NicSelectorSpec">NicSelectorSpec</a></em></td>
+<td><p>NIC selector configuration</p></td>
+</tr>
+<tr>
+<td><code>template</code><br />
+<em><a href="#FirmwareTemplateSpec">FirmwareTemplateSpec</a></em></td>
+<td><p>Firmware update template</p></td>
+</tr>
+</tbody>
+</table>
+
+### NicFirmwareTemplateStatus
+
+(*Appears on:*[NicFirmwareTemplate](#NicFirmwareTemplate))
+
+NicFirmwareTemplateStatus lists the NicDevice CRs matching the FW template
+
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nicDevices</code><br />
+<em>[]string</em></td>
+<td><p>NicDevice CRs matching this firmware template</p></td>
+</tr>
+</tbody>
+</table>
+
 ### NicSelectorSpec
 
-(*Appears on:*[NicConfigurationTemplateSpec](#NicConfigurationTemplateSpec))
+(*Appears on:*[NicConfigurationTemplateSpec](#NicConfigurationTemplateSpec),
+[NicFirmwareTemplateSpec](#NicFirmwareTemplateSpec))
 
 NicSelectorSpec is a desired configuration for NICs
 
@@ -567,4 +829,4 @@ RoceOptimizedSpec specifies RoCE optimization settings
 
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-*Generated with `gen-crd-api-reference-docs` on git commit `40efd3e`.*
+*Generated with `gen-crd-api-reference-docs` on git commit `7bb08b0`.*

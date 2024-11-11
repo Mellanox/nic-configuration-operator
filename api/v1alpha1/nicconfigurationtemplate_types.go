@@ -89,7 +89,7 @@ type ConfigurationTemplateSpec struct {
 
 // NicConfigurationTemplateSpec defines the desired state of NicConfigurationTemplate
 type NicConfigurationTemplateSpec struct {
-	// NodeSelector contains labels required on the node
+	// NodeSelector contains labels required on the node. When empty, the template will be applied to matching devices on all nodes.
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
 	// NIC selector configuration
 	// +required
