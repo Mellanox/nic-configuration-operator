@@ -496,6 +496,13 @@ func (r *NicDeviceReconciler) handleSpecValidation(ctx context.Context, statuses
 					status.nvConfigUpdateRequired = false
 					status.rebootRequired = false
 					status.lastStageError = errors.New(consts.FwConfigNotAppliedAfterRebootErrorMsg)
+				default:
+					// If reboot hasn't happened yet, proceed as normal and set PendingReboot status
+					log.Log.V(2).Info("reboot pending for device", "device", status.device.Name)
+					err = r.updateDeviceStatusCondition(ctx, status.device, consts.PendingRebootReason, metav1.ConditionTrue, "")
+					if err != nil {
+						status.lastStageError = err
+					}
 				}
 			}
 		}(i)
