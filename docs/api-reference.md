@@ -52,11 +52,6 @@ ConfigurationTemplateSpec is a set of configurations for the NICs
 <em><a href="#GpuDirectOptimizedSpec">GpuDirectOptimizedSpec</a></em></td>
 <td><p>GPU Direct optimization settings</p></td>
 </tr>
-<tr>
-<td><code>rawNvConfig</code><br />
-<em><a href="#NvConfigParam">[]NvConfigParam</a></em></td>
-<td><p>List of arbitrary nv config parameters</p></td>
-</tr>
 </tbody>
 </table>
 
@@ -301,8 +296,9 @@ NicDeviceConfigurationSpec contains desired configuration of the NIC
 <tr>
 <td><code>resetToDefault</code><br />
 <em>bool</em></td>
-<td><p>ResetToDefault specifies whether node agent needs to perform a reset flow The following operations will be performed: * Nvconfig reset of all non-volatile configurations - Mstconfig -d reset
-for each PF - Mstconfig -d set ADVANCED_PCI_SETTINGS=1 * Node reboot - Applies new NIC NV config - Will undo any runtime configuration previously performed for the device/driver</p></td>
+<td><p>ResetToDefault specifies whether node agent needs to perform a reset flow. In NIC Configuration Operator template v0.1.14 BF2/BF3 DPUs (not SuperNics) FW reset flow isn’t supported. The
+following operations will be performed: * Nvconfig reset of all non-volatile configurations - Mstconfig -d reset for each PF - Mstconfig -d set ADVANCED_PCI_SETTINGS=1 * Node reboot - Applies new NIC
+NV config - Will undo any runtime configuration previously performed for the device/driver</p></td>
 </tr>
 <tr>
 <td><code>template</code><br />
@@ -471,35 +467,6 @@ NicSelectorSpec is a desired configuration for NICs
 </tbody>
 </table>
 
-### NvConfigParam
-
-(*Appears on:*[ConfigurationTemplateSpec](#ConfigurationTemplateSpec))
-
-<table>
-<colgroup>
-<col style="width: 50%" />
-<col style="width: 50%" />
-</colgroup>
-<thead>
-<tr>
-<th>Field</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>name</code><br />
-<em>string</em></td>
-<td><p>Name of the arbitrary nvconfig parameter</p></td>
-</tr>
-<tr>
-<td><code>value</code><br />
-<em>string</em></td>
-<td><p>Value of the arbitrary nvconfig parameter</p></td>
-</tr>
-</tbody>
-</table>
-
 ### PciPerformanceOptimizedSpec
 
 (*Appears on:*[ConfigurationTemplateSpec](#ConfigurationTemplateSpec))
@@ -600,4 +567,4 @@ RoceOptimizedSpec specifies RoCE optimization settings
 
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-*Generated with `gen-crd-api-reference-docs` on git commit `a799e3a`.*
+*Generated with `gen-crd-api-reference-docs` on git commit `40efd3e`.*

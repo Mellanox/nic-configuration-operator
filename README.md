@@ -54,6 +54,9 @@ If more than one template match a single device, none will be applied and the er
 
 for more information refer to [api-reference](docs/api-reference.md).
 
+> [!IMPORTANT]
+> `ResetToDefault` In NIC Configuration Operator template v0.1.14 BF2/BF3 DPUs (not SuperNics) FW reset flow isn't supported.
+
 #### [Example NICConfigurationTemplate](docs/examples/example-nicconfigurationtemplate-connectx6.yaml):
 
 ```yaml
@@ -89,11 +92,6 @@ spec:
       gpuDirectOptimized:
          enabled: true
          env: Baremetal
-      rawNvConfig:
-         - name: THIS_IS_A_SPECIAL_NVCONFIG_PARAM
-           value: "55"
-         - name: SOME_ADVANCED_NVCONFIG_PARAM
-           value: "true"
 ```
 
 #### Configuration details
@@ -127,11 +125,9 @@ spec:
 * `gpuDirectOptimized`: performs gpu direct optimizations. ATM only optimizations for Baremetal environment are supported. If enabled perform the following:
   * Set nvconfig `ATS_ENABLED=0`
   * Can only be enabled when `pciPerformanceOptimized` is enabled
-* `rawNvConfig`: a `map[string]string` which contains NVConfig parameters to apply for a NIC on all of its PFs.
   * Both the numeric values and their string aliases, supported by NVConfig, are allowed (e.g. `REAL_TIME_CLOCK_ENABLE=False`, `REAL_TIME_CLOCK_ENABLE=0`).
   * For per port parameters (suffix `_P1`, `_P2`) parameters with `_P2` suffix are ignored if the device is single port.
 * If a configuration is not set in spec, its non-volatile configuration parameters (if any) should be set to device default.
-  * Parameters in rawNvConfig are regarded as having no default for this flow
 
 
 ### NicDevice
@@ -158,9 +154,6 @@ spec:
          numVfs: 8
          pciPerformanceOptimized:
             enabled: true
-         rawNvConfig:
-            - name: TLS_OPTIMIZE
-              value: "1"
 status:
    conditions:
       - reason: UpdateSuccessful
