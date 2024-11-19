@@ -231,10 +231,6 @@ var _ = Describe("NicDeviceReconciler", func() {
 								Enabled:       true,
 								MaxAccOutRead: 9999,
 							},
-							RawNvConfig: []v1alpha1.NvConfigParam{{
-								Name:  "CUSTOM_PARAM",
-								Value: "true",
-							}},
 						},
 					},
 				},
