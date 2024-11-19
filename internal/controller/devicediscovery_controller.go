@@ -72,21 +72,21 @@ func setFwConfigConditionsForDevice(device *v1alpha1.NicDevice, recommendedFirmw
 	switch recommendedFirmware {
 	case currentFirmware:
 		condition = metav1.Condition{
-			Type:    consts.FimwareConfigMatchCondition,
+			Type:    consts.FirmwareConfigMatchCondition,
 			Status:  metav1.ConditionTrue,
 			Reason:  consts.DeviceFwMatchReason,
 			Message: fmt.Sprintf("Device firmware '%s' matches to recommended version '%s'", currentFirmware, recommendedFirmware),
 		}
 	case "":
 		condition = metav1.Condition{
-			Type:    consts.FimwareConfigMatchCondition,
+			Type:    consts.FirmwareConfigMatchCondition,
 			Status:  metav1.ConditionUnknown,
 			Reason:  consts.DeviceFwMatchReason,
 			Message: "Can't get OFED version to check recommended firmware version",
 		}
 	default:
 		condition = metav1.Condition{
-			Type:    consts.FimwareConfigMatchCondition,
+			Type:    consts.FirmwareConfigMatchCondition,
 			Status:  metav1.ConditionFalse,
 			Reason:  consts.DeviceFwMismatchReason,
 			Message: fmt.Sprintf("Device firmware '%s' doesn't match to recommended version '%s'", currentFirmware, recommendedFirmware),
@@ -137,7 +137,13 @@ func (d *DeviceDiscovery) reconcile(ctx context.Context) error {
 			continue
 		}
 
-		d.updateFwCondition(nicDeviceCR)
+		d.updateFwCondition(&nicDeviceCR)
+		log.Log.V(2).Info("updated device", "nicDeviceCR", nicDeviceCR)
+		err = d.Client.Status().Update(ctx, &nicDeviceCR)
+		if err != nil {
+			log.Log.Error(err, "failed to update FirmwareConfigMatchCondition", "device", nicDeviceCR.Name)
+			continue
+		}
 
 		// Need to nullify conditions for deep equal
 		observedDeviceStatus.Conditions = nicDeviceCR.Status.Conditions
@@ -194,20 +200,21 @@ func (d *DeviceDiscovery) reconcile(ctx context.Context) error {
 		device.Status.Node = d.nodeName
 		setInitialsConditionsForDevice(device)
 
-		d.updateFwCondition(*device)
+		d.updateFwCondition(device)
+		log.Log.V(2).Info("updated device", "device", device)
 		err = d.Client.Status().Update(ctx, device)
 		if err != nil {
-			log.Log.Error(err, "failed to update FimwareConfigMatchCondition", "device", device.Name)
+			log.Log.Error(err, "failed to update FirmwareConfigMatchCondition", "device", device.Name)
 			continue
 		}
 	}
 	return nil
 }
 
-func (d *DeviceDiscovery) updateFwCondition(nicDeviceCR v1alpha1.NicDevice) {
+func (d *DeviceDiscovery) updateFwCondition(nicDeviceCR *v1alpha1.NicDevice) {
 	ofedVersion := d.hostManager.DiscoverOfedVersion()
 	recommendedFirmware := helper.GetRecommendedFwVersion(nicDeviceCR.Status.Type, ofedVersion)
-	setFwConfigConditionsForDevice(&nicDeviceCR, recommendedFirmware)
+	setFwConfigConditionsForDevice(nicDeviceCR, recommendedFirmware)
 }
 
 // Start starts the device discovery process by reconciling devices on the host.
