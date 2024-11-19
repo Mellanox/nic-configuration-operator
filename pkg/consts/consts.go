@@ -22,7 +22,7 @@ const (
 	Infiniband = "Infiniband"
 
 	ConfigUpdateInProgressCondition     = "ConfigUpdateInProgress"
-	FimwareConfigMatchCondition         = "FirmwareConfigMatch"
+	FirmwareConfigMatchCondition        = "FirmwareConfigMatch"
 	IncorrectSpecReason                 = "IncorrectSpec"
 	UpdateStartedReason                 = "UpdateStarted"
 	PendingRebootReason                 = "PendingReboot"
