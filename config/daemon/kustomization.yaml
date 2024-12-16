@@ -1,2 +1,15 @@
 resources:
-  - daemon.yaml
+- daemon.yaml
+
+configMapGenerator:
+- literals:
+  - serviceAccountName=nic-configuration-operator-controller-manager
+  - configDaemonImage=ghcr.io/mellanox/nic-configuration-operator@sha256:fd62c275c6765b728fe4f18f092a5c3f7372729763a4622ff4883b94d0e5d03f
+  - clusterType=openshift
+  - logLevel=info
+  - releaseVersion=0.1.14
+  name: config
+  options:
+    disableNameSuffixHash: true
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
