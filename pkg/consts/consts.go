@@ -82,4 +82,8 @@ const (
 	Mlx5ModuleVersionPath         = "/sys/bus/pci/drivers/mlx5_core/module/version"
 
 	FwConfigNotAppliedAfterRebootErrorMsg = "firmware configuration failed to apply after reboot"
+
+	ConfigDaemonManifestsPath = "./bindata/manifests/daemon"
+
+	OperatorConfigMapName = "nic-configuration-operator-config"
 )
