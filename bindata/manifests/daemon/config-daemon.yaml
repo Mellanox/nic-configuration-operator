@@ -2,37 +2,50 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: nic-configuration-daemon
-  namespace: {{ .Release.Namespace }}
+  namespace: {{.Namespace}}
   labels:
     app.kubernetes.io/name: nic-configuration-daemon
     app.kubernetes.io/created-by: nic-configuration-operator
     app.kubernetes.io/part-of: nic-configuration-operator
-    {{- include "nic-configuration-operator.labels" . | nindent 4 }}
+  annotations:
+    release.openshift.io/version: "{{.ReleaseVersion}}"
 spec:
   selector:
     matchLabels:
-      control-plane: nic-configuration-daemon
-      {{- include "nic-configuration-operator.selectorLabels" . | nindent 6 }}
+      app: nic-configuration-daemon
   template:
     metadata:
       annotations:
         kubectl.kubernetes.io/default-container: nic-configuration-daemon
+        openshift.io/required-scc: privileged
       labels:
-        control-plane: nic-configuration-daemon
-        {{- include "nic-configuration-operator.selectorLabels" . | nindent 8 }}
+        app: nic-configuration-daemon
+        component: network
+        type: infra
+        openshift.io/component: network
     spec:
-      nodeSelector: {{- toYaml .Values.operator.nodeSelector | nindent 8 }}
-      serviceAccountName: {{ include "nic-configuration-operator.serviceAccountName" . }}
+      serviceAccountName: {{.ServiceAccountName}}
       terminationGracePeriodSeconds: 10
       hostNetwork: true
       hostPID: true
       priorityClassName: system-node-critical
+      {{- if .ImagePullSecrets }}
+      imagePullSecrets:
+      {{- range .ImagePullSecrets }}
+      - name: {{ . }}
+      {{- end }}
+      {{- end }}
+      {{- if .NodeSelector }}
+      nodeSelector: {{.NodeSelector}}
+      {{- end }}
       containers:
-        - image: "{{ .Values.configDaemon.image.repository }}/{{ .Values.configDaemon.image.name }}:{{ .Values.configDaemon.image.tag | default .Chart.AppVersion }}"
+        - image: {{.Image}}
           name: nic-configuration-daemon
           securityContext:
             privileged: true
-          resources: {{- toYaml .Values.configDaemon.resources | nindent 12 }}
+          {{- if .Resources }}
+          resources: {{.Resources}}
+          {{- end }}
           env:
             - name: NODE_NAME
               valueFrom:
@@ -42,9 +55,9 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            {{- if .Values.logLevel}}
+            {{- if .LogLevel }}
             - name: LOG_LEVEL
-              value: {{ .Values.logLevel }}
+              value: {{.LogLevel}}
             {{- end}}
           volumeMounts:
             - name: sys
