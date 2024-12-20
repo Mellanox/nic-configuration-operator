@@ -1,0 +1,10 @@
+apiVersion: v1
+data:
+  clusterType: openshift
+  configDaemonImage: harbor.mellanox.com/cloud-orchestration-dev/nic-configuration-operator-daemon:latest
+  logLevel: info
+  releaseVersion: 1.1.0
+  serviceAccountName: nic-configuration-operator-controller-manager
+kind: ConfigMap
+metadata:
+  name: nic-configuration-operator-config

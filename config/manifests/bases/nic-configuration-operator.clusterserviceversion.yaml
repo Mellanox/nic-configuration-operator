@@ -1,0 +1,59 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: ClusterServiceVersion
+metadata:
+  annotations:
+    alm-examples: '[]'
+    capabilities: Basic Install
+  name: nic-configuration-operator.v0.0.0
+  namespace: placeholder
+spec:
+  apiservicedefinitions: {}
+  customresourcedefinitions:
+    owned:
+    - description: NicConfigurationTemplate is the Schema for the nicconfigurationtemplates
+        API
+      displayName: Nic Configuration Template
+      kind: NicConfigurationTemplate
+      name: nicconfigurationtemplates.configuration.net.nvidia.com
+      version: v1alpha1
+    - description: NicDevice is the Schema for the nicdevices API
+      displayName: Nic Device
+      kind: NicDevice
+      name: nicdevices.configuration.net.nvidia.com
+      version: v1alpha1
+  description: NVIDIA NIC Configuration Operator provides Kubernetes API (Custom Resource
+    Definition) to allow FW configuration on NVIDIA NICs in a coordinated manner.
+    It deploys a configuration daemon on each of the desired nodes to configure NVIDIA
+    NICs there.
+  displayName: NVIDIA NIC Configuration Operator
+  icon:
+  - base64data: ""
+    mediatype: ""
+  install:
+    spec:
+      deployments: null
+    strategy: ""
+  installModes:
+  - supported: true
+    type: OwnNamespace
+  - supported: true
+    type: SingleNamespace
+  - supported: false
+    type: MultiNamespace
+  - supported: false
+    type: AllNamespaces
+  keywords:
+  - node
+  - fw
+  - configuration
+  - nic
+  links:
+  - name: Nic Configuration Operator
+    url: https://github.com/Mellanox/nic-configuration-operator
+  maintainers:
+  - email: nvidia-network-operator-support@nvidia.com
+    name: NVIDIA
+  maturity: alpha
+  provider:
+    name: NVIDIA
+  version: 0.0.0

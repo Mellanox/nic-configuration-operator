@@ -42,6 +42,8 @@ ifeq ($(USE_IMAGE_DIGESTS), true)
 	BUNDLE_GEN_FLAGS += --use-image-digests
 endif
 
+BUNDLE_OCP_VERSIONS=v4.14-v4.17
+
 # Set the Operator SDK version to use. By default, what is installed on the system is used.
 # This is useful for CI or a project to utilize a specific version of the operator-sdk toolkit.
 OPERATOR_SDK_VERSION ?= v1.36.0
@@ -335,7 +337,9 @@ endif
 bundle: manifests kustomize operator-sdk ## Generate bundle manifests and metadata, then validate generated files.
 	$(OPERATOR_SDK) generate kustomize manifests -q
 	cd config/manager && $(KUSTOMIZE) edit set image controller=$(OPERATOR_IMAGE_TAG)
-	$(KUSTOMIZE) build config/manifests | $(OPERATOR_SDK) generate bundle $(BUNDLE_GEN_FLAGS)
+	cd config/daemon && $(KUSTOMIZE) edit set configmap config --from-literal=configDaemonImage=$(CONFIG_DAEMON_IMAGE_TAG) --from-literal=releaseVersion=${VERSION}
+	$(KUSTOMIZE) build config/manifests | $(OPERATOR_SDK) generate bundle $(BUNDLE_GEN_FLAGS) --metadata
+	echo "  com.redhat.openshift.versions: $(BUNDLE_OCP_VERSIONS)" >> bundle/metadata/annotations.yaml
 	$(OPERATOR_SDK) bundle validate ./bundle
 
 .PHONY: bundle-build
@@ -344,7 +348,7 @@ bundle-build: ## Build the bundle image.
 
 .PHONY: bundle-push
 bundle-push: ## Push the bundle image.
-	$(MAKE) docker-push IMG=$(BUNDLE_IMG)
+	$(CONTAINER_TOOL) push $(BUNDLE_IMG)
 
 .PHONY: opm
 OPM = $(LOCALBIN)/opm

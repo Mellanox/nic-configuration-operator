@@ -1,9 +1,30 @@
 apiVersion: configuration.net.nvidia.com/v1alpha1
 kind: NicDevice
 metadata:
-  labels:
-    app.kubernetes.io/name: nic-configuration-operator
-    app.kubernetes.io/managed-by: kustomize
-  name: nicdevice-sample
+  name: co-node-25-101b-mt2232t13210
+  namespace: nic-configuration-operator
 spec:
-  # TODO(user): Add fields here
+  configuration:
+    template:
+      linkType: Ethernet
+      numVfs: 8
+      pciPerformanceOptimized:
+        enabled: true
+status:
+  conditions:
+    - reason: UpdateSuccessful
+      status: "False"
+      type: ConfigUpdateInProgress
+  firmwareVersion: 20.42.1000
+  node: co-node-25
+  partNumber: mcx632312a-hdat
+  ports:
+    - networkInterface: enp4s0f0np0
+      pci: "0000:04:00.0"
+      rdmaInterface: mlx5_0
+    - networkInterface: enp4s0f1np1
+      pci: "0000:04:00.1"
+      rdmaInterface: mlx5_1
+  psid: mt_0000000225
+  serialNumber: mt2232t13210
+  type: 101b

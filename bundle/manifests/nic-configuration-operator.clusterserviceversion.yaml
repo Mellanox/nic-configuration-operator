@@ -1,0 +1,373 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: ClusterServiceVersion
+metadata:
+  annotations:
+    alm-examples: |-
+      [
+        {
+          "apiVersion": "configuration.net.nvidia.com/v1alpha1",
+          "kind": "NicConfigurationTemplate",
+          "metadata": {
+            "name": "connectx6-config",
+            "namespace": "nic-configuration-operator"
+          },
+          "spec": {
+            "nicSelector": {
+              "nicType": "101b",
+              "pciAddresses": [
+                "0000:03:00.0",
+                "“0000:04:00.0”"
+              ],
+              "serialNumbers": [
+                "MT2116X09299"
+              ]
+            },
+            "nodeSelector": {
+              "feature.node.kubernetes.io/pci-15b3.present": "true"
+            },
+            "resetToDefault": false,
+            "template": {
+              "gpuDirectOptimized": {
+                "enabled": true,
+                "env": "Baremetal"
+              },
+              "linkType": "Ethernet",
+              "numVfs": 2,
+              "pciPerformanceOptimized": {
+                "enabled": true,
+                "maxAccOutRead": 44,
+                "maxReadRequest": 4096
+              },
+              "roceOptimized": {
+                "enabled": true,
+                "qos": {
+                  "pfc": "0,0,0,1,0,0,0,0",
+                  "trust": "dscp"
+                }
+              }
+            }
+          }
+        },
+        {
+          "apiVersion": "configuration.net.nvidia.com/v1alpha1",
+          "kind": "NicDevice",
+          "metadata": {
+            "name": "co-node-25-101b-mt2232t13210",
+            "namespace": "nic-configuration-operator"
+          },
+          "spec": {
+            "configuration": {
+              "template": {
+                "linkType": "Ethernet",
+                "numVfs": 8,
+                "pciPerformanceOptimized": {
+                  "enabled": true
+                }
+              }
+            }
+          },
+          "status": {
+            "conditions": [
+              {
+                "reason": "UpdateSuccessful",
+                "status": "False",
+                "type": "ConfigUpdateInProgress"
+              }
+            ],
+            "firmwareVersion": "20.42.1000",
+            "node": "co-node-25",
+            "partNumber": "mcx632312a-hdat",
+            "ports": [
+              {
+                "networkInterface": "enp4s0f0np0",
+                "pci": "0000:04:00.0",
+                "rdmaInterface": "mlx5_0"
+              },
+              {
+                "networkInterface": "enp4s0f1np1",
+                "pci": "0000:04:00.1",
+                "rdmaInterface": "mlx5_1"
+              }
+            ],
+            "psid": "mt_0000000225",
+            "serialNumber": "mt2232t13210",
+            "type": "101b"
+          }
+        }
+      ]
+    capabilities: Basic Install
+    createdAt: "2024-12-20T11:10:42Z"
+    operators.operatorframework.io/builder: operator-sdk-v1.37.0
+    operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
+  name: nic-configuration-operator.v1.1.0
+  namespace: placeholder
+spec:
+  apiservicedefinitions: {}
+  customresourcedefinitions:
+    owned:
+    - description: NicConfigurationTemplate is the Schema for the nicconfigurationtemplates
+        API
+      displayName: Nic Configuration Template
+      kind: NicConfigurationTemplate
+      name: nicconfigurationtemplates.configuration.net.nvidia.com
+      version: v1alpha1
+    - description: NicDevice is the Schema for the nicdevices API
+      displayName: Nic Device
+      kind: NicDevice
+      name: nicdevices.configuration.net.nvidia.com
+      version: v1alpha1
+  description: NVIDIA NIC Configuration Operator provides Kubernetes API (Custom Resource
+    Definition) to allow FW configuration on NVIDIA NICs in a coordinated manner.
+    It deploys a configuration daemon on each of the desired nodes to configure NVIDIA
+    NICs there.
+  displayName: NVIDIA NIC Configuration Operator
+  icon:
+  - base64data: ""
+    mediatype: ""
+  install:
+    spec:
+      clusterPermissions:
+      - rules:
+        - apiGroups:
+          - ""
+          resources:
+          - configmaps
+          verbs:
+          - get
+          - list
+          - watch
+        - apiGroups:
+          - ""
+          resources:
+          - events
+          verbs:
+          - create
+        - apiGroups:
+          - ""
+          resources:
+          - nodes
+          verbs:
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - ""
+          resources:
+          - pods
+          verbs:
+          - list
+        - apiGroups:
+          - ""
+          resources:
+          - pods/eviction
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - apps
+          resources:
+          - daemonsets
+          verbs:
+          - create
+          - delete
+          - get
+          - update
+        - apiGroups:
+          - configuration.net.nvidia.com
+          resources:
+          - nicconfigurationtemplates
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - configuration.net.nvidia.com
+          resources:
+          - nicconfigurationtemplates/finalizers
+          verbs:
+          - update
+        - apiGroups:
+          - configuration.net.nvidia.com
+          resources:
+          - nicconfigurationtemplates/status
+          verbs:
+          - get
+          - patch
+          - update
+        - apiGroups:
+          - configuration.net.nvidia.com
+          resources:
+          - nicdevices
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - configuration.net.nvidia.com
+          resources:
+          - nicdevices/finalizers
+          verbs:
+          - update
+        - apiGroups:
+          - configuration.net.nvidia.com
+          resources:
+          - nicdevices/status
+          verbs:
+          - get
+          - patch
+          - update
+        - apiGroups:
+          - coordination.k8s.io
+          resources:
+          - leases
+          verbs:
+          - create
+          - get
+          - update
+        - apiGroups:
+          - maintenance.nvidia.com
+          resources:
+          - nodemaintenances
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - security.openshift.io
+          resourceNames:
+          - privileged
+          resources:
+          - securitycontextconstraints
+          verbs:
+          - use
+        serviceAccountName: nic-configuration-operator-controller-manager
+      deployments:
+      - label:
+          app.kubernetes.io/managed-by: kustomize
+          app.kubernetes.io/name: nic-configuration-operator
+          control-plane: controller-manager
+        name: nic-configuration-operator-controller-manager
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              control-plane: controller-manager
+          strategy: {}
+          template:
+            metadata:
+              annotations:
+                kubectl.kubernetes.io/default-container: manager
+              labels:
+                control-plane: controller-manager
+            spec:
+              containers:
+              - args:
+                - --secure-listen-address=0.0.0.0:8443
+                - --upstream=http://127.0.0.1:8080/
+                - --logtostderr=true
+                - --v=0
+                image: gcr.io/kubebuilder/kube-rbac-proxy:v0.16.0
+                name: kube-rbac-proxy
+                ports:
+                - containerPort: 8443
+                  name: https
+                  protocol: TCP
+                resources:
+                  limits:
+                    cpu: 500m
+                    memory: 128Mi
+                  requests:
+                    cpu: 5m
+                    memory: 64Mi
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                    - ALL
+              - args:
+                - --health-probe-bind-address=:8081
+                - --metrics-bind-address=127.0.0.1:8080
+                - --leader-elect
+                command:
+                - /manager
+                env:
+                - name: LOG_LEVEL
+                  value: info
+                - name: NAMESPACE
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
+                image: ghcr.io/mellanox/nic-configuration-operator@sha256:bfd4b296eecd0a68293458eec1f11015560ecb91e73f50e7b7b7da6048d554c9
+                livenessProbe:
+                  httpGet:
+                    path: /healthz
+                    port: 8081
+                  initialDelaySeconds: 15
+                  periodSeconds: 20
+                name: manager
+                readinessProbe:
+                  httpGet:
+                    path: /readyz
+                    port: 8081
+                  initialDelaySeconds: 5
+                  periodSeconds: 10
+                resources:
+                  limits:
+                    cpu: 500m
+                    memory: 128Mi
+                  requests:
+                    cpu: 10m
+                    memory: 64Mi
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                    - ALL
+              securityContext:
+                runAsNonRoot: true
+              serviceAccountName: nic-configuration-operator-controller-manager
+              terminationGracePeriodSeconds: 10
+    strategy: deployment
+  installModes:
+  - supported: true
+    type: OwnNamespace
+  - supported: true
+    type: SingleNamespace
+  - supported: false
+    type: MultiNamespace
+  - supported: false
+    type: AllNamespaces
+  keywords:
+  - node
+  - fw
+  - configuration
+  - nic
+  links:
+  - name: Nic Configuration Operator
+    url: https://github.com/Mellanox/nic-configuration-operator
+  maintainers:
+  - email: nvidia-network-operator-support@nvidia.com
+    name: NVIDIA
+  maturity: alpha
+  provider:
+    name: NVIDIA
+  version: 1.1.0
