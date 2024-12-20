@@ -112,7 +112,7 @@ type NicConfigurationTemplateSpec struct {
 // NicConfigurationTemplateStatus defines the observed state of NicConfigurationTemplate
 type NicConfigurationTemplateStatus struct {
 	// NicDevice CRs matching this configuration template
-	NicDevices []string `json:"nicDevices"`
+	NicDevices []string `json:"nicDevices,omitempty"`
 }
 
 //+kubebuilder:object:root=true

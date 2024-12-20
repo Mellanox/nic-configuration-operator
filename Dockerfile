@@ -28,6 +28,7 @@ RUN --mount=type=cache,target=/go/pkg/mod/ GO_GCFLAGS=${GCFLAGS} make build-mana
 FROM gcr.io/distroless/static:nonroot
 WORKDIR /
 COPY --from=builder /workspace/build/manager .
+COPY bindata /bindata
 USER 65532:65532
 
 ENTRYPOINT ["/manager"]
