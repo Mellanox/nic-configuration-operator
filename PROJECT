@@ -8,7 +8,7 @@ layout:
 plugins:
   manifests.sdk.operatorframework.io/v2: {}
   scorecard.sdk.operatorframework.io/v2: {}
-projectName: nic-configuration-operator
+projectName: nvidia-nic-configuration-operator
 repo: github.com/Mellanox/nic-configuration-operator
 resources:
 - api:
