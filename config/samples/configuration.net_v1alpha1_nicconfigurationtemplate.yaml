@@ -1,9 +1,32 @@
 apiVersion: configuration.net.nvidia.com/v1alpha1
 kind: NicConfigurationTemplate
 metadata:
-  labels:
-    app.kubernetes.io/name: nic-configuration-operator
-    app.kubernetes.io/managed-by: kustomize
-  name: nicconfigurationtemplate-sample
+  name: connectx6-config
+  namespace: nic-configuration-operator
 spec:
-  # TODO(user): Add fields here
+  nodeSelector:
+    feature.node.kubernetes.io/pci-15b3.present: "true"
+  nicSelector:
+    # nicType selector is mandatory the rest are optional. Only a single type can be specified.
+    nicType: 101b
+    pciAddresses:
+      - "0000:03:00.0"
+      - “0000:04:00.0”
+    serialNumbers:
+      - "MT2116X09299"
+  resetToDefault: false # if set, template is ignored, device configuration should reset
+  template:
+    numVfs: 2
+    linkType: Ethernet
+    pciPerformanceOptimized:
+      enabled: true
+      maxAccOutRead: 44
+      maxReadRequest: 4096
+    roceOptimized:
+      enabled: true
+      qos:
+        trust: dscp
+        pfc: "0,0,0,1,0,0,0,0"
+    gpuDirectOptimized:
+      enabled: true
+      env: Baremetal
