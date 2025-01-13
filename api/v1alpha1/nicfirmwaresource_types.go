@@ -28,7 +28,7 @@ type NicFirmwareSourceSpec struct {
 // NicFirmwareSourceStatus represents the status of the FW from given sources, e.g. version available for PSIDs
 type NicFirmwareSourceStatus struct {
 	// State represents the firmware processing state
-	// +kubebuilder:validation:Enum=Downloading;Processing;Success;ProcessingFailed;DownloadFailed
+	// +kubebuilder:validation:Enum=Downloading;Processing;Success;ProcessingFailed;DownloadFailed;CacheVerificationFailed
 	// +required
 	State string `json:"state"`
 	// Reason shows an error message if occurred
