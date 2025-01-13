@@ -64,6 +64,7 @@ spec:
                 - Success
                 - ProcessingFailed
                 - DownloadFailed
+                - CacheVerificationFailed
                 type: string
               versions:
                 additionalProperties:
