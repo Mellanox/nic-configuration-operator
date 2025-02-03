@@ -163,7 +163,8 @@ spec:
             description: Defines the observed state of NicConfigurationTemplate
             properties:
               nicDevices:
-                description: NicDevice CRs matching this configuration template
+                description: NicDevice CRs matching this configuration / firmware
+                  template
                 items:
                   type: string
                 type: array

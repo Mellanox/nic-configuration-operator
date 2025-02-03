@@ -90,16 +90,15 @@ spec:
             - template
             type: object
           status:
-            description: NicFirmwareTemplateStatus lists the NicDevice CRs matching
-              the FW template
+            description: NicTemplateStatus defines the observed state of NicConfigurationTemplate
+              and NicFirmwareTemplate
             properties:
               nicDevices:
-                description: NicDevice CRs matching this firmware template
+                description: NicDevice CRs matching this configuration / firmware
+                  template
                 items:
                   type: string
                 type: array
-            required:
-            - nicDevices
             type: object
         type: object
     served: true
