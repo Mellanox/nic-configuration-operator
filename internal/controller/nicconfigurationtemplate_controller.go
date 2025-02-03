@@ -20,10 +20,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"slices"
-	"strings"
 
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
@@ -45,6 +42,10 @@ type NicConfigurationTemplateReconciler struct {
 	client.Client
 	EventRecorder record.EventRecorder
 	Scheme        *runtime.Scheme
+}
+
+type nicConfigurationTemplate struct {
+	template v1alpha1.NicConfigurationTemplate
 }
 
 //+kubebuilder:rbac:groups=configuration.net.nvidia.com,resources=nicconfigurationtemplates,verbs=get;list;watch;create;update;patch;delete
@@ -79,99 +80,23 @@ func (r *NicConfigurationTemplateReconciler) Reconcile(ctx context.Context, req 
 	}
 	log.Log.V(2).Info("Listed templates", "templates", templateList.Items)
 
-	deviceList := &v1alpha1.NicDeviceList{}
-	err = r.List(ctx, deviceList)
-	if err != nil {
-		log.Log.Error(err, "Failed to list NicDevices")
-		return ctrl.Result{}, err
-	}
-	log.Log.V(2).Info("Listed devices", "devices", deviceList.Items)
-
-	nodeList := &v1.NodeList{}
-	err = r.List(ctx, nodeList)
-	if err != nil {
-		log.Log.Error(err, "Failed to list cluster nodes")
-		return ctrl.Result{}, err
-	}
-	log.Log.V(2).Info("Listed nodes", "nodes", nodeList.Items)
-
-	nodeMap := map[string]*v1.Node{}
-	for _, node := range nodeList.Items {
-		nodeMap[node.Name] = &node
-	}
-
-	templates := []*v1alpha1.NicConfigurationTemplate{}
+	templates := []nicTemplate{}
 	for _, template := range templateList.Items {
-		templates = append(templates, &template)
+		templates = append(templates, &nicConfigurationTemplate{template})
 	}
 
-	for _, device := range deviceList.Items {
-		node, ok := nodeMap[device.Status.Node]
-		if !ok {
-			log.Log.Info("device doesn't match any node, skipping", "device", device.Name)
-			continue
-		}
-
-		var matchingTemplates []*v1alpha1.NicConfigurationTemplate
-
-		for _, template := range templates {
-			if !deviceMatchesSelectors(&device, template, node) {
-				r.dropDeviceFromStatus(device.Name, template)
-
-				continue
-			}
-
-			matchingTemplates = append(matchingTemplates, template)
-		}
-
-		if len(matchingTemplates) == 0 {
-			log.Log.V(2).Info("Device doesn't match any configuration template, resetting the spec", "device", device.Name)
-			device.Spec.Configuration = nil
-			err = r.Update(ctx, &device)
-			if err != nil {
-				log.Log.Error(err, "Failed to update device's spec", "device", device)
-				return ctrl.Result{}, err
-			}
-			continue
-		}
-
-		if len(matchingTemplates) > 1 {
-			for _, template := range matchingTemplates {
-				r.dropDeviceFromStatus(device.Name, template)
-			}
-
-			templateNames := []string{}
-			for _, template := range matchingTemplates {
-				templateNames = append(templateNames, template.Name)
-			}
-			joinedTemplateNames := strings.Join(templateNames, ",")
-			err = fmt.Errorf("device matches several configuration templates: %s, %s", device.Name, joinedTemplateNames)
-			log.Log.Error(err, "Device matches several configuration templates, deleting its spec and emitting an error event", "device", device.Name)
-			err = r.handleErrorSeveralMatchingTemplates(ctx, &device, joinedTemplateNames)
-			if err != nil {
-				log.Log.Error(err, "Failed to emit warning about multiple templates matching one device", "templates", joinedTemplateNames)
-				return ctrl.Result{}, err
-			}
-		}
-
-		matchingTemplate := matchingTemplates[0]
-
-		if !slices.Contains(matchingTemplate.Status.NicDevices, device.Name) {
-			matchingTemplate.Status.NicDevices = append(matchingTemplate.Status.NicDevices, device.Name)
-		}
-
-		err = r.applyTemplateToDevice(ctx, &device, matchingTemplate)
-		if err != nil {
-			log.Log.Error(err, "failed to apply template to device", "template", matchingTemplate.Name, "device", device.Name)
-			return ctrl.Result{}, err
-		}
+	err = matchDevicesToTemplates(ctx, r.Client, r.EventRecorder, templates, func(device *v1alpha1.NicDevice) {
+		device.Spec.Configuration = nil
+	})
+	if err != nil {
+		return ctrl.Result{}, err
 	}
 
 	// Try to update template's status with added / deleted devices
 	for _, template := range templates {
-		err = r.Status().Update(ctx, template)
+		err = template.updateStatus(ctx, r.Client)
 		if err != nil {
-			log.Log.Error(err, "failed to update template status", "template", template.Name)
+			log.Log.Error(err, "failed to update template status", "template", template.getName())
 			return ctrl.Result{}, err
 		}
 	}
@@ -179,16 +104,24 @@ func (r *NicConfigurationTemplateReconciler) Reconcile(ctx context.Context, req 
 	return ctrl.Result{}, nil
 }
 
-func (r *NicConfigurationTemplateReconciler) dropDeviceFromStatus(deviceName string, template *v1alpha1.NicConfigurationTemplate) {
-	index := slices.Index(template.Status.NicDevices, deviceName)
-	if index != -1 {
-		// Device no longer matches template, drop it from the template's status
-		template.Status.NicDevices = slices.Delete(template.Status.NicDevices, index, index+1)
-	}
+func (t *nicConfigurationTemplate) getName() string {
+	return t.template.Name
 }
 
-func (r *NicConfigurationTemplateReconciler) applyTemplateToDevice(ctx context.Context, device *v1alpha1.NicDevice, template *v1alpha1.NicConfigurationTemplate) error {
-	log.Log.V(2).Info(fmt.Sprintf("Applying template %s to device %s", template.Name, device.Name))
+func (t *nicConfigurationTemplate) getNodeSelector() map[string]string {
+	return t.template.Spec.NodeSelector
+}
+
+func (t *nicConfigurationTemplate) getNicSelector() *v1alpha1.NicSelectorSpec {
+	return t.template.Spec.NicSelector
+}
+
+func (t *nicConfigurationTemplate) getStatus() *v1alpha1.NicTemplateStatus {
+	return &t.template.Status
+}
+
+func (t *nicConfigurationTemplate) applyToDevice(device *v1alpha1.NicDevice) bool {
+	log.Log.V(2).Info(fmt.Sprintf("Applying template %s to device %s", t.template.Name, device.Name))
 
 	updateSpec := false
 	if device.Spec.Configuration == nil {
@@ -196,87 +129,21 @@ func (r *NicConfigurationTemplateReconciler) applyTemplateToDevice(ctx context.C
 		device.Spec.Configuration = &v1alpha1.NicDeviceConfigurationSpec{}
 	}
 
-	if device.Spec.Configuration.ResetToDefault != template.Spec.ResetToDefault {
+	if device.Spec.Configuration.ResetToDefault != t.template.Spec.ResetToDefault {
 		updateSpec = true
-		device.Spec.Configuration.ResetToDefault = template.Spec.ResetToDefault
+		device.Spec.Configuration.ResetToDefault = t.template.Spec.ResetToDefault
 	}
 
-	if !reflect.DeepEqual(device.Spec.Configuration.Template, template.Spec.Template) {
+	if !reflect.DeepEqual(device.Spec.Configuration.Template, t.template.Spec.Template) {
 		updateSpec = true
-		device.Spec.Configuration.Template = template.Spec.Template.DeepCopy()
+		device.Spec.Configuration.Template = t.template.Spec.Template.DeepCopy()
 	}
 
-	if updateSpec {
-		err := r.Update(ctx, device)
-		if err != nil {
-			log.Log.Error(err, "Failed to update NicDevice spec", "device", device.Name)
-			return err
-		}
-	}
-
-	return nil
+	return updateSpec
 }
 
-func (r *NicConfigurationTemplateReconciler) handleErrorSeveralMatchingTemplates(ctx context.Context, device *v1alpha1.NicDevice, matchingTemplates string) error {
-	r.EventRecorder.Event(device, v1.EventTypeWarning, "SpecError", fmt.Sprintf("Several templates matching this device: %s", matchingTemplates))
-	device.Spec.Configuration = nil
-	return r.Update(ctx, device)
-}
-
-func nodeMatchesTemplate(node *v1.Node, template *v1alpha1.NicConfigurationTemplate) bool {
-	for k, v := range template.Spec.NodeSelector {
-		if nv, ok := node.Labels[k]; ok && nv == v {
-			continue
-		}
-		return false
-	}
-	return true
-}
-
-func deviceMatchesPCISelector(device *v1alpha1.NicDevice, template *v1alpha1.NicConfigurationTemplate) bool {
-	if len(template.Spec.NicSelector.PciAddresses) > 0 {
-		matchesPCI := false
-		for _, port := range device.Status.Ports {
-			if slices.Contains(template.Spec.NicSelector.PciAddresses, port.PCI) {
-				matchesPCI = true
-			}
-		}
-		if !matchesPCI {
-			return false
-		}
-	}
-
-	return true
-}
-
-func deviceMatchesSerialNumberSelector(device *v1alpha1.NicDevice, template *v1alpha1.NicConfigurationTemplate) bool {
-	if len(template.Spec.NicSelector.SerialNumbers) > 0 {
-		if !slices.Contains(template.Spec.NicSelector.SerialNumbers, device.Status.SerialNumber) {
-			return false
-		}
-	}
-
-	return true
-}
-
-func deviceMatchesSelectors(device *v1alpha1.NicDevice, template *v1alpha1.NicConfigurationTemplate, node *v1.Node) bool {
-	if !nodeMatchesTemplate(node, template) {
-		return false
-	}
-
-	if template.Spec.NicSelector.NicType != device.Status.Type {
-		return false
-	}
-
-	if !deviceMatchesPCISelector(device, template) {
-		return false
-	}
-
-	if !deviceMatchesSerialNumberSelector(device, template) {
-		return false
-	}
-
-	return true
+func (t *nicConfigurationTemplate) updateStatus(ctx context.Context, client client.Client) error {
+	return client.Status().Update(ctx, &t.template)
 }
 
 // SetupWithManager sets up the controller with the Manager.

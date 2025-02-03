@@ -147,6 +147,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err = (&controller.NicFirmwareTemplateReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "NicConfigurationTemplate")
+		os.Exit(1)
+	}
+
 	if err = (&controller.NicFirmwareSourceReconciler{
 		Client:              mgr.GetClient(),
 		Scheme:              mgr.GetScheme(),
