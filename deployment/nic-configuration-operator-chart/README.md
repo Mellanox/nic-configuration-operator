@@ -15,6 +15,9 @@ A Helm chart for NIC Configuration Operator
 | configDaemon.resources | object | `{"limits":{"cpu":"500m","memory":"128Mi"},"requests":{"cpu":"10m","memory":"64Mi"}}` | resources and limits for the config daemon |
 | imagePullSecrets | list | `[]` | image pull secrets for both the operator and the config daemon |
 | logLevel | string | `"info"` | log level configuration (debug|info) |
+| nicFirmwareStorage | object | `{"availableStorageSize":"1Gi","storageClassName":"nic-fw-storage-class"}` | settings to enable the NIC Firmware Storage |
+| nicFirmwareStorage.availableStorageSize | string | `"1Gi"` | storage size for the NIC Configuration Operator to request. 1Gi is the default value when not provided |
+| nicFirmwareStorage.storageClassName | string | `"nic-fw-storage-class"` | storage class name to be used to store NIC FW binaries during NIC FW upgrade. If not provided, the NIC FW upgrade feature will be disabled. |
 | operator.affinity | object | `{"nodeAffinity":{"preferredDuringSchedulingIgnoredDuringExecution":[{"preference":{"matchExpressions":[{"key":"node-role.kubernetes.io/master","operator":"Exists"}]},"weight":1},{"preference":{"matchExpressions":[{"key":"node-role.kubernetes.io/control-plane","operator":"Exists"}]},"weight":1}]}}` | node affinity for the operator |
 | operator.image.name | string | `"nic-configuration-operator"` |  |
 | operator.image.repository | string | `"ghcr.io/mellanox"` | repository to use for the operator image |
