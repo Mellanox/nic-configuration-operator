@@ -178,3 +178,13 @@ status:
 
 The NicDevice CRD is created and reconciled by the configuration daemon. The reconciliation logic scheme can be found [here](docs/nic-configuration-reconcile-diagram.png).
 
+## Provisioning a storage class for NIC FW upgrade
+
+To enable the NIC FW upgrade feature, `nicFwStorageClassName` parameter should be provided in the helm chart.
+Firmware binaries will be provisioned by a provisioner controller which will watch for NICFirmwareSource obj and provision the binaries in a shared volume enabled by the given storage class.
+Node agents will need to make sure that the reference NICFirmwareSource object is fully reconciled (status.state == Success) before proceeding with firmware update.
+
+### Example of the storage class deployment
+
+To set up a persistent NFS storage in the cluster, the [example from the CSI NFS Driver repository](https://github.com/kubernetes-csi/csi-driver-nfs/blob/master/deploy/example/nfs-provisioner/README.md) might be used.
+After deploying the NFS server and NFS CSI driver, the [storage class](https://github.com/kubernetes-csi/csi-driver-nfs/blob/master/deploy/example/storageclass-nfs.yaml) should be deployed. The name of the storage class can then be passed to the NIC Configuration Operator helm chart.

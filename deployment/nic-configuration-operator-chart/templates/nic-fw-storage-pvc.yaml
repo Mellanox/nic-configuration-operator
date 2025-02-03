@@ -1,0 +1,14 @@
+{{- if .Values.nicFirmwareStorage.storageClassName }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nic-fw-storage-pvc
+  namespace: {{ .Release.Namespace }}
+spec:
+  storageClassName: {{ .Values.nicFirmwareStorage.storageClassName }}
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ default "1Gi" .Values.nicFirmwareStorage.availableStorageSize}}
+{{- end }}
