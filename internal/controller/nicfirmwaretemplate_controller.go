@@ -1,6 +1,5 @@
 /*
-Copyright 2024.
-
+2025 NVIDIA CORPORATION & AFFILIATES
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -19,7 +18,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"reflect"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -35,39 +33,27 @@ import (
 	v1alpha1 "github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 )
 
-const nicConfigurationTemplateSyncEventName = "nic-configuration-template-sync-event"
+const nicFirmwareTemplateSyncEventName = "nic-firmware-template-sync-event"
 
-// NicConfigurationTemplateReconciler reconciles a NicConfigurationTemplate object
-type NicConfigurationTemplateReconciler struct {
+type nicFirmwareTemplate struct {
+	template v1alpha1.NicFirmwareTemplate
+}
+
+// NicFirmwareTemplateReconciler reconciles a NicFirmwareTemplate object
+type NicFirmwareTemplateReconciler struct {
 	client.Client
 	EventRecorder record.EventRecorder
 	Scheme        *runtime.Scheme
 }
 
-type nicConfigurationTemplate struct {
-	template v1alpha1.NicConfigurationTemplate
-}
-
-//+kubebuilder:rbac:groups=configuration.net.nvidia.com,resources=nicconfigurationtemplates,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=configuration.net.nvidia.com,resources=nicconfigurationtemplates/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=configuration.net.nvidia.com,resources=nicconfigurationtemplates/finalizers,verbs=update
-//+kubebuilder:rbac:groups=configuration.net.nvidia.com,resources=nicdevices/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=configuration.net.nvidia.com,resources=nicdevices,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=configuration.net.nvidia.com,resources=nicdevices/finalizers,verbs=update
-//+kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;update;patch
-//+kubebuilder:rbac:groups="",resources=configmaps,verbs=get
-//+kubebuilder:rbac:groups="",resources=pods,verbs=list
-//+kubebuilder:rbac:groups="",resources=pods/eviction,verbs=create;delete;get;list;patch;update;watch
-//+kubebuilder:rbac:groups=maintenance.nvidia.com,resources=nodemaintenances,verbs=get;list;watch;create;update;patch;delete
-
-// Reconcile reconciles the NicConfigurationTemplate object
-func (r *NicConfigurationTemplateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	if req.Name != nicConfigurationTemplateSyncEventName || req.Namespace != "" {
+// Reconcile reconciles the NicFirmwareTemplate object
+func (r *NicFirmwareTemplateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	if req.Name != nicFirmwareTemplateSyncEventName || req.Namespace != "" {
 		return reconcile.Result{}, nil
 	}
-	log.Log.Info("Reconciling NicConfigurationTemplates")
+	log.Log.Info("Reconciling NicFirmwareTemplates")
 
-	templateList := &v1alpha1.NicConfigurationTemplateList{}
+	templateList := &v1alpha1.NicFirmwareTemplateList{}
 	err := r.List(ctx, templateList)
 	if err != nil {
 		return reconcile.Result{}, err
@@ -76,11 +62,11 @@ func (r *NicConfigurationTemplateReconciler) Reconcile(ctx context.Context, req 
 
 	templates := []nicTemplate{}
 	for _, template := range templateList.Items {
-		templates = append(templates, &nicConfigurationTemplate{template})
+		templates = append(templates, &nicFirmwareTemplate{template})
 	}
 
 	err = matchDevicesToTemplates(ctx, r.Client, r.EventRecorder, templates, func(device *v1alpha1.NicDevice) {
-		device.Spec.Configuration = nil
+		device.Spec.Firmware = nil
 	})
 	if err != nil {
 		return ctrl.Result{}, err
@@ -98,56 +84,54 @@ func (r *NicConfigurationTemplateReconciler) Reconcile(ctx context.Context, req 
 	return ctrl.Result{}, nil
 }
 
-func (t *nicConfigurationTemplate) getName() string {
+func (t *nicFirmwareTemplate) getName() string {
 	return t.template.Name
 }
 
-func (t *nicConfigurationTemplate) getNodeSelector() map[string]string {
+func (t *nicFirmwareTemplate) getNodeSelector() map[string]string {
 	return t.template.Spec.NodeSelector
 }
 
-func (t *nicConfigurationTemplate) getNicSelector() *v1alpha1.NicSelectorSpec {
+func (t *nicFirmwareTemplate) getNicSelector() *v1alpha1.NicSelectorSpec {
 	return t.template.Spec.NicSelector
 }
 
-func (t *nicConfigurationTemplate) getStatus() *v1alpha1.NicTemplateStatus {
+func (t *nicFirmwareTemplate) getStatus() *v1alpha1.NicTemplateStatus {
 	return &t.template.Status
 }
 
-func (t *nicConfigurationTemplate) applyToDevice(device *v1alpha1.NicDevice) bool {
+func (t *nicFirmwareTemplate) applyToDevice(device *v1alpha1.NicDevice) bool {
 	log.Log.V(2).Info(fmt.Sprintf("Applying template %s to device %s", t.template.Name, device.Name))
 
 	updateSpec := false
-	if device.Spec.Configuration == nil {
+
+	if device.Spec.Firmware == nil {
 		updateSpec = true
-		device.Spec.Configuration = &v1alpha1.NicDeviceConfigurationSpec{}
+		device.Spec.Firmware = &v1alpha1.FirmwareTemplateSpec{}
 	}
 
-	if device.Spec.Configuration.ResetToDefault != t.template.Spec.ResetToDefault {
+	if device.Spec.Firmware.NicFirmwareSourceRef != t.template.Spec.Template.NicFirmwareSourceRef ||
+		device.Spec.Firmware.UpdatePolicy != t.template.Spec.Template.UpdatePolicy {
 		updateSpec = true
-		device.Spec.Configuration.ResetToDefault = t.template.Spec.ResetToDefault
-	}
-
-	if !reflect.DeepEqual(device.Spec.Configuration.Template, t.template.Spec.Template) {
-		updateSpec = true
-		device.Spec.Configuration.Template = t.template.Spec.Template.DeepCopy()
+		device.Spec.Firmware.NicFirmwareSourceRef = t.template.Spec.Template.NicFirmwareSourceRef
+		device.Spec.Firmware.UpdatePolicy = t.template.Spec.Template.UpdatePolicy
 	}
 
 	return updateSpec
 }
 
-func (t *nicConfigurationTemplate) updateStatus(ctx context.Context, client client.Client) error {
+func (t *nicFirmwareTemplate) updateStatus(ctx context.Context, client client.Client) error {
 	return client.Status().Update(ctx, &t.template)
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *NicConfigurationTemplateReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	r.EventRecorder = mgr.GetEventRecorderFor("NicConfigurationTemplateReconciler")
+func (r *NicFirmwareTemplateReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	r.EventRecorder = mgr.GetEventRecorderFor("NicFirmwareTemplateReconciler")
 
 	qHandler := func(q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 		q.Add(reconcile.Request{NamespacedName: types.NamespacedName{
 			Namespace: "",
-			Name:      nicConfigurationTemplateSyncEventName,
+			Name:      nicFirmwareTemplateSyncEventName,
 		}})
 	}
 
@@ -178,8 +162,8 @@ func (r *NicConfigurationTemplateReconciler) SetupWithManager(mgr ctrl.Manager) 
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).
-		Watches(&v1alpha1.NicConfigurationTemplate{}, eventHandler).
+		Watches(&v1alpha1.NicFirmwareTemplate{}, eventHandler).
 		Watches(&v1alpha1.NicDevice{}, nicDeviceEventHandler).
-		Named("nicConfigurationTemplateReconciler").
+		Named("nicFirmwareTemplateReconciler").
 		Complete(r)
 }
