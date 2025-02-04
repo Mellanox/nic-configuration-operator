@@ -10,14 +10,6 @@ rules:
   - configmaps
   verbs:
   - get
-  - list
-  - watch
-- apiGroups:
-  - ""
-  resources:
-  - events
-  verbs:
-  - create
 - apiGroups:
   - ""
   resources:
@@ -46,15 +38,6 @@ rules:
   - patch
   - update
   - watch
-- apiGroups:
-  - apps
-  resources:
-  - daemonsets
-  verbs:
-  - create
-  - delete
-  - get
-  - update
 - apiGroups:
   - configuration.net.nvidia.com
   resources:
@@ -108,14 +91,6 @@ rules:
   - patch
   - update
 - apiGroups:
-  - coordination.k8s.io
-  resources:
-  - leases
-  verbs:
-  - create
-  - get
-  - update
-- apiGroups:
   - maintenance.nvidia.com
   resources:
   - nodemaintenances
@@ -127,11 +102,3 @@ rules:
   - patch
   - update
   - watch
-- apiGroups:
-  - security.openshift.io
-  resourceNames:
-  - privileged
-  resources:
-  - securitycontextconstraints
-  verbs:
-  - use
