@@ -31,7 +31,7 @@ jobs:
         with:
           images: ghcr.io/${{ steps.repo_name.outputs.repository }}
       - name: Build and push container image
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@v6
         with:
           push: true
           platforms: linux/amd64,linux/arm64
@@ -39,7 +39,7 @@ jobs:
             ghcr.io/${{ steps.repo_name.outputs.repository }}:latest
           labels: ${{ steps.docker_meta.outputs.labels }}
       - name: Build and push container image
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@v6
         with:
           push: true
           platforms: linux/amd64,linux/arm64
