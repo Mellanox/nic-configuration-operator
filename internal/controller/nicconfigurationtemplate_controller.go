@@ -91,13 +91,11 @@ func (r *NicConfigurationTemplateReconciler) Reconcile(ctx context.Context, req 
 
 	nodeMap := map[string]*v1.Node{}
 	for _, node := range nodeList.Items {
-		node := node
 		nodeMap[node.Name] = &node
 	}
 
 	templates := []*v1alpha1.NicConfigurationTemplate{}
 	for _, template := range templateList.Items {
-		template := template
 		templates = append(templates, &template)
 	}
 
@@ -230,7 +228,7 @@ func nodeMatchesTemplate(node *v1.Node, template *v1alpha1.NicConfigurationTempl
 }
 
 func deviceMatchesPCISelector(device *v1alpha1.NicDevice, template *v1alpha1.NicConfigurationTemplate) bool {
-	if template.Spec.NicSelector.PciAddresses != nil && len(template.Spec.NicSelector.PciAddresses) > 0 {
+	if len(template.Spec.NicSelector.PciAddresses) > 0 {
 		matchesPCI := false
 		for _, port := range device.Status.Ports {
 			if slices.Contains(template.Spec.NicSelector.PciAddresses, port.PCI) {
@@ -246,7 +244,7 @@ func deviceMatchesPCISelector(device *v1alpha1.NicDevice, template *v1alpha1.Nic
 }
 
 func deviceMatchesSerialNumberSelector(device *v1alpha1.NicDevice, template *v1alpha1.NicConfigurationTemplate) bool {
-	if template.Spec.NicSelector.SerialNumbers != nil && len(template.Spec.NicSelector.SerialNumbers) > 0 {
+	if len(template.Spec.NicSelector.SerialNumbers) > 0 {
 		if !slices.Contains(template.Spec.NicSelector.SerialNumbers, device.Status.SerialNumber) {
 			return false
 		}
