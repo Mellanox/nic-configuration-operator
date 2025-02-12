@@ -11,7 +11,7 @@ require (
 	github.com/jaypipes/pcidb v1.0.1
 	github.com/onsi/ginkgo/v2 v2.22.1
 	github.com/onsi/gomega v1.36.2
-	github.com/stretchr/testify v1.9.0
+	github.com/stretchr/testify v1.10.0
 	github.com/vishvananda/netlink v1.3.0
 	go.uber.org/zap v1.26.0
 	k8s.io/api v0.31.0
