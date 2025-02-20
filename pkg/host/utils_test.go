@@ -300,7 +300,7 @@ var _ = Describe("HostUtils", func() {
 			Expect(speed).To(Equal(-1))
 		})
 	})
-	Describe("queryMSTConfig", func() {
+	Describe("queryMLXConfig", func() {
 		var (
 			h        *hostUtils
 			fakeExec *execTesting.FakeExec
@@ -310,7 +310,7 @@ var _ = Describe("HostUtils", func() {
 			fakeExec = &execTesting.FakeExec{}
 
 			// Prepare the fake commands and their outputs
-			// First command: mstconfig -d 0000:03:00.0 q
+			// First command: mlxconfig -d 0000:03:00.0 q
 			cmd1 := &execTesting.FakeCmd{}
 			cmd1.OutputScript = append(cmd1.OutputScript,
 				func() ([]byte, []byte, error) {
@@ -330,7 +330,7 @@ The '*' shows parameters with next value different from default/current value.
 				},
 			)
 
-			// Second command: mstconfig -d 0000:03:00.0 q ESWITCH_HAIRPIN_DESCRIPTORS[0..7]
+			// Second command: mlxconfig -d 0000:03:00.0 q ESWITCH_HAIRPIN_DESCRIPTORS[0..7]
 			cmd2 := &execTesting.FakeCmd{}
 			cmd2.OutputScript = append(cmd2.OutputScript,
 				func() ([]byte, []byte, error) {
@@ -351,12 +351,12 @@ Configurations:                              Default         Current         Nex
 
 			fakeExec.CommandScript = []execTesting.FakeCommandAction{
 				func(cmd string, args ...string) exec.Cmd {
-					Expect(cmd).To(Equal("mstconfig"))
+					Expect(cmd).To(Equal("mlxconfig"))
 					Expect(args).To(Equal([]string{"-d", pciAddress, "-e", "query"}))
 					return cmd1
 				},
 				func(cmd string, args ...string) exec.Cmd {
-					Expect(cmd).To(Equal("mstconfig"))
+					Expect(cmd).To(Equal("mlxconfig"))
 					Expect(args).To(Equal([]string{"-d", pciAddress, "-e", "query", "ESWITCH_HAIRPIN_DESCRIPTORS[0..7]"}))
 					return cmd2
 				},
@@ -367,7 +367,7 @@ Configurations:                              Default         Current         Nex
 			}
 		})
 
-		It("should parse mstconfig output correctly", func() {
+		It("should parse mlxconfig output correctly", func() {
 			query, err := h.QueryNvConfig(context.TODO(), pciAddress)
 			Expect(err).ToNot(HaveOccurred())
 
@@ -409,7 +409,7 @@ Device type:    ConnectX4
 
 			fakeExec.CommandScript = []execTesting.FakeCommandAction{
 				func(cmd string, args ...string) exec.Cmd {
-					Expect(cmd).To(Equal("mstconfig"))
+					Expect(cmd).To(Equal("mlxconfig"))
 					Expect(args).To(Equal([]string{"-d", pciAddress, "-e", "query"}))
 					return cmd1
 				},
@@ -425,18 +425,18 @@ Device type:    ConnectX4
 			Expect(query.NextBootConfig).To(BeEmpty())
 		})
 
-		It("should return error if mstconfig command fails", func() {
+		It("should return error if mlxconfig command fails", func() {
 			// Set the command to return an error
 			cmd1 := &execTesting.FakeCmd{}
 			cmd1.OutputScript = append(cmd1.OutputScript,
 				func() ([]byte, []byte, error) {
-					return nil, nil, fmt.Errorf("mstconfig error")
+					return nil, nil, fmt.Errorf("mlxconfig error")
 				},
 			)
 
 			fakeExec.CommandScript = []execTesting.FakeCommandAction{
 				func(cmd string, args ...string) exec.Cmd {
-					Expect(cmd).To(Equal("mstconfig"))
+					Expect(cmd).To(Equal("mlxconfig"))
 					Expect(args).To(Equal([]string{"-d", pciAddress, "-e", "query"}))
 					return cmd1
 				},
@@ -446,7 +446,7 @@ Device type:    ConnectX4
 
 			_, err := h.QueryNvConfig(context.TODO(), pciAddress)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(Equal("mstconfig error"))
+			Expect(err.Error()).To(Equal("mlxconfig error"))
 		})
 	})
 	Describe("GetMaxReadRequestSize", func() {

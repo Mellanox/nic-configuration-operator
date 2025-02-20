@@ -374,21 +374,21 @@ func (h *hostUtils) GetRDMADeviceName(pciAddr string) string {
 	return rdmaDevices[0]
 }
 
-// queryMSTConfig runs a query on mstconfig to parse out default, current and nextboot configurations
+// queryMLXConfig runs a query on mlxconfig to parse out default, current and nextboot configurations
 // might run recursively to expand array parameters' values
-func (h *hostUtils) queryMSTConfig(ctx context.Context, query types.NvConfigQuery, pciAddr string, additionalParameter string) error {
-	log.Log.Info(fmt.Sprintf("mstconfig -d %s query %s", pciAddr, additionalParameter)) //TODO change verbosity
+func (h *hostUtils) queryMLXConfig(ctx context.Context, query types.NvConfigQuery, pciAddr string, additionalParameter string) error {
+	log.Log.Info(fmt.Sprintf("mlxconfig -d %s query %s", pciAddr, additionalParameter)) //TODO change verbosity
 	valueInBracketsRegex := regexp.MustCompile(`^(.*?)\(([^)]*)\)$`)
 
 	var cmd execUtils.Cmd
 	if additionalParameter == "" {
-		cmd = h.execInterface.CommandContext(ctx, "mstconfig", "-d", pciAddr, "-e", "query")
+		cmd = h.execInterface.CommandContext(ctx, "mlxconfig", "-d", pciAddr, "-e", "query")
 	} else {
-		cmd = h.execInterface.CommandContext(ctx, "mstconfig", "-d", pciAddr, "-e", "query", additionalParameter)
+		cmd = h.execInterface.CommandContext(ctx, "mlxconfig", "-d", pciAddr, "-e", "query", additionalParameter)
 	}
 	output, err := cmd.Output()
 	if err != nil {
-		log.Log.Error(err, "queryMSTConfig(): Failed to run mstconfig", "output", string(output))
+		log.Log.Error(err, "queryMLXConfig(): Failed to run mlxconfig", "output", string(output))
 		return err
 	}
 
@@ -442,7 +442,7 @@ func (h *hostUtils) queryMSTConfig(ctx context.Context, query types.NvConfigQuer
 
 			// If the parameter value is an array, we want to extract values for all indices
 			if strings.HasPrefix(defaultVal, arrayPrefix) {
-				err = h.queryMSTConfig(ctx, query, pciAddr, paramName+strings.TrimPrefix(defaultVal, arrayPrefix))
+				err = h.queryMLXConfig(ctx, query, pciAddr, paramName+strings.TrimPrefix(defaultVal, arrayPrefix))
 				if err != nil {
 					return err
 				}
@@ -486,9 +486,9 @@ func (h *hostUtils) QueryNvConfig(ctx context.Context, pciAddr string) (types.Nv
 
 	query := types.NewNvConfigQuery()
 
-	err := h.queryMSTConfig(ctx, query, pciAddr, "")
+	err := h.queryMLXConfig(ctx, query, pciAddr, "")
 	if err != nil {
-		log.Log.Error(err, "Failed to parse mstconfig query output", "device", pciAddr)
+		log.Log.Error(err, "Failed to parse mlxconfig query output", "device", pciAddr)
 	}
 
 	return query, err
@@ -498,10 +498,10 @@ func (h *hostUtils) QueryNvConfig(ctx context.Context, pciAddr string) (types.Nv
 func (h *hostUtils) SetNvConfigParameter(pciAddr string, paramName string, paramValue string) error {
 	log.Log.Info("HostUtils.SetNvConfigParameter()", "pciAddr", pciAddr, "paramName", paramName, "paramValue", paramValue)
 
-	cmd := h.execInterface.Command("mstconfig", "-d", pciAddr, "--yes", "set", paramName+"="+paramValue)
+	cmd := h.execInterface.Command("mlxconfig", "-d", pciAddr, "--yes", "set", paramName+"="+paramValue)
 	_, err := cmd.Output()
 	if err != nil {
-		log.Log.Error(err, "SetNvConfigParameter(): Failed to run mstconfig")
+		log.Log.Error(err, "SetNvConfigParameter(): Failed to run mlxconfig")
 		return err
 	}
 	return nil
@@ -511,10 +511,10 @@ func (h *hostUtils) SetNvConfigParameter(pciAddr string, paramName string, param
 func (h *hostUtils) ResetNvConfig(pciAddr string) error {
 	log.Log.Info("HostUtils.ResetNvConfig()", "pciAddr", pciAddr)
 
-	cmd := h.execInterface.Command("mstconfig", "-d", pciAddr, "--yes", "reset")
+	cmd := h.execInterface.Command("mlxconfig", "-d", pciAddr, "--yes", "reset")
 	_, err := cmd.Output()
 	if err != nil {
-		log.Log.Error(err, "ResetNvConfig(): Failed to run mstconfig")
+		log.Log.Error(err, "ResetNvConfig(): Failed to run mlxconfig")
 		return err
 	}
 	return nil
