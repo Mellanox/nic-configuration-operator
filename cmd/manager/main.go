@@ -37,6 +37,7 @@ import (
 
 	configurationnetv1alpha1 "github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/internal/controller"
+	"github.com/Mellanox/nic-configuration-operator/pkg/firmware"
 	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 	"github.com/Mellanox/nic-configuration-operator/pkg/version"
 	//+kubebuilder:scaffold:imports
@@ -143,6 +144,15 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "NicConfigurationTemplate")
+		os.Exit(1)
+	}
+
+	if err = (&controller.NicFirmwareSourceReconciler{
+		Client:              mgr.GetClient(),
+		Scheme:              mgr.GetScheme(),
+		FirmwareProvisioner: firmware.NewFirmwareProvisioner(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "NicFirmwareSource")
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder
