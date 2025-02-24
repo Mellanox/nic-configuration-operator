@@ -186,7 +186,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			Expect(k8sClient.Status().Update(ctx, device)).To(Succeed())
 			Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
 
-			err := reconciler.updateDeviceStatusCondition(ctx, device, "TestReason", metav1.ConditionTrue, "test-message")
+			err := reconciler.updateConfigInProgressStatusCondition(ctx, device, "TestReason", metav1.ConditionTrue, "test-message")
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func() []metav1.Condition {
@@ -201,7 +201,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			}))
 
 			Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
-			err = reconciler.updateDeviceStatusCondition(ctx, device, "AnotherTestReason", metav1.ConditionFalse, "")
+			err = reconciler.updateConfigInProgressStatusCondition(ctx, device, "AnotherTestReason", metav1.ConditionFalse, "")
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func() []metav1.Condition {
