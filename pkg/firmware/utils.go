@@ -19,6 +19,7 @@ package firmware
 import (
 	"archive/zip"
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"io/fs"
@@ -43,6 +44,9 @@ type FirmwareUtils interface {
 	GetFirmwareVersionAndPSID(firmwareBinaryPath string) (string, string, error)
 	// CleanupDirectory deletes any file inside a root directory except for allowedSet. Empty directories are cleaned up as well at the end
 	CleanupDirectory(root string, allowedSet map[string]struct{}) error
+	// BurnNicFirmware burns the requested firmware on the requested device
+	// Operation can be long, require context to be able to terminate by timeout
+	BurnNicFirmware(ctx context.Context, pciAddress, fwPath string) error
 }
 
 type utils struct {
@@ -191,6 +195,7 @@ func (u utils) GetFirmwareVersionAndPSID(firmwareBinaryPath string) (string, str
 // CleanupDirectory deletes any file inside a root directory except for allowedSet. Empty directories are cleaned up as well at the end
 func (u utils) CleanupDirectory(root string, allowedSet map[string]struct{}) error {
 	log.Log.V(2).Info("FirmwareUtils.CleanupDirectory()", "root", root, "allowedSet", allowedSet)
+	log.Log.Info("Cleaning up cache directory", "cacheDir", root)
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -264,6 +269,20 @@ func (u utils) removeEmptyDirs(dir string) error {
 	return nil
 }
 
+// BurnNicFirmware burns the requested firmware on the requested device
+// Operation can be long, require context to be able to terminate by timeout
+func (u utils) BurnNicFirmware(ctx context.Context, pciAddress, fwPath string) error {
+	log.Log.V(2).Info("FirmwareUtils.BurnNicFirmware()", "pciAddress", pciAddress, "fwPath", fwPath)
+
+	cmd := u.execInterface.CommandContext(ctx, "mstflint", "--device", pciAddress, "--image", fwPath, "--yes", "burn")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Log.Error(err, "BurnNicFirmware(): Failed to run mstflint", "output", output)
+		return err
+	}
+	return nil
+}
+
 func newFirmwareUtils() FirmwareUtils {
 	return utils{execInterface: execUtils.New()}
 }
@@ -281,4 +300,43 @@ func createDirIfNotExists(path string) error {
 	}
 
 	return nil
+}
+
+// copyFile copies a file from src to dst.
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("opening source file: %w", err)
+	}
+	defer func() {
+		cerr := in.Close()
+		if cerr != nil {
+			err = cerr
+		}
+	}()
+
+	// Create the destination file for writing.
+	out, err := os.Create(dst)
+	if err != nil {
+		return fmt.Errorf("creating destination file: %w", err)
+	}
+	// Ensure the file is closed and capture any error.
+	defer func() {
+		cerr := out.Close()
+		if cerr != nil {
+			err = cerr
+		}
+	}()
+
+	// Copy the file content from in to out.
+	if _, err = io.Copy(out, in); err != nil {
+		return fmt.Errorf("copying file: %w", err)
+	}
+
+	// Optionally sync to flush write buffers.
+	if err = out.Sync(); err != nil {
+		return fmt.Errorf("syncing file: %w", err)
+	}
+
+	return err
 }
