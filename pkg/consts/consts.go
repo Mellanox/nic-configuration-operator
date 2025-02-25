@@ -87,6 +87,8 @@ const (
 	NicFirmwareBinariesFolder      = "firmware-binaries"
 	NicFirmwareBinaryFileExtension = ".bin"
 
+	TempDir = "/tmp"
+
 	// FirmwareSourceDownloadingStatus is set when the FW binary archives are being downloaded
 	FirmwareSourceDownloadingStatus = "Downloading"
 	// FirmwareSourceDownloadFailedStatus is set when the FW binary archives download failed with an error
