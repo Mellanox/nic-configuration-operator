@@ -18,6 +18,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -71,11 +72,11 @@ type nicDeviceConfigurationStatus struct {
 	device                 *v1alpha1.NicDevice
 	nvConfigUpdateRequired bool
 	rebootRequired         bool
-	lastStageError         error
 }
 
 // Reconcile reconciles the NicConfigurationTemplate object
 func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	// Get only the devices with non-empty spec to reconcile
 	configStatuses, err := r.getDevices(ctx)
 	if err != nil {
 		log.Log.Error(err, "failed to get devices to reconcile")
@@ -92,7 +93,9 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, nil
 	}
 
-	err = r.handleSpecValidation(ctx, configStatuses)
+	log.Log.V(2).Info(fmt.Sprintf("reconciling %d NicDevices", len(configStatuses)))
+
+	err = runInParallel(ctx, configStatuses, r.handleConfigurationSpecValidation)
 	if err != nil {
 		log.Log.Error(err, "failed to validate device's spec")
 		return ctrl.Result{}, err
@@ -110,7 +113,9 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			return result, nil
 		}
 
-		err = r.applyNvConfig(ctx, configStatuses)
+		log.Log.V(2).Info("maintenance allowed, applying nv config")
+
+		err = runInParallel(ctx, configStatuses, r.applyNvConfig)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -121,10 +126,12 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	if !configStatuses.nvConfigReadyForAll() {
+		log.Log.V(2).Info("nv config not ready for some devices, requeue")
 		return ctrl.Result{Requeue: true, RequeueAfter: requeueTime}, nil
 	}
 
-	err = r.applyRuntimeConfig(ctx, configStatuses)
+	log.Log.V(2).Info("applying runtime config")
+	err = runInParallel(ctx, configStatuses, r.applyRuntimeConfig)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -133,6 +140,7 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return r.handleReboot(ctx, configStatuses)
 	}
 
+	log.Log.V(2).Info("all configuration are successful, releasing maintenance")
 	err = r.MaintenanceManager.ReleaseMaintenance(ctx)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -141,6 +149,8 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	return ctrl.Result{}, nil
 }
 
+// getDevices lists all the NicDevice objects from this node and filters those with non-empty specs,
+// updates relevant status conditions if configuration or firmware specs are empty
 func (r *NicDeviceReconciler) getDevices(ctx context.Context) (nicDeviceConfigurationStatuses, error) {
 	devices := &v1alpha1.NicDeviceList{}
 
@@ -152,23 +162,13 @@ func (r *NicDeviceReconciler) getDevices(ctx context.Context) (nicDeviceConfigur
 		return nil, err
 	}
 
-	if len(devices.Items) == 0 {
-		err = r.MaintenanceManager.ReleaseMaintenance(ctx)
-		if err != nil {
-			log.Log.Error(err, "failed to release maintenance")
-			return nil, err
-		}
-		// Nothing to reconcile
-		return nil, nil
-	}
-
 	configStatuses := nicDeviceConfigurationStatuses{}
 
 	for i, device := range devices.Items {
 		if device.Spec.Configuration == nil {
 			statusCondition := meta.FindStatusCondition(device.Status.Conditions, consts.ConfigUpdateInProgressCondition)
 			if statusCondition.Reason != consts.DeviceConfigSpecEmptyReason {
-				err = r.updateDeviceStatusCondition(ctx, &device, consts.DeviceConfigSpecEmptyReason, metav1.ConditionFalse, "")
+				err = r.updateConfigInProgressStatusCondition(ctx, &device, consts.DeviceConfigSpecEmptyReason, metav1.ConditionFalse, "")
 				if err != nil {
 					log.Log.Error(err, "failed to update status condition", "device", device.Name)
 					return nil, err
@@ -207,87 +207,89 @@ func (r *NicDeviceReconciler) ensureMaintenance(ctx context.Context) (ctrl.Resul
 	return ctrl.Result{}, nil
 }
 
-// applyRuntimeConfig applies each device's runtime spec in parallel
-// if update is successful, applies status condition UpdateSuccessful, otherwise RuntimeConfigUpdateFailed
-// if rebootRequired, sets status condition PendingReboot
-// if status.rebootRequired == true, skips the device
-// returns nil if all devices' config updates were successful, error otherwise
-func (r *NicDeviceReconciler) applyRuntimeConfig(ctx context.Context, statuses nicDeviceConfigurationStatuses) error {
+// runInParallel runs a given function in parallel for each of the nicDevice statuses
+// returns an error if at least one status holds an error, nil otherwise
+func runInParallel(ctx context.Context, statuses nicDeviceConfigurationStatuses, f func(ctx context.Context, status *nicDeviceConfigurationStatus) error) error {
 	var wg sync.WaitGroup
+
+	observedErrors := make([]error, len(statuses))
 
 	for i := 0; i < len(statuses); i++ {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
-
-			status := statuses[index]
-			status.lastStageError = nil
-			if status.rebootRequired {
-				return
-			}
-
-			lastAppliedState, found := status.device.Annotations[consts.LastAppliedStateAnnotation]
-			if found {
-				specJson, err := json.Marshal(status.device.Spec)
-				if err != nil {
-					status.lastStageError = err
-					return
-				}
-
-				if string(specJson) != lastAppliedState {
-					log.Log.V(2).Info("last applied state differs, reboot required", "device", status.device.Name)
-					status.rebootRequired = true
-
-					err := r.updateDeviceStatusCondition(ctx, status.device, consts.PendingRebootReason, metav1.ConditionTrue, "")
-					if err != nil {
-						status.lastStageError = err
-						return
-					}
-
-					return
-				}
-			}
-
-			err := r.HostManager.ApplyDeviceRuntimeSpec(statuses[index].device)
-			if err != nil {
-				statuses[index].lastStageError = err
-				err = r.updateDeviceStatusCondition(ctx, status.device, consts.RuntimeConfigUpdateFailedReason, metav1.ConditionFalse, err.Error())
-				if err != nil {
-					log.Log.Error(err, "failed to update device status condition", "device", status.device.Name)
-				}
-				return
-			}
-
-			specJson, err := json.Marshal(status.device.Spec)
-			if err != nil {
-				status.lastStageError = err
-				return
-			}
-
-			if status.device.Annotations == nil {
-				status.device.SetAnnotations(make(map[string]string))
-			}
-			status.device.Annotations[consts.LastAppliedStateAnnotation] = string(specJson)
-			err = r.Update(ctx, status.device)
-			if err != nil {
-				status.lastStageError = err
-				return
-			}
-
-			err = r.updateDeviceStatusCondition(ctx, status.device, consts.UpdateSuccessfulReason, metav1.ConditionFalse, "")
-			if err != nil {
-				status.lastStageError = err
-				return
-			}
+			err := f(ctx, statuses[index])
+			observedErrors[index] = err
 		}(i)
 	}
 
 	wg.Wait()
 
-	for _, status := range statuses {
-		if status.lastStageError != nil {
-			return status.lastStageError
+	for _, observedErr := range observedErrors {
+		if observedErr != nil {
+			return observedErr
 		}
+	}
+
+	return nil
+}
+
+// applyRuntimeConfig applies device's runtime spec
+// if update is successful, applies status condition UpdateSuccessful, otherwise RuntimeConfigUpdateFailed
+// if rebootRequired, sets status condition PendingReboot
+// if status.rebootRequired == true, skips the device
+// returns nil if device's config update was successful, error otherwise
+func (r *NicDeviceReconciler) applyRuntimeConfig(ctx context.Context, status *nicDeviceConfigurationStatus) error {
+	if status.rebootRequired {
+		return nil
+	}
+
+	lastAppliedState, found := status.device.Annotations[consts.LastAppliedStateAnnotation]
+	if found {
+		specJson, err := json.Marshal(status.device.Spec)
+		if err != nil {
+			return err
+		}
+
+		if string(specJson) != lastAppliedState {
+			log.Log.V(2).Info("last applied state differs, reboot required", "device", status.device.Name)
+			status.rebootRequired = true
+
+			err := r.updateConfigInProgressStatusCondition(ctx, status.device, consts.PendingRebootReason, metav1.ConditionTrue, "")
+			if err != nil {
+				return err
+			}
+
+			return nil
+		}
+	}
+
+	err := r.HostManager.ApplyDeviceRuntimeSpec(status.device)
+	if err != nil {
+		updateErr := r.updateConfigInProgressStatusCondition(ctx, status.device, consts.RuntimeConfigUpdateFailedReason, metav1.ConditionFalse, err.Error())
+		if updateErr != nil {
+			log.Log.Error(err, "failed to update device status condition", "device", status.device.Name)
+		}
+		return err
+	}
+
+	specJson, err := json.Marshal(status.device.Spec)
+	if err != nil {
+		return err
+	}
+
+	if status.device.Annotations == nil {
+		status.device.SetAnnotations(make(map[string]string))
+	}
+	status.device.Annotations[consts.LastAppliedStateAnnotation] = string(specJson)
+	err = r.Update(ctx, status.device)
+	if err != nil {
+		return err
+	}
+
+	err = r.updateConfigInProgressStatusCondition(ctx, status.device, consts.UpdateSuccessfulReason, metav1.ConditionFalse, "")
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -298,27 +300,19 @@ func (r *NicDeviceReconciler) applyRuntimeConfig(ctx context.Context, statuses n
 // returns true if requeue of the reconcile request is required, false otherwise
 // return err if encountered an error while performing maintenance scheduling / reboot
 func (r *NicDeviceReconciler) handleReboot(ctx context.Context, statuses nicDeviceConfigurationStatuses) (ctrl.Result, error) {
-	err := r.MaintenanceManager.ScheduleMaintenance(ctx)
-	if err != nil {
-		log.Log.Error(err, "failed to schedule maintenance for node")
-		return ctrl.Result{}, err
-	}
+	log.Log.V(2).Info("reboot required")
 
-	maintenanceAllowed, err := r.MaintenanceManager.MaintenanceAllowed(ctx)
-	if err != nil {
-		log.Log.Error(err, "failed to get maintenance status")
-		return ctrl.Result{}, err
-	}
-	if !maintenanceAllowed {
-		// Maintenance not yet allowed, waiting until then
-		return ctrl.Result{RequeueAfter: requeueTime}, nil
+	if result, err := r.ensureMaintenance(ctx); result.RequeueAfter != 0 || err != nil {
+		return result, err
 	}
 
 	// We need to strip last applied state annotation before reboot as it resets the runtime configuration
-	err = r.stripLastAppliedStateAnnotations(ctx, statuses)
+	err := runInParallel(ctx, statuses, r.stripLastAppliedStateAnnotation)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+
+	log.Log.V(2).Info("maintenance allowed, scheduling reboot")
 
 	err = r.MaintenanceManager.Reboot()
 	if err != nil {
@@ -328,198 +322,139 @@ func (r *NicDeviceReconciler) handleReboot(ctx context.Context, statuses nicDevi
 	return ctrl.Result{}, nil
 }
 
-// stripLastAppliedStateAnnotations deletes the consts.LastAppliedStateAnnotation from each device in parallel
-// returns error if at least one annotation update failed
-func (r *NicDeviceReconciler) stripLastAppliedStateAnnotations(ctx context.Context, statuses nicDeviceConfigurationStatuses) error {
-	var wg sync.WaitGroup
-
-	for i := 0; i < len(statuses); i++ {
-		wg.Add(1)
-		go func(index int) {
-			defer wg.Done()
-
-			status := statuses[index]
-			status.lastStageError = nil
-
-			annotations := status.device.GetAnnotations()
-			if _, found := annotations[consts.LastAppliedStateAnnotation]; !found {
-				return
-			}
-
-			delete(annotations, consts.LastAppliedStateAnnotation)
-			status.device.SetAnnotations(annotations)
-			status.lastStageError = r.Update(ctx, status.device)
-		}(i)
+// stripLastAppliedStateAnnotation deletes the consts.LastAppliedStateAnnotation from device
+// returns error if annotation update failed
+func (r *NicDeviceReconciler) stripLastAppliedStateAnnotation(ctx context.Context, status *nicDeviceConfigurationStatus) error {
+	annotations := status.device.GetAnnotations()
+	if _, found := annotations[consts.LastAppliedStateAnnotation]; !found {
+		return nil
 	}
 
-	wg.Wait()
-
-	for _, status := range statuses {
-		if status.lastStageError != nil {
-			return status.lastStageError
-		}
-	}
-
-	return nil
+	delete(annotations, consts.LastAppliedStateAnnotation)
+	status.device.SetAnnotations(annotations)
+	return r.Update(ctx, status.device)
 }
 
-// applyNvConfig applies each device's non-volatile spec in parallel
+// applyNvConfig applies device's non-volatile spec
 // if update is correct, applies status condition PendingReboot, otherwise NonVolatileConfigUpdateFailed
 // sets rebootRequired flags for each device's configuration status
 // if status.nvConfigUpdateRequired == false, skips the device
-// returns nil if all devices' config updates were successful, error otherwise
-func (r *NicDeviceReconciler) applyNvConfig(ctx context.Context, statuses nicDeviceConfigurationStatuses) error {
-	var wg sync.WaitGroup
-
-	for i := 0; i < len(statuses); i++ {
-		wg.Add(1)
-		go func(index int) {
-			defer wg.Done()
-
-			status := statuses[index]
-			status.lastStageError = nil
-			if !status.nvConfigUpdateRequired {
-				return
-			}
-
-			rebootRequired, err := r.HostManager.ApplyDeviceNvSpec(ctx, statuses[index].device)
-			if err != nil {
-				statuses[index].lastStageError = err
-				if types.IsIncorrectSpecError(err) {
-					err = r.updateDeviceStatusCondition(ctx, status.device, consts.IncorrectSpecReason, metav1.ConditionFalse, err.Error())
-					if err != nil {
-						log.Log.Error(err, "failed to update device status condition", "device", status.device.Name)
-					}
-				} else {
-					err = r.updateDeviceStatusCondition(ctx, status.device, consts.NonVolatileConfigUpdateFailedReason, metav1.ConditionFalse, err.Error())
-					if err != nil {
-						log.Log.Error(err, "failed to update device status condition", "device", status.device.Name)
-					}
-				}
-			}
-			err = r.updateDeviceStatusCondition(ctx, status.device, consts.PendingRebootReason, metav1.ConditionTrue, "")
-			if err != nil {
-				status.lastStageError = err
-			}
-
-			statuses[index].rebootRequired = rebootRequired
-		}(i)
+// returns nil if config update was successful, error otherwise
+func (r *NicDeviceReconciler) applyNvConfig(ctx context.Context, status *nicDeviceConfigurationStatus) error {
+	if !status.nvConfigUpdateRequired {
+		return nil
 	}
 
-	wg.Wait()
-
-	for _, status := range statuses {
-		if status.lastStageError != nil {
-			return status.lastStageError
+	rebootRequired, err := r.HostManager.ApplyDeviceNvSpec(ctx, status.device)
+	if err != nil {
+		if types.IsIncorrectSpecError(err) {
+			updateErr := r.updateConfigInProgressStatusCondition(ctx, status.device, consts.IncorrectSpecReason, metav1.ConditionFalse, err.Error())
+			if updateErr != nil {
+				log.Log.Error(err, "failed to update device status condition", "device", status.device.Name)
+			}
+		} else {
+			updateErr := r.updateConfigInProgressStatusCondition(ctx, status.device, consts.NonVolatileConfigUpdateFailedReason, metav1.ConditionFalse, err.Error())
+			if updateErr != nil {
+				log.Log.Error(err, "failed to update device status condition", "device", status.device.Name)
+			}
 		}
+		return err
 	}
+	err = r.updateConfigInProgressStatusCondition(ctx, status.device, consts.PendingRebootReason, metav1.ConditionTrue, "")
+	if err != nil {
+		return err
+	}
+
+	status.rebootRequired = rebootRequired
 
 	return nil
 }
 
-// handleSpecValidation validates each device's spec in parallel
+// handleConfigurationSpecValidation validates device's configuration spec
 // if spec is correct, applies status condition UpdateStarted, otherwise IncorrectSpec
 // sets nvConfigUpdateRequired and rebootRequired flags for each device's configuration status
-// returns nil if all devices' specs are correct, error otherwise
-func (r *NicDeviceReconciler) handleSpecValidation(ctx context.Context, statuses nicDeviceConfigurationStatuses) error {
-	var wg sync.WaitGroup
-
-	for i := 0; i < len(statuses); i++ {
-		wg.Add(1)
-		go func(index int) {
-			defer wg.Done()
-			status := statuses[index]
-
-			nvConfigUpdateRequired, rebootRequired, err := r.HostManager.ValidateDeviceNvSpec(ctx, status.device)
-			log.Log.V(2).Info("nv spec validation complete for device", "device", status.device.Name, "nvConfigUpdateRequired", nvConfigUpdateRequired, "rebootRequired", rebootRequired)
-			if err != nil {
-				log.Log.Error(err, "failed to validate spec for device", "device", status.device.Name)
-				status.lastStageError = err
-				if types.IsIncorrectSpecError(err) {
-					err = r.updateDeviceStatusCondition(ctx, status.device, consts.IncorrectSpecReason, metav1.ConditionFalse, err.Error())
-					if err != nil {
-						log.Log.Error(err, "failed to update device status condition", "device", status.device.Name)
-					}
-				} else {
-					err = r.updateDeviceStatusCondition(ctx, status.device, consts.SpecValidationFailed, metav1.ConditionFalse, err.Error())
-					if err != nil {
-						log.Log.Error(err, "failed to update device status condition", "device", status.device.Name)
-					}
-				}
+// returns nil if specs is correct, error otherwise
+func (r *NicDeviceReconciler) handleConfigurationSpecValidation(ctx context.Context, status *nicDeviceConfigurationStatus) error {
+	nvConfigUpdateRequired, rebootRequired, err := r.HostManager.ValidateDeviceNvSpec(ctx, status.device)
+	log.Log.V(2).Info("nv spec validation complete for device", "device", status.device.Name, "nvConfigUpdateRequired", nvConfigUpdateRequired, "rebootRequired", rebootRequired)
+	if err != nil {
+		log.Log.Error(err, "failed to validate spec for device", "device", status.device.Name)
+		if types.IsIncorrectSpecError(err) {
+			updateError := r.updateConfigInProgressStatusCondition(ctx, status.device, consts.IncorrectSpecReason, metav1.ConditionFalse, err.Error())
+			if updateError != nil {
+				log.Log.Error(err, "failed to update device status condition", "device", status.device.Name)
 			}
-
-			status.nvConfigUpdateRequired = nvConfigUpdateRequired
-			status.rebootRequired = rebootRequired
-
-			if nvConfigUpdateRequired {
-				log.Log.V(2).Info("update started for device", "device", status.device.Name)
-				err = r.updateDeviceStatusCondition(ctx, status.device, consts.UpdateStartedReason, metav1.ConditionTrue, "")
-				if err != nil {
-					status.lastStageError = err
-				}
-			} else if rebootRequired {
-				// There might be a case where FW config didn't apply after a reboot because of some error in FW. In this case
-				// we don't want the node to be kept in a reboot loop (FW configured -> reboot -> Config was not applied -> FW configured -> etc.).
-				// To break the reboot loop, we should compare the last time the status was changed to PendingReboot to the node's uptime.
-				// If the node started after the status was changed, we assume the node was rebooted and the config couldn't apply.
-				// In this case, we indicate the error to the user with the status change and emit an error event.
-				statusCondition := meta.FindStatusCondition(status.device.Status.Conditions, consts.ConfigUpdateInProgressCondition)
-				if statusCondition == nil {
-					return
-				}
-
-				switch statusCondition.Reason {
-				case consts.PendingRebootReason:
-					// We need to determine, whether a reboot has happened since the PendingReboot status has been set
-					uptime, err := r.HostUtils.GetHostUptimeSeconds()
-					if err != nil {
-						status.lastStageError = err
-						return
-					}
-
-					sinceStatusUpdate := time.Since(statusCondition.LastTransitionTime.Time)
-
-					// If more time has passed since boot than since the status update, the reboot hasn't happened yet
-					if uptime > sinceStatusUpdate {
-						return
-					}
-
-					log.Log.Info("nv config failed to update after reboot for device", "device", status.device.Name)
-					r.EventRecorder.Event(status.device, v1.EventTypeWarning, consts.FirmwareError, consts.FwConfigNotAppliedAfterRebootErrorMsg)
-					err = r.updateDeviceStatusCondition(ctx, status.device, consts.FirmwareError, metav1.ConditionFalse, consts.FwConfigNotAppliedAfterRebootErrorMsg)
-					if err != nil {
-						status.lastStageError = err
-					}
-
-					fallthrough
-				case consts.FirmwareError:
-					status.nvConfigUpdateRequired = false
-					status.rebootRequired = false
-					status.lastStageError = errors.New(consts.FwConfigNotAppliedAfterRebootErrorMsg)
-				default:
-					// If reboot hasn't happened yet, proceed as normal and set PendingReboot status
-					log.Log.V(2).Info("reboot pending for device", "device", status.device.Name)
-					err = r.updateDeviceStatusCondition(ctx, status.device, consts.PendingRebootReason, metav1.ConditionTrue, "")
-					if err != nil {
-						status.lastStageError = err
-					}
-				}
+		} else {
+			updateError := r.updateConfigInProgressStatusCondition(ctx, status.device, consts.SpecValidationFailed, metav1.ConditionFalse, err.Error())
+			if updateError != nil {
+				log.Log.Error(err, "failed to update device status condition", "device", status.device.Name)
 			}
-		}(i)
+		}
+
+		return err
 	}
 
-	wg.Wait()
+	status.nvConfigUpdateRequired = nvConfigUpdateRequired
+	status.rebootRequired = rebootRequired
 
-	for _, status := range statuses {
-		if status.lastStageError != nil {
-			return status.lastStageError
+	if nvConfigUpdateRequired {
+		log.Log.V(2).Info("update started for device", "device", status.device.Name)
+		err = r.updateConfigInProgressStatusCondition(ctx, status.device, consts.UpdateStartedReason, metav1.ConditionTrue, "")
+		if err != nil {
+			return err
+		}
+	} else if rebootRequired {
+		// There might be a case where FW config didn't apply after a reboot because of some error in FW. In this case
+		// we don't want the node to be kept in a reboot loop (FW configured -> reboot -> Config was not applied -> FW configured -> etc.).
+		// To break the reboot loop, we should compare the last time the status was changed to PendingReboot to the node's uptime.
+		// If the node started after the status was changed, we assume the node was rebooted and the config couldn't apply.
+		// In this case, we indicate the error to the user with the status change and emit an error event.
+		statusCondition := meta.FindStatusCondition(status.device.Status.Conditions, consts.ConfigUpdateInProgressCondition)
+		if statusCondition == nil {
+			return nil
+		}
+
+		switch statusCondition.Reason {
+		case consts.PendingRebootReason:
+			// We need to determine, whether a reboot has happened since the PendingReboot status has been set
+			uptime, err := r.HostUtils.GetHostUptimeSeconds()
+			if err != nil {
+				return err
+			}
+
+			sinceStatusUpdate := time.Since(statusCondition.LastTransitionTime.Time)
+
+			// If more time has passed since boot than since the status update, the reboot hasn't happened yet
+			if uptime > sinceStatusUpdate {
+				return nil
+			}
+
+			log.Log.Info("nv config failed to update after reboot for device", "device", status.device.Name)
+			r.EventRecorder.Event(status.device, v1.EventTypeWarning, consts.FirmwareError, consts.FwConfigNotAppliedAfterRebootErrorMsg)
+			err = r.updateConfigInProgressStatusCondition(ctx, status.device, consts.FirmwareError, metav1.ConditionFalse, consts.FwConfigNotAppliedAfterRebootErrorMsg)
+			if err != nil {
+				return err
+			}
+
+			fallthrough
+		case consts.FirmwareError:
+			status.nvConfigUpdateRequired = false
+			status.rebootRequired = false
+			return errors.New(consts.FwConfigNotAppliedAfterRebootErrorMsg)
+		default:
+			// If reboot hasn't happened yet, proceed as normal and set PendingReboot status
+			log.Log.V(2).Info("reboot pending for device", "device", status.device.Name)
+			err = r.updateConfigInProgressStatusCondition(ctx, status.device, consts.PendingRebootReason, metav1.ConditionTrue, "")
+			if err != nil {
+				return err
+			}
 		}
 	}
 
 	return nil
 }
 
-func (r *NicDeviceReconciler) updateDeviceStatusCondition(ctx context.Context, device *v1alpha1.NicDevice, reason string, status metav1.ConditionStatus, message string) error {
+func (r *NicDeviceReconciler) updateConfigInProgressStatusCondition(ctx context.Context, device *v1alpha1.NicDevice, reason string, status metav1.ConditionStatus, message string) error {
 	cond := metav1.Condition{
 		Type:               consts.ConfigUpdateInProgressCondition,
 		Status:             status,
@@ -644,6 +579,9 @@ func (p nicDeviceConfigurationStatuses) nvConfigUpdateRequired() bool {
 		}
 	}
 
-	log.Log.V(2).Info("nv config change required for some devices")
+	if nvConfigUpdateRequiredForSome {
+		log.Log.V(2).Info("nv config change required for some devices")
+	}
+
 	return nvConfigUpdateRequiredForSome
 }
