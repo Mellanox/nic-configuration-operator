@@ -26,9 +26,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/rand"
-	"k8s.io/client-go/kubernetes/scheme"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
@@ -42,47 +39,22 @@ var _ = Describe("DeviceDiscovery", func() {
 		k8sClient      client.Client
 		deviceRegistry *DeviceDiscovery
 		hostManager    *mocks.HostManager
-		nodeName       = "test-node"
 		ctx            context.Context
 		cancel         context.CancelFunc
 		timeout        = time.Second * 10
 		namespaceName  string
 		wg             sync.WaitGroup
 		err            error
-		startManager   = func() {
-			wg = sync.WaitGroup{}
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				defer GinkgoRecover()
-				Expect(mgr.Start(ctx)).To(Succeed())
-			}()
-		}
 	)
 
 	BeforeEach(func() {
 		ctx, cancel = context.WithCancel(context.TODO())
-		mgr, err = ctrl.NewManager(cfg, ctrl.Options{
-			Scheme: scheme.Scheme,
-		})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(mgr).NotTo(BeNil())
+
+		mgr = createManager()
 
 		k8sClient = mgr.GetClient()
 
-		node := &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
-		Expect(k8sClient.Create(ctx, node)).To(Succeed())
-
-		namespaceName = "nic-configuration-operator-" + rand.String(6)
-		ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{
-			Name: namespaceName,
-		}}
-		Expect(k8sClient.Create(context.Background(), ns)).To(Succeed())
-
-		err = mgr.GetCache().IndexField(context.Background(), &v1alpha1.NicDevice{}, "status.node", func(o client.Object) []string {
-			return []string{o.(*v1alpha1.NicDevice).Status.Node}
-		})
-		Expect(err).NotTo(HaveOccurred())
+		namespaceName = createNodeAndRandomNamespace(ctx, k8sClient)
 
 		deviceDiscoveryReconcileTime = 1 * time.Second
 		hostManager = &mocks.HostManager{}
@@ -167,7 +139,7 @@ var _ = Describe("DeviceDiscovery", func() {
 				}, nil)
 				hostManager.On("DiscoverOfedVersion").Return("00.00-0.0.0", nil)
 
-				startManager()
+				startManager(mgr, ctx, &wg)
 
 				Eventually(func() (string, error) {
 					device := &v1alpha1.NicDevice{}
@@ -201,7 +173,7 @@ var _ = Describe("DeviceDiscovery", func() {
 			It("should delete CRs if they do not represent observed devices", func() {
 				hostManager.On("DiscoverNicDevices").Return(map[string]v1alpha1.NicDeviceStatus{}, nil)
 
-				startManager()
+				startManager(mgr, ctx, &wg)
 
 				Eventually(func() (int, error) {
 					list := &v1alpha1.NicDeviceList{}
@@ -223,7 +195,7 @@ var _ = Describe("DeviceDiscovery", func() {
 				}, nil)
 				hostManager.On("DiscoverOfedVersion").Return("00.00-0.0.0", nil)
 
-				startManager()
+				startManager(mgr, ctx, &wg)
 
 				Eventually(func() (string, error) {
 					device := &v1alpha1.NicDevice{}
