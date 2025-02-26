@@ -22,22 +22,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
+	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/rand"
-	"k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/utils/ptr"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
-
-	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
-	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 )
 
 func getDeviceSpecTemplate(ctx context.Context, name string, namespace string, client client.Client) func() (*v1alpha1.ConfigurationTemplateSpec, error) {
@@ -67,37 +60,24 @@ func getMatchedDevicesFromStatus(ctx context.Context, name string, namespace str
 
 var _ = Describe("NicConfigurationTemplate Controller", func() {
 	var (
-		mgr          manager.Manager
-		k8sClient    client.Client
-		reconciler   *NicConfigurationTemplateReconciler
-		nodeName     = "test-node"
-		templateName = "test-template"
-		deviceName   = "test-device"
-		ctx          context.Context
-		cancel       context.CancelFunc
-		//timeout       = time.Second * 10
+		mgr           manager.Manager
+		k8sClient     client.Client
+		reconciler    *NicConfigurationTemplateReconciler
+		templateName  = "test-template"
+		deviceName    = "test-device"
+		ctx           context.Context
+		cancel        context.CancelFunc
 		namespaceName string
-
-		err error
 	)
 
 	BeforeEach(func() {
 		ctx, cancel = context.WithCancel(context.Background())
-		mgr, err = ctrl.NewManager(cfg, ctrl.Options{
-			Scheme:     scheme.Scheme,
-			Metrics:    metricsserver.Options{BindAddress: "0"},
-			Controller: config.Controller{SkipNameValidation: ptr.To(true)},
-		})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(mgr).NotTo(BeNil())
+
+		mgr = createManager()
 
 		k8sClient = mgr.GetClient()
 
-		namespaceName = "nic-configuration-operator-" + rand.String(6)
-		ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{
-			Name: namespaceName,
-		}}
-		Expect(k8sClient.Create(context.Background(), ns)).To(Succeed())
+		namespaceName = createNodeAndRandomNamespace(ctx, k8sClient)
 
 		reconciler = &NicConfigurationTemplateReconciler{
 			Client: mgr.GetClient(),
@@ -109,14 +89,7 @@ var _ = Describe("NicConfigurationTemplate Controller", func() {
 		testMgrCtx, cancel := context.WithCancel(ctx)
 		By("start manager")
 		wg := sync.WaitGroup{}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			defer GinkgoRecover()
-			By("Start controller manager")
-			err := mgr.Start(testMgrCtx)
-			Expect(err).ToNot(HaveOccurred())
-		}()
+		startManager(mgr, testMgrCtx, &wg)
 
 		DeferCleanup(func() {
 			By("Shut down controller manager")
@@ -235,9 +208,6 @@ var _ = Describe("NicConfigurationTemplate Controller", func() {
 	})
 
 	It("should update spec if resetToDefault differs", func() {
-		node := &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
-		Expect(k8sClient.Create(ctx, node)).To(Succeed())
-
 		template := &v1alpha1.NicConfigurationTemplate{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      templateName,
@@ -286,9 +256,6 @@ var _ = Describe("NicConfigurationTemplate Controller", func() {
 	})
 
 	It("should update spec if template differs", func() {
-		node := &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
-		Expect(k8sClient.Create(ctx, node)).To(Succeed())
-
 		template := &v1alpha1.NicConfigurationTemplate{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      templateName,
@@ -340,9 +307,6 @@ var _ = Describe("NicConfigurationTemplate Controller", func() {
 	})
 
 	It("should not apply spec if NicDevice matches more than one template", func() {
-		node := &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
-		Expect(k8sClient.Create(ctx, node)).To(Succeed())
-
 		template1 := &v1alpha1.NicConfigurationTemplate{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "template1",

@@ -76,7 +76,11 @@ type nicDeviceConfigurationStatus struct {
 
 // Reconcile reconciles the NicConfigurationTemplate object
 func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	// Get only the devices with non-empty spec to reconcile
+	// Only handle node-policy-sync-event
+	if req.Name != nicDeviceSyncEventName || req.Namespace != "" {
+		return reconcile.Result{}, nil
+	}
+
 	configStatuses, err := r.getDevices(ctx)
 	if err != nil {
 		log.Log.Error(err, "failed to get devices to reconcile")

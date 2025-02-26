@@ -21,22 +21,16 @@ import (
 	"sync"
 	"time"
 
-	"k8s.io/apimachinery/pkg/api/meta"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/stretchr/testify/mock"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sTypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/json"
-	"k8s.io/apimachinery/pkg/util/rand"
-	"k8s.io/utils/ptr"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
@@ -50,54 +44,40 @@ const specValidationFailed = "spec validation failed"
 
 var _ = Describe("NicDeviceReconciler", func() {
 	var (
-		mgr                manager.Manager
-		reconciler         *NicDeviceReconciler
-		hostManager        *hostMocks.HostManager
-		maintenanceManager *maintenanceMocks.MaintenanceManager
-		hostUtils          *hostMocks.HostUtils
-		nodeName           = "test-node"
-		deviceName         = "test-device"
-		ctx                context.Context
-		cancel             context.CancelFunc
-		timeout            = time.Second * 10
-		namespaceName      string
-		wg                 sync.WaitGroup
-		err                error
-		startManager       = func() {
-			wg = sync.WaitGroup{}
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				defer GinkgoRecover()
-				Expect(mgr.Start(ctx)).To(Succeed())
-			}()
-			//time.Sleep(1 * time.Second)
+		mgr                 manager.Manager
+		k8sClient           client.Client
+		reconciler          *NicDeviceReconciler
+		hostManager         *hostMocks.HostManager
+		maintenanceManager  *maintenanceMocks.MaintenanceManager
+		hostUtils           *hostMocks.HostUtils
+		deviceName          = "test-device"
+		ctx                 context.Context
+		cancel              context.CancelFunc
+		timeout             = time.Second * 10
+		namespaceName       string
+		wg                  sync.WaitGroup
+		getDeviceConditions = func() []metav1.Condition {
+			device := &v1alpha1.NicDevice{}
+			Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
+			return device.Status.Conditions
+		}
+		getLastAppliedStateAnnotation = func() string {
+			device := &v1alpha1.NicDevice{}
+			Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
+			val := device.Annotations[consts.LastAppliedStateAnnotation]
+			return val
+		}
+		lastAppliedStateAnnotationExists = func() bool {
+			device := &v1alpha1.NicDevice{}
+			Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
+			_, found := device.Annotations[consts.LastAppliedStateAnnotation]
+			return found
 		}
 	)
 
 	BeforeEach(func() {
 		ctx, cancel = context.WithCancel(context.TODO())
-		mgr, err = ctrl.NewManager(cfg, ctrl.Options{
-			Scheme:     k8sClient.Scheme(),
-			Metrics:    metricsserver.Options{BindAddress: "0"},
-			Controller: config.Controller{SkipNameValidation: ptr.To(true)},
-		})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(mgr).NotTo(BeNil())
-
-		node := &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
-		Expect(k8sClient.Create(ctx, node)).To(Succeed())
-
-		namespaceName = "nic-configuration-operator-" + rand.String(6)
-		ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{
-			Name: namespaceName,
-		}}
-		Expect(k8sClient.Create(context.Background(), ns)).To(Succeed())
-
-		err = mgr.GetCache().IndexField(context.Background(), &v1alpha1.NicDevice{}, "status.node", func(o client.Object) []string {
-			return []string{o.(*v1alpha1.NicDevice).Status.Node}
-		})
-		Expect(err).NotTo(HaveOccurred())
+		mgr = createManager()
 
 		deviceDiscoveryReconcileTime = 1 * time.Second
 		hostManager = &hostMocks.HostManager{}
@@ -115,14 +95,24 @@ var _ = Describe("NicDeviceReconciler", func() {
 			EventRecorder:      mgr.GetEventRecorderFor("testReconciler"),
 		}
 		Expect(reconciler.SetupWithManager(mgr, false)).To(Succeed())
+
+		k8sClient = mgr.GetClient()
+
+		namespaceName = createNodeAndRandomNamespace(ctx, k8sClient)
+
+		startManager(mgr, ctx, &wg)
+
+		DeferCleanup(func() {
+			By("Shut down controller manager")
+			cancel()
+			wg.Wait()
+		})
 	})
 
 	AfterEach(func() {
 		Expect(k8sClient.DeleteAllOf(ctx, &v1alpha1.NicDevice{}, client.InNamespace(namespaceName))).To(Succeed())
 		Expect(k8sClient.Delete(ctx, &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespaceName}})).To(Succeed())
 		Expect(k8sClient.DeleteAllOf(ctx, &v1.Node{})).To(Succeed())
-		cancel()
-		wg.Wait()
 	})
 
 	Describe("nicDeviceConfigurationStatuses tests", func() {
@@ -175,7 +165,6 @@ var _ = Describe("NicDeviceReconciler", func() {
 
 	Describe("updateDeviceStatusCondition", func() {
 		It("should set the given status condition for device", func() {
-
 			device := &v1alpha1.NicDevice{ObjectMeta: metav1.ObjectMeta{Name: deviceName, Namespace: namespaceName}}
 			Expect(k8sClient.Create(ctx, device))
 			device.Status = v1alpha1.NicDeviceStatus{
@@ -184,16 +173,14 @@ var _ = Describe("NicDeviceReconciler", func() {
 				}},
 			}
 			Expect(k8sClient.Status().Update(ctx, device)).To(Succeed())
-			Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
 
+			time.Sleep(time.Second * 1)
+
+			Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
 			err := reconciler.updateConfigInProgressStatusCondition(ctx, device, "TestReason", metav1.ConditionTrue, "test-message")
 			Expect(err).NotTo(HaveOccurred())
 
-			Eventually(func() []metav1.Condition {
-				device := &v1alpha1.NicDevice{}
-				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
-				return device.Status.Conditions
-			}, timeout).Should(testutils.MatchCondition(metav1.Condition{
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.ConfigUpdateInProgressCondition,
 				Status:  metav1.ConditionTrue,
 				Reason:  "TestReason",
@@ -204,11 +191,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			err = reconciler.updateConfigInProgressStatusCondition(ctx, device, "AnotherTestReason", metav1.ConditionFalse, "")
 			Expect(err).NotTo(HaveOccurred())
 
-			Eventually(func() []metav1.Condition {
-				device := &v1alpha1.NicDevice{}
-				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
-				return device.Status.Conditions
-			}, timeout).Should(testutils.MatchCondition(metav1.Condition{
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.ConfigUpdateInProgressCondition,
 				Status:  metav1.ConditionFalse,
 				Reason:  "AnotherTestReason",
@@ -263,8 +246,6 @@ var _ = Describe("NicDeviceReconciler", func() {
 			Expect(k8sClient.Status().Update(ctx, device)).To(Succeed())
 			Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: "another-name", Namespace: namespaceName}, device)).To(Succeed())
 
-			startManager()
-
 			Consistently(func() []metav1.Condition {
 				maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
 				device := &v1alpha1.NicDevice{}
@@ -276,13 +257,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 			hostManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, errors.New(specValidationFailed))
 
 			createDevice(false)
-			startManager()
 
-			Eventually(func() []metav1.Condition {
-				device := &v1alpha1.NicDevice{}
-				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
-				return device.Status.Conditions
-			}, timeout).Should(testutils.MatchCondition(metav1.Condition{
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.ConfigUpdateInProgressCondition,
 				Status:  metav1.ConditionFalse,
 				Reason:  consts.SpecValidationFailed,
@@ -295,13 +271,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 			hostManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, err)
 
 			createDevice(false)
-			startManager()
 
-			Eventually(func() []metav1.Condition {
-				device := &v1alpha1.NicDevice{}
-				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
-				return device.Status.Conditions
-			}, timeout).Should(testutils.MatchCondition(metav1.Condition{
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.ConfigUpdateInProgressCondition,
 				Status:  metav1.ConditionFalse,
 				Reason:  consts.IncorrectSpecReason,
@@ -314,13 +285,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
 
 			createDevice(false)
-			startManager()
 
-			Eventually(func() []metav1.Condition {
-				device := &v1alpha1.NicDevice{}
-				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
-				return device.Status.Conditions
-			}, timeout).Should(testutils.MatchCondition(metav1.Condition{
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:   consts.ConfigUpdateInProgressCondition,
 				Status: metav1.ConditionFalse,
 				Reason: consts.UpdateSuccessfulReason,
@@ -332,12 +298,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Should dump the last applied state to annotations
-			Eventually(func() string {
-				device := &v1alpha1.NicDevice{}
-				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
-				val := device.Annotations[consts.LastAppliedStateAnnotation]
-				return val
-			}).Should(Equal(string(spec)))
+			Eventually(getLastAppliedStateAnnotation).Should(Equal(string(spec)))
 
 			maintenanceManager.AssertCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
 			maintenanceManager.AssertExpectations(GinkgoT())
@@ -348,35 +309,21 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(errors.New(errorText))
 
 			createDevice(true)
-			startManager()
 
-			Eventually(func() []metav1.Condition {
-				device := &v1alpha1.NicDevice{}
-				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
-				return device.Status.Conditions
-			}, timeout).Should(testutils.MatchCondition(metav1.Condition{
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.ConfigUpdateInProgressCondition,
 				Status:  metav1.ConditionTrue,
 				Reason:  consts.UpdateStartedReason,
 				Message: "", // Should not copy the error message from the failed maintenance request
 			}))
 			// Should keep this status consistently
-			Consistently(func() []metav1.Condition {
-				device := &v1alpha1.NicDevice{}
-				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
-				return device.Status.Conditions
-			}).Should(testutils.MatchCondition(metav1.Condition{
+			Consistently(getDeviceConditions).Should(testutils.MatchCondition(metav1.Condition{
 				Type:   consts.ConfigUpdateInProgressCondition,
 				Status: metav1.ConditionTrue,
 				Reason: consts.UpdateStartedReason,
 			}))
 			// Should not reset last applied state annotation if maintenance was not scheduled
-			Consistently(func() bool {
-				device := &v1alpha1.NicDevice{}
-				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
-				_, found := device.Annotations[consts.LastAppliedStateAnnotation]
-				return found
-			}).Should(BeTrue())
+			Consistently(lastAppliedStateAnnotationExists).Should(BeTrue())
 		})
 		It("Should keep in UpdateStarted status if maintenance is not allowed", func() {
 			hostManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(true, false, nil)
@@ -384,34 +331,20 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(false, nil)
 
 			createDevice(true)
-			startManager()
 
-			Eventually(func() []metav1.Condition {
-				device := &v1alpha1.NicDevice{}
-				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
-				return device.Status.Conditions
-			}, timeout).Should(testutils.MatchCondition(metav1.Condition{
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:   consts.ConfigUpdateInProgressCondition,
 				Status: metav1.ConditionTrue,
 				Reason: consts.UpdateStartedReason,
 			}))
 			// Should keep this status consistently
-			Consistently(func() []metav1.Condition {
-				device := &v1alpha1.NicDevice{}
-				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
-				return device.Status.Conditions
-			}).Should(testutils.MatchCondition(metav1.Condition{
+			Consistently(getDeviceConditions).Should(testutils.MatchCondition(metav1.Condition{
 				Type:   consts.ConfigUpdateInProgressCondition,
 				Status: metav1.ConditionTrue,
 				Reason: consts.UpdateStartedReason,
 			}))
 			// Should not reset last applied state annotation if maintenance was not allowed
-			Consistently(func() bool {
-				device := &v1alpha1.NicDevice{}
-				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
-				_, found := device.Annotations[consts.LastAppliedStateAnnotation]
-				return found
-			}).Should(BeTrue())
+			Consistently(lastAppliedStateAnnotationExists).Should(BeTrue())
 		})
 		It("Should result in NonVolatileConfigUpdateFailed status if nv config fails to apply", func() {
 			errorText := "maintenance request failed"
@@ -421,13 +354,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 			hostManager.On("ApplyDeviceNvSpec", mock.Anything, mock.Anything).Return(false, errors.New(errorText))
 
 			createDevice(false)
-			startManager()
 
-			Eventually(func() []metav1.Condition {
-				device := &v1alpha1.NicDevice{}
-				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
-				return device.Status.Conditions
-			}, timeout).Should(testutils.MatchCondition(metav1.Condition{
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.ConfigUpdateInProgressCondition,
 				Status:  metav1.ConditionFalse,
 				Reason:  consts.NonVolatileConfigUpdateFailedReason,
@@ -443,25 +371,15 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.On("Reboot").Return(errors.New(errorText))
 
 			createDevice(true)
-			startManager()
 
-			Eventually(func() []metav1.Condition {
-				device := &v1alpha1.NicDevice{}
-				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
-				return device.Status.Conditions
-			}, timeout).Should(testutils.MatchCondition(metav1.Condition{
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:   consts.ConfigUpdateInProgressCondition,
 				Status: metav1.ConditionTrue,
 				Reason: consts.PendingRebootReason,
 			}))
 
 			// Should reset last applied state annotation if tried to reboot but failed
-			Eventually(func() bool {
-				device := &v1alpha1.NicDevice{}
-				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
-				_, found := device.Annotations[consts.LastAppliedStateAnnotation]
-				return found
-			}).Should(BeFalse())
+			Eventually(lastAppliedStateAnnotationExists).Should(BeFalse())
 
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ApplyDeviceRuntimeSpec", mock.Anything)
 			maintenanceManager.AssertExpectations(GinkgoT())
@@ -472,13 +390,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 			hostManager.On("ApplyDeviceRuntimeSpec", mock.Anything).Return(errors.New(errorText))
 
 			createDevice(false)
-			startManager()
 
-			Eventually(func() []metav1.Condition {
-				device := &v1alpha1.NicDevice{}
-				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
-				return device.Status.Conditions
-			}, timeout).Should(testutils.MatchCondition(metav1.Condition{
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.ConfigUpdateInProgressCondition,
 				Status:  metav1.ConditionFalse,
 				Reason:  consts.RuntimeConfigUpdateFailedReason,
@@ -499,13 +412,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(false, nil)
 
 			createDevice(true) // lastAppliedSpec will not match the current resulting in need to reboot
-			startManager()
 
-			Eventually(func() []metav1.Condition {
-				device := &v1alpha1.NicDevice{}
-				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
-				return device.Status.Conditions
-			}, timeout).Should(testutils.MatchCondition(metav1.Condition{
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:   consts.ConfigUpdateInProgressCondition,
 				Status: metav1.ConditionTrue,
 				Reason: consts.PendingRebootReason,
@@ -532,13 +440,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			meta.SetStatusCondition(&device.Status.Conditions, cond)
 			Expect(k8sClient.Status().Update(ctx, device)).To(Succeed())
 
-			startManager()
-
-			Eventually(func() []metav1.Condition {
-				device := &v1alpha1.NicDevice{}
-				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
-				return device.Status.Conditions
-			}, timeout).Should(testutils.MatchCondition(metav1.Condition{
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.ConfigUpdateInProgressCondition,
 				Status:  metav1.ConditionFalse,
 				Reason:  consts.FirmwareError,
@@ -571,13 +473,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			meta.SetStatusCondition(&device.Status.Conditions, cond)
 			Expect(k8sClient.Status().Update(ctx, device)).To(Succeed())
 
-			startManager()
-
-			Consistently(func() []metav1.Condition {
-				device := &v1alpha1.NicDevice{}
-				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
-				return device.Status.Conditions
-			}, timeout).ShouldNot(testutils.MatchCondition(metav1.Condition{
+			Consistently(getDeviceConditions, timeout).ShouldNot(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.ConfigUpdateInProgressCondition,
 				Status:  metav1.ConditionFalse,
 				Reason:  consts.FirmwareError,
@@ -631,13 +527,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 			hostManager.On("ValidateDeviceNvSpec", mock.Anything, matchFirstDevice).Return(false, false, errors.New(specValidationFailed))
 
 			createDevices()
-			startManager()
 
-			Eventually(func() []metav1.Condition {
-				device := &v1alpha1.NicDevice{}
-				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
-				return device.Status.Conditions
-			}, timeout).Should(testutils.MatchCondition(metav1.Condition{
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.ConfigUpdateInProgressCondition,
 				Status:  metav1.ConditionFalse,
 				Reason:  consts.SpecValidationFailed,
@@ -663,13 +554,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 			hostManager.On("ValidateDeviceNvSpec", mock.Anything, matchFirstDevice).Return(false, false, errors.New(specValidationFailed))
 
 			createDevices()
-			startManager()
 
-			Eventually(func() []metav1.Condition {
-				device := &v1alpha1.NicDevice{}
-				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
-				return device.Status.Conditions
-			}, timeout).Should(testutils.MatchCondition(metav1.Condition{
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.ConfigUpdateInProgressCondition,
 				Status:  metav1.ConditionFalse,
 				Reason:  consts.SpecValidationFailed,
@@ -695,13 +581,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.On("Reboot").Return(nil)
 
 			createDevices()
-			startManager()
 
-			Eventually(func() []metav1.Condition {
-				device := &v1alpha1.NicDevice{}
-				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
-				return device.Status.Conditions
-			}, time.Minute*2).Should(testutils.MatchCondition(metav1.Condition{
+			Eventually(getDeviceConditions, time.Minute*2).Should(testutils.MatchCondition(metav1.Condition{
 				Type:   consts.ConfigUpdateInProgressCondition,
 				Status: metav1.ConditionTrue,
 				Reason: consts.PendingRebootReason,
