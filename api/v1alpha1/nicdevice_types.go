@@ -39,6 +39,8 @@ type NicDeviceConfigurationSpec struct {
 type NicDeviceSpec struct {
 	// Configuration specifies the configuration requested by NicConfigurationTemplate
 	Configuration *NicDeviceConfigurationSpec `json:"configuration,omitempty"`
+	// Firmware specifies the fw upgrade policy requested by NicFirmwareTemplate
+	Firmware *FirmwareTemplateSpec `json:"firmware,omitempty"`
 }
 
 // NicDevicePortSpec describes the ports of the NIC
