@@ -650,3 +650,8 @@ func (h *hostUtils) GetHostUptimeSeconds() (time.Duration, error) {
 func NewHostUtils() HostUtils {
 	return &hostUtils{execInterface: execUtils.New()}
 }
+
+func isBluefieldDevice(productType string) bool {
+	// TODO implement
+	return false
+}
