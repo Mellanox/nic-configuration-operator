@@ -26,15 +26,27 @@ const (
 	IncorrectSpecReason                 = "IncorrectSpec"
 	UpdateStartedReason                 = "UpdateStarted"
 	PendingRebootReason                 = "PendingReboot"
+	PendingNodeMaintenanceReason        = "PendingNodeMaintenance"
 	NonVolatileConfigUpdateFailedReason = "NonVolatileConfigUpdateFailed"
 	RuntimeConfigUpdateFailedReason     = "RuntimeConfigUpdateFailed"
 	UpdateSuccessfulReason              = "UpdateSuccessful"
 	SpecValidationFailed                = "SpecValidationFailed"
 	FirmwareError                       = "FirmwareError"
+	PendingFirmwareUpdateReason         = "PendingFirmwareUpdate"
+	PendingOwnFirmwareUpdateMessage     = "Configuration update is pending the device's firmware update"
+	PendingOtherFirmwareUpdateMessage   = "Configuration update is pending the firmware update on other devices on the node"
+	FirmwareUpdateInProgressCondition   = "FirmwareUpdateInProgress"
+	FirmwareUpdateStartedReason         = "FirmwareUpdateStarted"
+	FirmwareUpdateFailedReason          = "FirmwareUpdateFailed"
+	FirmwareSourceNotReadyReason        = "FirmwareSourceNotReady"
+	FirmwareSourceFailedReason          = "FirmwareSourceFailed"
 
-	DeviceConfigSpecEmptyReason = "DeviceConfigSpecEmpty"
-	DeviceFwMatchReason         = "DeviceFirmwareConfigMatch"
-	DeviceFwMismatchReason      = "DeviceFirmwareConfigMismatch"
+	DeviceConfigSpecEmptyReason   = "DeviceConfigSpecEmpty"
+	DeviceFirmwareSpecEmptyReason = "DeviceFirmwareSpecEmpty"
+	DeviceFwMatchReason           = "DeviceFirmwareConfigMatch"
+	DeviceFwMatchMessage          = "Firmware matches the requested version"
+	DeviceFwMismatchReason        = "DeviceFirmwareConfigMismatch"
+	DeviceFwMismatchMessage       = "Firmware doesn't match the requested version, can't proceed with update because policy is set to Validate"
 
 	PartNumberPrefix      = "pn:"
 	SerialNumberPrefix    = "sn:"
@@ -101,6 +113,9 @@ const (
 	FirmwareSourceSuccessStatus = "Success"
 	// FirmwareSourceCacheVerificationFailedStatus is set when the initial cache validation has failed, e.g. when the metadata file exists but can't be read
 	FirmwareSourceCacheVerificationFailedStatus = "CacheVerificationFailed"
+
+	FirmwareUpdatePolicyValidate = "Validate"
+	FirmwareUpdatePolicyUpdate   = "Update"
 
 	FirmwareSourceFinalizerName = "configuration.net.nvidia.com/nic-configuration-operator"
 )

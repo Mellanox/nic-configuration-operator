@@ -63,9 +63,17 @@ func setInitialsConditionsForDevice(device *v1alpha1.NicDevice) {
 		Message: "Device configuration spec is empty, cannot update configuration",
 	}
 	meta.SetStatusCondition(&device.Status.Conditions, condition)
+
+	condition = metav1.Condition{
+		Type:    consts.FirmwareUpdateInProgressCondition,
+		Status:  metav1.ConditionFalse,
+		Reason:  consts.DeviceFirmwareSpecEmptyReason,
+		Message: "Device firmware spec is empty, cannot update firmware",
+	}
+	meta.SetStatusCondition(&device.Status.Conditions, condition)
 }
 
-func setFwConfigConditionsForDevice(device *v1alpha1.NicDevice, recommendedFirmware string) {
+func setFwConfigConditionsForDevice(device *v1alpha1.NicDevice, recommendedFirmware string) bool {
 	currentFirmware := device.Status.FirmwareVersion
 	log.Log.V(2).Info("setFwConfigConditionsForDevice()", "recommendedFirmware", recommendedFirmware, "currentFirmware", currentFirmware)
 	var condition metav1.Condition
@@ -92,7 +100,7 @@ func setFwConfigConditionsForDevice(device *v1alpha1.NicDevice, recommendedFirmw
 			Message: fmt.Sprintf("Device firmware '%s' doesn't match to recommended version '%s'", currentFirmware, recommendedFirmware),
 		}
 	}
-	meta.SetStatusCondition(&device.Status.Conditions, condition)
+	return meta.SetStatusCondition(&device.Status.Conditions, condition)
 }
 
 // reconcile reconciles the devices on the host by comparing the observed devices with the existing NicDevice custom resources (CRs).
@@ -137,12 +145,13 @@ func (d *DeviceDiscovery) reconcile(ctx context.Context) error {
 			continue
 		}
 
-		d.updateFwCondition(&nicDeviceCR)
-		log.Log.V(2).Info("updated device", "nicDeviceCR", nicDeviceCR)
-		err = d.Client.Status().Update(ctx, &nicDeviceCR)
-		if err != nil {
-			log.Log.Error(err, "failed to update FirmwareConfigMatchCondition", "device", nicDeviceCR.Name)
-			continue
+		if changed := d.updateFwCondition(&nicDeviceCR); changed {
+			log.Log.V(2).Info("FirmwareConfigMatch condition changed, updating device", "nicDeviceCR", nicDeviceCR)
+			err = d.Client.Status().Update(ctx, &nicDeviceCR)
+			if err != nil {
+				log.Log.Error(err, "failed to update FirmwareConfigMatchCondition", "device", nicDeviceCR.Name)
+				continue
+			}
 		}
 
 		// Need to nullify conditions for deep equal
@@ -211,10 +220,12 @@ func (d *DeviceDiscovery) reconcile(ctx context.Context) error {
 	return nil
 }
 
-func (d *DeviceDiscovery) updateFwCondition(nicDeviceCR *v1alpha1.NicDevice) {
+// updateFwCondition updates the FirmwareConfigMatch status condition
+// returns bool - if condition changed and needs to be updated
+func (d *DeviceDiscovery) updateFwCondition(nicDeviceCR *v1alpha1.NicDevice) bool {
 	ofedVersion := d.hostManager.DiscoverOfedVersion()
 	recommendedFirmware := helper.GetRecommendedFwVersion(nicDeviceCR.Status.Type, ofedVersion)
-	setFwConfigConditionsForDevice(nicDeviceCR, recommendedFirmware)
+	return setFwConfigConditionsForDevice(nicDeviceCR, recommendedFirmware)
 }
 
 // Start starts the device discovery process by reconciling devices on the host.
