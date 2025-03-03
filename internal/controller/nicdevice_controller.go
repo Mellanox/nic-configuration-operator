@@ -524,22 +524,7 @@ func (r *NicDeviceReconciler) SetupWithManager(mgr ctrl.Manager, watchForMainten
 		Watches(&v1alpha1.NicDevice{}, eventHandler)
 
 	if watchForMaintenance {
-		maintenanceEventHandler := handler.Funcs{
-			// We only want status update events
-			UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-				nm := e.ObjectNew.(*maintenanceoperator.NodeMaintenance)
-
-				if nm.Spec.RequestorID != consts.MaintenanceRequestor || nm.Spec.NodeName != r.NodeName {
-					// We want to skip event from maintenance not on the current node or not scheduled by us
-					return
-				}
-
-				log.Log.Info("Enqueuing sync for maintenance update event", "resource", e.ObjectNew.GetName())
-				qHandler(q)
-			},
-		}
-
-		controller.Watches(&maintenanceoperator.NodeMaintenance{}, maintenanceEventHandler)
+		controller.Watches(&maintenanceoperator.NodeMaintenance{}, maintenance.GetMaintenanceRequestEventHandler(r.NodeName, qHandler))
 	}
 
 	return controller.
