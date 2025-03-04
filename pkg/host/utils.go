@@ -17,6 +17,7 @@ package host
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -38,8 +39,10 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 )
 
-const pciDevicesPath = "/sys/bus/pci/devices"
-const arrayPrefix = "Array"
+const (
+	pciDevicesPath = "/sys/bus/pci/devices"
+	arrayPrefix    = "Array"
+)
 
 // HostUtils is an interface that contains util functions that perform operations on the actual host
 type HostUtils interface {
@@ -89,6 +92,22 @@ type hostUtils struct {
 	execInterface execUtils.Interface
 }
 
+// runCommand runs a command and captures stderr separately for better error reporting
+// Returns stdout, error (with stderr included in the error message if command fails)
+func (h *hostUtils) runCommand(cmd execUtils.Cmd) ([]byte, error) {
+	var stderr bytes.Buffer
+	cmd.SetStderr(&stderr)
+	stdout, err := cmd.Output()
+	if err != nil {
+		stderrOutput := strings.TrimSpace(stderr.String())
+		if stderrOutput != "" {
+			err = fmt.Errorf("%w: %s", err, stderrOutput)
+		}
+	}
+
+	return stdout, err
+}
+
 // GetPCIDevices returns a list of PCI devices on the host
 func (h *hostUtils) GetPCIDevices() ([]*pci.Device, error) {
 	pciRegistry, err := ghw.PCI()
@@ -104,7 +123,7 @@ func (h *hostUtils) GetPCIDevices() ([]*pci.Device, error) {
 func (h *hostUtils) GetPartAndSerialNumber(pciAddr string) (string, string, error) {
 	log.Log.Info("HostUtils.GetPartAndSerialNumber()", "pciAddr", pciAddr)
 	cmd := h.execInterface.Command("mstvpd", pciAddr)
-	output, err := cmd.Output()
+	output, err := h.runCommand(cmd)
 	if err != nil {
 		log.Log.Error(err, "GetPartAndSerialNumber(): Failed to run mstvpd")
 		return "", "", err
@@ -141,7 +160,7 @@ func (h *hostUtils) GetPartAndSerialNumber(pciAddr string) (string, string, erro
 func (h *hostUtils) GetFirmwareVersionAndPSID(pciAddr string) (string, string, error) {
 	log.Log.Info("HostUtils.GetFirmwareVersionAndPSID()", "pciAddr", pciAddr)
 	cmd := h.execInterface.Command("mstflint", "-d", pciAddr, "q")
-	output, err := cmd.Output()
+	output, err := h.runCommand(cmd)
 	if err != nil {
 		log.Log.Error(err, "GetFirmwareVersionAndPSID(): Failed to run mstflint")
 		return "", "", err
@@ -178,7 +197,7 @@ func (h *hostUtils) GetFirmwareVersionAndPSID(pciAddr string) (string, string, e
 func (h *hostUtils) GetPCILinkSpeed(pciAddr string) (int, error) {
 	log.Log.Info("HostUtils.GetPCILinkSpeed()", "pciAddr", pciAddr)
 	cmd := h.execInterface.Command("lspci", "-vv", "-s", pciAddr)
-	output, err := cmd.Output()
+	output, err := h.runCommand(cmd)
 	if err != nil {
 		log.Log.Error(err, "GetPCILinkSpeed(): Failed to run lspci")
 		return -1, err
@@ -220,7 +239,7 @@ func (h *hostUtils) GetPCILinkSpeed(pciAddr string) (int, error) {
 func (h *hostUtils) GetMaxReadRequestSize(pciAddr string) (int, error) {
 	log.Log.Info("HostUtils.GetMaxReadRequestSize()", "pciAddr", pciAddr)
 	cmd := h.execInterface.Command("lspci", "-vv", "-s", pciAddr)
-	output, err := cmd.Output()
+	output, err := h.runCommand(cmd)
 	if err != nil && len(output) == 0 {
 		log.Log.Error(err, "GetMaxReadRequestSize(): Failed to run lspci")
 		return -1, err
@@ -377,7 +396,7 @@ func (h *hostUtils) GetRDMADeviceName(pciAddr string) string {
 // queryMLXConfig runs a query on mlxconfig to parse out default, current and nextboot configurations
 // might run recursively to expand array parameters' values
 func (h *hostUtils) queryMLXConfig(ctx context.Context, query types.NvConfigQuery, pciAddr string, additionalParameter string) error {
-	log.Log.Info(fmt.Sprintf("mlxconfig -d %s query %s", pciAddr, additionalParameter)) //TODO change verbosity
+	log.Log.Info(fmt.Sprintf("mlxconfig -d %s query %s", pciAddr, additionalParameter)) // TODO change verbosity
 	valueInBracketsRegex := regexp.MustCompile(`^(.*?)\(([^)]*)\)$`)
 
 	var cmd execUtils.Cmd
@@ -386,7 +405,7 @@ func (h *hostUtils) queryMLXConfig(ctx context.Context, query types.NvConfigQuer
 	} else {
 		cmd = h.execInterface.CommandContext(ctx, "mlxconfig", "-d", pciAddr, "-e", "query", additionalParameter)
 	}
-	output, err := cmd.Output()
+	output, err := h.runCommand(cmd)
 	if err != nil {
 		log.Log.Error(err, "queryMLXConfig(): Failed to run mlxconfig", "output", string(output))
 		return err
@@ -499,9 +518,9 @@ func (h *hostUtils) SetNvConfigParameter(pciAddr string, paramName string, param
 	log.Log.Info("HostUtils.SetNvConfigParameter()", "pciAddr", pciAddr, "paramName", paramName, "paramValue", paramValue)
 
 	cmd := h.execInterface.Command("mlxconfig", "-d", pciAddr, "--yes", "set", paramName+"="+paramValue)
-	_, err := cmd.Output()
+	output, err := h.runCommand(cmd)
 	if err != nil {
-		log.Log.Error(err, "SetNvConfigParameter(): Failed to run mlxconfig")
+		log.Log.Error(err, "SetNvConfigParameter(): Failed to run mlxconfig", "output", string(output))
 		return err
 	}
 	return nil
@@ -512,9 +531,9 @@ func (h *hostUtils) ResetNvConfig(pciAddr string) error {
 	log.Log.Info("HostUtils.ResetNvConfig()", "pciAddr", pciAddr)
 
 	cmd := h.execInterface.Command("mlxconfig", "-d", pciAddr, "--yes", "reset")
-	_, err := cmd.Output()
+	output, err := h.runCommand(cmd)
 	if err != nil {
-		log.Log.Error(err, "ResetNvConfig(): Failed to run mlxconfig")
+		log.Log.Error(err, "ResetNvConfig(): Failed to run mlxconfig", "output", string(output))
 		return err
 	}
 	return nil
@@ -527,7 +546,7 @@ func (h *hostUtils) ResetNicFirmware(ctx context.Context, pciAddr string) error 
 	log.Log.Info("HostUtils.ResetNicFirmware()", "pciAddr", pciAddr)
 
 	cmd := h.execInterface.CommandContext(ctx, "mlxfwreset", "--device", pciAddr, "reset", "--yes")
-	_, err := cmd.Output()
+	_, err := h.runCommand(cmd)
 	if err != nil {
 		log.Log.Error(err, "ResetNicFirmware(): Failed to run mlxfwreset")
 		return err
@@ -558,7 +577,7 @@ func (h *hostUtils) SetMaxReadRequestSize(pciAddr string, maxReadRequestSize int
 	}
 
 	cmd := h.execInterface.Command("setpci", "-s", pciAddr, fmt.Sprintf("CAP_EXP+08.w=%d000:F000", valueToApply))
-	_, err := cmd.Output()
+	_, err := h.runCommand(cmd)
 	if err != nil {
 		log.Log.Error(err, "SetMaxReadRequestSize(): Failed to run setpci")
 		return err
@@ -612,7 +631,7 @@ func (h *hostUtils) ScheduleReboot() error {
 	}()
 
 	cmd := h.execInterface.Command("shutdown", "-r", "now")
-	_, err = cmd.Output()
+	_, err = h.runCommand(cmd)
 	if err != nil {
 		log.Log.Error(err, "ScheduleReboot(): Failed to run shutdown -r now")
 		return err
