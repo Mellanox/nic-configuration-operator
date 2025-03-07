@@ -65,3 +65,10 @@ configDaemon:
 logLevel: info
 # -- image pull secrets for both the operator and the config daemon
 imagePullSecrets: []
+
+# -- settings to enable the NIC Firmware Storage
+nicFirmwareStorage:
+  # -- storage class name to be used to store NIC FW binaries during NIC FW upgrade. If not provided, the NIC FW upgrade feature will be disabled.
+  storageClassName: nic-fw-storage-class
+  # -- storage size for the NIC Configuration Operator to request. 1Gi is the default value when not providedq
+  availableStorageSize: 1Gi

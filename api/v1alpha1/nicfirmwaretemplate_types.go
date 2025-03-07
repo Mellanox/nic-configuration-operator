@@ -40,12 +40,6 @@ type NicFirmwareTemplateSpec struct {
 	Template *FirmwareTemplateSpec `json:"template"`
 }
 
-// NicFirmwareTemplateStatus lists the NicDevice CRs matching the FW template
-type NicFirmwareTemplateStatus struct {
-	// NicDevice CRs matching this firmware template
-	NicDevices []string `json:"nicDevices"`
-}
-
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 
@@ -54,8 +48,8 @@ type NicFirmwareTemplate struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   NicFirmwareTemplateSpec   `json:"spec,omitempty"`
-	Status NicFirmwareTemplateStatus `json:"status,omitempty"`
+	Spec   NicFirmwareTemplateSpec `json:"spec,omitempty"`
+	Status NicTemplateStatus       `json:"status,omitempty"`
 }
 
 //+kubebuilder:object:root=true

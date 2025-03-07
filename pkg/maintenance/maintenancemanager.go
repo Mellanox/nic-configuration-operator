@@ -18,15 +18,50 @@ package maintenance
 import (
 	"context"
 
-	maintenanceoperator "github.com/Mellanox/maintenance-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/host"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	maintenanceoperator "github.com/Mellanox/maintenance-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 )
+
+func GetMaintenanceRequestEventHandler(nodeName string, qHandler func(q workqueue.TypedRateLimitingInterface[reconcile.Request])) handler.Funcs {
+	return handler.Funcs{
+		// We only want status update events
+		UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			oldNM := e.ObjectOld.(*maintenanceoperator.NodeMaintenance)
+			newNM := e.ObjectNew.(*maintenanceoperator.NodeMaintenance)
+
+			if newNM.Spec.RequestorID != consts.MaintenanceRequestor || newNM.Spec.NodeName != nodeName {
+				// We want to skip event from maintenance not on the current node or not scheduled by us
+				return
+			}
+
+			oldReadyCondition := meta.FindStatusCondition(oldNM.Status.Conditions, maintenanceoperator.ConditionTypeReady)
+			newReadyCondition := meta.FindStatusCondition(newNM.Status.Conditions, maintenanceoperator.ConditionTypeReady)
+			if oldReadyCondition == nil || newReadyCondition == nil {
+				log.Log.V(2).Info("couldn't get maintenance request status")
+				return
+			}
+
+			log.Log.V(2).Info("Maintenance request updated", "status", newReadyCondition.Status, "reason", newReadyCondition.Reason, "message", newReadyCondition.Message)
+
+			if oldReadyCondition.Status == newReadyCondition.Status {
+				return
+			}
+
+			log.Log.Info("Enqueuing sync for maintenance update event", "resource", e.ObjectNew.GetName())
+			qHandler(q)
+		},
+	}
+}
 
 type MaintenanceManager interface {
 	ScheduleMaintenance(ctx context.Context) error

@@ -26,15 +26,27 @@ const (
 	IncorrectSpecReason                 = "IncorrectSpec"
 	UpdateStartedReason                 = "UpdateStarted"
 	PendingRebootReason                 = "PendingReboot"
+	PendingNodeMaintenanceReason        = "PendingNodeMaintenance"
 	NonVolatileConfigUpdateFailedReason = "NonVolatileConfigUpdateFailed"
 	RuntimeConfigUpdateFailedReason     = "RuntimeConfigUpdateFailed"
 	UpdateSuccessfulReason              = "UpdateSuccessful"
 	SpecValidationFailed                = "SpecValidationFailed"
 	FirmwareError                       = "FirmwareError"
+	PendingFirmwareUpdateReason         = "PendingFirmwareUpdate"
+	PendingOwnFirmwareUpdateMessage     = "Configuration update is pending the device's firmware update"
+	PendingOtherFirmwareUpdateMessage   = "Configuration update is pending the firmware update on other devices on the node"
+	FirmwareUpdateInProgressCondition   = "FirmwareUpdateInProgress"
+	FirmwareUpdateStartedReason         = "FirmwareUpdateStarted"
+	FirmwareUpdateFailedReason          = "FirmwareUpdateFailed"
+	FirmwareSourceNotReadyReason        = "FirmwareSourceNotReady"
+	FirmwareSourceFailedReason          = "FirmwareSourceFailed"
 
-	DeviceConfigSpecEmptyReason = "DeviceConfigSpecEmpty"
-	DeviceFwMatchReason         = "DeviceFirmwareConfigMatch"
-	DeviceFwMismatchReason      = "DeviceFirmwareConfigMismatch"
+	DeviceConfigSpecEmptyReason   = "DeviceConfigSpecEmpty"
+	DeviceFirmwareSpecEmptyReason = "DeviceFirmwareSpecEmpty"
+	DeviceFwMatchReason           = "DeviceFirmwareConfigMatch"
+	DeviceFwMatchMessage          = "Firmware matches the requested version"
+	DeviceFwMismatchReason        = "DeviceFirmwareConfigMismatch"
+	DeviceFwMismatchMessage       = "Firmware doesn't match the requested version, can't proceed with update because policy is set to Validate"
 
 	PartNumberPrefix      = "pn:"
 	SerialNumberPrefix    = "sn:"
@@ -82,4 +94,28 @@ const (
 	Mlx5ModuleVersionPath         = "/sys/bus/pci/drivers/mlx5_core/module/version"
 
 	FwConfigNotAppliedAfterRebootErrorMsg = "firmware configuration failed to apply after reboot"
+
+	NicFirmwareStorage             = "/nic-firmware"
+	NicFirmwareBinariesFolder      = "firmware-binaries"
+	NicFirmwareBinaryFileExtension = ".bin"
+
+	TempDir = "/tmp"
+
+	// FirmwareSourceDownloadingStatus is set when the FW binary archives are being downloaded
+	FirmwareSourceDownloadingStatus = "Downloading"
+	// FirmwareSourceDownloadFailedStatus is set when the FW binary archives download failed with an error
+	FirmwareSourceDownloadFailedStatus = "DownloadFailed"
+	// FirmwareSourceProcessingStatus is set when the downloaded FW binaries are being unzipped from archives, moved to the cache storage according to their metadata
+	FirmwareSourceProcessingStatus = "Processing"
+	// FirmwareSourceProcessingFailedStatus is set when the FW binaries couldn't be unzipped or processed
+	FirmwareSourceProcessingFailedStatus = "ProcessingFailed"
+	// FirmwareSourceSuccessStatus is set when all FW binary were successfully downloaded and processed and the cache is ready to be used
+	FirmwareSourceSuccessStatus = "Success"
+	// FirmwareSourceCacheVerificationFailedStatus is set when the initial cache validation has failed, e.g. when the metadata file exists but can't be read
+	FirmwareSourceCacheVerificationFailedStatus = "CacheVerificationFailed"
+
+	FirmwareUpdatePolicyValidate = "Validate"
+	FirmwareUpdatePolicyUpdate   = "Update"
+
+	FirmwareSourceFinalizerName = "configuration.net.nvidia.com/nic-configuration-operator"
 )

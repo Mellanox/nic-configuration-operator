@@ -16,6 +16,7 @@ import (
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/internal/controller"
+	"github.com/Mellanox/nic-configuration-operator/pkg/firmware"
 	"github.com/Mellanox/nic-configuration-operator/pkg/helper"
 	"github.com/Mellanox/nic-configuration-operator/pkg/host"
 	"github.com/Mellanox/nic-configuration-operator/pkg/maintenance"
@@ -73,6 +74,7 @@ func main() {
 	hostUtils := host.NewHostUtils()
 	hostManager := host.NewHostManager(nodeName, hostUtils, eventRecorder)
 	maintenanceManager := maintenance.New(mgr.GetClient(), hostUtils, nodeName, namespace)
+	firmwareManager := firmware.NewFirmwareManager(mgr.GetClient(), namespace)
 
 	if err := initNicFwMap(namespace); err != nil {
 		log.Log.Error(err, "unable to init NicFwMap")
@@ -92,6 +94,7 @@ func main() {
 		NamespaceName:      namespace,
 		HostManager:        hostManager,
 		MaintenanceManager: maintenanceManager,
+		FirmwareManager:    firmwareManager,
 		EventRecorder:      eventRecorder,
 		HostUtils:          hostUtils,
 	}

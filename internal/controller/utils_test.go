@@ -71,6 +71,7 @@ func createNodeAndRandomNamespace(ctx context.Context, client client.Client) str
 func startManager(manager manager.Manager, ctx context.Context, wg *sync.WaitGroup) {
 	wg.Add(1)
 	go func() {
+		log.Log.Info("starting manager for test", "test", GinkgoT().Name())
 		defer GinkgoRecover()
 		defer wg.Done()
 		Expect(manager.Start(ctx)).To(Succeed())
@@ -80,4 +81,6 @@ func startManager(manager manager.Manager, ctx context.Context, wg *sync.WaitGro
 	if !manager.GetCache().WaitForCacheSync(ctx) {
 		log.Log.Error(nil, "caches did not sync")
 	}
+
+	log.Log.Info("synced manager cache for test", "test", GinkgoT().Name())
 }

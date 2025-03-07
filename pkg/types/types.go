@@ -44,3 +44,13 @@ func IncorrectSpecError(msg string) error {
 func IsIncorrectSpecError(err error) bool {
 	return strings.HasPrefix(err.Error(), IncorrectSpecErrorPrefix)
 }
+
+const FirmwareSourceNotReadyErrorPrefix = "requested firmware source not ready"
+
+func FirmwareSourceNotReadyError(firmwareSourceName, msg string) error {
+	return fmt.Errorf("%s (%s): %s", FirmwareSourceNotReadyErrorPrefix, firmwareSourceName, msg)
+}
+
+func IsFirmwareSourceNotReadyError(err error) bool {
+	return strings.HasPrefix(err.Error(), FirmwareSourceNotReadyErrorPrefix)
+}

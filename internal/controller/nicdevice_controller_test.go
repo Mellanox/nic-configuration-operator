@@ -34,6 +34,7 @@ import (
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	firmwareMocks "github.com/Mellanox/nic-configuration-operator/pkg/firmware/mocks"
 	hostMocks "github.com/Mellanox/nic-configuration-operator/pkg/host/mocks"
 	maintenanceMocks "github.com/Mellanox/nic-configuration-operator/pkg/maintenance/mocks"
 	"github.com/Mellanox/nic-configuration-operator/pkg/testutils"
@@ -48,6 +49,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 		k8sClient           client.Client
 		reconciler          *NicDeviceReconciler
 		hostManager         *hostMocks.HostManager
+		firmwareManager     *firmwareMocks.FirmwareManager
 		maintenanceManager  *maintenanceMocks.MaintenanceManager
 		hostUtils           *hostMocks.HostUtils
 		deviceName          = "test-device"
@@ -81,6 +83,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 
 		deviceDiscoveryReconcileTime = 1 * time.Second
 		hostManager = &hostMocks.HostManager{}
+		firmwareManager = &firmwareMocks.FirmwareManager{}
 		maintenanceManager = &maintenanceMocks.MaintenanceManager{}
 		hostUtils = &hostMocks.HostUtils{}
 
@@ -90,6 +93,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			NodeName:           nodeName,
 			NamespaceName:      namespaceName,
 			HostManager:        hostManager,
+			FirmwareManager:    firmwareManager,
 			MaintenanceManager: maintenanceManager,
 			HostUtils:          hostUtils,
 			EventRecorder:      mgr.GetEventRecorderFor("testReconciler"),
@@ -104,15 +108,16 @@ var _ = Describe("NicDeviceReconciler", func() {
 
 		DeferCleanup(func() {
 			By("Shut down controller manager")
-			cancel()
 			wg.Wait()
 		})
 	})
 
 	AfterEach(func() {
-		Expect(k8sClient.DeleteAllOf(ctx, &v1alpha1.NicDevice{}, client.InNamespace(namespaceName))).To(Succeed())
-		Expect(k8sClient.Delete(ctx, &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespaceName}})).To(Succeed())
-		Expect(k8sClient.DeleteAllOf(ctx, &v1.Node{})).To(Succeed())
+		cancel()
+
+		Expect(k8sClient.DeleteAllOf(context.Background(), &v1alpha1.NicDevice{}, client.InNamespace(namespaceName))).To(Succeed())
+		Expect(k8sClient.Delete(context.Background(), &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespaceName}})).To(Succeed())
+		Expect(k8sClient.DeleteAllOf(context.Background(), &v1.Node{})).To(Succeed())
 	})
 
 	Describe("nicDeviceConfigurationStatuses tests", func() {
@@ -161,6 +166,91 @@ var _ = Describe("NicDeviceReconciler", func() {
 			}
 			Expect(statuses.nvConfigReadyForAll()).To(Equal(true))
 		})
+
+		It("should return correct flag if firmwareUpToDate", func() {
+			status := nicDeviceConfigurationStatus{requestedFirmwareVersion: "1", device: &v1alpha1.NicDevice{Status: v1alpha1.NicDeviceStatus{FirmwareVersion: "1"}}}
+			Expect(status.firmwareUpToDate()).To(Equal(true))
+			status = nicDeviceConfigurationStatus{requestedFirmwareVersion: "1", device: &v1alpha1.NicDevice{Status: v1alpha1.NicDeviceStatus{FirmwareVersion: "2"}}}
+			Expect(status.firmwareUpToDate()).To(Equal(false))
+		})
+
+		It("should return correct flag if firmwareReady", func() {
+			statuses := nicDeviceConfigurationStatuses{
+				{firmwareValidationSuccessful: true, requestedFirmwareVersion: "2", device: &v1alpha1.NicDevice{Status: v1alpha1.NicDeviceStatus{FirmwareVersion: "1"}}},
+				{firmwareValidationSuccessful: false, requestedFirmwareVersion: "1", device: &v1alpha1.NicDevice{Status: v1alpha1.NicDeviceStatus{FirmwareVersion: "1"}}},
+			}
+			Expect(statuses.firmwareReady()).To(Equal(false))
+			statuses = nicDeviceConfigurationStatuses{
+				{firmwareValidationSuccessful: true, requestedFirmwareVersion: "1", device: &v1alpha1.NicDevice{Status: v1alpha1.NicDeviceStatus{FirmwareVersion: "1"}}},
+				{firmwareValidationSuccessful: true, requestedFirmwareVersion: "1", device: &v1alpha1.NicDevice{Status: v1alpha1.NicDeviceStatus{FirmwareVersion: "1"}}},
+			}
+			Expect(statuses.firmwareReady()).To(Equal(true))
+			statuses = nicDeviceConfigurationStatuses{
+				{firmwareValidationSuccessful: false, requestedFirmwareVersion: "2", device: &v1alpha1.NicDevice{Status: v1alpha1.NicDeviceStatus{FirmwareVersion: "1"}}},
+				{firmwareValidationSuccessful: false, requestedFirmwareVersion: "2", device: &v1alpha1.NicDevice{Status: v1alpha1.NicDeviceStatus{FirmwareVersion: "1"}}},
+			}
+			Expect(statuses.firmwareReady()).To(Equal(false))
+			statuses = nicDeviceConfigurationStatuses{
+				{firmwareValidationSuccessful: true, requestedFirmwareVersion: "1", device: &v1alpha1.NicDevice{Status: v1alpha1.NicDeviceStatus{FirmwareVersion: "1"}}},
+				{firmwareValidationSuccessful: false, requestedFirmwareVersion: "2", device: &v1alpha1.NicDevice{Status: v1alpha1.NicDeviceStatus{FirmwareVersion: "1"}}},
+			}
+			Expect(statuses.firmwareReady()).To(Equal(false))
+			statuses = nicDeviceConfigurationStatuses{
+				{firmwareValidationSuccessful: false, requestedFirmwareVersion: "1", device: &v1alpha1.NicDevice{Status: v1alpha1.NicDeviceStatus{FirmwareVersion: "1"}}},
+				{firmwareValidationSuccessful: false, requestedFirmwareVersion: "1", device: &v1alpha1.NicDevice{Status: v1alpha1.NicDeviceStatus{FirmwareVersion: "1"}}},
+			}
+			Expect(statuses.firmwareReady()).To(Equal(false))
+		})
+
+		It("should return correct flag if firmwareUpdateRequired", func() {
+			// version mismatch but policy is to Validate
+			falseStatus1 := nicDeviceConfigurationStatus{
+				firmwareValidationSuccessful: true, requestedFirmwareVersion: "2", device: &v1alpha1.NicDevice{
+					Spec: v1alpha1.NicDeviceSpec{Firmware: &v1alpha1.FirmwareTemplateSpec{
+						NicFirmwareSourceRef: "some-ref",
+						UpdatePolicy:         consts.FirmwareUpdatePolicyValidate}},
+					Status: v1alpha1.NicDeviceStatus{FirmwareVersion: "1"}},
+			}
+			Expect(falseStatus1.firmwareUpdateRequired()).To(Equal(false))
+
+			// version mismatch and policy is to update but firmware validation was unsuccessful
+			falseStatus2 := nicDeviceConfigurationStatus{
+				firmwareValidationSuccessful: false, requestedFirmwareVersion: "", device: &v1alpha1.NicDevice{
+					Spec: v1alpha1.NicDeviceSpec{Firmware: &v1alpha1.FirmwareTemplateSpec{
+						NicFirmwareSourceRef: "some-ref",
+						UpdatePolicy:         consts.FirmwareUpdatePolicyUpdate}},
+					Status: v1alpha1.NicDeviceStatus{FirmwareVersion: "1"}},
+			}
+			Expect(falseStatus2.firmwareUpdateRequired()).To(Equal(false))
+
+			// version mismatch and policy is to Update, validation successful
+			trueStatus := nicDeviceConfigurationStatus{
+				firmwareValidationSuccessful: true, requestedFirmwareVersion: "2", device: &v1alpha1.NicDevice{
+					Spec: v1alpha1.NicDeviceSpec{Firmware: &v1alpha1.FirmwareTemplateSpec{
+						NicFirmwareSourceRef: "some-ref",
+						UpdatePolicy:         consts.FirmwareUpdatePolicyUpdate}},
+					Status: v1alpha1.NicDeviceStatus{FirmwareVersion: "1"}},
+			}
+			Expect(trueStatus.firmwareUpdateRequired()).To(Equal(true))
+
+			// version matches and policy is to Update
+			falseStatus3 := nicDeviceConfigurationStatus{
+				firmwareValidationSuccessful: true, requestedFirmwareVersion: "2", device: &v1alpha1.NicDevice{
+					Spec: v1alpha1.NicDeviceSpec{Firmware: &v1alpha1.FirmwareTemplateSpec{
+						NicFirmwareSourceRef: "some-ref",
+						UpdatePolicy:         consts.FirmwareUpdatePolicyUpdate}},
+					Status: v1alpha1.NicDeviceStatus{FirmwareVersion: "2"}},
+			}
+			Expect(falseStatus3.firmwareUpdateRequired()).To(Equal(false))
+
+			// should return true if at least one is true
+			statuses := nicDeviceConfigurationStatuses{&falseStatus1, &trueStatus}
+			Expect(statuses.firmwareUpdateRequired()).To(Equal(true))
+
+			// should return false if all false
+			statuses = nicDeviceConfigurationStatuses{&falseStatus1, &falseStatus2, &falseStatus3}
+			Expect(statuses.firmwareUpdateRequired()).To(Equal(false))
+		})
 	})
 
 	Describe("updateDeviceStatusCondition", func() {
@@ -190,6 +280,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 			Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
 			err = reconciler.updateConfigInProgressStatusCondition(ctx, device, "AnotherTestReason", metav1.ConditionFalse, "")
 			Expect(err).NotTo(HaveOccurred())
+			err = reconciler.updateFirmwareUpdateInProgressStatusCondition(ctx, device, "AnotherTestReason", metav1.ConditionTrue, "")
+			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.ConfigUpdateInProgressCondition,
@@ -197,11 +289,21 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Reason:  "AnotherTestReason",
 				Message: "",
 			}))
+			Eventually(func() []metav1.Condition {
+				device := &v1alpha1.NicDevice{}
+				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
+				return device.Status.Conditions
+			}, timeout).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.FirmwareUpdateInProgressCondition,
+				Status:  metav1.ConditionTrue,
+				Reason:  "AnotherTestReason",
+				Message: "",
+			}))
 		})
 	})
 
-	Describe("reconcile a single device", func() {
-		var createDevice = func(setLastSpecAnnotation bool) *v1alpha1.NicDevice {
+	Describe("reconcile a single device without firmware spec", func() {
+		var createDevice = func(setLastSpecAnnotation bool, initialStatusCondition *metav1.Condition) *v1alpha1.NicDevice {
 			device := &v1alpha1.NicDevice{
 				ObjectMeta: metav1.ObjectMeta{Name: deviceName, Namespace: namespaceName},
 				Spec: v1alpha1.NicDeviceSpec{
@@ -228,6 +330,9 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Ports: []v1alpha1.NicDevicePortSpec{{
 					PCI: "0000:3b:00.0",
 				}},
+			}
+			if initialStatusCondition != nil {
+				meta.SetStatusCondition(&device.Status.Conditions, *initialStatusCondition)
 			}
 			Expect(k8sClient.Status().Update(ctx, device)).To(Succeed())
 
@@ -256,7 +361,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 		It("Should result in SpecValidationFailed status if spec validation failed", func() {
 			hostManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, errors.New(specValidationFailed))
 
-			createDevice(false)
+			createDevice(false, nil)
 
 			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.ConfigUpdateInProgressCondition,
@@ -270,7 +375,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			errorText := err.Error()
 			hostManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, err)
 
-			createDevice(false)
+			createDevice(false, nil)
 
 			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.ConfigUpdateInProgressCondition,
@@ -284,7 +389,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			hostManager.On("ApplyDeviceRuntimeSpec", mock.Anything).Return(nil)
 			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
 
-			createDevice(false)
+			createDevice(false, nil)
 
 			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:   consts.ConfigUpdateInProgressCondition,
@@ -308,7 +413,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			hostManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(true, false, nil)
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(errors.New(errorText))
 
-			createDevice(true)
+			createDevice(true, nil)
 
 			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.ConfigUpdateInProgressCondition,
@@ -330,7 +435,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(false, nil)
 
-			createDevice(true)
+			createDevice(true, nil)
 
 			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:   consts.ConfigUpdateInProgressCondition,
@@ -353,7 +458,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
 			hostManager.On("ApplyDeviceNvSpec", mock.Anything, mock.Anything).Return(false, errors.New(errorText))
 
-			createDevice(false)
+			createDevice(false, nil)
 
 			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.ConfigUpdateInProgressCondition,
@@ -370,7 +475,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			hostManager.On("ApplyDeviceNvSpec", mock.Anything, mock.Anything).Return(true, nil)
 			maintenanceManager.On("Reboot").Return(errors.New(errorText))
 
-			createDevice(true)
+			createDevice(true, nil)
 
 			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:   consts.ConfigUpdateInProgressCondition,
@@ -389,7 +494,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			hostManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil)
 			hostManager.On("ApplyDeviceRuntimeSpec", mock.Anything).Return(errors.New(errorText))
 
-			createDevice(false)
+			createDevice(false, nil)
 
 			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.ConfigUpdateInProgressCondition,
@@ -411,7 +516,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(false, nil)
 
-			createDevice(true) // lastAppliedSpec will not match the current resulting in need to reboot
+			createDevice(true, nil) // lastAppliedSpec will not match the current resulting in need to reboot
 
 			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:   consts.ConfigUpdateInProgressCondition,
@@ -428,17 +533,12 @@ var _ = Describe("NicDeviceReconciler", func() {
 			hostManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, true, nil)
 			hostUtils.On("GetHostUptimeSeconds").Return(time.Second*0, nil)
 
-			device := createDevice(false)
-
-			cond := metav1.Condition{
-				Type:               consts.ConfigUpdateInProgressCondition,
-				Status:             metav1.ConditionTrue,
-				ObservedGeneration: device.Generation,
-				Reason:             consts.PendingRebootReason,
-				Message:            "",
-			}
-			meta.SetStatusCondition(&device.Status.Conditions, cond)
-			Expect(k8sClient.Status().Update(ctx, device)).To(Succeed())
+			_ = createDevice(false, &metav1.Condition{
+				Type:    consts.ConfigUpdateInProgressCondition,
+				Status:  metav1.ConditionTrue,
+				Reason:  consts.PendingRebootReason,
+				Message: "",
+			})
 
 			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.ConfigUpdateInProgressCondition,
@@ -461,17 +561,12 @@ var _ = Describe("NicDeviceReconciler", func() {
 			hostManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, true, nil)
 			hostUtils.On("GetHostUptimeSeconds").Return(time.Second*1000, nil)
 
-			device := createDevice(false)
-
-			cond := metav1.Condition{
-				Type:               consts.ConfigUpdateInProgressCondition,
-				Status:             metav1.ConditionTrue,
-				ObservedGeneration: device.Generation,
-				Reason:             consts.PendingRebootReason,
-				Message:            "",
-			}
-			meta.SetStatusCondition(&device.Status.Conditions, cond)
-			Expect(k8sClient.Status().Update(ctx, device)).To(Succeed())
+			_ = createDevice(false, &metav1.Condition{
+				Type:    consts.ConfigUpdateInProgressCondition,
+				Status:  metav1.ConditionTrue,
+				Reason:  consts.PendingRebootReason,
+				Message: "",
+			})
 
 			Consistently(getDeviceConditions, timeout).ShouldNot(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.ConfigUpdateInProgressCondition,
@@ -487,7 +582,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.AssertExpectations(GinkgoT())
 		})
 	})
-	Describe("reconcile multiple devices", func() {
+	Describe("reconcile multiple devices without firmware specs", func() {
 		var (
 			secondDeviceName = "second-test-device"
 
@@ -566,7 +661,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 				device := &v1alpha1.NicDevice{}
 				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: secondDeviceName, Namespace: namespaceName}, device)).To(Succeed())
 				return device.Status.Conditions
-			}).Should(BeEmpty()) // No operation are performed on this device, no reason to change status
+			}).ShouldNot(testutils.MatchCondition(metav1.Condition{Type: consts.ConfigUpdateInProgressCondition})) // No operation are performed on this device, no reason to change status
 
 			hostManager.AssertNotCalled(GinkgoT(), "ApplyDeviceRuntimeSpec", mock.Anything)
 			maintenanceManager.AssertExpectations(GinkgoT())
@@ -592,10 +687,456 @@ var _ = Describe("NicDeviceReconciler", func() {
 				device := &v1alpha1.NicDevice{}
 				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: secondDeviceName, Namespace: namespaceName}, device)).To(Succeed())
 				return device.Status.Conditions
-			}).Should(BeEmpty()) // No operation are performed on this device, no reason to change status
+			}).ShouldNot(testutils.MatchCondition(metav1.Condition{Type: consts.ConfigUpdateInProgressCondition})) // No operation are performed on this device, no reason to change status
 
 			hostManager.AssertNotCalled(GinkgoT(), "ApplyDeviceRuntimeSpec", mock.Anything)
 			maintenanceManager.AssertExpectations(GinkgoT())
+		})
+	})
+
+	Describe("reconcile a single device with both firmware and configuration spec", func() {
+		var oldFwVersion = "22.44.11"
+		var newFwVersion = "33.22.11"
+
+		var createDevice = func(fwVersion string, policy string) *v1alpha1.NicDevice {
+			device := &v1alpha1.NicDevice{
+				ObjectMeta: metav1.ObjectMeta{Name: deviceName, Namespace: namespaceName},
+				Spec: v1alpha1.NicDeviceSpec{
+					Firmware: &v1alpha1.FirmwareTemplateSpec{
+						NicFirmwareSourceRef: "some-fw-source-ref",
+						UpdatePolicy:         policy,
+					},
+					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
+						Template: &v1alpha1.ConfigurationTemplateSpec{
+							NumVfs:   4,
+							LinkType: consts.Ethernet,
+						},
+					},
+				},
+			}
+
+			Expect(k8sClient.Create(ctx, device))
+			device.Status = v1alpha1.NicDeviceStatus{
+				Node: nodeName,
+				Ports: []v1alpha1.NicDevicePortSpec{{
+					PCI: "0000:3b:00.0",
+				}},
+				FirmwareVersion: fwVersion,
+			}
+			Expect(k8sClient.Status().Update(ctx, device)).To(Succeed())
+
+			return device
+		}
+
+		It("Should fail validation if firmware source is not ready", func() {
+			err := types.FirmwareSourceNotReadyError("source-name", "source not ready!")
+			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return("", err)
+			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
+			maintenanceManager.AssertNotCalled(GinkgoT(), "ScheduleMaintenance", mock.Anything)
+
+			createDevice(oldFwVersion, consts.FirmwareUpdatePolicyUpdate)
+
+			Eventually(getDeviceConditions, time.Second*10).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.FirmwareUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.FirmwareSourceNotReadyReason,
+				Message: err.Error(),
+			}))
+
+			Consistently(getDeviceConditions, time.Second).ShouldNot(testutils.MatchCondition(metav1.Condition{Type: consts.FirmwareUpdateInProgressCondition, Status: metav1.ConditionTrue}))
+
+			maintenanceManager.AssertExpectations(GinkgoT())
+		})
+
+		It("Should fail validation if firmware source failed", func() {
+			err := errors.New("source failed")
+			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return("", err)
+			maintenanceManager.AssertNotCalled(GinkgoT(), "ScheduleMaintenance", mock.Anything)
+
+			createDevice(oldFwVersion, consts.FirmwareUpdatePolicyUpdate)
+
+			Eventually(getDeviceConditions, time.Second*10).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.FirmwareUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.FirmwareSourceFailedReason,
+				Message: err.Error(),
+			}))
+
+			Consistently(getDeviceConditions, time.Second).ShouldNot(testutils.MatchCondition(metav1.Condition{Type: consts.FirmwareUpdateInProgressCondition, Status: metav1.ConditionTrue}))
+
+			maintenanceManager.AssertExpectations(GinkgoT())
+		})
+
+		It("Should set successful status if fw update is not required", func() {
+			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return(newFwVersion, nil)
+			maintenanceManager.AssertNotCalled(GinkgoT(), "ScheduleMaintenance", mock.Anything)
+			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
+			hostManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil)
+			hostManager.On("ApplyDeviceRuntimeSpec", mock.Anything).Return(nil)
+
+			createDevice(newFwVersion, consts.FirmwareUpdatePolicyUpdate)
+
+			Eventually(getDeviceConditions, time.Second*10).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.FirmwareUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.DeviceFwMatchReason,
+				Message: consts.DeviceFwMatchMessage,
+			}))
+
+			Consistently(getDeviceConditions, time.Second).ShouldNot(testutils.MatchCondition(metav1.Condition{Type: consts.FirmwareUpdateInProgressCondition, Status: metav1.ConditionTrue}))
+
+			maintenanceManager.AssertExpectations(GinkgoT())
+		})
+
+		It("Should not start firmware update if maintenance is not allowed", func() {
+			err := errors.New("maintenance not allowed")
+			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return(newFwVersion, nil)
+			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(err)
+			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
+			firmwareManager.AssertNotCalled(GinkgoT(), "BurnNicFirmware", mock.Anything, mock.Anything, mock.Anything)
+
+			createDevice(oldFwVersion, consts.FirmwareUpdatePolicyUpdate)
+
+			Eventually(getDeviceConditions, time.Second*10).Should(testutils.MatchCondition(metav1.Condition{
+				Type:   consts.FirmwareUpdateInProgressCondition,
+				Status: metav1.ConditionTrue,
+				Reason: consts.PendingNodeMaintenanceReason,
+			}))
+
+			Consistently(getDeviceConditions, time.Second).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.ConfigUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.PendingFirmwareUpdateReason,
+				Message: consts.PendingOwnFirmwareUpdateMessage,
+			}))
+
+			firmwareManager.AssertExpectations(GinkgoT())
+			maintenanceManager.AssertExpectations(GinkgoT())
+		})
+
+		It("Should set the version mismatch status if policy is set to validate", func() {
+			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return(newFwVersion, nil)
+			maintenanceManager.AssertNotCalled(GinkgoT(), "ScheduleMaintenance", mock.Anything)
+			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
+			firmwareManager.AssertNotCalled(GinkgoT(), "BurnNicFirmware", mock.Anything, mock.Anything, mock.Anything)
+
+			createDevice(oldFwVersion, consts.FirmwareUpdatePolicyValidate)
+
+			Eventually(getDeviceConditions, time.Second*10).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.FirmwareUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.DeviceFwMismatchReason,
+				Message: consts.DeviceFwMismatchMessage,
+			}))
+
+			Consistently(getDeviceConditions, time.Second).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.ConfigUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.PendingFirmwareUpdateReason,
+				Message: consts.PendingOwnFirmwareUpdateMessage,
+			}))
+
+			firmwareManager.AssertExpectations(GinkgoT())
+			maintenanceManager.AssertExpectations(GinkgoT())
+		})
+
+		It("Should set the error status if fw update has failed", func() {
+			err := errors.New("fw update failed")
+			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return(newFwVersion, nil)
+			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
+			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
+			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
+			firmwareManager.On("BurnNicFirmware", mock.Anything, mock.Anything, mock.Anything).After(1 * time.Second).Return(err)
+
+			createDevice(oldFwVersion, consts.FirmwareUpdatePolicyUpdate)
+
+			Eventually(getDeviceConditions, time.Second*10).Should(testutils.MatchCondition(metav1.Condition{
+				Type:   consts.FirmwareUpdateInProgressCondition,
+				Status: metav1.ConditionTrue,
+				Reason: consts.FirmwareUpdateStartedReason,
+			}))
+
+			Eventually(getDeviceConditions, time.Second*10).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.FirmwareUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.FirmwareUpdateFailedReason,
+				Message: err.Error(),
+			}))
+
+			Consistently(getDeviceConditions, time.Second).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.ConfigUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.PendingFirmwareUpdateReason,
+				Message: consts.PendingOwnFirmwareUpdateMessage,
+			}))
+
+			firmwareManager.AssertExpectations(GinkgoT())
+			maintenanceManager.AssertExpectations(GinkgoT())
+		})
+
+		It("Should reboot if required after the fw update", func() {
+			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).After(time.Second).Return(newFwVersion, nil)
+			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
+			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
+			maintenanceManager.On("ReleaseMaintenance", mock.Anything)
+			firmwareManager.On("BurnNicFirmware", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+			hostManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil)
+			hostManager.On("ApplyDeviceRuntimeSpec", mock.Anything).Return(nil)
+			hostManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(true, nil)
+			maintenanceManager.On("Reboot", mock.Anything).Return(nil)
+
+			createDevice(oldFwVersion, consts.FirmwareUpdatePolicyUpdate)
+
+			Eventually(getDeviceConditions, time.Second*10).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.FirmwareUpdateInProgressCondition,
+				Status:  metav1.ConditionTrue,
+				Reason:  consts.PendingRebootReason,
+				Message: "",
+			}))
+		})
+
+		It("Should set the success status after fw update", func() {
+			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return(newFwVersion, nil)
+			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
+			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
+			maintenanceManager.On("ReleaseMaintenance", mock.Anything)
+			firmwareManager.On("BurnNicFirmware", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+			hostManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil)
+			hostManager.On("ApplyDeviceRuntimeSpec", mock.Anything).Return(nil)
+			hostManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(false, nil)
+
+			createDevice(oldFwVersion, consts.FirmwareUpdatePolicyUpdate)
+
+			Eventually(getDeviceConditions, time.Second*10).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.FirmwareUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.DeviceFwMatchReason,
+				Message: consts.DeviceFwMatchMessage,
+			}))
+		})
+	})
+
+	Describe("reconcile two devices with both firmware and configuration spec", func() {
+		var (
+			oldFwVersion     = "22.44.11"
+			newFwVersion     = "33.22.11"
+			secondDeviceName = "second-test-device"
+			matchFirstDevice = mock.MatchedBy(func(input *v1alpha1.NicDevice) bool {
+				return input.Name == deviceName
+			})
+
+			matchSecondDevice = mock.MatchedBy(func(input *v1alpha1.NicDevice) bool {
+				return input.Name == secondDeviceName
+			})
+		)
+
+		var createDevices = func(secondPolicy string) {
+			device := &v1alpha1.NicDevice{
+				ObjectMeta: metav1.ObjectMeta{Name: deviceName, Namespace: namespaceName},
+				Spec: v1alpha1.NicDeviceSpec{
+					Firmware: &v1alpha1.FirmwareTemplateSpec{
+						NicFirmwareSourceRef: "some-fw-source-ref",
+						UpdatePolicy:         consts.FirmwareUpdatePolicyUpdate,
+					},
+					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
+						Template: &v1alpha1.ConfigurationTemplateSpec{
+							NumVfs:   4,
+							LinkType: consts.Ethernet,
+						},
+					},
+				},
+			}
+
+			device2 := &v1alpha1.NicDevice{
+				ObjectMeta: metav1.ObjectMeta{Name: secondDeviceName, Namespace: namespaceName},
+				Spec: v1alpha1.NicDeviceSpec{
+					Firmware: &v1alpha1.FirmwareTemplateSpec{
+						NicFirmwareSourceRef: "some-fw-source-ref",
+						UpdatePolicy:         secondPolicy,
+					},
+					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
+						Template: &v1alpha1.ConfigurationTemplateSpec{
+							NumVfs:   4,
+							LinkType: consts.Ethernet,
+						},
+					},
+				},
+			}
+
+			Expect(k8sClient.Create(ctx, device2))
+			Expect(k8sClient.Create(ctx, device))
+
+			device.Status = v1alpha1.NicDeviceStatus{
+				Node: nodeName,
+				Ports: []v1alpha1.NicDevicePortSpec{{
+					PCI: "0000:3b:00.0",
+				}},
+				FirmwareVersion: oldFwVersion,
+			}
+
+			device2.Status = v1alpha1.NicDeviceStatus{
+				Node: nodeName,
+				Ports: []v1alpha1.NicDevicePortSpec{{
+					PCI: "0000:03:00.0",
+				}},
+				FirmwareVersion: oldFwVersion,
+			}
+
+			Expect(k8sClient.Status().Update(ctx, device2)).To(Succeed())
+			Expect(k8sClient.Status().Update(ctx, device)).To(Succeed())
+		}
+
+		It("Should not stop firmware update on one device if firmware version doesn't match on the second device and policy is to Validate", func() {
+			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return(newFwVersion, nil)
+			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
+			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
+			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
+			firmwareManager.On("BurnNicFirmware", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+			hostManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(false, nil)
+			hostManager.AssertNotCalled(GinkgoT(), "ValidateDeviceNvSpec", mock.Anything, mock.Anything)
+			hostManager.AssertNotCalled(GinkgoT(), "ApplyDeviceRuntimeSpec", mock.Anything)
+
+			createDevices(consts.FirmwareUpdatePolicyValidate)
+
+			Eventually(getDeviceConditions, time.Second*10).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.FirmwareUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.DeviceFwMatchReason,
+				Message: consts.DeviceFwMatchMessage,
+			}))
+
+			Eventually(func() []metav1.Condition {
+				device := &v1alpha1.NicDevice{}
+				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: secondDeviceName, Namespace: namespaceName}, device)).To(Succeed())
+				return device.Status.Conditions
+			}).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.FirmwareUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.DeviceFwMismatchReason,
+				Message: consts.DeviceFwMismatchMessage,
+			}))
+
+			Eventually(func() []metav1.Condition {
+				device := &v1alpha1.NicDevice{}
+				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: secondDeviceName, Namespace: namespaceName}, device)).To(Succeed())
+				return device.Status.Conditions
+			}, time.Second).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.ConfigUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.PendingFirmwareUpdateReason,
+				Message: consts.PendingOwnFirmwareUpdateMessage,
+			}))
+
+			Consistently(getDeviceConditions, time.Second).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.ConfigUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.PendingFirmwareUpdateReason,
+				Message: consts.PendingOtherFirmwareUpdateMessage,
+			}))
+
+			hostManager.AssertExpectations(GinkgoT())
+		})
+
+		It("Should stop configuration update on one device if firmware update failed for another one", func() {
+			err := errors.New("fw update failed")
+			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return(newFwVersion, nil)
+			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
+			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
+			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
+			firmwareManager.On("BurnNicFirmware", mock.Anything, matchFirstDevice, mock.Anything).Return(nil)
+			firmwareManager.On("BurnNicFirmware", mock.Anything, matchSecondDevice, mock.Anything).Return(err)
+			hostManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(false, nil)
+			hostManager.AssertNotCalled(GinkgoT(), "ValidateDeviceNvSpec", mock.Anything, mock.Anything)
+			hostManager.AssertNotCalled(GinkgoT(), "ApplyDeviceRuntimeSpec", mock.Anything)
+
+			createDevices(consts.FirmwareUpdatePolicyUpdate)
+
+			Eventually(getDeviceConditions, time.Second*10).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.FirmwareUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.DeviceFwMatchReason,
+				Message: consts.DeviceFwMatchMessage,
+			}))
+
+			Eventually(func() []metav1.Condition {
+				device := &v1alpha1.NicDevice{}
+				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: secondDeviceName, Namespace: namespaceName}, device)).To(Succeed())
+				return device.Status.Conditions
+			}, time.Second*10).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.FirmwareUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.FirmwareUpdateFailedReason,
+				Message: err.Error(),
+			}))
+
+			Eventually(getDeviceConditions, time.Second).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.ConfigUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.PendingFirmwareUpdateReason,
+				Message: consts.PendingOtherFirmwareUpdateMessage,
+			}))
+
+			Consistently(func() []metav1.Condition {
+				device := &v1alpha1.NicDevice{}
+				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: secondDeviceName, Namespace: namespaceName}, device)).To(Succeed())
+				return device.Status.Conditions
+			}, time.Second).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.ConfigUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.PendingFirmwareUpdateReason,
+				Message: consts.PendingOwnFirmwareUpdateMessage,
+			}))
+
+			hostManager.AssertExpectations(GinkgoT())
+		})
+
+		It("Should not stop configuration update if all devices have up-to-date firmware", func() {
+			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return(newFwVersion, nil)
+			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
+			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
+			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
+			firmwareManager.On("BurnNicFirmware", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+			hostManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(false, nil)
+			hostManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil)
+			hostManager.On("ApplyDeviceRuntimeSpec", mock.Anything).Return(nil)
+
+			createDevices(consts.FirmwareUpdatePolicyUpdate)
+
+			Eventually(getDeviceConditions, time.Second*10).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.FirmwareUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.DeviceFwMatchReason,
+				Message: consts.DeviceFwMatchMessage,
+			}))
+
+			Eventually(func() []metav1.Condition {
+				device := &v1alpha1.NicDevice{}
+				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: secondDeviceName, Namespace: namespaceName}, device)).To(Succeed())
+				return device.Status.Conditions
+			}, time.Second*10).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.FirmwareUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.DeviceFwMatchReason,
+				Message: consts.DeviceFwMatchMessage,
+			}))
+
+			Eventually(getDeviceConditions, time.Second*10).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.ConfigUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.UpdateSuccessfulReason,
+				Message: "",
+			}))
+
+			Consistently(func() []metav1.Condition {
+				device := &v1alpha1.NicDevice{}
+				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: secondDeviceName, Namespace: namespaceName}, device)).To(Succeed())
+				return device.Status.Conditions
+			}, time.Second).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.ConfigUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.UpdateSuccessfulReason,
+				Message: "",
+			}))
 		})
 	})
 })
