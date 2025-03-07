@@ -109,6 +109,34 @@ func (_m *HostManager) DiscoverOfedVersion() string {
 	return r0
 }
 
+// ResetNicFirmware provides a mock function with given fields: ctx, device
+func (_m *HostManager) ResetNicFirmware(ctx context.Context, device *v1alpha1.NicDevice) (bool, error) {
+	ret := _m.Called(ctx, device)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ResetNicFirmware")
+	}
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *v1alpha1.NicDevice) (bool, error)); ok {
+		return rf(ctx, device)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *v1alpha1.NicDevice) bool); ok {
+		r0 = rf(ctx, device)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *v1alpha1.NicDevice) error); ok {
+		r1 = rf(ctx, device)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // ValidateDeviceNvSpec provides a mock function with given fields: ctx, device
 func (_m *HostManager) ValidateDeviceNvSpec(ctx context.Context, device *v1alpha1.NicDevice) (bool, bool, error) {
 	ret := _m.Called(ctx, device)

@@ -50,6 +50,12 @@ type HostManager interface {
 	// returns string - installed OFED version
 	// returns empty string - OFED isn't installed or version couldn't be determined
 	DiscoverOfedVersion() string
+	// ResetNicFirmware resets NIC's firmware
+	// Operation can be long, required context to be able to terminate by timeout
+	// IB devices need to communicate with other nodes for confirmation
+	// returns bool - reboot required to reset firmware
+	// return err - there were errors while resetting NIC firmware
+	ResetNicFirmware(ctx context.Context, device *v1alpha1.NicDevice) (bool, error)
 }
 
 type hostManager struct {
@@ -233,8 +239,8 @@ func (h hostManager) ApplyDeviceNvSpec(ctx context.Context, device *v1alpha1.Nic
 			return false, err
 		}
 
-		err = h.hostUtils.ResetNicFirmware(ctx, pciAddr)
-		if err != nil {
+		rebootRequired, err := h.ResetNicFirmware(ctx, device)
+		if err != nil || rebootRequired {
 			log.Log.Error(err, "Failed to reset NIC firmware, reboot required to apply ADVANCED_PCI_SETTINGS", "device", device.Name)
 			// We try to perform FW reset after setting the ADVANCED_PCI_SETTINGS to save us a reboot
 			// However, if the soft FW reset fails for some reason, we need to perform a reboot to unlock
@@ -331,6 +337,29 @@ func (h hostManager) ApplyDeviceRuntimeSpec(device *v1alpha1.NicDevice) error {
 // returns error - OFED isn't installed or version couldn't be determined
 func (h hostManager) DiscoverOfedVersion() string {
 	return h.hostUtils.GetOfedVersion()
+}
+
+// ResetNicFirmware resets NIC's firmware
+// Operation can be long, required context to be able to terminate by timeout
+// IB devices need to communicate with other nodes for confirmation
+// returns bool - reboot required to reset firmware
+// return err - there were errors while resetting NIC firmware
+func (h hostManager) ResetNicFirmware(ctx context.Context, device *v1alpha1.NicDevice) (bool, error) {
+	log.Log.Info("hostManager.ResetNicFirmware", "device", device.Name)
+	// We cannot reset firmware on Bluefield devices in NIC mode as it would switch them back to the DPU mode
+	// Thus, reboot these devices instead of resetting firmware to apply changes
+	if isBluefieldDevice("") {
+		log.Log.Info("Skipping firmware reset for the Bluefield device, requesting reboot instead", "device", device.Name)
+		// TODO add product type to device status
+		return true, nil
+	}
+	err := h.hostUtils.ResetNicFirmware(ctx, device.Status.Ports[0].PCI)
+	if err != nil {
+		log.Log.Error(err, "Failed to reset NIC firmware", "device", device.Name)
+		return false, err
+	}
+
+	return false, nil
 }
 
 func NewHostManager(nodeName string, hostUtils HostUtils, eventRecorder record.EventRecorder) HostManager {
