@@ -109,9 +109,9 @@ type NicConfigurationTemplateSpec struct {
 	Template *ConfigurationTemplateSpec `json:"template"`
 }
 
-// NicConfigurationTemplateStatus defines the observed state of NicConfigurationTemplate
-type NicConfigurationTemplateStatus struct {
-	// NicDevice CRs matching this configuration template
+// NicTemplateStatus defines the observed state of NicConfigurationTemplate and NicFirmwareTemplate
+type NicTemplateStatus struct {
+	// NicDevice CRs matching this configuration / firmware template
 	NicDevices []string `json:"nicDevices,omitempty"`
 }
 
@@ -126,7 +126,7 @@ type NicConfigurationTemplate struct {
 	// Defines the desired state of NICs
 	Spec NicConfigurationTemplateSpec `json:"spec,omitempty"`
 	// Defines the observed state of NicConfigurationTemplate
-	Status NicConfigurationTemplateStatus `json:"status,omitempty"`
+	Status NicTemplateStatus `json:"status,omitempty"`
 }
 
 //+kubebuilder:object:root=true
