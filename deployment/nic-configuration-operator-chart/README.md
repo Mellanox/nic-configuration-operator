@@ -15,6 +15,11 @@ A Helm chart for NIC Configuration Operator
 | configDaemon.resources | object | `{"limits":{"cpu":"500m","memory":"128Mi"},"requests":{"cpu":"10m","memory":"64Mi"}}` | resources and limits for the config daemon |
 | imagePullSecrets | list | `[]` | image pull secrets for both the operator and the config daemon |
 | logLevel | string | `"info"` | log level configuration (debug|info) |
+| nicFirmwareStorage | object | `{"availableStorageSize":"1Gi","create":true,"pvcName":"nic-fw-storage-pvc","storageClassName":""}` | settings to enable the NIC Firmware Storage |
+| nicFirmwareStorage.availableStorageSize | string | `"1Gi"` | storage size for the NIC Configuration Operator to request. 1Gi is the default value when not provided |
+| nicFirmwareStorage.create | bool | `true` | create a new pvc or use an existing one |
+| nicFirmwareStorage.pvcName | string | `"nic-fw-storage-pvc"` | name of the PVC to mount as NIC Firmware storage. If not provided, the NIC FW upgrade feature will be disabled. |
+| nicFirmwareStorage.storageClassName | string | `""` | storage class name to be used to store NIC FW binaries during NIC FW upgrade. If not provided, the cluster-default storage class will be used |
 | operator.affinity | object | `{"nodeAffinity":{"preferredDuringSchedulingIgnoredDuringExecution":[{"preference":{"matchExpressions":[{"key":"node-role.kubernetes.io/master","operator":"Exists"}]},"weight":1},{"preference":{"matchExpressions":[{"key":"node-role.kubernetes.io/control-plane","operator":"Exists"}]},"weight":1}]}}` | node affinity for the operator |
 | operator.image.name | string | `"nic-configuration-operator"` |  |
 | operator.image.repository | string | `"ghcr.io/mellanox"` | repository to use for the operator image |
