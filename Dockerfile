@@ -23,9 +23,10 @@ COPY ./ ./
 #RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/maintenance-manager/main.go
 RUN --mount=type=cache,target=/go/pkg/mod/ GO_GCFLAGS=${GCFLAGS} make build-manager
 
-# Use distroless as minimal base image to package the manager binary
-# Refer to https://github.com/GoogleContainerTools/distroless for more details
-FROM gcr.io/distroless/static:nonroot
+FROM quay.io/centos/centos:stream9
+
+RUN yum -y install mstflint && yum clean all
+
 WORKDIR /
 COPY --from=builder /workspace/build/manager .
 USER 65532:65532
