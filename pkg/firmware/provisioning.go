@@ -247,7 +247,7 @@ func writeMetadataFile(metadata cacheMetadata, cacheDir string) error {
 // AddFirmwareBinariesToCacheByMetadata finds the newly downloaded firmware binary files and organizes them in the cache according to their metadata
 func (f firmwareProvisioner) AddFirmwareBinariesToCacheByMetadata(cacheName string) error {
 	cacheDir := path.Join(f.cacheRootDir, cacheName)
-	firmwareBinariesDir := path.Join(cacheDir, "firmware-binaries")
+	firmwareBinariesDir := path.Join(cacheDir, consts.NicFirmwareBinariesFolder)
 	entries, err := os.ReadDir(firmwareBinariesDir)
 	if err != nil {
 		log.Log.Error(err, "failed to read firmware binaries cache", "cacheName", cacheName)
@@ -311,7 +311,7 @@ func (f firmwareProvisioner) AddFirmwareBinariesToCacheByMetadata(cacheName stri
 // Returns mapping between firmware version to PSIDs available in the cache, error if validation failed
 func (f firmwareProvisioner) ValidateCache(cacheName string) (map[string][]string, error) {
 	cacheDir := path.Join(f.cacheRootDir, cacheName)
-	firmwareBinariesDir := path.Join(cacheDir, "firmware-binaries")
+	firmwareBinariesDir := path.Join(cacheDir, consts.NicFirmwareBinariesFolder)
 	cachedVersions := make(map[string][]string)
 	foundPSIDs := make(map[string]struct{})
 
