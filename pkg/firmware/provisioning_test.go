@@ -32,7 +32,7 @@ import (
 
 var _ = Describe("FirmwareProvisioner", func() {
 	var (
-		fwUtilsMock *mocks.ProvisioningUtils
+		fwUtilsMock *mocks.FirmwareUtils
 		fwProv      FirmwareProvisioner
 		tmpDir      string
 		cacheName   string
@@ -40,7 +40,7 @@ var _ = Describe("FirmwareProvisioner", func() {
 	)
 
 	BeforeEach(func() {
-		fwUtilsMock = &mocks.ProvisioningUtils{}
+		fwUtilsMock = &mocks.FirmwareUtils{}
 
 		var err error
 		tmpDir, err = os.MkdirTemp("/tmp", "fwprovisioningtest-*")
