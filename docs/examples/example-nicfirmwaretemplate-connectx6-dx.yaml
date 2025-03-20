@@ -1,0 +1,14 @@
+# Change this template first as it only provides an example of configuration
+apiVersion: configuration.net.nvidia.com/v1alpha1
+kind: NicFirmwareTemplate
+metadata:
+  name: connectx6dx-config
+  namespace: network-operator
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: cloud-dev-41
+  nicSelector:
+    nicType: "101d"
+  template:
+    nicFirmwareSourceRef: connectx6dx-firmware-22-44-1036
+    updatePolicy: Update
