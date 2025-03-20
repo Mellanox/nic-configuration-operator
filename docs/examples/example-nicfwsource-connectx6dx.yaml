@@ -1,0 +1,12 @@
+# Change this template first as it only provides an example of configuration
+apiVersion: configuration.net.nvidia.com/v1alpha1
+kind: NicFirmwareSource
+metadata:
+  name: connectx6-dx-firmware-22-44-1036
+  namespace: network-operator
+  finalizers:
+    - configuration.net.nvidia.com/nic-configuration-operator
+spec:
+  # a list of firmware binaries from mlnx website if they are zipped try to unzip before placing
+  binUrlSources:
+    - https://www.mellanox.com/downloads/firmware/fw-ConnectX6Dx-rel-22_44_1036-MCX623106AC-CDA_Ax-UEFI-14.37.14-FlexBoot-3.7.500.signed.bin.zip
