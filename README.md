@@ -5,66 +5,45 @@
 [![CodeQL](https://github.com/Mellanox/nic-configuration-operator/actions/workflows/codeql.yml/badge.svg)](https://github.com/Mellanox/nic-configuration-operator/actions/workflows/codeql.yml)
 [![Image push](https://github.com/Mellanox/nic-configuration-operator/actions/workflows/image-push-main.yml/badge.svg?event=push)](https://github.com/Mellanox/nic-configuration-operator/actions/workflows/image-push-main.yml)
 
-# NVIDIA Nic Configuration Operator
+# NVIDIA NIC Configuration Operator
 
-NVIDIA Nic Configuration Operator provides Kubernetes API(Custom Resource Definition) to allow FW configuration on Nvidia NICs
+NVIDIA NIC Configuration Operator provides Kubernetes API(Custom Resource Definition) to allow FW configuration on Nvidia NICs
 in a coordinated manner. It deploys a configuration daemon on each of the desired nodes to configure Nvidia NICs there. 
-NVIDIA Nic Configuration operator uses [maintenance operator](https://github.com/Mellanox/maintenance-operator) to prepare a node for maintenance before the actual configuration.
+NVIDIA NIC Configuration Operator uses the [Maintenance Operator](https://github.com/Mellanox/maintenance-operator) to prepare a node for maintenance before the actual configuration.
 
 ## Deployment
 
 ### Prerequisites
 
 * Kubernetes cluster
-* [Maintenance operator](https://github.com/Mellanox/maintenance-operator) deployed
+* [NVIDIA Network Operator](https://github.com/Mellanox/network-operator) deployed
+* [Maintenance Operator](https://github.com/Mellanox/maintenance-operator) deployed
 
-### Helm
-
-#### Deploy latest from project sources
-
-```bash
-# Clone project
-git clone https://github.com/Mellanox/nic-configuration-operator.git ; cd nic-configuration-operator
-
-# Install Operator
-helm install -n nic-configuration-operator --create-namespace --set operator.image.tag=latest nic-configuration ./deployment/nic-configuration-operator-chart
-
-# View deployed resources
-kubectl -n nic-configuration-operator get all
-```
-
-> [!NOTE]
-> Refer to [helm values documentation](deployment/nic-configuration-operator-chart/README.md) for more information
-
-#### Deploy last release from OCI repo
-
-```bash
-helm install -n nic-configuration-operator --create-namespace nic-configuration-operator oci://ghcr.io/mellanox/nic-configuration-operator-chart
-```
+NVIDIA NIC Configuration Operator can be deployed as part of the [NIC Cluster Policy CRD](https://github.com/Mellanox/network-operator?tab=readme-ov-file#nicclusterpolicy-spec).
 
 ## CRDs
 
 ### NICConfigurationTemplate
 
-The NICConfigurationTemplate CRD is used to request FW configuration for a subset of devices
+The NICConfigurationTemplate CRD is used to request FW configuration for a subset of devices.
 
-Nic Configuration Operator will select NIC devices in the cluster that match the template's selectors and apply the configuration spec to them.
+NIC Configuration Operator will select NIC devices in the cluster that match the template's selectors and apply the configuration spec to them.
 
-If more than one template match a single device, none will be applied and the error will be reported in all of their statuses.
+If more than one template matches a single device, none will be applied and the error will be reported in all of their statuses.
 
-for more information refer to [api-reference](docs/api-reference.md).
+For more information refer to [api-reference](docs/api-reference.md).
 
 > [!IMPORTANT]
 > `ResetToDefault` In NIC Configuration Operator template v0.1.14 BF2/BF3 DPUs (not SuperNics) FW reset flow isn't supported.
 
-#### [Example NICConfigurationTemplate](docs/examples/example-nicconfigurationtemplate-connectx6.yaml):
+#### [Example NICConfigurationTemplate](docs/examples/example-nicconfigurationtemplate-connectx6dx.yaml):
 
 ```yaml
 apiVersion: configuration.net.nvidia.com/v1alpha1
 kind: NicConfigurationTemplate
 metadata:
    name: connectx6-config
-   namespace: nic-configuration-operator
+   namespace: network-operator
 spec:
    nodeSelector:
       feature.node.kubernetes.io/network-sriov.capable: "true"
@@ -129,17 +108,77 @@ spec:
   * For per port parameters (suffix `_P1`, `_P2`) parameters with `_P2` suffix are ignored if the device is single port.
 * If a configuration is not set in spec, its non-volatile configuration parameters (if any) should be set to device default.
 
+### NicFirmwareSource
 
-### NicDevice
+The [NICFirmwareSource CR](/api/v1alpha1/nicfirmwaresource_types.go) represents a list of url sources with NIC FW binaries archives.
 
-The NicDevice CRD is created automatically by the configuration daemon and represents a specific NVIDIA NIC on a specific K8s node.
+#### Provisioning a storage class for NIC FW upgrade
+
+To enable the NIC FW upgrade feature, `NicFirmwareStorage` section should be provided in the [NIC Cluster Policy](https://github.com/Mellanox/network-operator/blob/7c31e789835afdad114b1a68011e5307bc773bcf/api/v1alpha1/nicclusterpolicy_types.go#L321). There is an option to create a new PVC or use the existing one.
+Firmware binaries will be provisioned by a provisioner controller which will watch for NICFirmwareSource obj and provision the binaries in a shared volume enabled by the given storage class.
+Node agents will need to make sure that the reference NICFirmwareSource object is fully reconciled (status.state == Success) before proceeding with firmware update.
+
+#### Example of the storage class deployment
+
+To set up a persistent NFS storage in the cluster, the [example from the CSI NFS Driver repository](https://github.com/kubernetes-csi/csi-driver-nfs/blob/master/deploy/example/nfs-provisioner/README.md) might be used.
+After deploying the NFS server and NFS CSI driver, the [storage class](https://github.com/kubernetes-csi/csi-driver-nfs/blob/master/deploy/example/storageclass-nfs.yaml) should be deployed. The name of the storage class can then be passed to the NIC Cluster Policy.
+
+#### [Example NICFirmwareSource](docs/examples/example-nicfwsource-connectx6dx.yaml):
+
+```yaml
+# Change this template first as it only provides an example of configuration
+apiVersion: configuration.net.nvidia.com/v1alpha1
+kind: NicFirmwareSource
+metadata:
+  name: connectx-6dx-firmware-22-44-1036
+  namespace: network-operator
+  finalizers:
+    - configuration.net.nvidia.com/nic-configuration-operator
+spec:
+  # a list of firmware binaries from mlnx website if they are zipped try to unzip before placing
+  binUrlSources:
+    - https://www.mellanox.com/downloads/firmware/fw-ConnectX6Dx-rel-22_44_1036-MCX623106AC-CDA_Ax-UEFI-14.37.14-FlexBoot-3.7.500.signed.bin.zip
+```
+
+### NICFirmwareTemplate
+
+The NICFirmwareTemplate CRD is used to request FW validation or update from a referenced NICFirmwareSource for a subset of devices.
+
+NIC Configuration Operator will select NIC devices in the cluster that match the template's selectors and apply the configuration spec to them.
+
+If more than one template matches a single device, none will be applied and the error will be reported in all of their statuses.
+
+For more information refer to [api-reference](docs/api-reference.md).
+
+#### [Example NICFirmwareTemplate](docs/examples/example-nicconfigurationtemplate-connectx6dx.yaml):
+
+```yaml
+apiVersion: configuration.net.nvidia.com/v1alpha1
+kind: NicFirmwareTemplate
+metadata:
+  name: connectx6dx-config
+  namespace: network-operator
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: cloud-dev-41
+  nicSelector:
+    nicType: "101d"
+  template:
+    nicFirmwareSourceRef: connectx6dx-firmware-22-44-1036
+    updatePolicy: Update
+```
+
+### NICDevice
+
+The NICDevice CRD is created automatically by the configuration daemon and represents a specific NVIDIA NIC on a specific K8s node.
 The name of the device combines the node name, device type and its serial number for easier tracking.
 
+`FirmwareUpdateInProgress` status condition can be used for tracking the state of the FW validation/update on a specific device. If an error occurs during FW update, it will be reflected in this field.
 `ConfigUpdateInProgress` status condition can be used for tracking the state of the FW configuration update on a specific device. If an error occurs during FW configuration update, it will be reflected in this field.
 
 for more information refer to [api-reference](docs/api-reference.md).
 
-#### Example NicDevice
+#### Example NICDevice
 
 ```yaml
 apiVersion: configuration.net.nvidia.com/v1alpha1
@@ -148,6 +187,9 @@ metadata:
    name: co-node-25-101b-mt2232t13210
    namespace: nic-configuration-operator
 spec:
+   firmware:
+     nicFirmwareSourceRef: connectx6dx-firmware-22-44-1036
+     updatePolicy: Update
    configuration:
       template:
          linkType: Ethernet
@@ -156,9 +198,13 @@ spec:
             enabled: true
 status:
    conditions:
-      - reason: UpdateSuccessful
+      - reason: DeviceFirmwareConfigMatch
+        type: FirmwareUpdateInProgress
         status: "False"
+        message: Firmware matches the requested version
+      - reason: UpdateSuccessful
         type: ConfigUpdateInProgress
+        status: "False"
    firmwareVersion: 20.42.1000
    node: co-node-25
    partNumber: mcx632312a-hdat
@@ -177,14 +223,3 @@ status:
 #### Implementation details:
 
 The NicDevice CRD is created and reconciled by the configuration daemon. The reconciliation logic scheme can be found [here](docs/nic-configuration-reconcile-diagram.png).
-
-## Provisioning a storage class for NIC FW upgrade
-
-To enable the NIC FW upgrade feature, `nicFirmwareStorage.pvcName` parameter should be provided in the helm chart. There is an option to create a new PVC or use the existing one.
-Firmware binaries will be provisioned by a provisioner controller which will watch for NICFirmwareSource obj and provision the binaries in a shared volume enabled by the given storage class.
-Node agents will need to make sure that the reference NICFirmwareSource object is fully reconciled (status.state == Success) before proceeding with firmware update.
-
-### Example of the storage class deployment
-
-To set up a persistent NFS storage in the cluster, the [example from the CSI NFS Driver repository](https://github.com/kubernetes-csi/csi-driver-nfs/blob/master/deploy/example/nfs-provisioner/README.md) might be used.
-After deploying the NFS server and NFS CSI driver, the [storage class](https://github.com/kubernetes-csi/csi-driver-nfs/blob/master/deploy/example/storageclass-nfs.yaml) should be deployed. The name of the storage class can then be passed to the NIC Configuration Operator helm chart.
