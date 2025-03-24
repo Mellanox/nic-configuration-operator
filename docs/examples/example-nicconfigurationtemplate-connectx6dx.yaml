@@ -2,8 +2,8 @@
 apiVersion: configuration.net.nvidia.com/v1alpha1
 kind: NicConfigurationTemplate
 metadata:
-  name: connectx6-config
-  namespace: nic-configuration-operator
+  name: connectx6dx-config
+  namespace: network-operator
 spec:
   nodeSelector:
     feature.node.kubernetes.io/network-sriov.capable: "true"
