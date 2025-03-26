@@ -874,27 +874,6 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.AssertExpectations(GinkgoT())
 		})
 
-		It("Should reboot if required after the fw update", func() {
-			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).After(time.Second).Return(newFwVersion, nil)
-			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
-			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
-			maintenanceManager.On("ReleaseMaintenance", mock.Anything)
-			firmwareManager.On("BurnNicFirmware", mock.Anything, mock.Anything, mock.Anything).Return(nil)
-			hostManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil)
-			hostManager.On("ApplyDeviceRuntimeSpec", mock.Anything).Return(nil)
-			hostManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(true, nil)
-			maintenanceManager.On("Reboot", mock.Anything).Return(nil)
-
-			createDevice(oldFwVersion, consts.FirmwareUpdatePolicyUpdate)
-
-			Eventually(getDeviceConditions, time.Second*10).Should(testutils.MatchCondition(metav1.Condition{
-				Type:    consts.FirmwareUpdateInProgressCondition,
-				Status:  metav1.ConditionTrue,
-				Reason:  consts.PendingRebootReason,
-				Message: "",
-			}))
-		})
-
 		It("Should set the success status after fw update", func() {
 			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return(newFwVersion, nil)
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
@@ -903,7 +882,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			firmwareManager.On("BurnNicFirmware", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			hostManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil)
 			hostManager.On("ApplyDeviceRuntimeSpec", mock.Anything).Return(nil)
-			hostManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(false, nil)
+			hostManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(nil)
 
 			createDevice(oldFwVersion, consts.FirmwareUpdatePolicyUpdate)
 
@@ -992,7 +971,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
 			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
 			firmwareManager.On("BurnNicFirmware", mock.Anything, mock.Anything, mock.Anything).Return(nil)
-			hostManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(false, nil)
+			hostManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(nil)
 			hostManager.AssertNotCalled(GinkgoT(), "ValidateDeviceNvSpec", mock.Anything, mock.Anything)
 			hostManager.AssertNotCalled(GinkgoT(), "ApplyDeviceRuntimeSpec", mock.Anything)
 
@@ -1045,7 +1024,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
 			firmwareManager.On("BurnNicFirmware", mock.Anything, matchFirstDevice, mock.Anything).Return(nil)
 			firmwareManager.On("BurnNicFirmware", mock.Anything, matchSecondDevice, mock.Anything).Return(err)
-			hostManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(false, nil)
+			hostManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(nil)
 			hostManager.AssertNotCalled(GinkgoT(), "ValidateDeviceNvSpec", mock.Anything, mock.Anything)
 			hostManager.AssertNotCalled(GinkgoT(), "ApplyDeviceRuntimeSpec", mock.Anything)
 
@@ -1096,7 +1075,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
 			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
 			firmwareManager.On("BurnNicFirmware", mock.Anything, mock.Anything, mock.Anything).Return(nil)
-			hostManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(false, nil)
+			hostManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(nil)
 			hostManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil)
 			hostManager.On("ApplyDeviceRuntimeSpec", mock.Anything).Return(nil)
 

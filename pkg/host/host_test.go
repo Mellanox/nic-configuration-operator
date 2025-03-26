@@ -20,14 +20,16 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
-	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
-	"github.com/Mellanox/nic-configuration-operator/pkg/host/mocks"
-	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 	"github.com/jaypipes/ghw/pkg/pci"
 	"github.com/jaypipes/pcidb"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/mock"
+
+	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
+	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	"github.com/Mellanox/nic-configuration-operator/pkg/host/mocks"
+	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 )
 
 var _ = Describe("HostManager", func() {
@@ -753,10 +755,44 @@ var _ = Describe("HostManager", func() {
 				})
 
 				It("should reset NV config and set AdvancedPCISettings parameter successfully", func() {
+					nvConfig := types.NvConfigQuery{
+						CurrentConfig:  map[string][]string{"param1": {"value1"}},
+						NextBootConfig: map[string][]string{"param1": {"value1"}},
+						DefaultConfig:  map[string][]string{"param1": {"default1"}},
+					}
+					mockHostUtils.On("QueryNvConfig", ctx, pciAddress).
+						Return(nvConfig, nil)
+
 					mockHostUtils.On("ResetNvConfig", pciAddress).Return(nil)
 					mockHostUtils.
 						On("SetNvConfigParameter", pciAddress, consts.AdvancedPCISettingsParam, consts.NvParamTrue).
 						Return(nil)
+					mockHostUtils.AssertNotCalled(GinkgoT(), "SetNvConfigParameter", pciAddress, consts.BF3OperationModeParam, mock.Anything)
+
+					reboot, err := manager.ApplyDeviceNvSpec(ctx, device)
+					Expect(reboot).To(BeTrue())
+					Expect(err).To(BeNil())
+
+					mockHostUtils.AssertExpectations(GinkgoT())
+				})
+
+				It("should reset NV config and restore the BF3 operation mode successfully", func() {
+					nvConfig := types.NvConfigQuery{
+						CurrentConfig:  map[string][]string{consts.BF3OperationModeParam: {consts.NvParamBF3NicMode}},
+						NextBootConfig: map[string][]string{consts.BF3OperationModeParam: {consts.NvParamBF3DpuMode}},
+						DefaultConfig:  map[string][]string{consts.BF3OperationModeParam: {consts.NvParamBF3DpuMode}},
+					}
+					mockHostUtils.On("QueryNvConfig", ctx, pciAddress).
+						Return(nvConfig, nil)
+
+					mockHostUtils.On("ResetNvConfig", pciAddress).Return(nil)
+					mockHostUtils.
+						On("SetNvConfigParameter", pciAddress, consts.AdvancedPCISettingsParam, consts.NvParamTrue).
+						Return(nil)
+					mockHostUtils.
+						On("SetNvConfigParameter", pciAddress, consts.BF3OperationModeParam, consts.NvParamBF3NicMode).
+						Return(nil)
+					mockHostUtils.AssertNotCalled(GinkgoT(), "SetNvConfigParameter", pciAddress, consts.BF3OperationModeParam, consts.NvParamBF3DpuMode)
 
 					reboot, err := manager.ApplyDeviceNvSpec(ctx, device)
 					Expect(reboot).To(BeTrue())
@@ -766,6 +802,14 @@ var _ = Describe("HostManager", func() {
 				})
 
 				It("should return error if ResetNvConfig fails", func() {
+					nvConfig := types.NvConfigQuery{
+						CurrentConfig:  map[string][]string{"param1": {"value1"}},
+						NextBootConfig: map[string][]string{"param1": {"value1"}},
+						DefaultConfig:  map[string][]string{"param1": {"default1"}},
+					}
+					mockHostUtils.On("QueryNvConfig", ctx, pciAddress).
+						Return(nvConfig, nil)
+
 					resetErr := errors.New("failed to reset nv config")
 					mockHostUtils.On("ResetNvConfig", pciAddress).Return(resetErr)
 
@@ -777,6 +821,14 @@ var _ = Describe("HostManager", func() {
 				})
 
 				It("should return error if SetNvConfigParameter fails", func() {
+					nvConfig := types.NvConfigQuery{
+						CurrentConfig:  map[string][]string{"param1": {"value1"}},
+						NextBootConfig: map[string][]string{"param1": {"value1"}},
+						DefaultConfig:  map[string][]string{"param1": {"default1"}},
+					}
+					mockHostUtils.On("QueryNvConfig", ctx, pciAddress).
+						Return(nvConfig, nil)
+
 					mockHostUtils.On("ResetNvConfig", pciAddress).Return(nil)
 					setParamErr := errors.New("failed to set nv config parameter")
 					mockHostUtils.

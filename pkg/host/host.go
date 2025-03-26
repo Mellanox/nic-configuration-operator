@@ -53,9 +53,8 @@ type HostManager interface {
 	// ResetNicFirmware resets NIC's firmware
 	// Operation can be long, required context to be able to terminate by timeout
 	// IB devices need to communicate with other nodes for confirmation
-	// returns bool - reboot required to reset firmware
 	// return err - there were errors while resetting NIC firmware
-	ResetNicFirmware(ctx context.Context, device *v1alpha1.NicDevice) (bool, error)
+	ResetNicFirmware(ctx context.Context, device *v1alpha1.NicDevice) error
 }
 
 type hostManager struct {
@@ -206,12 +205,37 @@ func (h hostManager) ApplyDeviceNvSpec(ctx context.Context, device *v1alpha1.Nic
 
 	pciAddr := device.Status.Ports[0].PCI
 
+	nvConfig, err := h.hostUtils.QueryNvConfig(ctx, device.Status.Ports[0].PCI)
+	if err != nil {
+		log.Log.Error(err, "failed to query nv config", "device", device.Name)
+		return false, err
+	}
+
 	if device.Spec.Configuration.ResetToDefault {
-		log.Log.Info("resetting nv config to default", "device", device.Name) // todo
+		log.Log.Info("resetting nv config to default", "device", device.Name)
+		bf3OperationModeValue, isBF3device := nvConfig.CurrentConfig[consts.BF3OperationModeParam]
+
 		err := h.hostUtils.ResetNvConfig(pciAddr)
 		if err != nil {
 			log.Log.Error(err, "Failed to reset nv config", "device", device.Name)
 			return false, err
+		}
+
+		// We need to restore the previous mode of operation for the BlueField devices, otherwise they might become unavailable if the mode changes
+		if isBF3device {
+			val := bf3OperationModeValue[0]
+			mode := ""
+			if val == consts.NvParamBF3DpuMode {
+				mode = "DPU"
+			} else if val == consts.NvParamBF3NicMode {
+				mode = "NIC"
+			}
+			log.Log.Info(fmt.Sprintf("The device %s is the BlueField-3, restoring the previous mode of operation (%s mode) after configuration reset", device.Name, mode))
+			err = h.hostUtils.SetNvConfigParameter(pciAddr, consts.BF3OperationModeParam, val)
+			if err != nil {
+				log.Log.Error(err, "Failed to restore the BlueField device mode of operation", "device", device.Name, "mode", mode, "param", consts.BF3OperationModeParam, "value", val)
+				return false, err
+			}
 		}
 
 		err = h.hostUtils.SetNvConfigParameter(pciAddr, consts.AdvancedPCISettingsParam, consts.NvParamTrue)
@@ -221,12 +245,6 @@ func (h hostManager) ApplyDeviceNvSpec(ctx context.Context, device *v1alpha1.Nic
 		}
 
 		return true, err
-	}
-
-	nvConfig, err := h.hostUtils.QueryNvConfig(ctx, device.Status.Ports[0].PCI)
-	if err != nil {
-		log.Log.Error(err, "failed to query nv config", "device", device.Name)
-		return false, err
 	}
 
 	// if ADVANCED_PCI_SETTINGS == 0, not all nv config parameters are available for configuration
@@ -239,8 +257,8 @@ func (h hostManager) ApplyDeviceNvSpec(ctx context.Context, device *v1alpha1.Nic
 			return false, err
 		}
 
-		rebootRequired, err := h.ResetNicFirmware(ctx, device)
-		if err != nil || rebootRequired {
+		err := h.ResetNicFirmware(ctx, device)
+		if err != nil {
 			log.Log.Error(err, "Failed to reset NIC firmware, reboot required to apply ADVANCED_PCI_SETTINGS", "device", device.Name)
 			// We try to perform FW reset after setting the ADVANCED_PCI_SETTINGS to save us a reboot
 			// However, if the soft FW reset fails for some reason, we need to perform a reboot to unlock
@@ -342,24 +360,16 @@ func (h hostManager) DiscoverOfedVersion() string {
 // ResetNicFirmware resets NIC's firmware
 // Operation can be long, required context to be able to terminate by timeout
 // IB devices need to communicate with other nodes for confirmation
-// returns bool - reboot required to reset firmware
 // return err - there were errors while resetting NIC firmware
-func (h hostManager) ResetNicFirmware(ctx context.Context, device *v1alpha1.NicDevice) (bool, error) {
+func (h hostManager) ResetNicFirmware(ctx context.Context, device *v1alpha1.NicDevice) error {
 	log.Log.Info("hostManager.ResetNicFirmware", "device", device.Name)
-	// We cannot reset firmware on Bluefield devices in NIC mode as it would switch them back to the DPU mode
-	// Thus, reboot these devices instead of resetting firmware to apply changes
-	if isBluefieldDevice("") {
-		log.Log.Info("Skipping firmware reset for the Bluefield device, requesting reboot instead", "device", device.Name)
-		// TODO add product type to device status
-		return true, nil
-	}
 	err := h.hostUtils.ResetNicFirmware(ctx, device.Status.Ports[0].PCI)
 	if err != nil {
 		log.Log.Error(err, "Failed to reset NIC firmware", "device", device.Name)
-		return false, err
+		return err
 	}
 
-	return false, nil
+	return nil
 }
 
 func NewHostManager(nodeName string, hostUtils HostUtils, eventRecorder record.EventRecorder) HostManager {
