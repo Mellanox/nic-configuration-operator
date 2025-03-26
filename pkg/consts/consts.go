@@ -66,6 +66,8 @@ const (
 	NvParamLinkTypeInfiniband = "1"
 	NvParamLinkTypeEthernet   = "2"
 	NvParamZero               = "0"
+	NvParamBF3DpuMode         = "0"
+	NvParamBF3NicMode         = "1"
 
 	SriovEnabledParam        = "SRIOV_EN"
 	SriovNumOfVfsParam       = "NUM_OF_VFS"
@@ -80,6 +82,7 @@ const (
 	Cnp802pPrioP2Param       = "CNP_802P_PRIO_P2"
 	AtsEnabledParam          = "ATS_ENABLED"
 	AdvancedPCISettingsParam = "ADVANCED_PCI_SETTINGS"
+	BF3OperationModeParam    = "INTERNAL_CPU_OFFLOAD_ENGINE"
 
 	SecondPortPrefix = "P2"
 

@@ -624,26 +624,20 @@ func (r *NicDeviceReconciler) handleFirmwareUpdate(ctx context.Context, status *
 
 	log.Log.Info("New firmware image was successfully burned. Firmware reset is required to apply changes", "device", status.device.Name)
 
-	rebootRequired, err := r.HostManager.ResetNicFirmware(ctx, status.device)
+	err = r.HostManager.ResetNicFirmware(ctx, status.device)
 	if err != nil {
 		log.Log.Error(err, "failed to reset NIC firmware", "device", status.device.Name)
 		_ = r.updateFirmwareUpdateInProgressStatusCondition(ctx, status.device, consts.FirmwareUpdateFailedReason, metav1.ConditionFalse, err.Error())
 		return err
 	}
 
-	if rebootRequired {
-		log.Log.Info("reboot required to apply fw update", "device", status.device.Name)
-		status.rebootRequired = true
-		return r.updateFirmwareUpdateInProgressStatusCondition(ctx, status.device, consts.PendingRebootReason, metav1.ConditionTrue, "")
-	} else {
-		log.Log.Info("update fw version for device after update", "device", status.device.Name, "new version", status.requestedFirmwareVersion)
-		status.device.Status.FirmwareVersion = status.requestedFirmwareVersion
-		err = r.Client.Status().Update(ctx, status.device)
-		if err != nil {
-			log.Log.Error(err, "failed to update device firmware version", "device", status.device.Name)
-		}
-		return r.updateFirmwareUpdateInProgressStatusCondition(ctx, status.device, consts.DeviceFwMatchReason, metav1.ConditionFalse, consts.DeviceFwMatchMessage)
+	log.Log.Info("update fw version for device after update", "device", status.device.Name, "new version", status.requestedFirmwareVersion)
+	status.device.Status.FirmwareVersion = status.requestedFirmwareVersion
+	err = r.Client.Status().Update(ctx, status.device)
+	if err != nil {
+		log.Log.Error(err, "failed to update device firmware version", "device", status.device.Name)
 	}
+	return r.updateFirmwareUpdateInProgressStatusCondition(ctx, status.device, consts.DeviceFwMatchReason, metav1.ConditionFalse, consts.DeviceFwMatchMessage)
 }
 
 // handleConfigurationPendingFirmwareUpdate updates the device's configuration status condition to PendingFirmware if configuration spec is not empty
