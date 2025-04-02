@@ -343,8 +343,7 @@ var _ = Describe("NicConfigurationTemplate Controller", func() {
 
 		device := &v1alpha1.NicDevice{
 			ObjectMeta: metav1.ObjectMeta{Name: deviceName, Namespace: namespaceName},
-			Spec: v1alpha1.NicDeviceSpec{Configuration: &v1alpha1.NicDeviceConfigurationSpec{
-				Template: &v1alpha1.ConfigurationTemplateSpec{NumVfs: 4, LinkType: consts.Ethernet}}},
+			Spec:       v1alpha1.NicDeviceSpec{},
 		}
 		Expect(k8sClient.Create(ctx, device)).To(Succeed())
 		device.Status = v1alpha1.NicDeviceStatus{
@@ -354,7 +353,7 @@ var _ = Describe("NicConfigurationTemplate Controller", func() {
 		}
 		Expect(k8sClient.Status().Update(ctx, device)).To(Succeed())
 
-		Eventually(getDeviceSpecTemplate(ctx, deviceName, namespaceName, k8sClient)).Should(BeNil())
+		Consistently(getDeviceSpecTemplate(ctx, deviceName, namespaceName, k8sClient), time.Second).Should(BeNil())
 		Eventually(getMatchedDevicesFromStatus(ctx, template1.Name, template1.Namespace, k8sClient)).Should(BeEmpty())
 		Eventually(getMatchedDevicesFromStatus(ctx, template2.Name, template2.Namespace, k8sClient)).Should(BeEmpty())
 	})
