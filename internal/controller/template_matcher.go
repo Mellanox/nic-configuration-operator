@@ -92,10 +92,7 @@ func matchDevicesToTemplates(ctx context.Context, client client.Client, recorder
 				log.Log.Error(err, "Failed to update device's spec", "device", device)
 				return err
 			}
-			continue
-		}
-
-		if len(matchingTemplates) > 1 {
+		} else if len(matchingTemplates) > 1 {
 			for _, template := range matchingTemplates {
 				dropDeviceFromStatus(device.Name, template)
 			}
@@ -112,21 +109,21 @@ func matchDevicesToTemplates(ctx context.Context, client client.Client, recorder
 				log.Log.Error(err, "Failed to emit warning about multiple templates matching one device", "templates", joinedTemplateNames)
 				return err
 			}
-		}
+		} else {
+			matchingTemplate := matchingTemplates[0]
 
-		matchingTemplate := matchingTemplates[0]
+			status := matchingTemplate.getStatus()
+			if !slices.Contains(status.NicDevices, device.Name) {
+				status.NicDevices = append(status.NicDevices, device.Name)
+			}
 
-		status := matchingTemplate.getStatus()
-		if !slices.Contains(status.NicDevices, device.Name) {
-			status.NicDevices = append(status.NicDevices, device.Name)
-		}
-
-		updateRequired := matchingTemplate.applyToDevice(&device)
-		if updateRequired {
-			err := client.Update(ctx, &device)
-			if err != nil {
-				log.Log.Error(err, "Failed to update NicDevice spec", "device", device.Name)
-				return err
+			updateRequired := matchingTemplate.applyToDevice(&device)
+			if updateRequired {
+				err := client.Update(ctx, &device)
+				if err != nil {
+					log.Log.Error(err, "Failed to update NicDevice spec", "device", device.Name)
+					return err
+				}
 			}
 		}
 	}
