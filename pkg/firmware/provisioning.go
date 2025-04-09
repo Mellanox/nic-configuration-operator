@@ -200,12 +200,20 @@ func (f firmwareProvisioner) DownloadAndUnzipFirmwareArchives(cacheName string, 
 			return err
 		}
 
+		binFileFoundInArchive := false
 		for _, file := range files {
 			if !strings.EqualFold(filepath.Ext(file), consts.NicFirmwareBinaryFileExtension) {
 				continue
 			}
+			binFileFoundInArchive = true
 
 			urlsToFiles[url] = append(urlsToFiles[url], filepath.Base(file))
+		}
+
+		if !binFileFoundInArchive {
+			err := fmt.Errorf("requested FW zip archive %s doesn't contain FW binary files", url)
+			log.Log.Error(err, "failed to process zip archive", "cacheName", cacheName, "url", url)
+			return err
 		}
 
 		log.Log.V(2).Info("Unzipped files", "archive", archiveLocalPath, "files", files)

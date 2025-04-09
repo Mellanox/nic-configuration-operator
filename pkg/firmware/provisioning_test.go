@@ -209,6 +209,25 @@ var _ = Describe("FirmwareProvisioner", func() {
 			})
 		})
 
+		Context("when archive has no binary files", func() {
+			It("should return an error", func() {
+				cleanupArchives = true
+				fwUtilsMock.On("DownloadFile", downloadUrls[0], mock.AnythingOfType("string")).
+					Return(nil).Once()
+				fwUtilsMock.On("UnzipFiles", mock.AnythingOfType("string"), mock.AnythingOfType("string")).
+					Return([]string{"randomFile"}, nil).Once()
+
+				Expect(os.MkdirAll(cacheDir, 0755)).To(Succeed())
+				fileToBeDeleted := path.Join(cacheDir, "fwA.zip")
+				Expect(os.WriteFile(fileToBeDeleted, []byte("dummy content"), 0644)).To(Succeed())
+
+				err := fwProv.DownloadAndUnzipFirmwareArchives(cacheName, downloadUrls, cleanupArchives)
+				Expect(err.Error()).To(ContainSubstring("requested FW zip archive http://example.com/fwA.zip doesn't contain FW binary files"))
+				_, err = os.Stat(fileToBeDeleted)
+				Expect(err).ToNot(HaveOccurred())
+			})
+		})
+
 		Context("when cleanupArchives is true", func() {
 			It("should remove the downloaded archive after unzipping", func() {
 				cleanupArchives = true
