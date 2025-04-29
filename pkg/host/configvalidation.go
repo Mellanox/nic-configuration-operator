@@ -143,7 +143,7 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 					if v.eventRecorder != nil {
 						v.eventRecorder.Event(device, v1.EventTypeWarning, "FirmwareError", warning)
 					}
-					log.Log.Error(errors.New(warning), "device", device.Name, "fw version", device.Status.FirmwareVersion)
+					log.Log.Error(errors.New(warning), "skipping parameter", "device", device.Name, "fw version", device.Status.FirmwareVersion)
 				}
 			}
 		}
