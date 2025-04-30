@@ -33,11 +33,11 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/pkg/host/mocks"
 )
 
-var _ = Describe("DeviceDiscovery", func() {
+var _ = Describe("DeviceDiscoveryController", func() {
 	var (
 		mgr            manager.Manager
 		k8sClient      client.Client
-		deviceRegistry *DeviceDiscovery
+		deviceRegistry *DeviceDiscoveryController
 		hostManager    *mocks.HostManager
 		ctx            context.Context
 		cancel         context.CancelFunc
@@ -59,7 +59,7 @@ var _ = Describe("DeviceDiscovery", func() {
 		deviceDiscoveryReconcileTime = 1 * time.Second
 		hostManager = &mocks.HostManager{}
 
-		deviceRegistry = NewDeviceRegistry(k8sClient, hostManager, nodeName, namespaceName)
+		deviceRegistry = NewDeviceDiscoveryController(k8sClient, hostManager, nodeName, namespaceName)
 		Expect(mgr.Add(deviceRegistry)).To(Succeed())
 	})
 
