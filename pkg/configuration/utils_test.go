@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package host
+package configuration
 
 import (
 	"context"
@@ -29,10 +29,10 @@ import (
 
 const pciAddress = "0000:03:00.0"
 
-var _ = Describe("HostUtils", func() {
+var _ = Describe("ConfigurationUtils", func() {
 	Describe("GetPCILinkSpeed", func() {
 		var (
-			h        *hostUtils
+			h        *configurationUtils
 			fakeExec *execTesting.FakeExec
 			pciAddr  string
 		)
@@ -40,7 +40,7 @@ var _ = Describe("HostUtils", func() {
 		BeforeEach(func() {
 			fakeExec = &execTesting.FakeExec{}
 
-			h = &hostUtils{
+			h = &configurationUtils{
 				execInterface: fakeExec,
 			}
 		})
@@ -152,7 +152,7 @@ var _ = Describe("HostUtils", func() {
 	})
 	Describe("queryMLXConfig", func() {
 		var (
-			h        *hostUtils
+			h        *configurationUtils
 			fakeExec *execTesting.FakeExec
 		)
 
@@ -212,7 +212,7 @@ Configurations:                              Default         Current         Nex
 				},
 			}
 
-			h = &hostUtils{
+			h = &configurationUtils{
 				execInterface: fakeExec,
 			}
 		})
@@ -301,7 +301,7 @@ Device type:    ConnectX4
 	})
 	Describe("GetMaxReadRequestSize", func() {
 		var (
-			h        *hostUtils
+			h        *configurationUtils
 			fakeExec *execTesting.FakeExec
 			pciAddr  string
 		)
@@ -309,7 +309,7 @@ Device type:    ConnectX4
 		BeforeEach(func() {
 			fakeExec = &execTesting.FakeExec{}
 
-			h = &hostUtils{
+			h = &configurationUtils{
 				execInterface: fakeExec,
 			}
 		})
@@ -417,7 +417,7 @@ Device type:    ConnectX4
 				return fakeCmd
 			})
 
-			h := &hostUtils{
+			h := &configurationUtils{
 				execInterface: fakeExec,
 			}
 
@@ -446,7 +446,7 @@ Device type:    ConnectX4
 				return fakeCmd
 			})
 
-			h := &hostUtils{
+			h := &configurationUtils{
 				execInterface: fakeExec,
 			}
 
@@ -459,7 +459,7 @@ Device type:    ConnectX4
 	})
 	Describe("SetMaxReadRequestSize", func() {
 		var (
-			h        *hostUtils
+			h        *configurationUtils
 			fakeExec *execTesting.FakeExec
 			pciAddr  string
 		)
@@ -467,7 +467,7 @@ Device type:    ConnectX4
 		BeforeEach(func() {
 			fakeExec = &execTesting.FakeExec{}
 
-			h = &hostUtils{
+			h = &configurationUtils{
 				execInterface: fakeExec,
 			}
 		})

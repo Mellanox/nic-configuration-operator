@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package host
+package configuration
 
 import (
 	"testing"
@@ -26,5 +26,5 @@ func TestHostManager(t *testing.T) {
 	// Register Gomega with Ginkgo
 	gomega.RegisterFailHandler(ginkgo.Fail)
 	// Run the test suite
-	ginkgo.RunSpecs(t, "HostManager Suite")
+	ginkgo.RunSpecs(t, "ConfigurationManager Suite")
 }

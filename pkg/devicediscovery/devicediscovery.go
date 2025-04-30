@@ -16,10 +16,12 @@ limitations under the License.
 package devicediscovery
 
 import (
+	"strconv"
+
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
-	"sigs.k8s.io/controller-runtime/pkg/log"
-	"strconv"
 )
 
 type DeviceDiscovery interface {
@@ -35,7 +37,7 @@ type deviceDiscovery struct {
 
 // DiscoverNicDevices uses host utils to discover Nvidia NIC devices on the host and returns back a map of serial numbers to device statuses
 func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDeviceStatus, error) {
-	log.Log.Info("HostManager.DiscoverNicDevices()")
+	log.Log.Info("ConfigurationManager.DiscoverNicDevices()")
 
 	pciDevices, err := d.utils.GetPCIDevices()
 	if err != nil {
