@@ -25,7 +25,6 @@ import (
 	"github.com/Mellanox/rdmamap"
 	"github.com/jaypipes/ghw"
 	"github.com/jaypipes/ghw/pkg/pci"
-	"github.com/vishvananda/netlink"
 	execUtils "k8s.io/utils/exec"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 

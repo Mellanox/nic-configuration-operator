@@ -30,21 +30,23 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
-	"github.com/Mellanox/nic-configuration-operator/pkg/host/mocks"
+	deviceDiscoveryMocks "github.com/Mellanox/nic-configuration-operator/pkg/devicediscovery/mocks"
+	hostMocks "github.com/Mellanox/nic-configuration-operator/pkg/host/mocks"
 )
 
 var _ = Describe("DeviceDiscoveryController", func() {
 	var (
-		mgr            manager.Manager
-		k8sClient      client.Client
-		deviceRegistry *DeviceDiscoveryController
-		hostManager    *mocks.HostManager
-		ctx            context.Context
-		cancel         context.CancelFunc
-		timeout        = time.Second * 10
-		namespaceName  string
-		wg             sync.WaitGroup
-		err            error
+		mgr             manager.Manager
+		k8sClient       client.Client
+		deviceRegistry  *DeviceDiscoveryController
+		deviceDiscovery *deviceDiscoveryMocks.DeviceDiscovery
+		hostUtils       *hostMocks.HostUtils
+		ctx             context.Context
+		cancel          context.CancelFunc
+		timeout         = time.Second * 10
+		namespaceName   string
+		wg              sync.WaitGroup
+		err             error
 	)
 
 	BeforeEach(func() {
@@ -57,9 +59,10 @@ var _ = Describe("DeviceDiscoveryController", func() {
 		namespaceName = createNodeAndRandomNamespace(ctx, k8sClient)
 
 		deviceDiscoveryReconcileTime = 1 * time.Second
-		hostManager = &mocks.HostManager{}
+		deviceDiscovery = &deviceDiscoveryMocks.DeviceDiscovery{}
+		hostUtils = &hostMocks.HostUtils{}
 
-		deviceRegistry = NewDeviceDiscoveryController(k8sClient, hostManager, nodeName, namespaceName)
+		deviceRegistry = NewDeviceDiscoveryController(k8sClient, deviceDiscovery, hostUtils, nodeName, namespaceName)
 		Expect(mgr.Add(deviceRegistry)).To(Succeed())
 	})
 
@@ -127,7 +130,7 @@ var _ = Describe("DeviceDiscoveryController", func() {
 				partNumber := "test-part-number"
 				fwVersion := "test-fw-version"
 
-				hostManager.On("DiscoverNicDevices").Return(map[string]v1alpha1.NicDeviceStatus{
+				deviceDiscovery.On("DiscoverNicDevices").Return(map[string]v1alpha1.NicDeviceStatus{
 					"123456": {
 						Node:            nodeName,
 						SerialNumber:    "123456",
@@ -137,7 +140,7 @@ var _ = Describe("DeviceDiscoveryController", func() {
 						FirmwareVersion: fwVersion,
 					},
 				}, nil)
-				hostManager.On("DiscoverOfedVersion").Return("00.00-0.0.0", nil)
+				hostUtils.On("DiscoverOfedVersion").Return("00.00-0.0.0", nil)
 
 				startManager(mgr, ctx, &wg)
 
@@ -171,7 +174,7 @@ var _ = Describe("DeviceDiscoveryController", func() {
 			})
 
 			It("should delete CRs if they do not represent observed devices", func() {
-				hostManager.On("DiscoverNicDevices").Return(map[string]v1alpha1.NicDeviceStatus{}, nil)
+				deviceDiscovery.On("DiscoverNicDevices").Return(map[string]v1alpha1.NicDeviceStatus{}, nil)
 
 				startManager(mgr, ctx, &wg)
 
@@ -186,14 +189,14 @@ var _ = Describe("DeviceDiscoveryController", func() {
 				serialNumber := "new-serial-num"
 
 				// Add a new device that does not have a CR representation
-				hostManager.On("DiscoverNicDevices").Return(map[string]v1alpha1.NicDeviceStatus{
+				deviceDiscovery.On("DiscoverNicDevices").Return(map[string]v1alpha1.NicDeviceStatus{
 					serialNumber: {
 						SerialNumber: serialNumber,
 						Type:         deviceType,
 						Ports:        []v1alpha1.NicDevicePortSpec{{PCI: "0000:81:00.0"}},
 					},
 				}, nil)
-				hostManager.On("DiscoverOfedVersion").Return("00.00-0.0.0", nil)
+				hostUtils.On("DiscoverOfedVersion").Return("00.00-0.0.0", nil)
 
 				startManager(mgr, ctx, &wg)
 

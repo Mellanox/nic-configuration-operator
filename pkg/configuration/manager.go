@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package host
+package configuration
 
 import (
 	"context"
@@ -29,8 +29,8 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 )
 
-// HostManager contains logic for managing NIC devices on the host
-type HostManager interface {
+// ConfigurationManager contains logic for configuring NIC devices on the host
+type ConfigurationManager interface {
 	// ValidateDeviceNvSpec will validate device's non-volatile spec against already applied configuration on the host
 	// returns bool - nv config update required
 	// returns bool - reboot required
@@ -43,10 +43,6 @@ type HostManager interface {
 	// ApplyDeviceRuntimeSpec calculates device's missing runtime spec configuration and applies it to the device on the host
 	// returns error - there were errors while applying nv configuration
 	ApplyDeviceRuntimeSpec(device *v1alpha1.NicDevice) error
-	// DiscoverOfedVersion retrieves installed OFED version
-	// returns string - installed OFED version
-	// returns empty string - OFED isn't installed or version couldn't be determined
-	DiscoverOfedVersion() string
 	// ResetNicFirmware resets NIC's firmware
 	// Operation can be long, required context to be able to terminate by timeout
 	// IB devices need to communicate with other nodes for confirmation
@@ -54,9 +50,9 @@ type HostManager interface {
 	ResetNicFirmware(ctx context.Context, device *v1alpha1.NicDevice) error
 }
 
-type hostManager struct {
-	hostUtils        HostUtils
-	configValidation configValidation
+type configurationManager struct {
+	configurationUtils ConfigurationUtils
+	configValidation   configValidation
 }
 
 // ValidateDeviceNvSpec will validate device's non-volatile spec against already applied configuration on the host
@@ -66,10 +62,10 @@ type hostManager struct {
 // if fully matches in current and next config, returns false, false
 // if fully matched next but not current, returns false, true
 // if not fully matched next boot, returns true, true
-func (h hostManager) ValidateDeviceNvSpec(ctx context.Context, device *v1alpha1.NicDevice) (bool, bool, error) {
-	log.Log.Info("hostManager.ValidateDeviceNvSpec", "device", device.Name)
+func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *v1alpha1.NicDevice) (bool, bool, error) {
+	log.Log.Info("configurationManager.ValidateDeviceNvSpec", "device", device.Name)
 
-	nvConfig, err := h.hostUtils.QueryNvConfig(ctx, device.Status.Ports[0].PCI)
+	nvConfig, err := h.configurationUtils.QueryNvConfig(ctx, device.Status.Ports[0].PCI)
 	if err != nil {
 		log.Log.Error(err, "failed to query nv config", "device", device.Name)
 		return false, false, err
@@ -116,12 +112,12 @@ func (h hostManager) ValidateDeviceNvSpec(ctx context.Context, device *v1alpha1.
 // ApplyDeviceNvSpec calculates device's missing nv spec configuration and applies it to the device on the host
 // returns bool - reboot required
 // returns error - there were errors while applying nv configuration
-func (h hostManager) ApplyDeviceNvSpec(ctx context.Context, device *v1alpha1.NicDevice) (bool, error) {
-	log.Log.Info("hostManager.ApplyDeviceNvSpec", "device", device.Name)
+func (h configurationManager) ApplyDeviceNvSpec(ctx context.Context, device *v1alpha1.NicDevice) (bool, error) {
+	log.Log.Info("configurationManager.ApplyDeviceNvSpec", "device", device.Name)
 
 	pciAddr := device.Status.Ports[0].PCI
 
-	nvConfig, err := h.hostUtils.QueryNvConfig(ctx, device.Status.Ports[0].PCI)
+	nvConfig, err := h.configurationUtils.QueryNvConfig(ctx, device.Status.Ports[0].PCI)
 	if err != nil {
 		log.Log.Error(err, "failed to query nv config", "device", device.Name)
 		return false, err
@@ -131,7 +127,7 @@ func (h hostManager) ApplyDeviceNvSpec(ctx context.Context, device *v1alpha1.Nic
 		log.Log.Info("resetting nv config to default", "device", device.Name)
 		bf3OperationModeValue, isBF3device := nvConfig.CurrentConfig[consts.BF3OperationModeParam]
 
-		err := h.hostUtils.ResetNvConfig(pciAddr)
+		err := h.configurationUtils.ResetNvConfig(pciAddr)
 		if err != nil {
 			log.Log.Error(err, "Failed to reset nv config", "device", device.Name)
 			return false, err
@@ -147,14 +143,14 @@ func (h hostManager) ApplyDeviceNvSpec(ctx context.Context, device *v1alpha1.Nic
 				mode = "NIC"
 			}
 			log.Log.Info(fmt.Sprintf("The device %s is the BlueField-3, restoring the previous mode of operation (%s mode) after configuration reset", device.Name, mode))
-			err = h.hostUtils.SetNvConfigParameter(pciAddr, consts.BF3OperationModeParam, val)
+			err = h.configurationUtils.SetNvConfigParameter(pciAddr, consts.BF3OperationModeParam, val)
 			if err != nil {
 				log.Log.Error(err, "Failed to restore the BlueField device mode of operation", "device", device.Name, "mode", mode, "param", consts.BF3OperationModeParam, "value", val)
 				return false, err
 			}
 		}
 
-		err = h.hostUtils.SetNvConfigParameter(pciAddr, consts.AdvancedPCISettingsParam, consts.NvParamTrue)
+		err = h.configurationUtils.SetNvConfigParameter(pciAddr, consts.AdvancedPCISettingsParam, consts.NvParamTrue)
 		if err != nil {
 			log.Log.Error(err, "Failed to apply nv config parameter", "device", device.Name, "param", consts.AdvancedPCISettingsParam, "value", consts.NvParamTrue)
 			return false, err
@@ -167,7 +163,7 @@ func (h hostManager) ApplyDeviceNvSpec(ctx context.Context, device *v1alpha1.Nic
 	// we enable this parameter first to unlock them
 	if !h.configValidation.AdvancedPCISettingsEnabled(nvConfig) {
 		log.Log.V(2).Info("AdvancedPciSettings not enabled, fw reset required", "device", device.Name)
-		err = h.hostUtils.SetNvConfigParameter(pciAddr, consts.AdvancedPCISettingsParam, consts.NvParamTrue)
+		err = h.configurationUtils.SetNvConfigParameter(pciAddr, consts.AdvancedPCISettingsParam, consts.NvParamTrue)
 		if err != nil {
 			log.Log.Error(err, "Failed to apply nv config parameter", "device", device.Name, "param", consts.AdvancedPCISettingsParam, "value", consts.NvParamTrue)
 			return false, err
@@ -183,7 +179,7 @@ func (h hostManager) ApplyDeviceNvSpec(ctx context.Context, device *v1alpha1.Nic
 		}
 
 		// Query nv config again, additional options could become available
-		nvConfig, err = h.hostUtils.QueryNvConfig(ctx, device.Status.Ports[0].PCI)
+		nvConfig, err = h.configurationUtils.QueryNvConfig(ctx, device.Status.Ports[0].PCI)
 		if err != nil {
 			log.Log.Error(err, "failed to query nv config", "device", device.Name)
 			return false, err
@@ -214,7 +210,7 @@ func (h hostManager) ApplyDeviceNvSpec(ctx context.Context, device *v1alpha1.Nic
 	log.Log.V(2).Info("applying nv config to device", "device", device.Name, "config", paramsToApply)
 
 	for param, value := range paramsToApply {
-		err = h.hostUtils.SetNvConfigParameter(pciAddr, param, value)
+		err = h.configurationUtils.SetNvConfigParameter(pciAddr, param, value)
 		if err != nil {
 			log.Log.Error(err, "Failed to apply nv config parameter", "device", device.Name, "param", param, "value", value)
 			return false, err
@@ -228,8 +224,8 @@ func (h hostManager) ApplyDeviceNvSpec(ctx context.Context, device *v1alpha1.Nic
 
 // ApplyDeviceRuntimeSpec calculates device's missing runtime spec configuration and applies it to the device on the host
 // returns error - there were errors while applying nv configuration
-func (h hostManager) ApplyDeviceRuntimeSpec(device *v1alpha1.NicDevice) error {
-	log.Log.Info("hostManager.ApplyDeviceRuntimeSpec", "device", device.Name)
+func (h configurationManager) ApplyDeviceRuntimeSpec(device *v1alpha1.NicDevice) error {
+	log.Log.Info("configurationManager.ApplyDeviceRuntimeSpec", "device", device.Name)
 
 	alreadyApplied, err := h.configValidation.RuntimeConfigApplied(device)
 	if err != nil {
@@ -247,7 +243,7 @@ func (h hostManager) ApplyDeviceRuntimeSpec(device *v1alpha1.NicDevice) error {
 
 	if desiredMaxReadReqSize != 0 {
 		for _, port := range ports {
-			err = h.hostUtils.SetMaxReadRequestSize(port.PCI, desiredMaxReadReqSize)
+			err = h.configurationUtils.SetMaxReadRequestSize(port.PCI, desiredMaxReadReqSize)
 			if err != nil {
 				log.Log.Error(err, "failed to apply runtime configuration", "device", device)
 				return err
@@ -256,7 +252,7 @@ func (h hostManager) ApplyDeviceRuntimeSpec(device *v1alpha1.NicDevice) error {
 	}
 
 	for _, port := range ports {
-		err = h.hostUtils.SetTrustAndPFC(port.NetworkInterface, desiredTrust, desiredPfc)
+		err = h.configurationUtils.SetTrustAndPFC(port.NetworkInterface, desiredTrust, desiredPfc)
 		if err != nil {
 			log.Log.Error(err, "failed to apply runtime configuration", "device", device)
 			return err
@@ -266,20 +262,13 @@ func (h hostManager) ApplyDeviceRuntimeSpec(device *v1alpha1.NicDevice) error {
 	return nil
 }
 
-// DiscoverOfedVersion retrieves installed OFED version
-// returns string - installed OFED version
-// returns error - OFED isn't installed or version couldn't be determined
-func (h hostManager) DiscoverOfedVersion() string {
-	return h.hostUtils.GetOfedVersion()
-}
-
 // ResetNicFirmware resets NIC's firmware
 // Operation can be long, required context to be able to terminate by timeout
 // IB devices need to communicate with other nodes for confirmation
 // return err - there were errors while resetting NIC firmware
-func (h hostManager) ResetNicFirmware(ctx context.Context, device *v1alpha1.NicDevice) error {
-	log.Log.Info("hostManager.ResetNicFirmware", "device", device.Name)
-	err := h.hostUtils.ResetNicFirmware(ctx, device.Status.Ports[0].PCI)
+func (h configurationManager) ResetNicFirmware(ctx context.Context, device *v1alpha1.NicDevice) error {
+	log.Log.Info("configurationManager.ResetNicFirmware", "device", device.Name)
+	err := h.configurationUtils.ResetNicFirmware(ctx, device.Status.Ports[0].PCI)
 	if err != nil {
 		log.Log.Error(err, "Failed to reset NIC firmware", "device", device.Name)
 		return err
@@ -288,6 +277,7 @@ func (h hostManager) ResetNicFirmware(ctx context.Context, device *v1alpha1.NicD
 	return nil
 }
 
-func NewHostManager(hostUtils HostUtils, eventRecorder record.EventRecorder) HostManager {
-	return hostManager{hostUtils: hostUtils, configValidation: newConfigValidation(hostUtils, eventRecorder)}
+func NewConfigurationManager(eventRecorder record.EventRecorder) ConfigurationManager {
+	utils := newConfigurationUtils()
+	return configurationManager{configurationUtils: utils, configValidation: newConfigValidation(utils, eventRecorder)}
 }

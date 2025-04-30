@@ -34,6 +34,7 @@ import (
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	"github.com/Mellanox/nic-configuration-operator/pkg/devicediscovery"
 	"github.com/Mellanox/nic-configuration-operator/pkg/helper"
 	"github.com/Mellanox/nic-configuration-operator/pkg/host"
 )
@@ -45,9 +46,10 @@ var deviceDiscoveryReconcileTime = time.Minute * 5
 type DeviceDiscoveryController struct {
 	client.Client
 
-	hostManager host.HostManager
-	nodeName    string
-	namespace   string
+	deviceDiscovery devicediscovery.DeviceDiscovery
+	hostUtils       host.HostUtils
+	nodeName        string
+	namespace       string
 }
 
 // Constructs a unique CR name based on the device's type and serial number
@@ -107,7 +109,7 @@ func setFwConfigConditionsForDevice(device *v1alpha1.NicDevice, recommendedFirmw
 // It deletes CRs that do not represent observed devices, updates the CRs if the status of the device changes,
 // and creates new CRs for devices that do not have a CR representation.
 func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
-	observedDevices, err := d.hostManager.DiscoverNicDevices()
+	observedDevices, err := d.deviceDiscovery.DiscoverNicDevices()
 	if err != nil {
 		return err
 	}
@@ -223,7 +225,7 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 // updateFwCondition updates the FirmwareConfigMatch status condition
 // returns bool - if condition changed and needs to be updated
 func (d *DeviceDiscoveryController) updateFwCondition(nicDeviceCR *v1alpha1.NicDevice) bool {
-	ofedVersion := d.hostManager.DiscoverOfedVersion()
+	ofedVersion := d.hostUtils.DiscoverOfedVersion()
 	recommendedFirmware := helper.GetRecommendedFwVersion(nicDeviceCR.Status.Type, ofedVersion)
 	return setFwConfigConditionsForDevice(nicDeviceCR, recommendedFirmware)
 }
@@ -267,11 +269,12 @@ OUTER:
 }
 
 // NewDeviceDiscoveryController creates a new instance of DeviceDiscoveryController with the specified parameters.
-func NewDeviceDiscoveryController(client client.Client, hostManager host.HostManager, node string, namespace string) *DeviceDiscoveryController {
+func NewDeviceDiscoveryController(client client.Client, deviceDiscovery devicediscovery.DeviceDiscovery, hostUtils host.HostUtils, node string, namespace string) *DeviceDiscoveryController {
 	return &DeviceDiscoveryController{
-		Client:      client,
-		hostManager: hostManager,
-		nodeName:    node,
-		namespace:   namespace,
+		Client:          client,
+		deviceDiscovery: deviceDiscovery,
+		hostUtils:       hostUtils,
+		nodeName:        node,
+		namespace:       namespace,
 	}
 }

@@ -13,12 +13,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package host
+package configuration
 
 import (
 	"fmt"
 
-	"github.com/Mellanox/nic-configuration-operator/pkg/host/mocks"
+	"github.com/Mellanox/nic-configuration-operator/pkg/configuration/mocks"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -34,11 +34,11 @@ const anotherTestVal = "anotherTestVal"
 var _ = Describe("ConfigValidationImpl", func() {
 	var (
 		validator     *configValidationImpl
-		mockHostUtils mocks.HostUtils
+		mockHostUtils mocks.ConfigurationUtils
 	)
 
 	BeforeEach(func() {
-		mockHostUtils = mocks.HostUtils{}
+		mockHostUtils = mocks.ConfigurationUtils{}
 		validator = &configValidationImpl{utils: &mockHostUtils}
 	})
 

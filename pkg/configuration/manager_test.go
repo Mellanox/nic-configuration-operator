@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package host
+package configuration
 
 import (
 	"context"
@@ -25,28 +25,28 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
+	"github.com/Mellanox/nic-configuration-operator/pkg/configuration/mocks"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
-	"github.com/Mellanox/nic-configuration-operator/pkg/host/mocks"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 )
 
-var _ = Describe("HostManager", func() {
-	Describe("hostManager.ValidateDeviceNvSpec", func() {
+var _ = Describe("ConfigurationManager", func() {
+	Describe("configurationManager.ValidateDeviceNvSpec", func() {
 		var (
-			mockHostUtils        mocks.HostUtils
+			mockHostUtils        mocks.ConfigurationUtils
 			mockConfigValidation mocks.ConfigValidation
-			manager              hostManager
+			manager              configurationManager
 			ctx                  context.Context
 			device               *v1alpha1.NicDevice
 			pciAddress           string
 		)
 
 		BeforeEach(func() {
-			mockHostUtils = mocks.HostUtils{}
+			mockHostUtils = mocks.ConfigurationUtils{}
 			mockConfigValidation = mocks.ConfigValidation{}
-			manager = hostManager{
-				hostUtils:        &mockHostUtils,
-				configValidation: &mockConfigValidation,
+			manager = configurationManager{
+				configurationUtils: &mockHostUtils,
+				configValidation:   &mockConfigValidation,
 			}
 			ctx = context.TODO()
 			pciAddress = "0000:3b:00.0"
@@ -337,22 +337,22 @@ var _ = Describe("HostManager", func() {
 			})
 		})
 	})
-	Describe("hostManager.ApplyDeviceNvSpec", func() {
+	Describe("configurationManager.ApplyDeviceNvSpec", func() {
 		var (
-			mockHostUtils        mocks.HostUtils
+			mockHostUtils        mocks.ConfigurationUtils
 			mockConfigValidation mocks.ConfigValidation
-			manager              hostManager
+			manager              configurationManager
 			ctx                  context.Context
 			device               *v1alpha1.NicDevice
 			pciAddress           string
 		)
 
 		BeforeEach(func() {
-			mockHostUtils = mocks.HostUtils{}
+			mockHostUtils = mocks.ConfigurationUtils{}
 			mockConfigValidation = mocks.ConfigValidation{}
-			manager = hostManager{
-				hostUtils:        &mockHostUtils,
-				configValidation: &mockConfigValidation,
+			manager = configurationManager{
+				configurationUtils: &mockHostUtils,
+				configValidation:   &mockConfigValidation,
 			}
 			ctx = context.TODO()
 			pciAddress = "0000:3b:00.0"

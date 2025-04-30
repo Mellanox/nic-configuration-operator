@@ -16,6 +16,8 @@ import (
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/internal/controller"
+	"github.com/Mellanox/nic-configuration-operator/pkg/configuration"
+	"github.com/Mellanox/nic-configuration-operator/pkg/devicediscovery"
 	"github.com/Mellanox/nic-configuration-operator/pkg/firmware"
 	"github.com/Mellanox/nic-configuration-operator/pkg/helper"
 	"github.com/Mellanox/nic-configuration-operator/pkg/host"
@@ -72,7 +74,9 @@ func main() {
 	eventRecorder := mgr.GetEventRecorderFor("NicDeviceReconciler")
 
 	hostUtils := host.NewHostUtils()
-	hostManager := host.NewHostManager(nodeName, hostUtils, eventRecorder)
+	deviceDiscovery := devicediscovery.NewDeviceDiscovery(nodeName)
+
+	configurationManager := configuration.NewConfigurationManager(eventRecorder)
 	maintenanceManager := maintenance.New(mgr.GetClient(), hostUtils, nodeName, namespace)
 	firmwareManager := firmware.NewFirmwareManager(mgr.GetClient(), namespace)
 
@@ -81,22 +85,23 @@ func main() {
 		os.Exit(1)
 	}
 
-	deviceDiscoveryController := controller.NewDeviceDiscoveryController(mgr.GetClient(), hostManager, nodeName, namespace)
+	deviceDiscoveryController := controller.NewDeviceDiscoveryController(
+		mgr.GetClient(), deviceDiscovery, hostUtils, nodeName, namespace)
 	if err = mgr.Add(deviceDiscoveryController); err != nil {
 		log.Log.Error(err, "unable to add device discovery runnable")
 		os.Exit(1)
 	}
 
 	nicDeviceReconciler := controller.NicDeviceReconciler{
-		Client:             mgr.GetClient(),
-		Scheme:             mgr.GetScheme(),
-		NodeName:           nodeName,
-		NamespaceName:      namespace,
-		HostManager:        hostManager,
-		MaintenanceManager: maintenanceManager,
-		FirmwareManager:    firmwareManager,
-		EventRecorder:      eventRecorder,
-		HostUtils:          hostUtils,
+		Client:               mgr.GetClient(),
+		Scheme:               mgr.GetScheme(),
+		NodeName:             nodeName,
+		NamespaceName:        namespace,
+		ConfigurationManager: configurationManager,
+		MaintenanceManager:   maintenanceManager,
+		FirmwareManager:      firmwareManager,
+		EventRecorder:        eventRecorder,
+		HostUtils:            hostUtils,
 	}
 	err = nicDeviceReconciler.SetupWithManager(mgr, true)
 	if err != nil {
