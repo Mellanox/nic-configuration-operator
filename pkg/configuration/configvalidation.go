@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package host
+package configuration
 
 import (
 	"errors"
@@ -53,7 +53,7 @@ type configValidation interface {
 }
 
 type configValidationImpl struct {
-	utils         HostUtils
+	utils         ConfigurationUtils
 	eventRecorder record.EventRecorder
 }
 
@@ -345,6 +345,6 @@ func (v *configValidationImpl) CalculateDesiredRuntimeConfig(device *v1alpha1.Ni
 	return maxReadRequestSize, trust, pfc
 }
 
-func newConfigValidation(utils HostUtils, eventRecorder record.EventRecorder) configValidation {
+func newConfigValidation(utils ConfigurationUtils, eventRecorder record.EventRecorder) configValidation {
 	return &configValidationImpl{utils: utils, eventRecorder: eventRecorder}
 }

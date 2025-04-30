@@ -41,6 +41,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha1 "github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
+	"github.com/Mellanox/nic-configuration-operator/pkg/configuration"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	"github.com/Mellanox/nic-configuration-operator/pkg/firmware"
 	"github.com/Mellanox/nic-configuration-operator/pkg/host"
@@ -61,10 +62,10 @@ type NicDeviceReconciler struct {
 	NodeName      string
 	NamespaceName string
 
-	FirmwareManager    firmware.FirmwareManager
-	HostManager        host.HostManager
-	HostUtils          host.HostUtils
-	MaintenanceManager maintenance.MaintenanceManager
+	FirmwareManager      firmware.FirmwareManager
+	ConfigurationManager configuration.ConfigurationManager
+	HostUtils            host.HostUtils
+	MaintenanceManager   maintenance.MaintenanceManager
 
 	EventRecorder record.EventRecorder
 }
@@ -362,7 +363,7 @@ func (r *NicDeviceReconciler) applyRuntimeConfig(ctx context.Context, status *ni
 		}
 	}
 
-	err := r.HostManager.ApplyDeviceRuntimeSpec(status.device)
+	err := r.ConfigurationManager.ApplyDeviceRuntimeSpec(status.device)
 	if err != nil {
 		updateErr := r.updateConfigInProgressStatusCondition(ctx, status.device, consts.RuntimeConfigUpdateFailedReason, metav1.ConditionFalse, err.Error())
 		if updateErr != nil {
@@ -443,7 +444,7 @@ func (r *NicDeviceReconciler) applyNvConfig(ctx context.Context, status *nicDevi
 		return nil
 	}
 
-	rebootRequired, err := r.HostManager.ApplyDeviceNvSpec(ctx, status.device)
+	rebootRequired, err := r.ConfigurationManager.ApplyDeviceNvSpec(ctx, status.device)
 	if err != nil {
 		if types.IsIncorrectSpecError(err) {
 			updateErr := r.updateConfigInProgressStatusCondition(ctx, status.device, consts.IncorrectSpecReason, metav1.ConditionFalse, err.Error())
@@ -479,7 +480,7 @@ func (r *NicDeviceReconciler) handleConfigurationSpecValidation(ctx context.Cont
 		return nil
 	}
 
-	nvConfigUpdateRequired, rebootRequired, err := r.HostManager.ValidateDeviceNvSpec(ctx, status.device)
+	nvConfigUpdateRequired, rebootRequired, err := r.ConfigurationManager.ValidateDeviceNvSpec(ctx, status.device)
 	log.Log.V(2).Info("nv spec validation complete for device", "device", status.device.Name, "nvConfigUpdateRequired", nvConfigUpdateRequired, "rebootRequired", rebootRequired)
 	if err != nil {
 		log.Log.Error(err, "failed to validate spec for device", "device", status.device.Name)
@@ -624,7 +625,7 @@ func (r *NicDeviceReconciler) handleFirmwareUpdate(ctx context.Context, status *
 
 	log.Log.Info("New firmware image was successfully burned. Firmware reset is required to apply changes", "device", status.device.Name)
 
-	err = r.HostManager.ResetNicFirmware(ctx, status.device)
+	err = r.ConfigurationManager.ResetNicFirmware(ctx, status.device)
 	if err != nil {
 		log.Log.Error(err, "failed to reset NIC firmware", "device", status.device.Name)
 		_ = r.updateFirmwareUpdateInProgressStatusCondition(ctx, status.device, consts.FirmwareUpdateFailedReason, metav1.ConditionFalse, err.Error())
