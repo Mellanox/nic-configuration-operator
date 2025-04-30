@@ -19,6 +19,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"github.com/vishvananda/netlink"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -27,10 +28,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Mellanox/rdmamap"
-	"github.com/jaypipes/ghw"
-	"github.com/jaypipes/ghw/pkg/pci"
-	"github.com/vishvananda/netlink"
 	execUtils "k8s.io/utils/exec"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -40,50 +37,42 @@ import (
 )
 
 const (
-	pciDevicesPath = "/sys/bus/pci/devices"
-	arrayPrefix    = "Array"
+	arrayPrefix = "Array"
 )
 
 // HostUtils is an interface that contains util functions that perform operations on the actual host
 type HostUtils interface {
-	// GetPCIDevices returns a list of PCI devices on the host
-	GetPCIDevices() ([]*pci.Device, error)
-	// GetPartAndSerialNumber uses mstvpd util to retrieve Part and Serial numbers of the PCI device
-	GetPartAndSerialNumber(pciAddr string) (string, string, error)
-	// GetFirmwareVersionAndPSID uses mstflint tool to retrieve FW version and PSID of the device
-	GetFirmwareVersionAndPSID(pciAddr string) (string, string, error)
+	// GetLinkType return the link type of the net device (Ethernet / Infiniband)
+	GetLinkType(name string) string
 	// GetPCILinkSpeed return PCI bus speed in GT/s
 	GetPCILinkSpeed(pciAddr string) (int, error)
 	// GetMaxReadRequestSize returns MaxReadRequest size for PCI device
 	GetMaxReadRequestSize(pciAddr string) (int, error)
 	// GetTrustAndPFC returns trust and pfc settings for network interface
 	GetTrustAndPFC(interfaceName string) (string, string, error)
-	// GetRDMADeviceName returns a RDMA device name for the given PCI address
-	GetRDMADeviceName(pciAddr string) string
-	// GetInterfaceName returns a network interface name for the given PCI address
-	GetInterfaceName(pciAddr string) string
-	// GetLinkType return the link type of the net device (Ethernet / Infiniband)
-	GetLinkType(name string) string
-	// IsSriovVF return true if the device is a SRIOV VF, false otherwise
-	IsSriovVF(pciAddr string) bool
+
+	// SetMaxReadRequestSize sets max read request size for PCI device
+	SetMaxReadRequestSize(pciAddr string, maxReadRequestSize int) error
+	// SetTrustAndPFC sets trust and PFC settings for a network interface
+	SetTrustAndPFC(interfaceName string, trust string, pfc string) error
+
 	// QueryNvConfig queries nv config for a mellanox device and returns default, current and next boot configs
 	QueryNvConfig(ctx context.Context, pciAddr string) (types.NvConfigQuery, error)
 	// SetNvConfigParameter sets a nv config parameter for a mellanox device
 	SetNvConfigParameter(pciAddr string, paramName string, paramValue string) error
 	// ResetNvConfig resets NIC's nv config
 	ResetNvConfig(pciAddr string) error
+
 	// ResetNicFirmware resets NIC's firmware
 	// Operation can be long, required context to be able to terminate by timeout
 	// IB devices need to communicate with other nodes for confirmation
 	ResetNicFirmware(ctx context.Context, pciAddr string) error
-	// SetMaxReadRequestSize sets max read request size for PCI device
-	SetMaxReadRequestSize(pciAddr string, maxReadRequestSize int) error
-	// SetTrustAndPFC sets trust and PFC settings for a network interface
-	SetTrustAndPFC(interfaceName string, trust string, pfc string) error
-	// ScheduleReboot schedules reboot on the host
-	ScheduleReboot() error
+
 	// GetOfedVersion retrieves installed OFED version
 	GetOfedVersion() string
+
+	// ScheduleReboot schedules reboot on the host
+	ScheduleReboot() error
 	// GetHostUptimeSeconds returns the host uptime in seconds
 	GetHostUptimeSeconds() (time.Duration, error)
 }
@@ -92,96 +81,22 @@ type hostUtils struct {
 	execInterface execUtils.Interface
 }
 
-// GetPCIDevices returns a list of PCI devices on the host
-func (h *hostUtils) GetPCIDevices() ([]*pci.Device, error) {
-	pciRegistry, err := ghw.PCI()
+// GetLinkType return the link type of the net device (Ethernet / Infiniband)
+func (d *hostUtils) GetLinkType(name string) string {
+	log.Log.Info("HostUtils.GetLinkType()", "name", name)
+	link, err := netlink.LinkByName(name)
 	if err != nil {
-		log.Log.Error(err, "GetPCIDevices(): Failed to read PCI devices")
-		return nil, err
+		log.Log.Error(err, "GetLinkType(): failed to get link", "device", name)
+		return ""
 	}
-
-	return pciRegistry.Devices, nil
-}
-
-// GetPartAndSerialNumber uses mstvpd util to retrieve Part and Serial numbers of the PCI device
-func (h *hostUtils) GetPartAndSerialNumber(pciAddr string) (string, string, error) {
-	log.Log.Info("HostUtils.GetPartAndSerialNumber()", "pciAddr", pciAddr)
-	cmd := h.execInterface.Command("mstvpd", pciAddr)
-	output, err := utils.runCommand(cmd)
-	if err != nil {
-		log.Log.Error(err, "GetPartAndSerialNumber(): Failed to run mstvpd")
-		return "", "", err
-	}
-
-	// Parse the output for PN and SN
-	scanner := bufio.NewScanner(strings.NewReader(string(output)))
-	var partNumber, serialNumber string
-
-	for scanner.Scan() {
-		line := strings.ToLower(scanner.Text())
-
-		if strings.HasPrefix(line, consts.PartNumberPrefix) {
-			partNumber = strings.TrimSpace(strings.TrimPrefix(line, consts.PartNumberPrefix))
-		}
-		if strings.HasPrefix(line, consts.SerialNumberPrefix) {
-			serialNumber = strings.TrimSpace(strings.TrimPrefix(line, consts.SerialNumberPrefix))
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		log.Log.Error(err, "GetPartAndSerialNumber(): Error reading mstvpd output")
-		return "", "", err
-	}
-
-	if partNumber == "" || serialNumber == "" {
-		return "", "", fmt.Errorf("GetPartAndSerialNumber(): part number (%v) or serial number (%v) is empty", partNumber, serialNumber)
-	}
-
-	return partNumber, serialNumber, nil
-}
-
-// GetFirmwareVersionAndPSID uses mstflint tool to retrieve FW version and PSID of the device
-func (h *hostUtils) GetFirmwareVersionAndPSID(pciAddr string) (string, string, error) {
-	log.Log.Info("HostUtils.GetFirmwareVersionAndPSID()", "pciAddr", pciAddr)
-	cmd := h.execInterface.Command("mstflint", "-d", pciAddr, "q")
-	output, err := utils.runCommand(cmd)
-	if err != nil {
-		log.Log.Error(err, "GetFirmwareVersionAndPSID(): Failed to run mstflint")
-		return "", "", err
-	}
-
-	// Parse the output for PN and SN
-	scanner := bufio.NewScanner(strings.NewReader(string(output)))
-	var firmwareVersion, PSID string
-
-	for scanner.Scan() {
-		line := strings.ToLower(scanner.Text())
-
-		if strings.HasPrefix(line, consts.FirmwareVersionPrefix) {
-			firmwareVersion = strings.TrimSpace(strings.TrimPrefix(line, consts.FirmwareVersionPrefix))
-		}
-		if strings.HasPrefix(line, consts.PSIDPrefix) {
-			PSID = strings.TrimSpace(strings.TrimPrefix(line, consts.PSIDPrefix))
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		log.Log.Error(err, "GetFirmwareVersionAndPSID(): Error reading mstflint output")
-		return "", "", err
-	}
-
-	if firmwareVersion == "" || PSID == "" {
-		return "", "", fmt.Errorf("GetFirmwareVersionAndPSID(): firmware version (%v) or PSID (%v) is empty", firmwareVersion, PSID)
-	}
-
-	return firmwareVersion, PSID, nil
+	return encapTypeToLinkType(link.Attrs().EncapType)
 }
 
 // GetPCILinkSpeed return PCI bus speed in GT/s
 func (h *hostUtils) GetPCILinkSpeed(pciAddr string) (int, error) {
 	log.Log.Info("HostUtils.GetPCILinkSpeed()", "pciAddr", pciAddr)
 	cmd := h.execInterface.Command("lspci", "-vv", "-s", pciAddr)
-	output, err := utils.runCommand(cmd)
+	output, err := utils.RunCommand(cmd)
 	if err != nil {
 		log.Log.Error(err, "GetPCILinkSpeed(): Failed to run lspci")
 		return -1, err
@@ -223,7 +138,7 @@ func (h *hostUtils) GetPCILinkSpeed(pciAddr string) (int, error) {
 func (h *hostUtils) GetMaxReadRequestSize(pciAddr string) (int, error) {
 	log.Log.Info("HostUtils.GetMaxReadRequestSize()", "pciAddr", pciAddr)
 	cmd := h.execInterface.Command("lspci", "-vv", "-s", pciAddr)
-	output, err := utils.runCommand(cmd)
+	output, err := utils.RunCommand(cmd)
 	if err != nil && len(output) == 0 {
 		log.Log.Error(err, "GetMaxReadRequestSize(): Failed to run lspci")
 		return -1, err
@@ -299,84 +214,6 @@ func (h *hostUtils) GetTrustAndPFC(interfaceName string) (string, string, error)
 	return trust, pfc, nil
 }
 
-// GetLinkType return the link type of the net device (Ethernet / Infiniband)
-func (h *hostUtils) GetLinkType(name string) string {
-	log.Log.Info("HostUtils.GetLinkType()", "name", name)
-	link, err := netlink.LinkByName(name)
-	if err != nil {
-		log.Log.Error(err, "GetLinkType(): failed to get link", "device", name)
-		return ""
-	}
-	return encapTypeToLinkType(link.Attrs().EncapType)
-}
-
-func encapTypeToLinkType(encapType string) string {
-	if encapType == "ether" {
-		return consts.Ethernet
-	} else if encapType == "infiniband" {
-		return consts.Infiniband
-	}
-	return ""
-}
-
-func getNetNames(pciAddr string) ([]string, error) {
-	netDir := filepath.Join(pciDevicesPath, pciAddr, "net")
-	if _, err := os.Lstat(netDir); err != nil {
-		return nil, fmt.Errorf("GetNetNames(): no net directory under pci device %s: %q", pciAddr, err)
-	}
-
-	fInfos, err := os.ReadDir(netDir)
-	if err != nil {
-		return nil, fmt.Errorf("GetNetNames(): failed to read net directory %s: %q", netDir, err)
-	}
-
-	names := make([]string, 0)
-	for _, f := range fInfos {
-		names = append(names, f.Name())
-	}
-
-	return names, nil
-}
-
-// GetInterfaceName returns a network interface name for the given PCI address
-func (h *hostUtils) GetInterfaceName(pciAddr string) string {
-	log.Log.Info("HostUtils.GetInterfaceName()", "pciAddr", pciAddr)
-
-	names, err := getNetNames(pciAddr)
-	if err != nil || len(names) < 1 {
-		log.Log.Error(err, "GetInterfaceName(): failed to get interface name")
-		return ""
-	}
-	log.Log.Info("Interface name", "pciAddr", pciAddr, "name", names[0])
-	return names[0]
-}
-
-// IsSriovVF return true if the device is a SRIOV VF, false otherwise
-func (h *hostUtils) IsSriovVF(pciAddr string) bool {
-	log.Log.Info("HostUtils.IsSriovVF()", "pciAddr", pciAddr)
-
-	totalVfFilePath := filepath.Join(pciDevicesPath, pciAddr, "physfn")
-	if _, err := os.Stat(totalVfFilePath); err != nil {
-		return false
-	}
-	return true
-}
-
-// GetRDMADeviceName returns a RDMA device name for the given PCI address
-func (h *hostUtils) GetRDMADeviceName(pciAddr string) string {
-	log.Log.Info("HostUtils.GetRDMADeviceName()", "pciAddr", pciAddr)
-
-	rdmaDevices := rdmamap.GetRdmaDevicesForPcidev(pciAddr)
-
-	if len(rdmaDevices) < 1 {
-		log.Log.Info("GetRDMADeviceName(): No RDMA device found for device", "address", pciAddr)
-		return ""
-	}
-
-	log.Log.V(1).Info("Rdma device", "pciAddr", pciAddr, "name", rdmaDevices[0])
-	return rdmaDevices[0]
-}
-
 // queryMLXConfig runs a query on mlxconfig to parse out default, current and nextboot configurations
 // might run recursively to expand array parameters' values
 func (h *hostUtils) queryMLXConfig(ctx context.Context, query types.NvConfigQuery, pciAddr string, additionalParameter string) error {
@@ -389,7 +226,7 @@ func (h *hostUtils) queryMLXConfig(ctx context.Context, query types.NvConfigQuer
 	} else {
 		cmd = h.execInterface.CommandContext(ctx, "mlxconfig", "-d", pciAddr, "-e", "query", additionalParameter)
 	}
-	output, err := utils.runCommand(cmd)
+	output, err := utils.RunCommand(cmd)
 	if err != nil {
 		log.Log.Error(err, "queryMLXConfig(): Failed to run mlxconfig", "output", string(output))
 		return err
@@ -502,7 +339,7 @@ func (h *hostUtils) SetNvConfigParameter(pciAddr string, paramName string, param
 	log.Log.Info("HostUtils.SetNvConfigParameter()", "pciAddr", pciAddr, "paramName", paramName, "paramValue", paramValue)
 
 	cmd := h.execInterface.Command("mlxconfig", "-d", pciAddr, "--yes", "set", paramName+"="+paramValue)
-	output, err := utils.runCommand(cmd)
+	output, err := utils.RunCommand(cmd)
 	if err != nil {
 		log.Log.Error(err, "SetNvConfigParameter(): Failed to run mlxconfig", "output", string(output))
 		return err
@@ -515,7 +352,7 @@ func (h *hostUtils) ResetNvConfig(pciAddr string) error {
 	log.Log.Info("HostUtils.ResetNvConfig()", "pciAddr", pciAddr)
 
 	cmd := h.execInterface.Command("mlxconfig", "-d", pciAddr, "--yes", "reset")
-	output, err := utils.runCommand(cmd)
+	output, err := utils.RunCommand(cmd)
 	if err != nil {
 		log.Log.Error(err, "ResetNvConfig(): Failed to run mlxconfig", "output", string(output))
 		return err
@@ -530,7 +367,7 @@ func (h *hostUtils) ResetNicFirmware(ctx context.Context, pciAddr string) error 
 	log.Log.Info("HostUtils.ResetNicFirmware()", "pciAddr", pciAddr)
 
 	cmd := h.execInterface.CommandContext(ctx, "mlxfwreset", "--device", pciAddr, "reset", "--yes")
-	_, err := utils.runCommand(cmd)
+	_, err := utils.RunCommand(cmd)
 	if err != nil {
 		log.Log.Error(err, "ResetNicFirmware(): Failed to run mlxfwreset")
 		return err
@@ -561,7 +398,7 @@ func (h *hostUtils) SetMaxReadRequestSize(pciAddr string, maxReadRequestSize int
 	}
 
 	cmd := h.execInterface.Command("setpci", "-s", pciAddr, fmt.Sprintf("CAP_EXP+08.w=%d000:F000", valueToApply))
-	_, err := utils.runCommand(cmd)
+	_, err := utils.RunCommand(cmd)
 	if err != nil {
 		log.Log.Error(err, "SetMaxReadRequestSize(): Failed to run setpci")
 		return err
@@ -615,7 +452,7 @@ func (h *hostUtils) ScheduleReboot() error {
 	}()
 
 	cmd := h.execInterface.Command("shutdown", "-r", "now")
-	_, err = utils.runCommand(cmd)
+	_, err = utils.RunCommand(cmd)
 	if err != nil {
 		log.Log.Error(err, "ScheduleReboot(): Failed to run shutdown -r now")
 		return err
@@ -648,6 +485,15 @@ func (h *hostUtils) GetHostUptimeSeconds() (time.Duration, error) {
 	uptimeSeconds, _ := strconv.ParseFloat(uptimeStr, 64)
 
 	return time.Duration(uptimeSeconds) * time.Second, nil
+}
+
+func encapTypeToLinkType(encapType string) string {
+	if encapType == "ether" {
+		return consts.Ethernet
+	} else if encapType == "infiniband" {
+		return consts.Infiniband
+	}
+	return ""
 }
 
 func NewHostUtils() HostUtils {

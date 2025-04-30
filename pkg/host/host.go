@@ -19,7 +19,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
@@ -32,8 +31,6 @@ import (
 
 // HostManager contains logic for managing NIC devices on the host
 type HostManager interface {
-	// DiscoverNicDevices discovers Nvidia NIC devices on the host and returns back a map of serial numbers to device statuses
-	DiscoverNicDevices() (map[string]v1alpha1.NicDeviceStatus, error)
 	// ValidateDeviceNvSpec will validate device's non-volatile spec against already applied configuration on the host
 	// returns bool - nv config update required
 	// returns bool - reboot required
@@ -58,89 +55,8 @@ type HostManager interface {
 }
 
 type hostManager struct {
-	nodeName         string
 	hostUtils        HostUtils
 	configValidation configValidation
-}
-
-// DiscoverNicDevices uses host utils to discover Nvidia NIC devices on the host and returns back a map of serial numbers to device statuses
-func (h hostManager) DiscoverNicDevices() (map[string]v1alpha1.NicDeviceStatus, error) {
-	log.Log.Info("HostManager.DiscoverNicDevices()")
-
-	pciDevices, err := h.hostUtils.GetPCIDevices()
-	if err != nil {
-		log.Log.Error(err, "Failed to get PCI devices")
-		return nil, err
-	}
-
-	// Map of Serial Number to nic device
-	devices := make(map[string]v1alpha1.NicDeviceStatus)
-
-	for _, device := range pciDevices {
-		if device.Vendor.ID != consts.MellanoxVendor {
-			continue
-		}
-
-		devClass, err := strconv.ParseInt(device.Class.ID, 16, 64)
-		if err != nil {
-			log.Log.Error(err, "DiscoverSriovDevices(): unable to parse device class, skipping",
-				"device", device)
-			continue
-		}
-		if devClass != consts.NetClass {
-			log.Log.V(2).Info("Device is not a network device, skipping", "address", device)
-			continue
-		}
-
-		if h.hostUtils.IsSriovVF(device.Address) {
-			log.Log.V(2).Info("Device is an SRIOV VF, skipping", "address", device.Address)
-			continue
-		}
-
-		log.Log.Info("Found Mellanox device", "address", device.Address, "type", device.Product.Name)
-
-		partNumber, serialNumber, err := h.hostUtils.GetPartAndSerialNumber(device.Address)
-		if err != nil {
-			log.Log.Error(err, "Failed to get device's part and serial numbers", "address", device.Address)
-			return nil, err
-		}
-
-		// Devices with the same serial number are ports of the same NIC, so grouping them
-		deviceStatus, ok := devices[serialNumber]
-
-		if !ok {
-			firmwareVersion, psid, err := h.hostUtils.GetFirmwareVersionAndPSID(device.Address)
-			if err != nil {
-				log.Log.Error(err, "Failed to get device's firmware and PSID", "address", device.Address)
-				return nil, err
-			}
-
-			deviceStatus = v1alpha1.NicDeviceStatus{
-				Type:            device.Product.ID,
-				SerialNumber:    serialNumber,
-				PartNumber:      partNumber,
-				PSID:            psid,
-				FirmwareVersion: firmwareVersion,
-				Ports:           []v1alpha1.NicDevicePortSpec{},
-			}
-
-			devices[serialNumber] = deviceStatus
-		}
-
-		networkInterface := h.hostUtils.GetInterfaceName(device.Address)
-		rdmaInterface := h.hostUtils.GetRDMADeviceName(device.Address)
-
-		deviceStatus.Ports = append(deviceStatus.Ports, v1alpha1.NicDevicePortSpec{
-			PCI:              device.Address,
-			NetworkInterface: networkInterface,
-			RdmaInterface:    rdmaInterface,
-		})
-
-		deviceStatus.Node = h.nodeName
-		devices[deviceStatus.SerialNumber] = deviceStatus
-	}
-
-	return devices, nil
 }
 
 // ValidateDeviceNvSpec will validate device's non-volatile spec against already applied configuration on the host
@@ -372,6 +288,6 @@ func (h hostManager) ResetNicFirmware(ctx context.Context, device *v1alpha1.NicD
 	return nil
 }
 
-func NewHostManager(nodeName string, hostUtils HostUtils, eventRecorder record.EventRecorder) HostManager {
-	return hostManager{nodeName: nodeName, hostUtils: hostUtils, configValidation: newConfigValidation(hostUtils, eventRecorder)}
+func NewHostManager(hostUtils HostUtils, eventRecorder record.EventRecorder) HostManager {
+	return hostManager{hostUtils: hostUtils, configValidation: newConfigValidation(hostUtils, eventRecorder)}
 }
