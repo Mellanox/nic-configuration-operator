@@ -19,7 +19,6 @@ package firmware
 import (
 	"archive/zip"
 	"bufio"
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -33,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	commonUtils "github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
 
 type FirmwareUtils interface {
@@ -54,22 +54,6 @@ type FirmwareUtils interface {
 
 type utils struct {
 	execInterface execUtils.Interface
-}
-
-// runCommand runs a command and captures stderr separately for better error reporting
-// Returns stdout, error (with stderr included in the error message if command fails)
-func (u *utils) runCommand(cmd execUtils.Cmd) ([]byte, error) {
-	var stderr bytes.Buffer
-	cmd.SetStderr(&stderr)
-	stdout, err := cmd.Output()
-	if err != nil {
-		stderrOutput := strings.TrimSpace(stderr.String())
-		if stderrOutput != "" {
-			err = fmt.Errorf("%w: %s", err, stderrOutput)
-		}
-	}
-
-	return stdout, err
 }
 
 // DownloadFile downloads the file under url and places it locally under destPath
@@ -215,7 +199,7 @@ func (u *utils) GetFirmwareVersionAndPSID(firmwareBinaryPath string) (string, st
 func (u utils) VerifyImageBootable(firmwareBinaryPath string) error {
 	log.Log.V(2).Info("FirmwareUtils.VerifyImageBootable()", "firmwareBinaryPath", firmwareBinaryPath)
 	cmd := u.execInterface.Command("mstflint", "-i", firmwareBinaryPath, "v")
-	_, err := u.runCommand(cmd)
+	_, err := commonUtils.RunCommand(cmd)
 	if err != nil {
 		log.Log.Error(err, "VerifyImageBootable(): mstflint check failed")
 		return err
