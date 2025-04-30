@@ -40,9 +40,9 @@ import (
 
 var deviceDiscoveryReconcileTime = time.Minute * 5
 
-// DeviceDiscovery periodically reconciles devices on the host, creates CRs for new devices,
+// DeviceDiscoveryController periodically reconciles devices on the host, creates CRs for new devices,
 // deletes CRs for absent devices, updates the CR when device's status has changed.
-type DeviceDiscovery struct {
+type DeviceDiscoveryController struct {
 	client.Client
 
 	hostManager host.HostManager
@@ -51,7 +51,7 @@ type DeviceDiscovery struct {
 }
 
 // Constructs a unique CR name based on the device's type and serial number
-func (d *DeviceDiscovery) getCRName(deviceType string, serialNumber string) string {
+func (d *DeviceDiscoveryController) getCRName(deviceType string, serialNumber string) string {
 	return strings.ToLower(d.nodeName + "-" + deviceType + "-" + serialNumber)
 }
 
@@ -106,7 +106,7 @@ func setFwConfigConditionsForDevice(device *v1alpha1.NicDevice, recommendedFirmw
 // reconcile reconciles the devices on the host by comparing the observed devices with the existing NicDevice custom resources (CRs).
 // It deletes CRs that do not represent observed devices, updates the CRs if the status of the device changes,
 // and creates new CRs for devices that do not have a CR representation.
-func (d *DeviceDiscovery) reconcile(ctx context.Context) error {
+func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 	observedDevices, err := d.hostManager.DiscoverNicDevices()
 	if err != nil {
 		return err
@@ -222,7 +222,7 @@ func (d *DeviceDiscovery) reconcile(ctx context.Context) error {
 
 // updateFwCondition updates the FirmwareConfigMatch status condition
 // returns bool - if condition changed and needs to be updated
-func (d *DeviceDiscovery) updateFwCondition(nicDeviceCR *v1alpha1.NicDevice) bool {
+func (d *DeviceDiscoveryController) updateFwCondition(nicDeviceCR *v1alpha1.NicDevice) bool {
 	ofedVersion := d.hostManager.DiscoverOfedVersion()
 	recommendedFirmware := helper.GetRecommendedFwVersion(nicDeviceCR.Status.Type, ofedVersion)
 	return setFwConfigConditionsForDevice(nicDeviceCR, recommendedFirmware)
@@ -232,7 +232,7 @@ func (d *DeviceDiscovery) updateFwCondition(nicDeviceCR *v1alpha1.NicDevice) boo
 //
 // It triggers the first reconciliation manually and then runs it periodically based on the
 // deviceDiscoveryReconcileTime interval until the context is done.
-func (d *DeviceDiscovery) Start(ctx context.Context) error {
+func (d *DeviceDiscoveryController) Start(ctx context.Context) error {
 	log.Log.Info("Device discovery started")
 
 	t := time.NewTicker(deviceDiscoveryReconcileTime)
@@ -266,9 +266,9 @@ OUTER:
 	return nil
 }
 
-// NewDeviceRegistry creates a new instance of DeviceDiscovery with the specified parameters.
-func NewDeviceRegistry(client client.Client, hostManager host.HostManager, node string, namespace string) *DeviceDiscovery {
-	return &DeviceDiscovery{
+// NewDeviceDiscoveryController creates a new instance of DeviceDiscoveryController with the specified parameters.
+func NewDeviceDiscoveryController(client client.Client, hostManager host.HostManager, node string, namespace string) *DeviceDiscoveryController {
+	return &DeviceDiscoveryController{
 		Client:      client,
 		hostManager: hostManager,
 		nodeName:    node,

@@ -81,8 +81,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	deviceDiscovery := controller.NewDeviceRegistry(mgr.GetClient(), hostManager, nodeName, namespace)
-	if err = mgr.Add(deviceDiscovery); err != nil {
+	deviceDiscoveryController := controller.NewDeviceDiscoveryController(mgr.GetClient(), hostManager, nodeName, namespace)
+	if err = mgr.Add(deviceDiscoveryController); err != nil {
 		log.Log.Error(err, "unable to add device discovery runnable")
 		os.Exit(1)
 	}
