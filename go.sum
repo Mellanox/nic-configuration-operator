@@ -1,5 +1,5 @@
-github.com/Mellanox/maintenance-operator/api v0.2.1 h1:cY7Zg6zWwEXZrhGgNhJUo6z4NAzIjmWZ5HbUyoTav3w=
-github.com/Mellanox/maintenance-operator/api v0.2.1/go.mod h1:pkd4TxjMFItohSXT0D1JhXB/E3d8jE5asBzxNATwT2s=
+github.com/Mellanox/maintenance-operator/api v0.2.2 h1:7bl/txeHv49NdubQ72AqC7tLXa9oJrZuqk27TG5CybM=
+github.com/Mellanox/maintenance-operator/api v0.2.2/go.mod h1:pkd4TxjMFItohSXT0D1JhXB/E3d8jE5asBzxNATwT2s=
 github.com/Mellanox/rdmamap v1.1.0 h1:A/W1wAXw+6vm58f3VklrIylgV+eDJlPVIMaIKuxgUT4=
 github.com/Mellanox/rdmamap v1.1.0/go.mod h1:fN+/V9lf10ABnDCwTaXRjeeWijLt2iVLETnK+sx/LY8=
 github.com/StackExchange/wmi v1.2.1 h1:VIkavFPXSjcnS+O8yTq7NI32k0R5Aj+v39y29VYDOSA=
