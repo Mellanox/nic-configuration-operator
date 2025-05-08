@@ -219,6 +219,10 @@ func (v *configValidationImpl) ValidateResetToDefault(nvConfig types.NvConfigQue
 	// ResetToDefault requires us to set ADVANCED_PCI_SETTINGS=true, which is not a default value
 	// Deleting this key from maps so that it doesn't interfere with comparisons
 	delete(nvConfig.DefaultConfig, consts.AdvancedPCISettingsParam)
+	// We want to retain the BF3 operation mode after reset, so not taking it into consideration
+	delete(nvConfig.DefaultConfig, consts.BF3OperationModeParam)
+	delete(nvConfig.CurrentConfig, consts.BF3OperationModeParam)
+	delete(nvConfig.NextBootConfig, consts.BF3OperationModeParam)
 
 	alreadyResetInCurrent := false
 	willResetInNextBoot := false

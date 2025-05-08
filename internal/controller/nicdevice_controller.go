@@ -533,6 +533,14 @@ func (r *NicDeviceReconciler) handleConfigurationSpecValidation(ctx context.Cont
 				return nil
 			}
 
+			// If configuration reset was applied (nvConfigUpdateRequired == false) and reboot has happened (uptime > sinceStatusUpdate),
+			// there might still be discrepancies in the mlxconfig query that might lead to a boot loop.
+			// In this case, consider the reset successful
+			if status.device.Spec.Configuration.ResetToDefault {
+				status.rebootRequired = false
+				return nil
+			}
+
 			log.Log.Info("nv config failed to update after reboot for device", "device", status.device.Name)
 			r.EventRecorder.Event(status.device, v1.EventTypeWarning, consts.FirmwareError, consts.FwConfigNotAppliedAfterRebootErrorMsg)
 			err = r.updateConfigInProgressStatusCondition(ctx, status.device, consts.FirmwareError, metav1.ConditionFalse, consts.FwConfigNotAppliedAfterRebootErrorMsg)
