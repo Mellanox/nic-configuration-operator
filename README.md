@@ -33,9 +33,6 @@ If more than one template matches a single device, none will be applied and the 
 
 For more information refer to [api-reference](docs/api-reference.md).
 
-> [!IMPORTANT]
-> `ResetToDefault` In NIC Configuration Operator template v0.1.14 BF2/BF3 DPUs (not SuperNics) FW reset flow isn't supported.
-
 #### [Example NICConfigurationTemplate](docs/examples/example-nicconfigurationtemplate-connectx6dx.yaml):
 
 ```yaml
