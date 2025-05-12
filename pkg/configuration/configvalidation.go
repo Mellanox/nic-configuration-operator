@@ -299,7 +299,7 @@ func (v *configValidationImpl) RuntimeConfigApplied(device *v1alpha1.NicDevice) 
 			log.Log.Error(err, "cannot validate QoS settings", "device", device.Name, "port", port.PCI)
 			return false, err
 		}
-		actualTrust, actualPfc, err := v.utils.GetTrustAndPFC(port.NetworkInterface)
+		actualTrust, actualPfc, err := v.utils.GetTrustAndPFC(device, port.NetworkInterface)
 		if err != nil {
 			log.Log.Error(err, "cannot validate QoS settings", "device", device.Name, "port", port.PCI)
 			return false, err

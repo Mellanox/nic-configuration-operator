@@ -19,15 +19,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
+	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
+	"github.com/Mellanox/nic-configuration-operator/pkg/dms/mocks"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/utils/exec"
 	execTesting "k8s.io/utils/exec/testing"
 )
-
-const pciAddress = "0000:03:00.0"
 
 var _ = Describe("ConfigurationUtils", func() {
 	Describe("GetPCILinkSpeed", func() {
@@ -396,63 +395,52 @@ Device type:    ConnectX4
 	})
 	Describe("GetTrustAndPFC", func() {
 		It("should return parsed values", func() {
-			interfaceName := "enp3s0f0np0"
+			device := &v1alpha1.NicDevice{
+				Status: v1alpha1.NicDeviceStatus{
+					SerialNumber: "serialnumber",
+					Ports:        []v1alpha1.NicDevicePortSpec{{PCI: "0000:03:00.0", NetworkInterface: "enp3s0f0np0"}},
+				},
+			}
 			trust := "dscp"
 			pfc := "0,1,0,1,0,1,0,0"
 
-			fakeExec := &execTesting.FakeExec{}
-
-			fakeCmd := &execTesting.FakeCmd{}
-			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
-				return []byte("irrelevant line\n" +
-						"Priority trust state: dscp\n" +
-						"           enabled  0   1   0   1   0   1   0   0  \n" +
-						"another irrelevant line"),
-					nil, nil
-			})
-
-			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
-				Expect(cmd).To(Equal("mlnx_qos"))
-				Expect(args).To(Equal([]string{"-i", interfaceName}))
-				return fakeCmd
-			})
+			mockDMSManager := &mocks.DMSManager{}
+			mockDMSClient := &mocks.DMSClient{}
+			mockDMSManager.On("GetDMSClientBySerialNumber", "serialnumber").Return(mockDMSClient, nil)
+			mockDMSClient.On("GetQoSSettings", "enp3s0f0np0").Return(trust, pfc, nil)
 
 			h := &configurationUtils{
-				execInterface: fakeExec,
+				dmsManager:    mockDMSManager,
+				execInterface: nil, // not used in this test
 			}
 
-			observedTrust, observedPFC, err := h.GetTrustAndPFC(interfaceName)
+			observedTrust, observedPFC, err := h.GetTrustAndPFC(device, "enp3s0f0np0")
 
 			Expect(err).NotTo(HaveOccurred())
-			Expect(observedTrust).To(Equal(strings.ToLower(trust)))
-			Expect(observedPFC).To(Equal(strings.ToLower(pfc)))
+			Expect(observedTrust).To(Equal(trust))
+			Expect(observedPFC).To(Equal(pfc))
 		})
 		It("should return empty string for both numbers if one is empty", func() {
-			interfaceName := "enp3s0f0np0"
-
-			fakeExec := &execTesting.FakeExec{}
-
-			fakeCmd := &execTesting.FakeCmd{}
-			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
-				return []byte("irrelevant line\n" +
-						"Priority trust state: dscp\n" +
-						"another irrelevant line"),
-					nil, nil
-			})
-
-			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
-				Expect(cmd).To(Equal("mlnx_qos"))
-				Expect(args).To(Equal([]string{"-i", interfaceName}))
-				return fakeCmd
-			})
-
-			h := &configurationUtils{
-				execInterface: fakeExec,
+			device := &v1alpha1.NicDevice{
+				Status: v1alpha1.NicDeviceStatus{
+					SerialNumber: "serialnumber",
+					Ports:        []v1alpha1.NicDevicePortSpec{{PCI: "0000:03:00.0", NetworkInterface: "enp3s0f0np0"}},
+				},
 			}
 
-			observedTrust, observedPFC, err := h.GetTrustAndPFC(interfaceName)
+			mockDMSManager := &mocks.DMSManager{}
+			mockDMSClient := &mocks.DMSClient{}
+			mockDMSManager.On("GetDMSClientBySerialNumber", "serialnumber").Return(mockDMSClient, nil)
+			mockDMSClient.On("GetQoSSettings", "enp3s0f0np0").Return("", "", nil)
 
-			Expect(err).To(HaveOccurred())
+			h := &configurationUtils{
+				dmsManager:    mockDMSManager,
+				execInterface: nil, // not used in this test
+			}
+
+			observedTrust, observedPFC, err := h.GetTrustAndPFC(device, "enp3s0f0np0")
+
+			Expect(err).NotTo(HaveOccurred())
 			Expect(observedTrust).To(Equal(""))
 			Expect(observedPFC).To(Equal(""))
 		})

@@ -27,6 +27,7 @@ import (
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	"github.com/Mellanox/nic-configuration-operator/pkg/dms"
 )
 
 // ConfigurationManager contains logic for configuring NIC devices on the host
@@ -230,6 +231,7 @@ func (h configurationManager) ApplyDeviceRuntimeSpec(device *v1alpha1.NicDevice)
 	alreadyApplied, err := h.configValidation.RuntimeConfigApplied(device)
 	if err != nil {
 		log.Log.Error(err, "failed to verify runtime configuration", "device", device)
+		return err
 	}
 
 	if alreadyApplied {
@@ -251,8 +253,9 @@ func (h configurationManager) ApplyDeviceRuntimeSpec(device *v1alpha1.NicDevice)
 		}
 	}
 
-	for _, port := range ports {
-		err = h.configurationUtils.SetTrustAndPFC(port.NetworkInterface, desiredTrust, desiredPfc)
+	// Don't apply QoS settings if neither trust nor pfc changes are requested
+	if desiredTrust != "" || desiredPfc != "" {
+		err = h.configurationUtils.SetTrustAndPFC(device, desiredTrust, desiredPfc)
 		if err != nil {
 			log.Log.Error(err, "failed to apply runtime configuration", "device", device)
 			return err
@@ -277,7 +280,7 @@ func (h configurationManager) ResetNicFirmware(ctx context.Context, device *v1al
 	return nil
 }
 
-func NewConfigurationManager(eventRecorder record.EventRecorder) ConfigurationManager {
-	utils := newConfigurationUtils()
+func NewConfigurationManager(eventRecorder record.EventRecorder, dmsManager dms.DMSManager) ConfigurationManager {
+	utils := newConfigurationUtils(dmsManager)
 	return configurationManager{configurationUtils: utils, configValidation: newConfigValidation(utils, eventRecorder)}
 }
