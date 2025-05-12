@@ -22,7 +22,7 @@ COPY ./ ./
 # by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
 RUN --mount=type=cache,target=/go/pkg/mod/ GO_GCFLAGS=${GCFLAGS} make build-daemon
 
-FROM nvcr.io/nvidia/doca/doca:2.10.0-full-rt-host
+FROM nvcr.io/nvidia/doca/doca:2.9.2-full-rt-host
 
 ARG TARGETARCH
 ENV MFT_VERSION=4.29.0-131
@@ -47,6 +47,9 @@ RUN case ${TARGETARCH} in \
 
 WORKDIR /
 COPY --from=builder /workspace/build/nic-configuration-daemon .
+
+# Copy sources to the container
+ADD . /workspace
 
 ENTRYPOINT ["/nic-configuration-daemon"]
 
