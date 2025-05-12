@@ -39,7 +39,7 @@ COPY ./ ./
 #RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/maintenance-manager/main.go
 RUN --mount=type=cache,target=/go/pkg/mod/ GO_GCFLAGS=${GCFLAGS} make build-manager
 
-FROM nvcr.io/nvidia/doca/doca:2.9.2-full-rt-host
+FROM nvcr.io/nvidia/doca/doca:3.0.0-full-rt-host
 
 ARG TARGETARCH
 ENV MFT_VERSION=4.29.0-131

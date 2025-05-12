@@ -18,7 +18,9 @@ package main
 
 import (
 	"flag"
+	"maps"
 	"os"
+	"slices"
 
 	maintenanceoperator "github.com/Mellanox/maintenance-operator/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -34,6 +36,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/internal/controller"
 	"github.com/Mellanox/nic-configuration-operator/pkg/configuration"
 	"github.com/Mellanox/nic-configuration-operator/pkg/devicediscovery"
+	"github.com/Mellanox/nic-configuration-operator/pkg/dms"
 	"github.com/Mellanox/nic-configuration-operator/pkg/firmware"
 	"github.com/Mellanox/nic-configuration-operator/pkg/helper"
 	"github.com/Mellanox/nic-configuration-operator/pkg/host"
@@ -92,7 +95,29 @@ func main() {
 	hostUtils := host.NewHostUtils()
 	deviceDiscovery := devicediscovery.NewDeviceDiscovery(nodeName)
 
-	configurationManager := configuration.NewConfigurationManager(eventRecorder)
+	// Initialize DMS manager
+	dmsManager := dms.NewDMSManager()
+
+	// Start DMS instances for all discovered devices
+	devices, err := deviceDiscovery.DiscoverNicDevices()
+	if err != nil {
+		log.Log.Error(err, "failed to discover NIC devices")
+		os.Exit(1)
+	}
+
+	if err := dmsManager.StartDMSInstances(slices.Collect(maps.Values(devices))); err != nil {
+		log.Log.Error(err, "failed to start DMS instances")
+		os.Exit(1)
+	}
+
+	// Ensure DMS instances are stopped when the program exits
+	defer func() {
+		if err := dmsManager.StopAllDMSInstances(); err != nil {
+			log.Log.Error(err, "failed to stop DMS instances")
+		}
+	}()
+
+	configurationManager := configuration.NewConfigurationManager(eventRecorder, dmsManager)
 	maintenanceManager := maintenance.New(mgr.GetClient(), hostUtils, nodeName, namespace)
 	firmwareManager := firmware.NewFirmwareManager(mgr.GetClient(), namespace)
 
