@@ -18,7 +18,7 @@ package maintenance
 import (
 	"context"
 
-	"github.com/Mellanox/nic-configuration-operator/pkg/host"
+	maintenanceoperator "github.com/Mellanox/maintenance-operator/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/workqueue"
@@ -28,8 +28,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	maintenanceoperator "github.com/Mellanox/maintenance-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	"github.com/Mellanox/nic-configuration-operator/pkg/host"
 )
 
 func GetMaintenanceRequestEventHandler(nodeName string, qHandler func(q workqueue.TypedRateLimitingInterface[reconcile.Request])) handler.Funcs {

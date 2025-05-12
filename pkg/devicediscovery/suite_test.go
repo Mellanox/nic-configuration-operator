@@ -1,5 +1,5 @@
 /*
-2024 NVIDIA CORPORATION & AFFILIATES
+2025 NVIDIA CORPORATION & AFFILIATES
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package host
+package devicediscovery
 
 import (
 	"testing"
@@ -26,5 +26,5 @@ func TestHostManager(t *testing.T) {
 	// Register Gomega with Ginkgo
 	gomega.RegisterFailHandler(ginkgo.Fail)
 	// Run the test suite
-	ginkgo.RunSpecs(t, "HostManager Suite")
+	ginkgo.RunSpecs(t, "DeviceDiscovery Suite")
 }
