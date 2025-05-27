@@ -7,7 +7,7 @@ toolchain go1.23.6
 require (
 	github.com/Mellanox/maintenance-operator/api v0.2.2
 	github.com/Mellanox/rdmamap v1.1.0
-	github.com/jaypipes/ghw v0.16.0
+	github.com/jaypipes/ghw v0.17.0
 	github.com/jaypipes/pcidb v1.0.1
 	github.com/onsi/ginkgo/v2 v2.23.4
 	github.com/onsi/gomega v1.37.0
