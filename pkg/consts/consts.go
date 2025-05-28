@@ -121,4 +121,7 @@ const (
 	FirmwareUpdatePolicyUpdate   = "Update"
 
 	FirmwareSourceFinalizerName = "configuration.net.nvidia.com/nic-configuration-operator"
+
+	TrustModeDscp = "dscp"
+	TrustModePfc  = "pfc"
 )

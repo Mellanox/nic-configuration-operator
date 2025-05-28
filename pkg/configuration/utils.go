@@ -27,7 +27,9 @@ import (
 	execUtils "k8s.io/utils/exec"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	"github.com/Mellanox/nic-configuration-operator/pkg/dms"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
@@ -45,12 +47,12 @@ type ConfigurationUtils interface {
 	// GetMaxReadRequestSize returns MaxReadRequest size for PCI device
 	GetMaxReadRequestSize(pciAddr string) (int, error)
 	// GetTrustAndPFC returns trust and pfc settings for network interface
-	GetTrustAndPFC(interfaceName string) (string, string, error)
+	GetTrustAndPFC(device *v1alpha1.NicDevice, interfaceName string) (string, string, error)
 
 	// SetMaxReadRequestSize sets max read request size for PCI device
 	SetMaxReadRequestSize(pciAddr string, maxReadRequestSize int) error
 	// SetTrustAndPFC sets trust and PFC settings for a network interface
-	SetTrustAndPFC(interfaceName string, trust string, pfc string) error
+	SetTrustAndPFC(device *v1alpha1.NicDevice, trust string, pfc string) error
 
 	// QueryNvConfig queries nv config for a mellanox device and returns default, current and next boot configs
 	QueryNvConfig(ctx context.Context, pciAddr string) (types.NvConfigQuery, error)
@@ -67,6 +69,7 @@ type ConfigurationUtils interface {
 
 type configurationUtils struct {
 	execInterface execUtils.Interface
+	dmsManager    dms.DMSManager
 }
 
 // GetLinkType return the link type of the net device (Ethernet / Infiniband)
@@ -165,38 +168,19 @@ func (h *configurationUtils) GetMaxReadRequestSize(pciAddr string) (int, error) 
 }
 
 // GetTrustAndPFC returns trust and pfc settings for network interface
-func (h *configurationUtils) GetTrustAndPFC(interfaceName string) (string, string, error) {
-	log.Log.Info("ConfigurationUtils.GetTrustAndPFC()", "interface", interfaceName)
-	cmd := h.execInterface.Command("mlnx_qos", "-i", interfaceName)
-	output, err := cmd.CombinedOutput()
+func (h *configurationUtils) GetTrustAndPFC(device *v1alpha1.NicDevice, interfaceName string) (string, string, error) {
+	log.Log.Info("ConfigurationUtils.GetTrustAndPFC()", "device", device.Name)
+
+	dmsClient, err := h.dmsManager.GetDMSClientBySerialNumber(device.Status.SerialNumber)
 	if err != nil {
-		err = fmt.Errorf("failed to run mlnx_qos: %s", output)
-		log.Log.Error(err, "GetTrustAndPFC(): Failed to run mlnx_qos")
+		log.Log.Error(err, "GetTrustAndPFC(): failed to get DMS client", "device", device.Name)
 		return "", "", err
 	}
 
-	// Parse the output for trust and pfc states
-	scanner := bufio.NewScanner(strings.NewReader(string(output)))
-	var trust, pfc string
-
-	for scanner.Scan() {
-		line := strings.TrimSpace(strings.ToLower(scanner.Text()))
-
-		if strings.HasPrefix(line, consts.TrustStatePrefix) {
-			trust = strings.TrimSpace(strings.TrimPrefix(line, consts.TrustStatePrefix))
-		}
-		if strings.HasPrefix(line, consts.PfcEnabledPrefix) {
-			pfc = strings.Replace(strings.TrimSpace(strings.TrimPrefix(line, consts.PfcEnabledPrefix)), "   ", ",", -1)
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		log.Log.Error(err, "GetTrustAndPFC(): Error reading mlnx_qos output")
+	trust, pfc, err := dmsClient.GetQoSSettings(interfaceName)
+	if err != nil {
+		log.Log.Error(err, "GetTrustAndPFC(): failed to get QoS settings", "device", device.Name)
 		return "", "", err
-	}
-
-	if trust == "" || pfc == "" {
-		return "", "", fmt.Errorf("GetTrustAndPFC(): trust (%v) or pfc (%v) is empty", trust, pfc)
 	}
 
 	return trust, pfc, nil
@@ -395,16 +379,20 @@ func (h *configurationUtils) SetMaxReadRequestSize(pciAddr string, maxReadReques
 }
 
 // SetTrustAndPFC sets trust and PFC settings for a network interface
-func (h *configurationUtils) SetTrustAndPFC(interfaceName string, trust string, pfc string) error {
-	log.Log.Info("ConfigurationUtils.SetTrustAndPFC()", "interfaceName", interfaceName, "trust", trust, "pfc", pfc)
+func (h *configurationUtils) SetTrustAndPFC(device *v1alpha1.NicDevice, trust string, pfc string) error {
+	log.Log.Info("ConfigurationUtils.SetTrustAndPFC()", "device", device.Name, "trust", trust, "pfc", pfc)
 
-	cmd := h.execInterface.Command("mlnx_qos", "-i", interfaceName, "--trust", trust, "--pfc", pfc)
-	output, err := cmd.CombinedOutput()
+	dmsClient, err := h.dmsManager.GetDMSClientBySerialNumber(device.Status.SerialNumber)
 	if err != nil {
-		err = fmt.Errorf("failed to run mlnx_qos: %s", output)
-		log.Log.Error(err, "SetTrustAndPFC(): Failed to run mlnx_qos")
+		log.Log.Error(err, "SetTrustAndPFC(): failed to get DMS client", "device", device.Name)
 		return err
 	}
+
+	if err := dmsClient.SetQoSSettings(trust, pfc); err != nil {
+		log.Log.Error(err, "SetTrustAndPFC(): failed to set QoS settings", "device", device.Name)
+		return err
+	}
+
 	return nil
 }
 
@@ -417,6 +405,9 @@ func encapTypeToLinkType(encapType string) string {
 	return ""
 }
 
-func newConfigurationUtils() ConfigurationUtils {
-	return &configurationUtils{execInterface: execUtils.New()}
+func newConfigurationUtils(dmsManager dms.DMSManager) ConfigurationUtils {
+	return &configurationUtils{
+		execInterface: execUtils.New(),
+		dmsManager:    dmsManager,
+	}
 }
