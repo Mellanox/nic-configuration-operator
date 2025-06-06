@@ -30,6 +30,8 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 )
 
+const pciAddress = "0000:3b:00.0"
+
 var _ = Describe("ConfigurationManager", func() {
 	Describe("configurationManager.ValidateDeviceNvSpec", func() {
 		var (
@@ -38,7 +40,6 @@ var _ = Describe("ConfigurationManager", func() {
 			manager              configurationManager
 			ctx                  context.Context
 			device               *v1alpha1.NicDevice
-			pciAddress           string
 		)
 
 		BeforeEach(func() {
@@ -49,7 +50,6 @@ var _ = Describe("ConfigurationManager", func() {
 				configValidation:   &mockConfigValidation,
 			}
 			ctx = context.TODO()
-			pciAddress = "0000:3b:00.0"
 
 			device = &v1alpha1.NicDevice{
 				Spec: v1alpha1.NicDeviceSpec{
@@ -344,7 +344,6 @@ var _ = Describe("ConfigurationManager", func() {
 			manager              configurationManager
 			ctx                  context.Context
 			device               *v1alpha1.NicDevice
-			pciAddress           string
 		)
 
 		BeforeEach(func() {
@@ -355,7 +354,6 @@ var _ = Describe("ConfigurationManager", func() {
 				configValidation:   &mockConfigValidation,
 			}
 			ctx = context.TODO()
-			pciAddress = "0000:3b:00.0"
 
 			device = &v1alpha1.NicDevice{
 				Spec: v1alpha1.NicDeviceSpec{
@@ -761,6 +759,170 @@ var _ = Describe("ConfigurationManager", func() {
 					mockHostUtils.AssertExpectations(GinkgoT())
 					mockConfigValidation.AssertExpectations(GinkgoT())
 				})
+			})
+		})
+	})
+
+	Describe("configurationManager.ApplyDeviceRuntimeSpec", func() {
+		var (
+			mockHostUtils        mocks.ConfigurationUtils
+			mockConfigValidation mocks.ConfigValidation
+			manager              configurationManager
+			device               *v1alpha1.NicDevice
+		)
+
+		BeforeEach(func() {
+			mockHostUtils = mocks.ConfigurationUtils{}
+			mockConfigValidation = mocks.ConfigValidation{}
+			manager = configurationManager{
+				configurationUtils: &mockHostUtils,
+				configValidation:   &mockConfigValidation,
+			}
+
+			device = &v1alpha1.NicDevice{
+				Spec: v1alpha1.NicDeviceSpec{
+					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
+						Template: &v1alpha1.ConfigurationTemplateSpec{
+							PciPerformanceOptimized: &v1alpha1.PciPerformanceOptimizedSpec{
+								Enabled:        true,
+								MaxReadRequest: 2048,
+							},
+							RoceOptimized: &v1alpha1.RoceOptimizedSpec{
+								Enabled: true,
+							},
+						},
+					},
+				},
+				Status: v1alpha1.NicDeviceStatus{
+					Ports: []v1alpha1.NicDevicePortSpec{
+						{PCI: pciAddress, NetworkInterface: "eth0"},
+					},
+				},
+			}
+		})
+
+		Context("when runtime config is already applied", func() {
+			It("should return nil without applying any changes", func() {
+				mockConfigValidation.On("RuntimeConfigApplied", device).Return(true, nil)
+
+				err := manager.ApplyDeviceRuntimeSpec(device)
+				Expect(err).To(BeNil())
+
+				mockHostUtils.AssertNotCalled(GinkgoT(), "SetMaxReadRequestSize", mock.Anything, mock.Anything)
+				mockHostUtils.AssertNotCalled(GinkgoT(), "SetTrustAndPFC", mock.Anything, mock.Anything, mock.Anything)
+				mockConfigValidation.AssertExpectations(GinkgoT())
+			})
+		})
+
+		Context("when RuntimeConfigApplied returns an error", func() {
+			It("should return the error", func() {
+				checkErr := errors.New("failed to check runtime config")
+				mockConfigValidation.On("RuntimeConfigApplied", device).Return(false, checkErr)
+
+				err := manager.ApplyDeviceRuntimeSpec(device)
+				Expect(err).To(MatchError(checkErr))
+
+				mockHostUtils.AssertNotCalled(GinkgoT(), "SetMaxReadRequestSize", mock.Anything, mock.Anything)
+				mockHostUtils.AssertNotCalled(GinkgoT(), "SetTrustAndPFC", mock.Anything, mock.Anything, mock.Anything)
+				mockConfigValidation.AssertExpectations(GinkgoT())
+			})
+		})
+
+		Context("when applying max read request size", func() {
+			BeforeEach(func() {
+				mockConfigValidation.On("RuntimeConfigApplied", device).Return(false, nil)
+				mockConfigValidation.On("CalculateDesiredRuntimeConfig", device).Return(2048, "", "")
+			})
+
+			It("should apply max read request size successfully", func() {
+				mockHostUtils.On("SetMaxReadRequestSize", pciAddress, 2048).Return(nil)
+
+				err := manager.ApplyDeviceRuntimeSpec(device)
+				Expect(err).To(BeNil())
+
+				mockHostUtils.AssertExpectations(GinkgoT())
+				mockConfigValidation.AssertExpectations(GinkgoT())
+			})
+
+			It("should return error if SetMaxReadRequestSize fails", func() {
+				setErr := errors.New("failed to set max read request size")
+				mockHostUtils.On("SetMaxReadRequestSize", pciAddress, 2048).Return(setErr)
+
+				err := manager.ApplyDeviceRuntimeSpec(device)
+				Expect(err).To(MatchError(setErr))
+
+				mockHostUtils.AssertExpectations(GinkgoT())
+				mockConfigValidation.AssertExpectations(GinkgoT())
+			})
+		})
+
+		Context("when applying QoS settings", func() {
+			BeforeEach(func() {
+				mockConfigValidation.On("RuntimeConfigApplied", device).Return(false, nil)
+				mockConfigValidation.On("CalculateDesiredRuntimeConfig", device).Return(0, "trust", "pfc")
+			})
+
+			It("should apply QoS settings successfully", func() {
+				mockHostUtils.On("SetTrustAndPFC", device, "trust", "pfc").Return(nil)
+
+				err := manager.ApplyDeviceRuntimeSpec(device)
+				Expect(err).To(BeNil())
+
+				mockHostUtils.AssertExpectations(GinkgoT())
+				mockConfigValidation.AssertExpectations(GinkgoT())
+			})
+
+			It("should return error if SetTrustAndPFC fails", func() {
+				setErr := errors.New("failed to set QoS settings")
+				mockHostUtils.On("SetTrustAndPFC", device, "trust", "pfc").Return(setErr)
+
+				err := manager.ApplyDeviceRuntimeSpec(device)
+				Expect(err).To(MatchError(setErr))
+
+				mockHostUtils.AssertExpectations(GinkgoT())
+				mockConfigValidation.AssertExpectations(GinkgoT())
+			})
+		})
+
+		Context("when applying both max read request size and QoS settings", func() {
+			BeforeEach(func() {
+				mockConfigValidation.On("RuntimeConfigApplied", device).Return(false, nil)
+				mockConfigValidation.On("CalculateDesiredRuntimeConfig", device).Return(2048, "trust", "pfc")
+			})
+
+			It("should apply both settings successfully", func() {
+				mockHostUtils.On("SetMaxReadRequestSize", pciAddress, 2048).Return(nil)
+				mockHostUtils.On("SetTrustAndPFC", device, "trust", "pfc").Return(nil)
+
+				err := manager.ApplyDeviceRuntimeSpec(device)
+				Expect(err).To(BeNil())
+
+				mockHostUtils.AssertExpectations(GinkgoT())
+				mockConfigValidation.AssertExpectations(GinkgoT())
+			})
+
+			It("should return error if SetMaxReadRequestSize fails", func() {
+				setErr := errors.New("failed to set max read request size")
+				mockHostUtils.On("SetMaxReadRequestSize", pciAddress, 2048).Return(setErr)
+
+				err := manager.ApplyDeviceRuntimeSpec(device)
+				Expect(err).To(MatchError(setErr))
+
+				mockHostUtils.AssertNotCalled(GinkgoT(), "SetTrustAndPFC", mock.Anything, mock.Anything, mock.Anything)
+				mockHostUtils.AssertExpectations(GinkgoT())
+				mockConfigValidation.AssertExpectations(GinkgoT())
+			})
+
+			It("should return error if SetTrustAndPFC fails", func() {
+				mockHostUtils.On("SetMaxReadRequestSize", pciAddress, 2048).Return(nil)
+				setErr := errors.New("failed to set QoS settings")
+				mockHostUtils.On("SetTrustAndPFC", device, "trust", "pfc").Return(setErr)
+
+				err := manager.ApplyDeviceRuntimeSpec(device)
+				Expect(err).To(MatchError(setErr))
+
+				mockHostUtils.AssertExpectations(GinkgoT())
+				mockConfigValidation.AssertExpectations(GinkgoT())
 			})
 		})
 	})

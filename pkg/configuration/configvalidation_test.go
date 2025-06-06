@@ -820,8 +820,8 @@ var _ = Describe("ConfigValidationImpl", func() {
 				mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desiredMaxReadReqSize, nil)
 				mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.1").Return(desiredMaxReadReqSize, nil)
 
-				mockHostUtils.On("GetTrustAndPFC", "interface0").Return(desiredTrust, desiredPfc, nil)
-				mockHostUtils.On("GetTrustAndPFC", "interface1").Return(desiredTrust, desiredPfc, nil)
+				mockHostUtils.On("GetTrustAndPFC", device, "interface0").Return(desiredTrust, desiredPfc, nil)
+				mockHostUtils.On("GetTrustAndPFC", device, "interface1").Return(desiredTrust, desiredPfc, nil)
 			})
 
 			It("should return true with no error", func() {
@@ -848,8 +848,8 @@ var _ = Describe("ConfigValidationImpl", func() {
 
 				mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desiredMaxReadReqSize+128, nil)
 
-				mockHostUtils.On("GetTrustAndPFC", "interface0").Return(desiredTrust, desiredPfc, nil)
-				mockHostUtils.On("GetTrustAndPFC", "interface1").Return(desiredTrust, desiredPfc, nil)
+				mockHostUtils.On("GetTrustAndPFC", device, "interface0").Return(desiredTrust, desiredPfc, nil)
+				mockHostUtils.On("GetTrustAndPFC", device, "interface1").Return(desiredTrust, desiredPfc, nil)
 
 				// The second port should not be called since the first port already fails
 			})
@@ -880,7 +880,8 @@ var _ = Describe("ConfigValidationImpl", func() {
 				mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desiredMaxReadReqSize, nil)
 				mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.1").Return(desiredMaxReadReqSize+256, nil)
 
-				mockHostUtils.On("GetTrustAndPFC", "interface0").Return(desiredTrust, desiredPfc, nil)
+				mockHostUtils.On("GetTrustAndPFC", device, "interface0").Return(desiredTrust, desiredPfc, nil)
+				mockHostUtils.On("GetTrustAndPFC", device, "interface1").Return(desiredTrust, desiredPfc, nil)
 			})
 
 			It("should return false with no error", func() {
@@ -897,7 +898,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 				mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desiredMaxReadReqSize, nil)
 				mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.1").Return(desiredMaxReadReqSize, nil)
 
-				mockHostUtils.On("GetTrustAndPFC", "interface0").Return("differentTrust", desiredPfc, nil)
+				mockHostUtils.On("GetTrustAndPFC", device, "interface0").Return("differentTrust", desiredPfc, nil)
 				// The second port should not be called since the first port already fails
 			})
 
@@ -910,14 +911,13 @@ var _ = Describe("ConfigValidationImpl", func() {
 
 		Context("when PFC setting does not match on the second port", func() {
 			BeforeEach(func() {
-				desiredMaxReadReqSize, desiredTrust, desiredPfc := validator.CalculateDesiredRuntimeConfig(device)
+				desiredMaxReadReqSize, desiredTrust, _ := validator.CalculateDesiredRuntimeConfig(device)
 
 				mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desiredMaxReadReqSize, nil)
 				mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.1").Return(desiredMaxReadReqSize, nil)
 
-				mockHostUtils.On("GetTrustAndPFC", "interface0").Return(desiredTrust, desiredPfc, nil)
-
-				mockHostUtils.On("GetTrustAndPFC", "interface1").Return(desiredTrust, "differentPfc", nil)
+				mockHostUtils.On("GetTrustAndPFC", device, "interface0").Return(desiredTrust, "differentPfc", nil)
+				mockHostUtils.On("GetTrustAndPFC", device, "interface1").Return(desiredTrust, "differentPfc", nil)
 			})
 
 			It("should return false with no error", func() {
@@ -961,7 +961,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 				mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desiredMaxReadReqSize, nil)
 				mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.1").Return(desiredMaxReadReqSize, nil)
 
-				mockHostUtils.On("GetTrustAndPFC", "interface0").Return("", "", fmt.Errorf("failed to get trust and pfc"))
+				mockHostUtils.On("GetTrustAndPFC", device, "interface0").Return("", "", fmt.Errorf("failed to get trust and pfc"))
 			})
 
 			It("should return false with the error", func() {
@@ -982,7 +982,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 				desiredMaxReadReqSize, desiredTrust, desiredPfc := validator.CalculateDesiredRuntimeConfig(device)
 
 				mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desiredMaxReadReqSize, nil)
-				mockHostUtils.On("GetTrustAndPFC", "interface0").Return(desiredTrust, desiredPfc, nil)
+				mockHostUtils.On("GetTrustAndPFC", device, "interface0").Return(desiredTrust, desiredPfc, nil)
 			})
 
 			It("should return true with no error", func() {
@@ -1002,7 +1002,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 				desiredMaxReadReqSize, _, desiredPfc := validator.CalculateDesiredRuntimeConfig(device)
 
 				mockHostUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desiredMaxReadReqSize, nil)
-				mockHostUtils.On("GetTrustAndPFC", "interface0").Return("differentTrust", desiredPfc, nil)
+				mockHostUtils.On("GetTrustAndPFC", device, "interface0").Return("differentTrust", desiredPfc, nil)
 			})
 
 			It("should return false with no error", func() {
