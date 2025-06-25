@@ -40,19 +40,26 @@ spec:
             description: NicFirmwareSourceSpec represents a list of url sources for
               FW
             properties:
+              bfbUrlSource:
+                description: BFBUrlSource represents a url source for BFB FW
+                type: string
               binUrlSources:
                 description: BinUrlSources represents a list of url sources for FW
                 items:
                   type: string
                 minItems: 1
                 type: array
-            required:
-            - binUrlSources
             type: object
+            x-kubernetes-validations:
+            - message: At least one of binUrlSources or bfbUrlSource must be specified
+              rule: size(self.binUrlSources) > 0 || self.bfbUrlSource != nil
           status:
             description: NicFirmwareSourceStatus represents the status of the FW from
               given sources, e.g. version available for PSIDs
             properties:
+              bfb:
+                description: BFB represents the available BFB file
+                type: string
               reason:
                 description: Reason shows an error message if occurred
                 type: string
