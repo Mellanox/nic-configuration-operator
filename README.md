@@ -135,6 +135,15 @@ spec:
   # a list of firmware binaries from mlnx website if they are zipped try to unzip before placing
   binUrlSources:
     - https://www.mellanox.com/downloads/firmware/fw-ConnectX6Dx-rel-22_44_1036-MCX623106AC-CDA_Ax-UEFI-14.37.14-FlexBoot-3.7.500.signed.bin.zip
+  bfbUrlSource: https://example.com/bluefield3-31.41.0.bfb
+status:
+  state: Success
+  binaryVersions:
+    22.44.1036:
+    - mt_0000000436
+  bfbVersions:
+    a2dc: 34.41.0 # BF3 NIC FW
+    a2d6: 25.21.0 # BF2 NIC FW
 ```
 
 ### NICFirmwareTemplate

@@ -57,7 +57,7 @@ ConfigurationTemplateSpec is a set of configurations for the NICs
 
 ### FirmwareTemplateSpec
 
-(*Appears on:*[NicFirmwareTemplateSpec](#NicFirmwareTemplateSpec))
+(*Appears on:*[NicDeviceSpec](#NicDeviceSpec), [NicFirmwareTemplateSpec](#NicFirmwareTemplateSpec))
 
 FirmwareTemplateSpec specifies a FW update policy for a given FW source ref
 
@@ -183,7 +183,7 @@ each PF - Mstconfig -d set ADVANCED_PCI_SETTINGS=1 * Node reboot - Applies new N
 </tr>
 <tr>
 <td><code>status</code><br />
-<em><a href="#NicConfigurationTemplateStatus">NicConfigurationTemplateStatus</a></em></td>
+<em><a href="#NicTemplateStatus">NicTemplateStatus</a></em></td>
 <td><p>Defines the observed state of NicConfigurationTemplate</p></td>
 </tr>
 </tbody>
@@ -232,32 +232,6 @@ each PF - Mstconfig -d set ADVANCED_PCI_SETTINGS=1 * Node reboot - Applies new N
 </tbody>
 </table>
 
-### NicConfigurationTemplateStatus
-
-(*Appears on:*[NicConfigurationTemplate](#NicConfigurationTemplate))
-
-NicConfigurationTemplateStatus defines the observed state of NicConfigurationTemplate
-
-<table>
-<colgroup>
-<col style="width: 50%" />
-<col style="width: 50%" />
-</colgroup>
-<thead>
-<tr>
-<th>Field</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>nicDevices</code><br />
-<em>[]string</em></td>
-<td><p>NicDevice CRs matching this configuration template</p></td>
-</tr>
-</tbody>
-</table>
-
 ### NicDevice
 
 NicDevice is the Schema for the nicdevices API
@@ -294,6 +268,11 @@ NicDevice is the Schema for the nicdevices API
 <td><code>configuration</code><br />
 <em><a href="#NicDeviceConfigurationSpec">NicDeviceConfigurationSpec</a></em></td>
 <td><p>Configuration specifies the configuration requested by NicConfigurationTemplate</p></td>
+</tr>
+<tr>
+<td><code>firmware</code><br />
+<em><a href="#FirmwareTemplateSpec">FirmwareTemplateSpec</a></em></td>
+<td><p>Firmware specifies the fw upgrade policy requested by NicFirmwareTemplate</p></td>
 </tr>
 </tbody>
 </table></td>
@@ -398,6 +377,11 @@ NicDeviceSpec defines the desired state of NicDevice
 <em><a href="#NicDeviceConfigurationSpec">NicDeviceConfigurationSpec</a></em></td>
 <td><p>Configuration specifies the configuration requested by NicConfigurationTemplate</p></td>
 </tr>
+<tr>
+<td><code>firmware</code><br />
+<em><a href="#FirmwareTemplateSpec">FirmwareTemplateSpec</a></em></td>
+<td><p>Firmware specifies the fw upgrade policy requested by NicFirmwareTemplate</p></td>
+</tr>
 </tbody>
 </table>
 
@@ -497,7 +481,14 @@ NicFirmwareSource is the Schema for the nicfirmwaresources API
 <tr>
 <td><code>binUrlSources</code><br />
 <em>[]string</em></td>
-<td><p>BinUrlSources represents a list of url sources for FW</p></td>
+<td><em>(Optional)</em>
+<p>BinUrlSources represents a list of url sources for ConnectX Firmware</p></td>
+</tr>
+<tr>
+<td><code>bfbUrlSource</code><br />
+<em>string</em></td>
+<td><em>(Optional)</em>
+<p>BFBUrlSource represents a url source for BlueField Bundle</p></td>
 </tr>
 </tbody>
 </table></td>
@@ -531,7 +522,14 @@ NicFirmwareSourceSpec represents a list of url sources for FW
 <tr>
 <td><code>binUrlSources</code><br />
 <em>[]string</em></td>
-<td><p>BinUrlSources represents a list of url sources for FW</p></td>
+<td><em>(Optional)</em>
+<p>BinUrlSources represents a list of url sources for ConnectX Firmware</p></td>
+</tr>
+<tr>
+<td><code>bfbUrlSource</code><br />
+<em>string</em></td>
+<td><em>(Optional)</em>
+<p>BFBUrlSource represents a url source for BlueField Bundle</p></td>
 </tr>
 </tbody>
 </table>
@@ -568,6 +566,11 @@ NicFirmwareSourceStatus represents the status of the FW from given sources, e.g.
 <td><code>versions</code><br />
 <em>map[string][]string</em></td>
 <td><p>Versions is a map of available FW versions to PSIDs a PSID should have only a single FW version available for it</p></td>
+</tr>
+<tr>
+<td><code>bfbVersions</code><br />
+<em>map[string]string</em></td>
+<td><p>BFBVersions represents the FW versions available in the provided BFB bundle</p></td>
 </tr>
 </tbody>
 </table>
@@ -624,7 +627,7 @@ NicFirmwareTemplate is the Schema for the nicfirmwaretemplates API
 </tr>
 <tr>
 <td><code>status</code><br />
-<em><a href="#NicFirmwareTemplateStatus">NicFirmwareTemplateStatus</a></em></td>
+<em><a href="#NicTemplateStatus">NicTemplateStatus</a></em></td>
 <td></td>
 </tr>
 </tbody>
@@ -666,32 +669,6 @@ NicFirmwareTemplateSpec defines the FW templates and node/nic selectors for it
 </tbody>
 </table>
 
-### NicFirmwareTemplateStatus
-
-(*Appears on:*[NicFirmwareTemplate](#NicFirmwareTemplate))
-
-NicFirmwareTemplateStatus lists the NicDevice CRs matching the FW template
-
-<table>
-<colgroup>
-<col style="width: 50%" />
-<col style="width: 50%" />
-</colgroup>
-<thead>
-<tr>
-<th>Field</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>nicDevices</code><br />
-<em>[]string</em></td>
-<td><p>NicDevice CRs matching this firmware template</p></td>
-</tr>
-</tbody>
-</table>
-
 ### NicSelectorSpec
 
 (*Appears on:*[NicConfigurationTemplateSpec](#NicConfigurationTemplateSpec),
@@ -725,6 +702,32 @@ NicSelectorSpec is a desired configuration for NICs
 <td><code>serialNumbers</code><br />
 <em>[]string</em></td>
 <td><p>Serial numbers of the NICs to be selected, e.g. MT2116X09299</p></td>
+</tr>
+</tbody>
+</table>
+
+### NicTemplateStatus
+
+(*Appears on:*[NicConfigurationTemplate](#NicConfigurationTemplate), [NicFirmwareTemplate](#NicFirmwareTemplate))
+
+NicTemplateStatus defines the observed state of NicConfigurationTemplate and NicFirmwareTemplate
+
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nicDevices</code><br />
+<em>[]string</em></td>
+<td><p>NicDevice CRs matching this configuration / firmware template</p></td>
 </tr>
 </tbody>
 </table>
@@ -829,4 +832,4 @@ RoceOptimizedSpec specifies RoCE optimization settings
 
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-*Generated with `gen-crd-api-reference-docs` on git commit `7bb08b0`.*
+*Generated with `gen-crd-api-reference-docs` on git commit `5c0e1e9`.*
