@@ -31,6 +31,8 @@ import (
 )
 
 var _ = Describe("FirmwareProvisioner", func() {
+	const testBFBFileName = "firmware.bfb"
+
 	var (
 		fwUtilsMock *mocks.FirmwareUtils
 		fwProv      FirmwareProvisioner
@@ -372,6 +374,406 @@ var _ = Describe("FirmwareProvisioner", func() {
 				_, err := fwProv.ValidateCache(cacheName)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("no firmware binary files in the PSID directory"))
+			})
+		})
+	})
+
+	Describe("BFB Functionality", func() {
+		var (
+			bfbCacheDir string
+			bfbUrl      string
+		)
+
+		BeforeEach(func() {
+			bfbCacheDir = path.Join(tmpDir, cacheName, consts.BFBFolder)
+			bfbUrl = "http://example.com/firmware.bfb"
+		})
+
+		Describe("VerifyCachedBFB", func() {
+			Context("when the BFB cache directory does not exist", func() {
+				It("should return true (needs download)", func() {
+					needsDownload, err := fwProv.VerifyCachedBFB(cacheName, bfbUrl)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(needsDownload).To(BeTrue())
+				})
+			})
+
+			Context("when the metadata file is missing", func() {
+				It("should clean up the directory and return true", func() {
+					// Create the directory but not metadata.json
+					Expect(os.MkdirAll(bfbCacheDir, 0755)).To(Succeed())
+
+					// Create a dummy file to verify cleanup
+					dummyFile := path.Join(bfbCacheDir, "dummy.bfb")
+					Expect(os.WriteFile(dummyFile, []byte("dummy"), 0644)).To(Succeed())
+
+					needsDownload, err := fwProv.VerifyCachedBFB(cacheName, bfbUrl)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(needsDownload).To(BeTrue())
+
+					// Directory should be cleaned up
+					_, statErr := os.Stat(bfbCacheDir)
+					Expect(os.IsNotExist(statErr)).To(BeTrue())
+				})
+			})
+
+			Context("when metadata file exists but is corrupted", func() {
+				It("should return an error", func() {
+					Expect(os.MkdirAll(bfbCacheDir, 0755)).To(Succeed())
+
+					// Write invalid JSON
+					metadataFile := path.Join(bfbCacheDir, metadataFileName)
+					Expect(os.WriteFile(metadataFile, []byte("invalid json"), 0644)).To(Succeed())
+
+					_, err := fwProv.VerifyCachedBFB(cacheName, bfbUrl)
+					Expect(err).To(HaveOccurred())
+					Expect(err.Error()).To(ContainSubstring("invalid character"))
+				})
+			})
+
+			Context("when URL is not found in metadata", func() {
+				It("should return true (needs download)", func() {
+					Expect(os.MkdirAll(bfbCacheDir, 0755)).To(Succeed())
+
+					// Create metadata with different URL
+					metadataFile := path.Join(bfbCacheDir, metadataFileName)
+					metadata := `{"http://other.com/firmware.bfb": "other.bfb"}`
+					Expect(os.WriteFile(metadataFile, []byte(metadata), 0644)).To(Succeed())
+
+					needsDownload, err := fwProv.VerifyCachedBFB(cacheName, bfbUrl)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(needsDownload).To(BeTrue())
+				})
+			})
+
+			Context("when URL is found but BFB file is missing from disk", func() {
+				It("should return true (needs download)", func() {
+					Expect(os.MkdirAll(bfbCacheDir, 0755)).To(Succeed())
+
+					// Create metadata with our URL but no actual file
+					metadataFile := path.Join(bfbCacheDir, metadataFileName)
+					metadata := `{"` + bfbUrl + `": "firmware.bfb"}`
+					Expect(os.WriteFile(metadataFile, []byte(metadata), 0644)).To(Succeed())
+
+					needsDownload, err := fwProv.VerifyCachedBFB(cacheName, bfbUrl)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(needsDownload).To(BeTrue())
+				})
+			})
+
+			Context("when URL is found and BFB file exists", func() {
+				It("should return false (skip download)", func() {
+					Expect(os.MkdirAll(bfbCacheDir, 0755)).To(Succeed())
+
+					// Create metadata and actual file
+					bfbFileName := "firmware.bfb"
+					metadataFile := path.Join(bfbCacheDir, metadataFileName)
+					metadata := `{"` + bfbUrl + `": "` + bfbFileName + `"}`
+					Expect(os.WriteFile(metadataFile, []byte(metadata), 0644)).To(Succeed())
+
+					bfbFile := path.Join(bfbCacheDir, bfbFileName)
+					Expect(os.WriteFile(bfbFile, []byte("bfb content"), 0644)).To(Succeed())
+
+					needsDownload, err := fwProv.VerifyCachedBFB(cacheName, bfbUrl)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(needsDownload).To(BeFalse())
+				})
+			})
+		})
+
+		Describe("DownloadBFB", func() {
+			It("should clean up directory, download file, validate extension, and update metadata", func() {
+				// Create some existing files to verify cleanup
+				Expect(os.MkdirAll(bfbCacheDir, 0755)).To(Succeed())
+				oldFile := path.Join(bfbCacheDir, "old.bfb")
+				Expect(os.WriteFile(oldFile, []byte("old content"), 0644)).To(Succeed())
+
+				// Mock successful download
+				expectedLocalPath := path.Join(bfbCacheDir, testBFBFileName)
+				fwUtilsMock.On("DownloadFile", bfbUrl, expectedLocalPath).Return(nil).Once()
+
+				filename, err := fwProv.DownloadBFB(cacheName, bfbUrl)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(filename).To(Equal(testBFBFileName))
+
+				// Verify old file was cleaned up
+				_, err = os.Stat(oldFile)
+				Expect(os.IsNotExist(err)).To(BeTrue())
+
+				// Verify metadata was created
+				metadataFile := path.Join(bfbCacheDir, metadataFileName)
+				Expect(metadataFile).To(BeARegularFile())
+
+				// Read and verify metadata content
+				data, err := os.ReadFile(metadataFile)
+				Expect(err).NotTo(HaveOccurred())
+
+				var metadata bfbMetadata
+				Expect(json.Unmarshal(data, &metadata)).To(Succeed())
+				Expect(metadata).To(HaveKeyWithValue(bfbUrl, testBFBFileName))
+			})
+
+			It("should replace existing BFB file when downloading new one", func() {
+				// Create existing metadata and file
+				Expect(os.MkdirAll(bfbCacheDir, 0755)).To(Succeed())
+				metadataFile := path.Join(bfbCacheDir, metadataFileName)
+				existingMetadata := `{"http://other.com/old.bfb": "old.bfb"}`
+				Expect(os.WriteFile(metadataFile, []byte(existingMetadata), 0644)).To(Succeed())
+
+				// Create the old BFB file
+				oldBfbFile := path.Join(bfbCacheDir, "old.bfb")
+				Expect(os.WriteFile(oldBfbFile, []byte("old bfb content"), 0644)).To(Succeed())
+
+				// Mock successful download of new BFB
+				expectedLocalPath := path.Join(bfbCacheDir, testBFBFileName)
+				fwUtilsMock.On("DownloadFile", bfbUrl, expectedLocalPath).Return(nil).Once()
+
+				filename, err := fwProv.DownloadBFB(cacheName, bfbUrl)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(filename).To(Equal(testBFBFileName))
+
+				// Verify old BFB file was cleaned up (directory cleanup should remove it)
+				_, err = os.Stat(oldBfbFile)
+				Expect(os.IsNotExist(err)).To(BeTrue())
+
+				// Read and verify metadata contains only the new BFB file
+				data, err := os.ReadFile(metadataFile)
+				Expect(err).NotTo(HaveOccurred())
+
+				var metadata bfbMetadata
+				Expect(json.Unmarshal(data, &metadata)).To(Succeed())
+				Expect(metadata).To(HaveLen(1))
+				Expect(metadata).To(HaveKeyWithValue(bfbUrl, testBFBFileName))
+				Expect(metadata).NotTo(HaveKey("http://other.com/old.bfb"))
+			})
+
+			Context("when download fails", func() {
+				It("should return an error", func() {
+					expectedLocalPath := path.Join(bfbCacheDir, "firmware.bfb")
+					fwUtilsMock.On("DownloadFile", bfbUrl, expectedLocalPath).
+						Return(errors.New("network error")).Once()
+
+					_, err := fwProv.DownloadBFB(cacheName, bfbUrl)
+					Expect(err).To(HaveOccurred())
+					Expect(err.Error()).To(ContainSubstring("network error"))
+				})
+			})
+
+			Context("when downloaded file has wrong extension", func() {
+				It("should return an error", func() {
+					wrongUrl := "http://example.com/firmware.bin" // Wrong extension
+					expectedLocalPath := path.Join(bfbCacheDir, "firmware.bin")
+					fwUtilsMock.On("DownloadFile", wrongUrl, expectedLocalPath).Return(nil).Once()
+
+					_, err := fwProv.DownloadBFB(cacheName, wrongUrl)
+					Expect(err).To(HaveOccurred())
+					Expect(err.Error()).To(ContainSubstring("downloaded file does not have BFB extension"))
+				})
+			})
+
+		})
+
+		Describe("BFB Metadata", func() {
+			var metadataFile string
+
+			BeforeEach(func() {
+				Expect(os.MkdirAll(bfbCacheDir, 0755)).To(Succeed())
+				metadataFile = path.Join(bfbCacheDir, metadataFileName)
+			})
+
+			Describe("readBFBMetadataFromFile", func() {
+				It("should read valid BFB metadata", func() {
+					metadata := `{"http://example.com/firmware.bfb": "firmware.bfb"}`
+					Expect(os.WriteFile(metadataFile, []byte(metadata), 0644)).To(Succeed())
+
+					result, err := readBFBMetadataFromFile(metadataFile)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(result).To(HaveLen(1))
+					Expect(result).To(HaveKeyWithValue("http://example.com/firmware.bfb", "firmware.bfb"))
+				})
+
+				It("should return error when file does not exist", func() {
+					_, err := readBFBMetadataFromFile("/nonexistent/file.json")
+					Expect(err).To(HaveOccurred())
+					Expect(os.IsNotExist(err)).To(BeTrue())
+				})
+
+				It("should return error when JSON is corrupted", func() {
+					Expect(os.WriteFile(metadataFile, []byte("invalid json"), 0644)).To(Succeed())
+
+					_, err := readBFBMetadataFromFile(metadataFile)
+					Expect(err).To(HaveOccurred())
+					Expect(err.Error()).To(ContainSubstring("invalid character"))
+				})
+			})
+
+			Describe("writeMetadataFile with BFB metadata", func() {
+				It("should write single BFB metadata correctly", func() {
+					metadata := bfbMetadata{
+						"http://example.com/firmware.bfb": "firmware.bfb",
+					}
+
+					err := writeMetadataFile(metadata, bfbCacheDir)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(metadataFile).To(BeARegularFile())
+
+					// Read back and verify
+					data, err := os.ReadFile(metadataFile)
+					Expect(err).NotTo(HaveOccurred())
+
+					var readBack bfbMetadata
+					Expect(json.Unmarshal(data, &readBack)).To(Succeed())
+					Expect(readBack).To(Equal(metadata))
+					Expect(readBack).To(HaveLen(1))
+				})
+			})
+
+			Describe("writeMetadataFile with binary metadata (regression test)", func() {
+				It("should still work with fwBinaryMetadata", func() {
+					metadata := fwBinaryMetadata{
+						"http://example.com/fw1.zip": []string{"fw1.bin", "fw2.bin"},
+						"http://example.com/fw2.zip": []string{"fw3.bin"},
+					}
+
+					err := writeMetadataFile(metadata, bfbCacheDir)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(metadataFile).To(BeARegularFile())
+
+					// Read back and verify
+					data, err := os.ReadFile(metadataFile)
+					Expect(err).NotTo(HaveOccurred())
+
+					var readBack fwBinaryMetadata
+					Expect(json.Unmarshal(data, &readBack)).To(Succeed())
+					Expect(readBack).To(Equal(metadata))
+				})
+			})
+		})
+
+		Describe("ValidateBFB", func() {
+			var metadataFile string
+
+			BeforeEach(func() {
+				Expect(os.MkdirAll(bfbCacheDir, 0755)).To(Succeed())
+				metadataFile = path.Join(bfbCacheDir, metadataFileName)
+			})
+
+			It("should return BF firmware versions when BFB is valid", func() {
+				// Create metadata file
+				bfbFileName := testBFBFileName
+				metadata := `{"` + bfbUrl + `": "` + bfbFileName + `"}`
+				Expect(os.WriteFile(metadataFile, []byte(metadata), 0644)).To(Succeed())
+
+				// Create the BFB file
+				bfbFilePath := path.Join(bfbCacheDir, bfbFileName)
+				Expect(os.WriteFile(bfbFilePath, []byte("dummy bfb content"), 0644)).To(Succeed())
+
+				// Mock the GetFWVersionsFromBFB call
+				expectedVersions := map[string]string{
+					"bf2": "24.35.1000",
+					"bf3": "28.39.1002",
+				}
+				fwUtilsMock.On("GetFWVersionsFromBFB", bfbFilePath).Return(expectedVersions, nil).Once()
+
+				versions, err := fwProv.ValidateBFB(cacheName)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(versions).To(Equal(expectedVersions))
+			})
+
+			It("should return error when metadata file is missing", func() {
+				// No metadata file created
+				_, err := fwProv.ValidateBFB(cacheName)
+				Expect(err).To(HaveOccurred())
+				Expect(os.IsNotExist(err)).To(BeTrue())
+			})
+
+			It("should return error when metadata file is corrupted", func() {
+				// Create corrupted metadata file
+				Expect(os.WriteFile(metadataFile, []byte("invalid json"), 0644)).To(Succeed())
+
+				_, err := fwProv.ValidateBFB(cacheName)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("invalid character"))
+			})
+
+			It("should return error when GetFWVersionsFromBFB fails", func() {
+				// Create valid metadata file
+				bfbFileName := "firmware.bfb"
+				metadata := `{"` + bfbUrl + `": "` + bfbFileName + `"}`
+				Expect(os.WriteFile(metadataFile, []byte(metadata), 0644)).To(Succeed())
+
+				// Create the BFB file
+				bfbFilePath := path.Join(bfbCacheDir, bfbFileName)
+				Expect(os.WriteFile(bfbFilePath, []byte("dummy bfb content"), 0644)).To(Succeed())
+
+				// Mock GetFWVersionsFromBFB to fail
+				fwUtilsMock.On("GetFWVersionsFromBFB", bfbFilePath).Return(nil, errors.New("BFB parsing failed")).Once()
+
+				_, err := fwProv.ValidateBFB(cacheName)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("BFB parsing failed"))
+			})
+
+			It("should return error when BFB cache is empty", func() {
+				// Create metadata file with no entries
+				metadata := `{}`
+				Expect(os.WriteFile(metadataFile, []byte(metadata), 0644)).To(Succeed())
+
+				_, err := fwProv.ValidateBFB(cacheName)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("no BFB file found in cache"))
+			})
+
+			It("should return versions for first BFB file when multiple exist", func() {
+				// Create metadata file with multiple entries (although this shouldn't happen in practice)
+				bfbFileName1 := "firmware1.bfb"
+				bfbFileName2 := "firmware2.bfb"
+				metadata := `{
+					"http://example.com/firmware1.bfb": "` + bfbFileName1 + `",
+					"http://example.com/firmware2.bfb": "` + bfbFileName2 + `"
+				}`
+				Expect(os.WriteFile(metadataFile, []byte(metadata), 0644)).To(Succeed())
+
+				// Create both BFB files
+				bfbFilePath1 := path.Join(bfbCacheDir, bfbFileName1)
+				bfbFilePath2 := path.Join(bfbCacheDir, bfbFileName2)
+				Expect(os.WriteFile(bfbFilePath1, []byte("dummy bfb content 1"), 0644)).To(Succeed())
+				Expect(os.WriteFile(bfbFilePath2, []byte("dummy bfb content 2"), 0644)).To(Succeed())
+
+				// Mock the GetFWVersionsFromBFB call - it should be called for one of the files
+				expectedVersions := map[string]string{
+					"bf2": "24.35.1000",
+					"bf3": "28.39.1002",
+				}
+				// We can't predict which file will be processed first due to map iteration order,
+				// so we'll mock both possibilities
+				fwUtilsMock.On("GetFWVersionsFromBFB", mock.AnythingOfType("string")).Return(expectedVersions, nil).Once()
+
+				versions, err := fwProv.ValidateBFB(cacheName)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(versions).To(Equal(expectedVersions))
+			})
+		})
+
+		Describe("BFB Directory Structure", func() {
+			It("should create proper BFB directory structure", func() {
+				// Mock successful download
+				expectedLocalPath := path.Join(bfbCacheDir, "firmware.bfb")
+				fwUtilsMock.On("DownloadFile", bfbUrl, expectedLocalPath).Return(nil).Once()
+
+				_, err := fwProv.DownloadBFB(cacheName, bfbUrl)
+				Expect(err).NotTo(HaveOccurred())
+
+				// Verify directory structure
+				Expect(bfbCacheDir).To(BeADirectory())
+
+				// Check that BFB folder is separate from firmware-binaries folder
+				binaryDir := path.Join(tmpDir, cacheName, consts.NicFirmwareBinariesFolder)
+				Expect(bfbCacheDir).NotTo(Equal(binaryDir))
+
+				// Verify metadata exists
+				metadataFile := path.Join(bfbCacheDir, metadataFileName)
+				Expect(metadataFile).To(BeARegularFile())
 			})
 		})
 	})
