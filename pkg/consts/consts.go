@@ -100,7 +100,9 @@ const (
 
 	NicFirmwareStorage             = "/nic-firmware"
 	NicFirmwareBinariesFolder      = "firmware-binaries"
+	BFBFolder                      = "bfb"
 	NicFirmwareBinaryFileExtension = ".bin"
+	BFBFileExtension               = ".bfb"
 
 	TempDir = "/tmp"
 
