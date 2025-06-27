@@ -141,6 +141,64 @@ func (_m *FirmwareProvisioner) VerifyCachedBinaries(cacheName string, urls []str
 	return r0, r1
 }
 
+// DownloadBFB provides a mock function with given fields: cacheName, url
+func (_m *FirmwareProvisioner) DownloadBFB(cacheName string, url string) (string, error) {
+	ret := _m.Called(cacheName, url)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DownloadBFB")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, string) (string, error)); ok {
+		return rf(cacheName, url)
+	}
+	if rf, ok := ret.Get(0).(func(string, string) string); ok {
+		r0 = rf(cacheName, url)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(string)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string, string) error); ok {
+		r1 = rf(cacheName, url)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// VerifyCachedBFB provides a mock function with given fields: cacheName, url
+func (_m *FirmwareProvisioner) VerifyCachedBFB(cacheName string, url string) (bool, error) {
+	ret := _m.Called(cacheName, url)
+
+	if len(ret) == 0 {
+		panic("no return value specified for VerifyCachedBFB")
+	}
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, string) (bool, error)); ok {
+		return rf(cacheName, url)
+	}
+	if rf, ok := ret.Get(0).(func(string, string) bool); ok {
+		r0 = rf(cacheName, url)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(string, string) error); ok {
+		r1 = rf(cacheName, url)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // NewFirmwareProvisioner creates a new instance of FirmwareProvisioner. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewFirmwareProvisioner(t interface {

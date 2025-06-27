@@ -18,11 +18,15 @@ package v1alpha1
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // NicFirmwareSourceSpec represents a list of url sources for FW
+// +kubebuilder:validation:XValidation:rule="size(self.binUrlSources) > 0 || self.bfbUrlSource != nil",message="At least one of binUrlSources or bfbUrlSource must be specified"
 type NicFirmwareSourceSpec struct {
 	// BinUrlSources represents a list of url sources for FW
 	// +kubebuilder:validation:MinItems=1
-	// +required
-	BinUrlSources []string `json:"binUrlSources"`
+	// +optional
+	BinUrlSources []string `json:"binUrlSources,omitempty"`
+	// BFBUrlSource represents a url source for BFB FW
+	// +optional
+	BFBUrlSource string `json:"bfbUrlSource,omitempty"`
 }
 
 // NicFirmwareSourceStatus represents the status of the FW from given sources, e.g. version available for PSIDs
@@ -36,6 +40,8 @@ type NicFirmwareSourceStatus struct {
 	// Versions is a map of available FW versions to PSIDs
 	// a PSID should have only a single FW version available for it
 	Versions map[string][]string `json:"versions,omitempty"`
+	// BFB represents the available BFB file
+	BFB string `json:"bfb,omitempty"`
 }
 
 //+kubebuilder:object:root=true
