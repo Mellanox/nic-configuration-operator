@@ -95,68 +95,133 @@ func (r *NicFirmwareSourceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		}
 	}
 
-	urlsToProcess, err := r.FirmwareProvisioner.VerifyCachedBinaries(cacheName, instance.Spec.BinUrlSources)
-	if err != nil {
-		log.Log.Error(err, "failed to verify cached binaries", "name", instance.Name)
-
-		if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceCacheVerificationFailedStatus, err, nil); updateErr != nil {
-			return reconcile.Result{}, updateErr
-		}
-		return reconcile.Result{}, err
-	}
-	if len(urlsToProcess) != 0 {
-		if err = r.updateStatus(ctx, instance, consts.FirmwareSourceDownloadingStatus, nil, nil); err != nil {
-			return reconcile.Result{}, err
-		}
-
-		err = r.FirmwareProvisioner.DownloadAndUnzipFirmwareArchives(cacheName, urlsToProcess, true)
+	// Handle Binary Firmware URLs
+	var binaryVersions map[string][]string
+	if len(instance.Spec.BinUrlSources) > 0 {
+		binaryVersions, err = r.processBinarySources(ctx, instance, cacheName)
 		if err != nil {
-			log.Log.Error(err, "failed to download fw binaries archives", "name", instance.Name)
-
-			if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceDownloadFailedStatus, err, nil); updateErr != nil {
-				return reconcile.Result{}, updateErr
-			}
+			log.Log.Error(err, "failed to process binary source", "name", instance.Name)
 			return reconcile.Result{}, err
 		}
-	} else {
-		log.Log.Info("Files for all requested URLs already present, skipping download", "cacheName", instance.Name)
 	}
 
-	if err = r.updateStatus(ctx, instance, consts.FirmwareSourceProcessingStatus, nil, nil); err != nil {
-		return reconcile.Result{}, err
-	}
-
-	err = r.FirmwareProvisioner.AddFirmwareBinariesToCacheByMetadata(cacheName)
-	if err != nil {
-		log.Log.Error(err, "failed to add fw binaries to cache", "name", instance.Name)
-
-		if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceProcessingFailedStatus, err, nil); updateErr != nil {
-			return reconcile.Result{}, updateErr
+	// Handle BFB Firmware URL
+	var bfbVersions map[string]string
+	if instance.Spec.BFBUrlSource != "" {
+		bfbVersions, err = r.processBFBSource(ctx, instance, cacheName)
+		if err != nil {
+			log.Log.Error(err, "failed to process BFB source", "name", instance.Name)
+			return reconcile.Result{}, err
 		}
-		return reconcile.Result{}, err
 	}
 
-	return r.ValidateCache(ctx, instance)
-}
-
-func (r *NicFirmwareSourceReconciler) ValidateCache(ctx context.Context, instance *v1alpha1.NicFirmwareSource) (reconcile.Result, error) {
-	versions, err := r.FirmwareProvisioner.ValidateCache(instance.Name)
-	if err != nil {
-		log.Log.Error(err, "failed to validate fw binaries cache", "name", instance.Name)
-		if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceProcessingFailedStatus, err, nil); updateErr != nil {
-			return reconcile.Result{}, updateErr
-		}
-		return reconcile.Result{}, err
-	}
-
-	if err = r.updateStatus(ctx, instance, consts.FirmwareSourceSuccessStatus, nil, versions); err != nil {
+	// Update final status with both binary versions and BFB info
+	if err = r.updateStatus(ctx, instance, consts.FirmwareSourceSuccessStatus, nil, binaryVersions, bfbVersions); err != nil {
 		return reconcile.Result{}, err
 	}
 
 	return ctrl.Result{}, nil
 }
 
-func (r *NicFirmwareSourceReconciler) updateStatus(ctx context.Context, obj *v1alpha1.NicFirmwareSource, status string, statusError error, versions map[string][]string) error {
+// processBinarySources handles downloading and processing of binary firmware files
+func (r *NicFirmwareSourceReconciler) processBinarySources(ctx context.Context, instance *v1alpha1.NicFirmwareSource, cacheName string) (map[string][]string, error) {
+	urlsToProcess, err := r.FirmwareProvisioner.VerifyCachedBinaries(cacheName, instance.Spec.BinUrlSources)
+	if err != nil {
+		log.Log.Error(err, "failed to verify cached binaries", "name", instance.Name)
+
+		if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceCacheVerificationFailedStatus, err, nil, nil); updateErr != nil {
+			return nil, updateErr
+		}
+		return nil, err
+	}
+
+	if len(urlsToProcess) != 0 {
+		if err = r.updateStatus(ctx, instance, consts.FirmwareSourceDownloadingStatus, nil, nil, nil); err != nil {
+			return nil, err
+		}
+
+		err = r.FirmwareProvisioner.DownloadAndUnzipFirmwareArchives(cacheName, urlsToProcess, true)
+		if err != nil {
+			log.Log.Error(err, "failed to download fw binaries archives", "name", instance.Name)
+
+			if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceDownloadFailedStatus, err, nil, nil); updateErr != nil {
+				return nil, updateErr
+			}
+			return nil, err
+		}
+	} else {
+		log.Log.Info("Files for all requested binary URLs already present, skipping download", "cacheName", instance.Name)
+	}
+
+	if err = r.updateStatus(ctx, instance, consts.FirmwareSourceProcessingStatus, nil, nil, nil); err != nil {
+		return nil, err
+	}
+
+	err = r.FirmwareProvisioner.AddFirmwareBinariesToCacheByMetadata(cacheName)
+	if err != nil {
+		log.Log.Error(err, "failed to add fw binaries to cache", "name", instance.Name)
+
+		if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceProcessingFailedStatus, err, nil, nil); updateErr != nil {
+			return nil, updateErr
+		}
+		return nil, err
+	}
+
+	versions, err := r.FirmwareProvisioner.ValidateCache(cacheName)
+	if err != nil {
+		log.Log.Error(err, "failed to validate fw binaries cache", "name", instance.Name)
+		if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceProcessingFailedStatus, err, nil, nil); updateErr != nil {
+			return nil, updateErr
+		}
+		return nil, err
+	}
+
+	return versions, nil
+}
+
+// processBFBSource handles downloading and processing of BFB firmware files
+func (r *NicFirmwareSourceReconciler) processBFBSource(ctx context.Context, instance *v1alpha1.NicFirmwareSource, cacheName string) (map[string]string, error) {
+	needsDownload, err := r.FirmwareProvisioner.VerifyCachedBFB(cacheName, instance.Spec.BFBUrlSource)
+	if err != nil {
+		log.Log.Error(err, "failed to verify cached BFB", "name", instance.Name)
+
+		if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceCacheVerificationFailedStatus, err, nil, map[string]string{}); updateErr != nil {
+			return nil, updateErr
+		}
+		return nil, err
+	}
+
+	var bfbFileName string
+	if needsDownload {
+		if err = r.updateStatus(ctx, instance, consts.FirmwareSourceDownloadingStatus, nil, nil, nil); err != nil {
+			return nil, err
+		}
+
+		bfbFileName, err = r.FirmwareProvisioner.DownloadBFB(cacheName, instance.Spec.BFBUrlSource)
+		if err != nil {
+			log.Log.Error(err, "failed to download BFB file", "name", instance.Name)
+
+			if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceDownloadFailedStatus, err, nil, map[string]string{}); updateErr != nil {
+				return nil, updateErr
+			}
+			return nil, err
+		}
+	}
+
+	bfbVersions, err := r.FirmwareProvisioner.ValidateBFB(cacheName)
+	if err != nil {
+		log.Log.Error(err, "failed to validate BFB file", "name", instance.Name)
+		if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceProcessingFailedStatus, err, nil, map[string]string{}); updateErr != nil {
+			return nil, updateErr
+		}
+		return nil, err
+	}
+
+	log.Log.Info("BFB file successfully processed", "cacheName", instance.Name, "filename", bfbFileName)
+	return bfbVersions, nil
+}
+
+func (r *NicFirmwareSourceReconciler) updateStatus(ctx context.Context, obj *v1alpha1.NicFirmwareSource, status string, statusError error, binaryVersions map[string][]string, bfbVersions map[string]string) error {
 	obj.Status.State = status
 	if statusError != nil {
 		obj.Status.Reason = statusError.Error()
@@ -164,7 +229,9 @@ func (r *NicFirmwareSourceReconciler) updateStatus(ctx context.Context, obj *v1a
 		obj.Status.Reason = ""
 	}
 
-	obj.Status.Versions = versions
+	obj.Status.BinaryVersions = binaryVersions
+	obj.Status.BFBVersions = bfbVersions
+
 	err := r.Status().Update(ctx, obj)
 	if err != nil {
 		log.Log.Error(err, "failed to update the status of NicFirmwareSource object", "name", obj.Name)

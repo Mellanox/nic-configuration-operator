@@ -19,6 +19,7 @@ package firmware
 import (
 	"archive/zip"
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -203,6 +204,276 @@ var _ = Describe("utils", func() {
 			Expect(err).To(HaveOccurred())
 			Expect(part).To(Equal(""))
 			Expect(serial).To(Equal(""))
+		})
+	})
+
+	Describe("GetFWVersionsFromBFB", func() {
+		var bfbPath = "/tmp/firmware.bfb"
+
+		It("should return BF2 and BF3 firmware versions successfully", func() {
+			fakeExec := &execTesting.FakeExec{}
+
+			// First command: mlx-mkbfb to extract info
+			mlxMkbfbCmd := &execTesting.FakeCmd{}
+			mlxMkbfbCmd.CombinedOutputScript = append(mlxMkbfbCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
+				// Create mock dump-info-v0 file
+				infoContent := `{"components": [{"Name": "BF3_NIC_FW", "Version": "28.39.1002"}]}`
+				err := os.WriteFile("dump-info-v0", []byte(infoContent), 0644)
+				Expect(err).NotTo(HaveOccurred())
+				return []byte("extraction successful"), nil, nil
+			})
+
+			// Second command: awk command for BF3 version
+			bf3AwkCmd := &execTesting.FakeCmd{}
+			bf3AwkCmd.OutputScript = append(bf3AwkCmd.OutputScript, func() ([]byte, []byte, error) {
+				return []byte("28.39.1002"), nil, nil
+			})
+
+			// Third command: awk command for BF2 version
+			bf2AwkCmd := &execTesting.FakeCmd{}
+			bf2AwkCmd.OutputScript = append(bf2AwkCmd.OutputScript, func() ([]byte, []byte, error) {
+				return []byte("24.35.1000"), nil, nil
+			})
+
+			// Set up all three commands in the CommandScript
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				Expect(cmd).To(Equal("/usr/sbin/mlx-mkbfb"))
+				Expect(args).To(Equal([]string{"-x", "-n", "info-v0", bfbPath}))
+				return mlxMkbfbCmd
+			})
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				Expect(cmd).To(Equal("/bin/sh"))
+				Expect(args[0]).To(Equal("-c"))
+				Expect(args[1]).To(ContainSubstring("BF3_NIC_FW"))
+				return bf3AwkCmd
+			})
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				Expect(cmd).To(Equal("/bin/sh"))
+				Expect(args[0]).To(Equal("-c"))
+				Expect(args[1]).To(ContainSubstring("BF2_NIC_FW"))
+				return bf2AwkCmd
+			})
+
+			testedUtils := &utils{execInterface: fakeExec}
+
+			versions, err := testedUtils.GetFWVersionsFromBFB(bfbPath)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(versions).To(HaveLen(2))
+			Expect(versions["bf3"]).To(Equal("28.39.1002"))
+			Expect(versions["bf2"]).To(Equal("24.35.1000"))
+
+			// Cleanup
+			_ = os.Remove("dump-info-v0")
+		})
+
+		It("should return error when mlx-mkbfb command fails", func() {
+			fakeExec := &execTesting.FakeExec{}
+
+			fakeCmd := &execTesting.FakeCmd{}
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
+				return nil, []byte("mlx-mkbfb failed"), fmt.Errorf("command failed")
+			})
+
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				Expect(cmd).To(Equal("/usr/sbin/mlx-mkbfb"))
+				return fakeCmd
+			})
+
+			testedUtils := &utils{execInterface: fakeExec}
+
+			_, err := testedUtils.GetFWVersionsFromBFB(bfbPath)
+
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("command failed"))
+		})
+
+		It("should return error when info-v0 file is missing after extraction", func() {
+			fakeExec := &execTesting.FakeExec{}
+
+			// mlx-mkbfb succeeds but doesn't create the file
+			mlxMkbfbCmd := &execTesting.FakeCmd{}
+			mlxMkbfbCmd.CombinedOutputScript = append(mlxMkbfbCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
+				return []byte("extraction successful"), nil, nil
+			})
+
+			// BF3 awk command - returns empty since file doesn't exist
+			bf3AwkCmd := &execTesting.FakeCmd{}
+			bf3AwkCmd.OutputScript = append(bf3AwkCmd.OutputScript, func() ([]byte, []byte, error) {
+				return []byte(""), nil, nil
+			})
+
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				return mlxMkbfbCmd
+			})
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				return bf3AwkCmd
+			})
+
+			testedUtils := &utils{execInterface: fakeExec}
+
+			_, err := testedUtils.GetFWVersionsFromBFB(bfbPath)
+
+			Expect(err).To(HaveOccurred()) // Now fails because BF3 version is empty
+			Expect(err.Error()).To(ContainSubstring("BF3 NIC FW version is empty or not found"))
+		})
+
+		It("should return error when BF3 awk command fails", func() {
+			fakeExec := &execTesting.FakeExec{}
+
+			// First command: mlx-mkbfb succeeds
+			mlxMkbfbCmd := &execTesting.FakeCmd{}
+			mlxMkbfbCmd.CombinedOutputScript = append(mlxMkbfbCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
+				err := os.WriteFile("dump-info-v0", []byte("dummy content"), 0644)
+				Expect(err).NotTo(HaveOccurred())
+				return []byte("extraction successful"), nil, nil
+			})
+
+			// Second command: BF3 awk fails
+			bf3AwkCmd := &execTesting.FakeCmd{}
+			bf3AwkCmd.OutputScript = append(bf3AwkCmd.OutputScript, func() ([]byte, []byte, error) {
+				return nil, []byte("awk failed"), fmt.Errorf("awk command failed")
+			})
+
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				return mlxMkbfbCmd
+			})
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				return bf3AwkCmd
+			})
+
+			testedUtils := &utils{execInterface: fakeExec}
+
+			_, err := testedUtils.GetFWVersionsFromBFB(bfbPath)
+
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("awk command failed"))
+
+			// Cleanup
+			_ = os.Remove("dump-info-v0")
+		})
+
+		It("should return error when BF2 awk command fails", func() {
+			fakeExec := &execTesting.FakeExec{}
+
+			// First command: mlx-mkbfb succeeds
+			mlxMkbfbCmd := &execTesting.FakeCmd{}
+			mlxMkbfbCmd.CombinedOutputScript = append(mlxMkbfbCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
+				err := os.WriteFile("dump-info-v0", []byte("dummy content"), 0644)
+				Expect(err).NotTo(HaveOccurred())
+				return []byte("extraction successful"), nil, nil
+			})
+
+			// Second command: BF3 awk succeeds
+			bf3AwkCmd := &execTesting.FakeCmd{}
+			bf3AwkCmd.OutputScript = append(bf3AwkCmd.OutputScript, func() ([]byte, []byte, error) {
+				return []byte("28.39.1002"), nil, nil
+			})
+
+			// Third command: BF2 awk fails
+			bf2AwkCmd := &execTesting.FakeCmd{}
+			bf2AwkCmd.OutputScript = append(bf2AwkCmd.OutputScript, func() ([]byte, []byte, error) {
+				return nil, []byte("awk failed"), fmt.Errorf("BF2 awk command failed")
+			})
+
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				return mlxMkbfbCmd
+			})
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				return bf3AwkCmd
+			})
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				return bf2AwkCmd
+			})
+
+			testedUtils := &utils{execInterface: fakeExec}
+
+			_, err := testedUtils.GetFWVersionsFromBFB(bfbPath)
+
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("BF2 awk command failed"))
+
+			// Cleanup
+			_ = os.Remove("dump-info-v0")
+		})
+
+		It("should return error when BF3 version is empty or whitespace", func() {
+			fakeExec := &execTesting.FakeExec{}
+
+			// First command: mlx-mkbfb succeeds
+			mlxMkbfbCmd := &execTesting.FakeCmd{}
+			mlxMkbfbCmd.CombinedOutputScript = append(mlxMkbfbCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
+				err := os.WriteFile("dump-info-v0", []byte("dummy content"), 0644)
+				Expect(err).NotTo(HaveOccurred())
+				return []byte("extraction successful"), nil, nil
+			})
+
+			// Second command: BF3 awk returns whitespace only
+			bf3AwkCmd := &execTesting.FakeCmd{}
+			bf3AwkCmd.OutputScript = append(bf3AwkCmd.OutputScript, func() ([]byte, []byte, error) {
+				return []byte("   \n  "), nil, nil // whitespace only
+			})
+
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				return mlxMkbfbCmd
+			})
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				return bf3AwkCmd
+			})
+
+			testedUtils := &utils{execInterface: fakeExec}
+
+			_, err := testedUtils.GetFWVersionsFromBFB(bfbPath)
+
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("BF3 NIC FW version is empty or not found"))
+
+			// Cleanup
+			_ = os.Remove("dump-info-v0")
+		})
+
+		It("should return error when BF2 version is empty", func() {
+			fakeExec := &execTesting.FakeExec{}
+
+			// First command: mlx-mkbfb succeeds
+			mlxMkbfbCmd := &execTesting.FakeCmd{}
+			mlxMkbfbCmd.CombinedOutputScript = append(mlxMkbfbCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
+				err := os.WriteFile("dump-info-v0", []byte("dummy content"), 0644)
+				Expect(err).NotTo(HaveOccurred())
+				return []byte("extraction successful"), nil, nil
+			})
+
+			// Second command: BF3 awk succeeds
+			bf3AwkCmd := &execTesting.FakeCmd{}
+			bf3AwkCmd.OutputScript = append(bf3AwkCmd.OutputScript, func() ([]byte, []byte, error) {
+				return []byte("28.39.1002"), nil, nil
+			})
+
+			// Third command: BF2 awk returns empty
+			bf2AwkCmd := &execTesting.FakeCmd{}
+			bf2AwkCmd.OutputScript = append(bf2AwkCmd.OutputScript, func() ([]byte, []byte, error) {
+				return []byte(""), nil, nil
+			})
+
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				return mlxMkbfbCmd
+			})
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				return bf3AwkCmd
+			})
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				return bf2AwkCmd
+			})
+
+			testedUtils := &utils{execInterface: fakeExec}
+
+			_, err := testedUtils.GetFWVersionsFromBFB(bfbPath)
+
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("BF2 NIC FW version is empty or not found"))
+
+			// Cleanup
+			_ = os.Remove("dump-info-v0")
 		})
 	})
 
