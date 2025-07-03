@@ -28,6 +28,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/utils/exec"
@@ -260,8 +261,8 @@ var _ = Describe("utils", func() {
 
 			Expect(err).NotTo(HaveOccurred())
 			Expect(versions).To(HaveLen(2))
-			Expect(versions["bf3"]).To(Equal("28.39.1002"))
-			Expect(versions["bf2"]).To(Equal("24.35.1000"))
+			Expect(versions[consts.BlueField3DeviceID]).To(Equal("28.39.1002"))
+			Expect(versions[consts.BlueField2DeviceID]).To(Equal("24.35.1000"))
 
 			// Cleanup
 			_ = os.Remove("dump-info-v0")

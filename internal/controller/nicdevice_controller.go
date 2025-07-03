@@ -47,6 +47,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/pkg/host"
 	"github.com/Mellanox/nic-configuration-operator/pkg/maintenance"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
+	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
 
 const nicDeviceSyncEventName = "nic-device-sync-event-name"
@@ -629,6 +630,12 @@ func (r *NicDeviceReconciler) handleFirmwareUpdate(ctx context.Context, status *
 		log.Log.Error(err, "failed to update device firmware", "device", status.device.Name)
 		_ = r.updateFirmwareUpdateInProgressStatusCondition(ctx, status.device, consts.FirmwareUpdateFailedReason, metav1.ConditionFalse, err.Error())
 		return err
+	}
+
+	if utils.IsBlueFieldDevice(status.device.Status.Type) {
+		log.Log.Info("BlueField BFB installed, reboot is required to apply changes", "device", status.device.Name)
+		status.rebootRequired = true
+		return nil
 	}
 
 	log.Log.Info("New firmware image was successfully burned. Firmware reset is required to apply changes", "device", status.device.Name)

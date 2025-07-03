@@ -32,6 +32,7 @@ import (
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	dmsMocks "github.com/Mellanox/nic-configuration-operator/pkg/dms/mocks"
 	"github.com/Mellanox/nic-configuration-operator/pkg/firmware/mocks"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 )
@@ -77,9 +78,22 @@ var _ = Describe("FirmwareManager", func() {
 				ObjectMeta: v1.ObjectMeta{Name: fwSourceName, Namespace: ""},
 				Spec:       v1alpha1.NicFirmwareSourceSpec{},
 				Status: v1alpha1.NicFirmwareSourceStatus{
-					State:    state,
-					Reason:   reason,
-					Versions: versions,
+					State:          state,
+					Reason:         reason,
+					BinaryVersions: versions,
+				},
+			}
+		}
+
+		var createNicFwSourceWithBFB = func(state, reason string, versions map[string][]string, bfbVersions map[string]string) *v1alpha1.NicFirmwareSource {
+			return &v1alpha1.NicFirmwareSource{
+				ObjectMeta: v1.ObjectMeta{Name: fwSourceName, Namespace: ""},
+				Spec:       v1alpha1.NicFirmwareSourceSpec{},
+				Status: v1alpha1.NicFirmwareSourceStatus{
+					State:          state,
+					Reason:         reason,
+					BinaryVersions: versions,
+					BFBVersions:    bfbVersions,
 				},
 			}
 		}
@@ -140,6 +154,47 @@ var _ = Describe("FirmwareManager", func() {
 			version, err := manager.ValidateRequestedFirmwareSource(context.Background(), createNicDevice())
 			Expect(version).To(Equal("some-other-version"))
 			Expect(err).To(Succeed())
+		})
+
+		Context("for BlueField devices", func() {
+			var createBlueFieldDevice = func(deviceType string) *v1alpha1.NicDevice {
+				device := createNicDevice()
+				device.Status.Type = deviceType
+				device.Status.SerialNumber = "test-serial-123"
+				return device
+			}
+
+			It("should return BFB version for BF2 device when available", func() {
+				bfbVersions := map[string]string{
+					consts.BlueField2DeviceID: "24.35.1000",
+					consts.BlueField3DeviceID: "28.39.1002",
+				}
+				manager := createManager(createNicFwSourceWithBFB(consts.FirmwareSourceSuccessStatus, "", nil, bfbVersions))
+				version, err := manager.ValidateRequestedFirmwareSource(context.Background(), createBlueFieldDevice(consts.BlueField2DeviceID))
+				Expect(version).To(Equal("24.35.1000"))
+				Expect(err).To(Succeed())
+			})
+
+			It("should return BFB version for BF3 device when available", func() {
+				bfbVersions := map[string]string{
+					consts.BlueField2DeviceID: "24.35.1000",
+					consts.BlueField3DeviceID: "28.39.1002",
+				}
+				manager := createManager(createNicFwSourceWithBFB(consts.FirmwareSourceSuccessStatus, "", nil, bfbVersions))
+				version, err := manager.ValidateRequestedFirmwareSource(context.Background(), createBlueFieldDevice(consts.BlueField3DeviceID))
+				Expect(version).To(Equal("28.39.1002"))
+				Expect(err).To(Succeed())
+			})
+
+			It("should return error when BFB version not available for device type", func() {
+				bfbVersions := map[string]string{
+					consts.BlueField2DeviceID: "24.35.1000",
+				}
+				manager := createManager(createNicFwSourceWithBFB(consts.FirmwareSourceSuccessStatus, "", nil, bfbVersions))
+				version, err := manager.ValidateRequestedFirmwareSource(context.Background(), createBlueFieldDevice(consts.BlueField3DeviceID))
+				Expect(version).To(BeEmpty())
+				Expect(err).To(MatchError(fmt.Sprintf("requested firmware source (%s) has no image for this BlueField device (%s)", fwSourceName, consts.BlueField3DeviceID)))
+			})
 		})
 	})
 
@@ -283,6 +338,133 @@ var _ = Describe("FirmwareManager", func() {
 
 				_, err = os.Stat(path.Join(tmpDir, path.Base(fwBinary)))
 				Expect(err).To(BeNil())
+			})
+		})
+
+		Context("for BlueField devices with BFB installation", func() {
+			var (
+				dmsManagerMock *dmsMocks.DMSManager
+				dmsClientMock  *dmsMocks.DMSClient
+				bfbCacheDir    string
+				bfbFileName    = "firmware.bfb"
+				testSerial     = "test-serial-123"
+				fwVersion      = "24.35.1000"
+			)
+
+			var createBlueFieldDevice = func(deviceType string) *v1alpha1.NicDevice {
+				device := createNicDevice()
+				device.Status.Type = deviceType
+				device.Status.SerialNumber = testSerial
+				return device
+			}
+
+			BeforeEach(func() {
+				dmsManagerMock = &dmsMocks.DMSManager{}
+				dmsClientMock = &dmsMocks.DMSClient{}
+
+				bfbCacheDir = path.Join(cacheDir, fwSourceName, consts.BFBFolder)
+				Expect(os.MkdirAll(bfbCacheDir, 0755)).To(Succeed())
+
+				// Create a mock BFB file
+				bfbFilePath := path.Join(bfbCacheDir, bfbFileName)
+				Expect(os.WriteFile(bfbFilePath, []byte("mock bfb content"), 0644)).To(Succeed())
+
+				manager = firmwareManager{
+					client:       nil,
+					dmsManager:   dmsManagerMock,
+					utils:        fwUtilsMock,
+					cacheRootDir: cacheDir,
+					tmpDir:       tmpDir,
+					namespace:    "",
+				}
+			})
+
+			AfterEach(func() {
+				dmsManagerMock.AssertExpectations(GinkgoT())
+				dmsClientMock.AssertExpectations(GinkgoT())
+			})
+
+			It("should install BFB successfully on BF2 device", func() {
+				device := createBlueFieldDevice(consts.BlueField2DeviceID)
+				expectedBFBPath := path.Join(bfbCacheDir, bfbFileName)
+
+				dmsManagerMock.On("GetDMSClientBySerialNumber", testSerial).Return(dmsClientMock, nil).Once()
+				dmsClientMock.On("InstallBFB", mock.Anything, fwVersion, expectedBFBPath).Return(nil).Once()
+
+				err := manager.BurnNicFirmware(context.Background(), device, fwVersion)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("should install BFB successfully on BF3 device", func() {
+				device := createBlueFieldDevice(consts.BlueField3DeviceID)
+				expectedBFBPath := path.Join(bfbCacheDir, bfbFileName)
+
+				dmsManagerMock.On("GetDMSClientBySerialNumber", testSerial).Return(dmsClientMock, nil).Once()
+				dmsClientMock.On("InstallBFB", mock.Anything, fwVersion, expectedBFBPath).Return(nil).Once()
+
+				err := manager.BurnNicFirmware(context.Background(), device, fwVersion)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("should return error when BFB file not found", func() {
+				device := createBlueFieldDevice(consts.BlueField2DeviceID)
+
+				// Remove the BFB file to simulate missing file
+				Expect(os.Remove(path.Join(bfbCacheDir, bfbFileName))).To(Succeed())
+
+				dmsManagerMock.On("GetDMSClientBySerialNumber", testSerial).Return(dmsClientMock, nil).Once()
+
+				err := manager.BurnNicFirmware(context.Background(), device, fwVersion)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("couldn't find BFB file for version"))
+			})
+
+			It("should return error when DMS client unavailable", func() {
+				device := createBlueFieldDevice(consts.BlueField2DeviceID)
+				dmsError := errors.New("DMS client not available")
+
+				dmsManagerMock.On("GetDMSClientBySerialNumber", testSerial).Return(nil, dmsError).Once()
+
+				err := manager.BurnNicFirmware(context.Background(), device, fwVersion)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("DMS client not available"))
+			})
+
+			It("should return error when BFB installation fails", func() {
+				device := createBlueFieldDevice(consts.BlueField2DeviceID)
+				expectedBFBPath := path.Join(bfbCacheDir, bfbFileName)
+				installError := errors.New("BFB installation failed")
+
+				dmsManagerMock.On("GetDMSClientBySerialNumber", testSerial).Return(dmsClientMock, nil).Once()
+				dmsClientMock.On("InstallBFB", mock.Anything, fwVersion, expectedBFBPath).Return(installError).Once()
+
+				err := manager.BurnNicFirmware(context.Background(), device, fwVersion)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("BFB installation failed"))
+			})
+		})
+
+		Context("for non-BlueField devices", func() {
+			It("should continue with normal firmware binary installation", func() {
+				device := createNicDevice()
+				device.Status.Type = "cx6" // Non-BlueField device
+
+				fwFolder := path.Join(cacheDir, fwSourceName, consts.NicFirmwareBinariesFolder, fwVersion, psid)
+				fwBinary := path.Join(fwFolder, "fw.bin")
+				tempFwBinaryPath := path.Join(tmpDir, path.Base(fwBinary))
+
+				Expect(os.MkdirAll(fwFolder, 0755)).To(Succeed())
+				Expect(os.WriteFile(fwBinary, []byte(""), 0644)).To(Succeed())
+
+				fwUtilsMock.On("GetFirmwareVersionAndPSID", fwBinary).
+					Return(fwVersion, psid, nil).Once()
+				fwUtilsMock.On("VerifyImageBootable", tempFwBinaryPath).
+					Return(nil).Once()
+				fwUtilsMock.On("BurnNicFirmware", mock.Anything, pci, tempFwBinaryPath).
+					Return(nil).Once()
+
+				err := manager.BurnNicFirmware(context.Background(), device, fwVersion)
+				Expect(err).NotTo(HaveOccurred())
 			})
 		})
 	})
