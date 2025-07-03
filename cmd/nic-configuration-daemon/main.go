@@ -119,7 +119,7 @@ func main() {
 
 	configurationManager := configuration.NewConfigurationManager(eventRecorder, dmsManager)
 	maintenanceManager := maintenance.New(mgr.GetClient(), hostUtils, nodeName, namespace)
-	firmwareManager := firmware.NewFirmwareManager(mgr.GetClient(), namespace)
+	firmwareManager := firmware.NewFirmwareManager(mgr.GetClient(), dmsManager, namespace)
 
 	if err := initNicFwMap(namespace); err != nil {
 		log.Log.Error(err, "unable to init NicFwMap")

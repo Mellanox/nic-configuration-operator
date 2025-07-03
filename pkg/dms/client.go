@@ -16,6 +16,7 @@ limitations under the License.
 package dms
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -27,6 +28,7 @@ import (
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
 
 const (
@@ -47,6 +49,8 @@ type DMSClient interface {
 	GetQoSSettings(interfaceName string) (string, string, error)
 	// SetQoSSettings sets the QoS settings for the device (trust mode and PFC configuration). Settings are applied to all ports of the device.
 	SetQoSSettings(trustMode, pfc string) error
+	// InstallBFB installs the BFB file with the new firmware version on a BlueField device
+	InstallBFB(ctx context.Context, version string, bfbPath string) error
 }
 
 // dmsInstance implements the DMSClient interface
@@ -246,5 +250,47 @@ func (i *dmsInstance) SetQoSSettings(trust, pfc string) error {
 	}
 
 	log.Log.V(2).Info("QoS settings applied to all ports", "device", i.device.SerialNumber, "portCount", portCount)
+	return nil
+}
+
+// InstallBFB installs the BFB file with the new firmware version on a BlueField device
+func (i *dmsInstance) InstallBFB(ctx context.Context, version string, bfbPath string) error {
+	log.Log.V(2).Info("dmsInstance.InstallBFB()", "version", version, "bfbPath", bfbPath, "device", i.device.SerialNumber)
+
+	if !i.running.Load() {
+		log.Log.V(2).Info("DMS instance not running", "device", i.device.SerialNumber)
+		return fmt.Errorf("DMS instance is not running")
+	}
+
+	if !utils.IsBlueFieldDevice(i.device.Type) {
+		err := fmt.Errorf("cannot install BFB file on non-BlueField device")
+		log.Log.Error(err, "failed to install BFB", "device", i.device.SerialNumber, "deviceType", i.device.Type)
+		return err
+	}
+
+	args := []string{dmsClientPath, "-a", i.bindAddress, "--insecure", "os", "install", "--version", version, "--pkg", bfbPath}
+	log.Log.V(2).Info("dmsInstance.InstallBFB() install command", "args", strings.Join(args, " "))
+
+	command := i.execInterface.CommandContext(ctx, args[0], args[1:]...)
+	output, err := utils.RunCommand(command)
+	if err != nil {
+		log.Log.Error(err, "failed to install BFB", "device", i.device.SerialNumber, "deviceType", i.device.Type)
+		return err
+	}
+
+	log.Log.V(2).Info("BFB installed successfully", "device", i.device.SerialNumber, "version", version, "output", string(output))
+
+	args = []string{dmsClientPath, "-a", i.bindAddress, "--insecure", "os", "activate", "--version", version}
+	log.Log.V(2).Info("dmsInstance.InstallBFB() activate command", "args", strings.Join(args, " "))
+
+	command = i.execInterface.CommandContext(ctx, args[0], args[1:]...)
+	output, err = utils.RunCommand(command)
+	if err != nil {
+		log.Log.Error(err, "failed to activate BFB", "device", i.device.SerialNumber, "deviceType", i.device.Type)
+		return err
+	}
+
+	log.Log.V(2).Info("BFB activated successfully", "device", i.device.SerialNumber, "version", version, "output", string(output))
+
 	return nil
 }

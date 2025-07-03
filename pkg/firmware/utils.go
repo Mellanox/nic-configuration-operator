@@ -43,6 +43,8 @@ type FirmwareUtils interface {
 	UnzipFiles(zipPath, destDir string) ([]string, error)
 	// GetFirmwareVersionAndPSID retrieves the version and PSID from the firmware binary
 	GetFirmwareVersionAndPSID(firmwareBinaryPath string) (string, string, error)
+	// GetFWVersionsFromBFB retrieves the FW versions from the BFB file
+	GetFWVersionsFromBFB(bfbPath string) (map[string]string, error)
 	// VerifyImageBootable verifies if the image file is valid and bootable
 	VerifyImageBootable(firmwareBinaryPath string) error
 	// CleanupDirectory deletes any file inside a root directory except for allowedSet. Empty directories are cleaned up as well at the end
@@ -193,6 +195,58 @@ func (u *utils) GetFirmwareVersionAndPSID(firmwareBinaryPath string) (string, st
 	log.Log.V(2).Info("Firmware version and PSID found in .bin file", "version", firmwareVersion, "psid", PSID, "path", firmwareBinaryPath)
 
 	return firmwareVersion, PSID, nil
+}
+
+// GetFWVersionsFromBFB retrieves the FW versions from the BFB file
+func (u *utils) GetFWVersionsFromBFB(bfbPath string) (map[string]string, error) {
+	log.Log.V(2).Info("FirmwareUtils.GetFWVersionsFromBFB()", "bfbPath", bfbPath)
+	dir := filepath.Dir(bfbPath)
+
+	// Extract JSON file containing component details and versions
+	log.Log.V(2).Info("Extracting info-v0 file from BFB", "bfbPath", bfbPath)
+	cmd := u.execInterface.Command("/usr/sbin/mlx-mkbfb", "-x", "-n", "info-v0", bfbPath)
+	cmd.SetDir(dir)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Log.Error(err, "GetFWVersionsFromBFB(): Failed to run mlx-mkbfb", "output", string(output))
+		return nil, err
+	}
+
+	infoFile := filepath.Join(dir, "dump-info-v0")
+	if _, err := os.Stat(infoFile); os.IsNotExist(err) {
+		log.Log.Error(err, "GetFWVersionsFromBFB(): failed to extract info-v0 file from BFB", "bfbPath", bfbPath)
+	}
+
+	versions := make(map[string]string)
+
+	log.Log.V(2).Info("Extracting versions from info-v0 file", "bfbPath", bfbPath)
+	cmd = u.execInterface.Command("/bin/sh", "-c", `awk '/"Name": "BF3_NIC_FW"/ {getline; print $2}' `+infoFile+` | tr -d '",'`)
+	bf3NicFwVersion, err := cmd.Output()
+	if err != nil {
+		log.Log.Error(err, "GetFWVersionsFromBFB(): Failed to extract BF3 NIC FW version")
+		return nil, err
+	}
+
+	bf3Version := strings.TrimSpace(string(bf3NicFwVersion))
+	if bf3Version == "" {
+		return nil, fmt.Errorf("GetFWVersionsFromBFB(): BF3 NIC FW version is empty or not found in BFB file")
+	}
+	versions[consts.BlueField3DeviceID] = bf3Version
+
+	cmd = u.execInterface.Command("/bin/sh", "-c", `awk '/"Name": "BF2_NIC_FW"/ {getline; print $2}' `+infoFile+` | tr -d '",'`)
+	bf2NicFwVersion, err := cmd.Output()
+	if err != nil {
+		log.Log.Error(err, "GetFWVersionsFromBFB(): Failed to extract BF2 NIC FW version")
+		return nil, err
+	}
+
+	bf2Version := strings.TrimSpace(string(bf2NicFwVersion))
+	if bf2Version == "" {
+		return nil, fmt.Errorf("GetFWVersionsFromBFB(): BF2 NIC FW version is empty or not found in BFB file")
+	}
+	versions[consts.BlueField2DeviceID] = bf2Version
+
+	return versions, nil
 }
 
 // VerifyImageBootable verifies if the image file is valid and bootable

@@ -16,6 +16,7 @@ limitations under the License.
 package dms
 
 import (
+	"context"
 	"errors"
 	"strings"
 
@@ -234,6 +235,119 @@ var _ = Describe("DMSClient", func() {
 
 			It("should return error", func() {
 				err := instance.SetQoSSettings(testTrustMode, testPFC)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(Equal("DMS instance is not running"))
+			})
+		})
+	})
+
+	Describe("InstallBFB", func() {
+		const (
+			testBFBVersion = "24.35.1000"
+			testBFBPath    = "/path/to/firmware.bfb"
+		)
+
+		Context("when the instance is running", func() {
+			Context("on BlueField device", func() {
+				BeforeEach(func() {
+					device.Type = "a2d6" // BlueField2 device ID
+					instance.device = device
+					instance.running.Store(true)
+				})
+
+				It("should install and activate BFB successfully", func() {
+					fakeInstallCmd := createFakeCmd([]byte("BFB install successful"), nil)
+					fakeActivateCmd := createFakeCmd([]byte("BFB activate successful"), nil)
+
+					callCount := 0
+					cmdAction := func(cmd string, args ...string) exec.Cmd {
+						callCount++
+						Expect(cmd).To(Equal(dmsClientPath))
+
+						if callCount == 1 {
+							// First call should be install command
+							Expect(args).To(ContainElement("--insecure"))
+							Expect(args).To(ContainElement("os"))
+							Expect(args).To(ContainElement("install"))
+							Expect(args).To(ContainElement("--version"))
+							Expect(args).To(ContainElement(testBFBVersion))
+							Expect(args).To(ContainElement("--pkg"))
+							Expect(args).To(ContainElement(testBFBPath))
+							return fakeInstallCmd
+						} else {
+							// Second call should be activate command
+							Expect(args).To(ContainElement("--insecure"))
+							Expect(args).To(ContainElement("os"))
+							Expect(args).To(ContainElement("activate"))
+							Expect(args).To(ContainElement("--version"))
+							Expect(args).To(ContainElement(testBFBVersion))
+							return fakeActivateCmd
+						}
+					}
+
+					fakeExec.CommandScript = []execTesting.FakeCommandAction{cmdAction, cmdAction}
+
+					err := instance.InstallBFB(context.Background(), testBFBVersion, testBFBPath)
+					Expect(err).NotTo(HaveOccurred())
+				})
+
+				It("should return error when install command fails", func() {
+					fakeInstallCmd := createFakeCmd(nil, errors.New("install failed"))
+
+					cmdAction := func(cmd string, args ...string) exec.Cmd {
+						return fakeInstallCmd
+					}
+
+					fakeExec.CommandScript = []execTesting.FakeCommandAction{cmdAction}
+
+					err := instance.InstallBFB(context.Background(), testBFBVersion, testBFBPath)
+					Expect(err).To(HaveOccurred())
+					Expect(err.Error()).To(ContainSubstring("install failed"))
+				})
+
+				It("should return error when activate command fails", func() {
+					fakeInstallCmd := createFakeCmd([]byte("BFB install successful"), nil)
+					fakeActivateCmd := createFakeCmd(nil, errors.New("activate failed"))
+
+					cmdAction := func(cmd string, args ...string) exec.Cmd {
+						if len(args) >= 3 && args[2] == "install" {
+							return fakeInstallCmd
+						}
+						return fakeActivateCmd
+					}
+
+					fakeExec.CommandScript = []execTesting.FakeCommandAction{cmdAction, cmdAction}
+
+					err := instance.InstallBFB(context.Background(), testBFBVersion, testBFBPath)
+					Expect(err).To(HaveOccurred())
+					Expect(err.Error()).To(ContainSubstring("activate failed"))
+				})
+			})
+
+			Context("on non-BlueField device", func() {
+				BeforeEach(func() {
+					device.Type = "cx6"
+					instance.device = device
+					instance.running.Store(true)
+				})
+
+				It("should return error for non-BlueField device", func() {
+					err := instance.InstallBFB(context.Background(), testBFBVersion, testBFBPath)
+					Expect(err).To(HaveOccurred())
+					Expect(err.Error()).To(ContainSubstring("cannot install BFB file on non-BlueField device"))
+				})
+			})
+		})
+
+		Context("when the instance is not running", func() {
+			BeforeEach(func() {
+				device.Type = "a2d6" // BlueField2 device ID
+				instance.device = device
+				instance.running.Store(false)
+			})
+
+			It("should return error", func() {
+				err := instance.InstallBFB(context.Background(), testBFBVersion, testBFBPath)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(Equal("DMS instance is not running"))
 			})
