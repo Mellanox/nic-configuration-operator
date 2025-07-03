@@ -231,7 +231,7 @@ func (u *utils) GetFWVersionsFromBFB(bfbPath string) (map[string]string, error) 
 	if bf3Version == "" {
 		return nil, fmt.Errorf("GetFWVersionsFromBFB(): BF3 NIC FW version is empty or not found in BFB file")
 	}
-	versions["bf3"] = bf3Version
+	versions[consts.BlueField3DeviceID] = bf3Version
 
 	cmd = u.execInterface.Command("/bin/sh", "-c", `awk '/"Name": "BF2_NIC_FW"/ {getline; print $2}' `+infoFile+` | tr -d '",'`)
 	bf2NicFwVersion, err := cmd.Output()
@@ -244,7 +244,7 @@ func (u *utils) GetFWVersionsFromBFB(bfbPath string) (map[string]string, error) 
 	if bf2Version == "" {
 		return nil, fmt.Errorf("GetFWVersionsFromBFB(): BF2 NIC FW version is empty or not found in BFB file")
 	}
-	versions["bf2"] = bf2Version
+	versions[consts.BlueField2DeviceID] = bf2Version
 
 	return versions, nil
 }

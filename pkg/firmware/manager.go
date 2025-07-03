@@ -31,7 +31,9 @@ import (
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	"github.com/Mellanox/nic-configuration-operator/pkg/dms"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
+	utilsPkg "github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
 
 // FirmwareManager contains logic for managing NIC devices FW on the host
@@ -52,6 +54,8 @@ type FirmwareManager interface {
 
 type firmwareManager struct {
 	client client.Client
+
+	dmsManager dms.DMSManager
 
 	utils FirmwareUtils
 
@@ -88,6 +92,16 @@ func (f firmwareManager) ValidateRequestedFirmwareSource(ctx context.Context, de
 	case consts.FirmwareSourceDownloadFailedStatus, consts.FirmwareSourceProcessingFailedStatus, consts.FirmwareSourceCacheVerificationFailedStatus:
 		return "", fmt.Errorf("requested firmware source %s failed: %s, %s", fwSourceName, status, fwSourceObj.Status.Reason)
 	case consts.FirmwareSourceSuccessStatus:
+		deviceID := device.Status.Type
+		if utilsPkg.IsBlueFieldDevice(deviceID) {
+			version, found := fwSourceObj.Status.BFBVersions[deviceID]
+			if !found {
+				return "", fmt.Errorf("requested firmware source (%s) has no image for this BlueField device (%s)", fwSourceName, deviceID)
+			}
+
+			return version, nil
+		}
+
 		devicePSID := device.Status.PSID
 
 		for version, PSIDs := range fwSourceObj.Status.Versions {
@@ -114,6 +128,46 @@ func (f firmwareManager) BurnNicFirmware(ctx context.Context, device *v1alpha1.N
 	fwSourceName := device.Spec.Firmware.NicFirmwareSourceRef
 
 	cacheDir := path.Join(f.cacheRootDir, fwSourceName)
+
+	if utilsPkg.IsBlueFieldDevice(device.Status.Type) {
+		dmsClient, err := f.dmsManager.GetDMSClientBySerialNumber(device.Status.SerialNumber)
+		if err != nil {
+			log.Log.Error(err, "failed to get DMS client", "device", device.Name)
+			return err
+		}
+
+		bfbFolderPath := filepath.Join(cacheDir, consts.BFBFolder)
+		log.Log.V(2).Info("Searching for BFB file in the cache", "bfbFolderPath", bfbFolderPath)
+
+		var bfbPath string
+		err = filepath.WalkDir(bfbFolderPath, func(path string, d os.DirEntry, err error) error {
+			if err == nil && strings.EqualFold(filepath.Ext(d.Name()), ".bfb") {
+				log.Log.V(2).Info("Found BFB file", "path", path)
+				bfbPath = path
+				return filepath.SkipAll
+			}
+			return nil
+		})
+		if err != nil {
+			log.Log.Error(err, "failed to search for BFB file", "bfbFolderPath", bfbFolderPath)
+			return err
+		}
+
+		if bfbPath == "" {
+			err := fmt.Errorf("couldn't find BFB file for version %s", version)
+			log.Log.Error(err, "failed to upgrade FW on BlueField device", "device", device.Name)
+			return err
+		}
+
+		err = dmsClient.InstallBFB(ctx, version, bfbPath)
+		if err != nil {
+			log.Log.Error(err, "failed to install BFB", "device", device.Name)
+			return err
+		}
+
+		return nil
+	}
+
 	devicePSID := device.Status.PSID
 
 	log.Log.V(2).Info("Searching for FW binary in the cache", "cacheDir", cacheDir, "PSID", devicePSID)
@@ -187,6 +241,6 @@ func (f firmwareManager) BurnNicFirmware(ctx context.Context, device *v1alpha1.N
 	return nil
 }
 
-func NewFirmwareManager(client client.Client, namespace string) FirmwareManager {
-	return &firmwareManager{client: client, cacheRootDir: consts.NicFirmwareStorage, namespace: namespace, tmpDir: consts.TempDir, utils: newFirmwareUtils()}
+func NewFirmwareManager(client client.Client, dmsManager dms.DMSManager, namespace string) FirmwareManager {
+	return &firmwareManager{client: client, dmsManager: dmsManager, cacheRootDir: consts.NicFirmwareStorage, namespace: namespace, tmpDir: consts.TempDir, utils: newFirmwareUtils()}
 }
