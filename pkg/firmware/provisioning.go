@@ -32,7 +32,8 @@ import (
 
 const metadataFileName = "metadata.json"
 
-type cacheMetadata map[string][]string
+type fwBinaryMetadata map[string][]string
+type bfbMetadata map[string]string
 
 type FirmwareProvisioner interface {
 	// IsFWStorageAvailable checks if the cache storage exists in the pod.
@@ -54,6 +55,15 @@ type FirmwareProvisioner interface {
 	ValidateCache(cacheName string) (map[string][]string, error)
 	// DeleteCache deletes the cache directory with the given name
 	DeleteCache(cacheName string) error
+	// VerifyCachedBFB checks if BFB file exists and matches URL in metadata
+	// Returns whether re-download is needed, error if occurred
+	VerifyCachedBFB(cacheName string, url string) (bool, error)
+	// DownloadBFB downloads BFB file, validates it, updates metadata, and returns filename
+	// Returns filename on disk, error if occurred
+	DownloadBFB(cacheName string, url string) (string, error)
+	// ValidateBFB checks if the BFB file exists and is valid
+	// Returns BF FW versions available in the BFB
+	ValidateBFB(cacheName string) (map[string]string, error)
 }
 
 type firmwareProvisioner struct {
@@ -94,7 +104,7 @@ func (f firmwareProvisioner) VerifyCachedBinaries(cacheName string, urls []strin
 		return urls, nil
 	}
 
-	metadata, err := readMetadataFromFile(metadataFile)
+	metadata, err := readFwBinaryMetadataFromFile(metadataFile)
 	if err != nil {
 		log.Log.Error(err, "failed to read cache metadata file", "path", metadataFile)
 		return nil, err
@@ -181,15 +191,15 @@ func (f firmwareProvisioner) DownloadAndUnzipFirmwareArchives(cacheName string, 
 	log.Log.Info("Downloading firmware zip archives", "cacheDir", firmwareBinariesDir)
 	log.Log.V(2).Info("URLs to process", "urls", urls)
 
-	var urlsToFiles cacheMetadata
+	var urlsToFiles fwBinaryMetadata
 
 	metadataFile := path.Join(firmwareBinariesDir, metadataFileName)
 	if _, err := os.Stat(metadataFile); os.IsNotExist(err) {
-		urlsToFiles = cacheMetadata{}
+		urlsToFiles = fwBinaryMetadata{}
 	} else if err != nil {
 		return err
 	} else {
-		urlsToFiles, err = readMetadataFromFile(metadataFile)
+		urlsToFiles, err = readFwBinaryMetadataFromFile(metadataFile)
 		if err != nil {
 			log.Log.Error(err, "failed to read cache metadata file", "path", metadataFile)
 			return err
@@ -252,7 +262,7 @@ func (f firmwareProvisioner) DownloadAndUnzipFirmwareArchives(cacheName string, 
 	return nil
 }
 
-func writeMetadataFile(metadata cacheMetadata, cacheDir string) error {
+func writeMetadataFile(metadata interface{}, cacheDir string) error {
 	log.Log.Info("Writing metadata file to disk", "cacheDir", cacheDir, "metadata", metadata)
 
 	jsonData, err := json.Marshal(metadata)
@@ -265,7 +275,7 @@ func writeMetadataFile(metadata cacheMetadata, cacheDir string) error {
 	if err != nil {
 		log.Log.Error(err, "failed to save cache metadata", "cacheDir", cacheDir, "metadata", metadata)
 	}
-	return nil
+	return err
 }
 
 // AddFirmwareBinariesToCacheByMetadata finds the newly downloaded firmware binary files and organizes them in the cache according to their metadata
@@ -419,18 +429,151 @@ func (f firmwareProvisioner) ValidateCache(cacheName string) (map[string][]strin
 	return cachedVersions, nil
 }
 
+// VerifyCachedBFB checks if BFB file exists and matches URL in metadata
+// Returns whether re-download is needed, error if occurred
+func (f firmwareProvisioner) VerifyCachedBFB(cacheName string, url string) (bool, error) {
+	cacheDir := path.Join(f.cacheRootDir, cacheName, consts.BFBFolder)
+
+	metadataFile := path.Join(cacheDir, metadataFileName)
+	if _, err := os.Stat(metadataFile); os.IsNotExist(err) {
+		log.Log.Info("BFB cache directory is missing metadata file, removing it", "cacheDir", cacheDir)
+		// If cache metadata file doesn't exist, clean up the cache directory because we can't validate the contents
+		if err = os.RemoveAll(cacheDir); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+
+	metadata, err := readBFBMetadataFromFile(metadataFile)
+	if err != nil {
+		log.Log.Error(err, "failed to read BFB cache metadata file", "path", metadataFile)
+		return false, err
+	}
+
+	bfbFileName, found := metadata[url]
+	if !found {
+		log.Log.Info("Requested BFB url not found in existing cache, processing it again", "cacheDir", cacheDir, "url", url)
+		return true, nil
+	}
+
+	// Check if the file still exists on disk
+	bfbFilePath := path.Join(cacheDir, bfbFileName)
+	if _, err := os.Stat(bfbFilePath); os.IsNotExist(err) {
+		log.Log.Info("BFB file missing from cache, processing it again", "cacheDir", cacheDir, "url", url, "file", bfbFileName)
+		return true, nil
+	} else if err != nil {
+		return false, err
+	}
+
+	log.Log.Info("BFB file already present, skipping download", "cacheDir", cacheDir, "url", url, "file", bfbFileName)
+	return false, nil
+}
+
+// DownloadBFB downloads BFB file, validates it, updates metadata, and returns filename
+// Returns filename on disk, error if occurred
+// Note: BFB cache contains only one BFB file - new downloads replace any existing BFB
+func (f firmwareProvisioner) DownloadBFB(cacheName string, url string) (string, error) {
+	cacheDir := path.Join(f.cacheRootDir, cacheName, consts.BFBFolder)
+
+	// Clean up directory prior to download to ensure clean state
+	// This removes any existing BFB files and metadata
+	if err := os.RemoveAll(cacheDir); err != nil {
+		log.Log.Error(err, "failed to cleanup BFB cache directory", "cacheName", cacheName)
+		return "", err
+	}
+
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		log.Log.Error(err, "failed to create new cache in bfb storage", "cacheName", cacheName)
+		return "", err
+	}
+
+	log.Log.Info("Downloading BFB file", "cacheDir", cacheDir, "url", url)
+
+	bfbLocalPath := filepath.Join(cacheDir, filepath.Base(url))
+	err := f.utils.DownloadFile(url, bfbLocalPath)
+	if err != nil {
+		log.Log.Error(err, "failed to download BFB file", "cacheName", cacheName, "url", url)
+		return "", err
+	}
+
+	// Basic validation - check file exists and has correct extension
+	if !strings.EqualFold(filepath.Ext(bfbLocalPath), consts.BFBFileExtension) {
+		err := fmt.Errorf("downloaded file does not have BFB extension: %s", bfbLocalPath)
+		log.Log.Error(err, "BFB validation failed", "cacheName", cacheName, "url", url)
+		return "", err
+	}
+
+	log.Log.V(2).Info("BFB file downloaded and validated", "path", bfbLocalPath)
+
+	// Create new metadata with only this BFB file
+	bfbFileName := filepath.Base(bfbLocalPath)
+	metadata := bfbMetadata{
+		url: bfbFileName,
+	}
+
+	// Write metadata
+	if err := writeMetadataFile(metadata, cacheDir); err != nil {
+		return "", err
+	}
+
+	log.Log.Info("BFB file successfully processed", "cacheName", cacheName, "url", url, "filename", bfbFileName)
+
+	return bfbFileName, nil
+}
+
+// ValidateBFB checks if the BFB file exists and is valid
+// Returns BF FW versions available in the BFB
+func (f firmwareProvisioner) ValidateBFB(cacheName string) (map[string]string, error) {
+	cacheDir := path.Join(f.cacheRootDir, cacheName, consts.BFBFolder)
+	metadataFile := path.Join(cacheDir, metadataFileName)
+
+	metadata, err := readBFBMetadataFromFile(metadataFile)
+	if err != nil {
+		log.Log.Error(err, "failed to read BFB cache metadata file", "path", metadataFile)
+		return nil, err
+	}
+
+	// There is a single BFB file in the cache
+	for _, bfbFileName := range metadata {
+		versions, err := f.utils.GetFWVersionsFromBFB(path.Join(cacheDir, bfbFileName))
+		if err != nil {
+			log.Log.Error(err, "failed to get FW versions from BFB", "path", path.Join(cacheDir, bfbFileName))
+			return nil, err
+		}
+
+		return versions, nil
+	}
+
+	return nil, errors.New("no BFB file found in cache")
+}
+
 // DeleteCache deletes the cache directory with the given name
 func (f firmwareProvisioner) DeleteCache(cacheName string) error {
 	return os.RemoveAll(path.Join(f.cacheRootDir, cacheName))
 }
 
-func readMetadataFromFile(path string) (cacheMetadata, error) {
+func readFwBinaryMetadataFromFile(path string) (fwBinaryMetadata, error) {
 	file, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 
-	metadata := cacheMetadata{}
+	metadata := fwBinaryMetadata{}
+	err = json.Unmarshal(file, &metadata)
+	if err != nil {
+		return nil, err
+	}
+
+	return metadata, nil
+}
+
+func readBFBMetadataFromFile(path string) (bfbMetadata, error) {
+	file, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	metadata := bfbMetadata{}
 	err = json.Unmarshal(file, &metadata)
 	if err != nil {
 		return nil, err

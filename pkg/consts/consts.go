@@ -16,7 +16,9 @@ limitations under the License.
 package consts
 
 const (
-	MellanoxVendor = "15b3"
+	MellanoxVendor     = "15b3"
+	BlueField3DeviceID = "a2dc"
+	BlueField2DeviceID = "a2d6"
 
 	Ethernet   = "Ethernet"
 	Infiniband = "Infiniband"
@@ -100,7 +102,9 @@ const (
 
 	NicFirmwareStorage             = "/nic-firmware"
 	NicFirmwareBinariesFolder      = "firmware-binaries"
+	BFBFolder                      = "bfb"
 	NicFirmwareBinaryFileExtension = ".bin"
+	BFBFileExtension               = ".bfb"
 
 	TempDir = "/tmp"
 

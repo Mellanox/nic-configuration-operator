@@ -37,8 +37,9 @@ import (
 )
 
 const (
-	crName      = "nic-fw-source"
-	crNamespace = "default"
+	crName          = "nic-fw-source"
+	crNamespace     = "default"
+	testBFBFileName = "firmware.bfb"
 )
 
 var _ = Describe("NicFirmwareTemplate Controller", func() {
@@ -88,7 +89,7 @@ var _ = Describe("NicFirmwareTemplate Controller", func() {
 		Eventually(func() map[string][]string {
 			cr, err := getCR(name, namespace)
 			Expect(err).NotTo(HaveOccurred())
-			return cr.Status.Versions
+			return cr.Status.BinaryVersions
 		}).Should(Equal(versions))
 	}
 
@@ -319,6 +320,272 @@ var _ = Describe("NicFirmwareTemplate Controller", func() {
 
 			ValidateCRStatusAndReason(crName, crNamespace, consts.FirmwareSourceProcessingFailedStatus, errMsg)
 		})
+
+		createBFBOnlyCR := func(name, namespace string) {
+			By("creating BFB-only NicFirmwareSource CR")
+			log.Log.Info("creating BFB-only NicFirmwareSource CR for test", "test", GinkgoT().Name())
+			cr := &v1alpha1.NicFirmwareSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: namespace,
+				},
+				Spec: v1alpha1.NicFirmwareSourceSpec{
+					BFBUrlSource: "https://firmware.example.com/firmware.bfb",
+				},
+			}
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+		}
+
+		createMixedCR := func(name, namespace string) {
+			By("creating Mixed Binary+BFB NicFirmwareSource CR")
+			log.Log.Info("creating Mixed NicFirmwareSource CR for test", "test", GinkgoT().Name())
+			cr := &v1alpha1.NicFirmwareSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: namespace,
+				},
+				Spec: v1alpha1.NicFirmwareSourceSpec{
+					BinUrlSources: []string{"https://firmware.example.com/fwA.zip"},
+					BFBUrlSource:  "https://firmware.example.com/firmware.bfb",
+				},
+			}
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+		}
+
+		ValidateCRBFBVersions := func(name, namespace string, expectedVersions map[string]string) {
+			Eventually(func() map[string]string {
+				cr, err := getCR(name, namespace)
+				Expect(err).NotTo(HaveOccurred())
+				return cr.Status.BFBVersions
+			}).Should(Equal(expectedVersions))
+		}
+
+		It("should successfully process BFB-only firmware source", func() {
+			bfbFileName := testBFBFileName
+			bfbVersions := map[string]string{
+				"bf2": "24.35.1000",
+				"bf3": "28.39.1002",
+			}
+
+			firmwareProvisioner.On("IsFWStorageAvailable").
+				Return(nil)
+
+			// BFB processing
+			firmwareProvisioner.On("VerifyCachedBFB", crName, "https://firmware.example.com/firmware.bfb").
+				Return(true, nil) // needs download
+
+			firmwareProvisioner.On("DownloadBFB", crName, "https://firmware.example.com/firmware.bfb").
+				Return(bfbFileName, nil)
+
+			firmwareProvisioner.On("ValidateBFB", crName).
+				Return(bfbVersions, nil)
+
+			createBFBOnlyCR(crName, crNamespace)
+
+			ValidateCRStatusAndReason(crName, crNamespace, consts.FirmwareSourceSuccessStatus, "")
+			ValidateCRBFBVersions(crName, crNamespace, bfbVersions)
+
+			// Verify no binary processing was called
+			firmwareProvisioner.AssertNotCalled(GinkgoT(), "VerifyCachedBinaries")
+			firmwareProvisioner.AssertNotCalled(GinkgoT(), "DownloadAndUnzipFirmwareArchives")
+			firmwareProvisioner.AssertNotCalled(GinkgoT(), "AddFirmwareBinariesToCacheByMetadata")
+			firmwareProvisioner.AssertNotCalled(GinkgoT(), "ValidateCache")
+		})
+
+		It("should skip BFB download when already cached", func() {
+			bfbVersions := map[string]string{
+				"bf2": "24.35.1000",
+				"bf3": "28.39.1002",
+			}
+
+			firmwareProvisioner.On("IsFWStorageAvailable").
+				Return(nil)
+
+			// BFB already cached
+			firmwareProvisioner.On("VerifyCachedBFB", crName, "https://firmware.example.com/firmware.bfb").
+				Return(false, nil) // no download needed
+
+			firmwareProvisioner.On("ValidateBFB", crName).
+				Return(bfbVersions, nil)
+
+			createBFBOnlyCR(crName, crNamespace)
+
+			ValidateCRStatusAndReason(crName, crNamespace, consts.FirmwareSourceSuccessStatus, "")
+			ValidateCRBFBVersions(crName, crNamespace, bfbVersions)
+
+			// Verify download was not called
+			firmwareProvisioner.AssertNotCalled(GinkgoT(), "DownloadBFB")
+		})
+
+		It("should process both binary and BFB sources independently", func() {
+			versionsMap := map[string][]string{"1.2.3": {"psid1"}}
+			bfbFileName := "firmware.bfb"
+			bfbVersions := map[string]string{
+				"bf2": "24.35.1000",
+				"bf3": "28.39.1002",
+			}
+
+			firmwareProvisioner.On("IsFWStorageAvailable").
+				Return(nil)
+
+			// Binary processing
+			firmwareProvisioner.On("VerifyCachedBinaries", crName, mock.AnythingOfType("[]string")).
+				Return([]string{"https://firmware.example.com/fwA.zip"}, nil)
+
+			firmwareProvisioner.On("DownloadAndUnzipFirmwareArchives", crName, []string{"https://firmware.example.com/fwA.zip"}, true).
+				Return(nil)
+
+			firmwareProvisioner.On("AddFirmwareBinariesToCacheByMetadata", crName).
+				Return(nil)
+
+			firmwareProvisioner.On("ValidateCache", crName).
+				Return(versionsMap, nil)
+
+			// BFB processing
+			firmwareProvisioner.On("VerifyCachedBFB", crName, "https://firmware.example.com/firmware.bfb").
+				Return(true, nil) // needs download
+
+			firmwareProvisioner.On("DownloadBFB", crName, "https://firmware.example.com/firmware.bfb").
+				Return(bfbFileName, nil)
+
+			firmwareProvisioner.On("ValidateBFB", crName).
+				Return(bfbVersions, nil)
+
+			createMixedCR(crName, crNamespace)
+
+			ValidateCRStatusAndReason(crName, crNamespace, consts.FirmwareSourceSuccessStatus, "")
+			ValidateCRReportedVersions(crName, crNamespace, versionsMap)
+			ValidateCRBFBVersions(crName, crNamespace, bfbVersions)
+		})
+
+		It("should set CacheVerificationFailed status if BFB cache verification fails", func() {
+			errMsg := "failed to verify BFB cache"
+
+			firmwareProvisioner.On("IsFWStorageAvailable").
+				Return(nil)
+
+			firmwareProvisioner.On("VerifyCachedBFB", crName, "https://firmware.example.com/firmware.bfb").
+				Return(false, errors.New(errMsg))
+
+			firmwareProvisioner.AssertNotCalled(GinkgoT(), "DownloadBFB")
+
+			createBFBOnlyCR(crName, crNamespace)
+
+			ValidateCRStatusAndReason(crName, crNamespace, consts.FirmwareSourceCacheVerificationFailedStatus, errMsg)
+			ValidateCRBFBVersions(crName, crNamespace, nil) // BFB versions should be empty on failure
+		})
+
+		It("should set DownloadFailed status if BFB download fails", func() {
+			errMsg := "failed to download BFB"
+
+			firmwareProvisioner.On("IsFWStorageAvailable").
+				Return(nil)
+
+			firmwareProvisioner.On("VerifyCachedBFB", crName, "https://firmware.example.com/firmware.bfb").
+				Return(true, nil) // needs download
+
+			firmwareProvisioner.On("DownloadBFB", crName, "https://firmware.example.com/firmware.bfb").
+				Return("", errors.New(errMsg))
+
+			createBFBOnlyCR(crName, crNamespace)
+
+			ValidateCRStatusAndReason(crName, crNamespace, consts.FirmwareSourceDownloadFailedStatus, errMsg)
+			ValidateCRBFBVersions(crName, crNamespace, nil) // BFB versions should be empty on failure
+		})
+
+		It("should show Downloading status during BFB download", func() {
+			bfbFileName := testBFBFileName
+			bfbVersions := map[string]string{
+				"bf2": "24.35.1000",
+				"bf3": "28.39.1002",
+			}
+
+			firmwareProvisioner.On("IsFWStorageAvailable").
+				Return(nil)
+
+			firmwareProvisioner.On("VerifyCachedBFB", crName, "https://firmware.example.com/firmware.bfb").
+				Return(true, nil) // needs download
+
+			// Simulate slow BFB download
+			firmwareProvisioner.On("DownloadBFB", crName, "https://firmware.example.com/firmware.bfb").
+				Run(func(args mock.Arguments) {
+					time.Sleep(1 * time.Second)
+				}).
+				Return(bfbFileName, nil)
+
+			firmwareProvisioner.On("ValidateBFB", crName).
+				Return(bfbVersions, nil)
+
+			createBFBOnlyCR(crName, crNamespace)
+
+			// We want to see "Downloading" before it completes
+			Eventually(func() string {
+				cr, err := getCR(crName, crNamespace)
+				if apiErrors.IsNotFound(err) {
+					return ""
+				}
+				Expect(err).NotTo(HaveOccurred())
+				return cr.Status.State
+			}, 500*time.Millisecond, 100*time.Millisecond).Should(Equal(consts.FirmwareSourceDownloadingStatus))
+
+			ValidateCRStatusAndReason(crName, crNamespace, consts.FirmwareSourceSuccessStatus, "")
+			ValidateCRBFBVersions(crName, crNamespace, bfbVersions)
+		})
+
+		It("should handle mixed processing with binary success and BFB failure", func() {
+			versionsMap := map[string][]string{"1.2.3": {"psid1"}}
+			errMsg := "BFB download failed"
+
+			firmwareProvisioner.On("IsFWStorageAvailable").
+				Return(nil)
+
+			// Binary processing succeeds
+			firmwareProvisioner.On("VerifyCachedBinaries", crName, mock.AnythingOfType("[]string")).
+				Return([]string{}, nil) // no download needed
+
+			firmwareProvisioner.On("AddFirmwareBinariesToCacheByMetadata", crName).
+				Return(nil)
+
+			firmwareProvisioner.On("ValidateCache", crName).
+				Return(versionsMap, nil)
+
+			// BFB processing fails
+			firmwareProvisioner.On("VerifyCachedBFB", crName, "https://firmware.example.com/firmware.bfb").
+				Return(true, nil) // needs download
+
+			firmwareProvisioner.On("DownloadBFB", crName, "https://firmware.example.com/firmware.bfb").
+				Return("", errors.New(errMsg))
+
+			createMixedCR(crName, crNamespace)
+
+			// Should fail overall due to BFB failure
+			ValidateCRStatusAndReason(crName, crNamespace, consts.FirmwareSourceDownloadFailedStatus, errMsg)
+			ValidateCRBFBVersions(crName, crNamespace, nil) // BFB versions should be empty on failure
+		})
+
+		It("should handle mixed processing with binary failure and BFB success", func() {
+			errMsg := "binary download failed"
+
+			firmwareProvisioner.On("IsFWStorageAvailable").
+				Return(nil)
+
+			// Binary processing fails
+			firmwareProvisioner.On("VerifyCachedBinaries", crName, mock.AnythingOfType("[]string")).
+				Return([]string{"https://firmware.example.com/fwA.zip"}, nil)
+
+			firmwareProvisioner.On("DownloadAndUnzipFirmwareArchives", crName, []string{"https://firmware.example.com/fwA.zip"}, true).
+				Return(errors.New(errMsg))
+
+			// BFB processing should not be called after binary failure
+			firmwareProvisioner.AssertNotCalled(GinkgoT(), "VerifyCachedBFB")
+			firmwareProvisioner.AssertNotCalled(GinkgoT(), "DownloadBFB")
+
+			createMixedCR(crName, crNamespace)
+
+			// Should fail due to binary failure, before BFB processing
+			ValidateCRStatusAndReason(crName, crNamespace, consts.FirmwareSourceDownloadFailedStatus, errMsg)
+			ValidateCRBFBVersions(crName, crNamespace, nil) // BFB versions should be empty on failure
+		})
 	})
 
 	Describe("NicFirmwareSource Finalizer", func() {
@@ -450,4 +717,5 @@ var _ = Describe("NicFirmwareTemplate Controller", func() {
 			}, time.Second).ShouldNot(BeNil())
 		})
 	})
+
 })

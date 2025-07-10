@@ -18,11 +18,15 @@ package v1alpha1
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // NicFirmwareSourceSpec represents a list of url sources for FW
+// +kubebuilder:validation:XValidation:rule="size(self.binUrlSources) > 0 || size(self.bfbUrlSource) > 0",message="At least one of binUrlSources or bfbUrlSource must be specified"
 type NicFirmwareSourceSpec struct {
-	// BinUrlSources represents a list of url sources for FW
+	// BinUrlSources represents a list of url sources for ConnectX Firmware
 	// +kubebuilder:validation:MinItems=1
-	// +required
-	BinUrlSources []string `json:"binUrlSources"`
+	// +optional
+	BinUrlSources []string `json:"binUrlSources,omitempty"`
+	// BFBUrlSource represents a url source for BlueField Bundle
+	// +optional
+	BFBUrlSource string `json:"bfbUrlSource,omitempty"`
 }
 
 // NicFirmwareSourceStatus represents the status of the FW from given sources, e.g. version available for PSIDs
@@ -33,9 +37,11 @@ type NicFirmwareSourceStatus struct {
 	State string `json:"state"`
 	// Reason shows an error message if occurred
 	Reason string `json:"reason,omitempty"`
-	// Versions is a map of available FW versions to PSIDs
+	// Versions is a map of available FW binaries versions to PSIDs
 	// a PSID should have only a single FW version available for it
-	Versions map[string][]string `json:"versions,omitempty"`
+	BinaryVersions map[string][]string `json:"binaryVersions,omitempty"`
+	// BFBVersions represents the FW versions available in the provided BFB bundle
+	BFBVersions map[string]string `json:"bfbVersions,omitempty"`
 }
 
 //+kubebuilder:object:root=true
