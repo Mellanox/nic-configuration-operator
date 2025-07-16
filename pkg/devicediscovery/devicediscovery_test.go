@@ -36,7 +36,29 @@ var _ = Describe("DeviceDiscovery", func() {
 
 	BeforeEach(func() {
 		mockUtils = mocks.DeviceDiscoveryUtils{}
-		manager = deviceDiscovery{utils: &mockUtils}
+		manager = deviceDiscovery{utils: &mockUtils, nodeName: "test-node"}
+	})
+
+	Describe("NewDeviceDiscovery", func() {
+		It("should create a DeviceDiscovery with nodeName set correctly", func() {
+			nodeName := "test-node"
+			manager := NewDeviceDiscovery(nodeName)
+
+			// Cast to the concrete type to access the nodeName field
+			concreteManager, ok := manager.(*deviceDiscovery)
+			Expect(ok).To(BeTrue())
+			Expect(concreteManager.nodeName).To(Equal(nodeName))
+		})
+
+		It("should not allow empty nodeName", func() {
+			nodeName := ""
+			manager := NewDeviceDiscovery(nodeName)
+
+			// Cast to the concrete type to access the nodeName field
+			concreteManager, ok := manager.(*deviceDiscovery)
+			Expect(ok).To(BeTrue())
+			Expect(concreteManager.nodeName).To(BeEmpty())
+		})
 	})
 
 	Describe("DiscoverNicDevices", func() {
@@ -133,7 +155,7 @@ var _ = Describe("DeviceDiscovery", func() {
 				mockUtils.AssertExpectations(GinkgoT())
 			})
 
-			It("should discover and return devices successfully", func() {
+			It("should discover and return devices successfully with nodeName", func() {
 				mockUtils.On("IsSriovVF", "0000:00:00.0").Return(false)
 				mockUtils.On("GetPartAndSerialNumber", "0000:00:00.0").
 					Return("part-number", "serial-number", nil)
@@ -148,6 +170,7 @@ var _ = Describe("DeviceDiscovery", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedDeviceStatus := v1alpha1.NicDeviceStatus{
+					Node:            "test-node",
 					Type:            "test-id",
 					SerialNumber:    "serial-number",
 					PartNumber:      "part-number",
@@ -164,6 +187,8 @@ var _ = Describe("DeviceDiscovery", func() {
 
 				Expect(devices).To(HaveKey("serial-number"))
 				Expect(devices["serial-number"]).To(Equal(expectedDeviceStatus))
+				// Verify that the returned device has the correct nodeName
+				Expect(devices["serial-number"].Node).To(Equal("test-node"))
 
 				mockUtils.AssertExpectations(GinkgoT())
 			})
@@ -205,6 +230,7 @@ var _ = Describe("DeviceDiscovery", func() {
 			devices, err := manager.DiscoverNicDevices()
 			Expect(err).NotTo(HaveOccurred())
 			expectedDeviceStatus := v1alpha1.NicDeviceStatus{
+				Node:            "test-node",
 				Type:            "test-id",
 				SerialNumber:    "serial-number",
 				PartNumber:      "part-number",
@@ -299,6 +325,7 @@ var _ = Describe("DeviceDiscovery", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			expectedDeviceStatus1 := v1alpha1.NicDeviceStatus{
+				Node:            "test-node",
 				Type:            "test-id",
 				SerialNumber:    "serial-number",
 				PartNumber:      "part-number",
@@ -314,6 +341,7 @@ var _ = Describe("DeviceDiscovery", func() {
 			}
 
 			expectedDeviceStatus2 := v1alpha1.NicDeviceStatus{
+				Node:            "test-node",
 				Type:            "test-id",
 				SerialNumber:    "serial-number-2",
 				PartNumber:      "part-number",
@@ -379,6 +407,7 @@ var _ = Describe("DeviceDiscovery", func() {
 			devices, err := manager.DiscoverNicDevices()
 			Expect(err).NotTo(HaveOccurred())
 			expectedDeviceStatus := v1alpha1.NicDeviceStatus{
+				Node:            "test-node",
 				Type:            "test-id",
 				SerialNumber:    sameSerialNumber,
 				PartNumber:      "part-number",
