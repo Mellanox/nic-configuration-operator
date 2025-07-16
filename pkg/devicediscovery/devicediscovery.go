@@ -88,6 +88,7 @@ func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDeviceStat
 			}
 
 			deviceStatus = v1alpha1.NicDeviceStatus{
+				Node:            d.nodeName,
 				Type:            device.Product.ID,
 				SerialNumber:    serialNumber,
 				PartNumber:      partNumber,
@@ -108,13 +109,14 @@ func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDeviceStat
 			RdmaInterface:    rdmaInterface,
 		})
 
-		deviceStatus.Node = d.nodeName
 		devices[deviceStatus.SerialNumber] = deviceStatus
 	}
+
+	log.Log.V(2).Info("Found devices", "devices", devices)
 
 	return devices, nil
 }
 
 func NewDeviceDiscovery(nodeName string) DeviceDiscovery {
-	return &deviceDiscovery{utils: newDeviceDiscoveryUtils()}
+	return &deviceDiscovery{nodeName: nodeName, utils: newDeviceDiscoveryUtils()}
 }
