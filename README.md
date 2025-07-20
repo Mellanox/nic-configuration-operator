@@ -83,12 +83,10 @@ spec:
   * Set nvconfig `MAX_ACC_OUT_READ` nvconfig parameter to `0` (use device defaults)
   * Set PCI max read request size for each PF to `4096` (note: this is a runtime config and is not persistent)
   * Users can override values via `maxAccOutRead` and `maxReadRequest`
-> [!IMPORTANT]
-> According to the PRM, setting MAX_ACC_OUT_READ to zero enables the auto mode, 
-> which applies the best suitable optimizations. 
-> However, there is a bug in certain FW versions, where the zero value is not available. 
-> In this case, until the fix is available, MAX_ACC_OUT_READ will not be set and a warning event will be emitted for this device's CR.
-* roceOptimized: performs RoCE related optimizations. If enabled performs the following by default:
+  * **IMPORTANT** :
+    * According to the PRM, setting `MAX_ACC_OUT_READ` to zero enables the auto mode, which applies the best suitable optimizations. However, there is a bug in certain FW versions, where the zero value is not available.
+    * In this case, until the fix is available, `MAX_ACC_OUT_READ` will not be set and a warning event will be emitted for this device's CR.
+* `roceOptimized`: performs RoCE related optimizations. If enabled performs the following by default:
   * Nvconfig set for both ports (can be applied from PF0)
     * Conditionally applied for second port if present
       * `ROCE_CC_PRIO_MASK_P1=255`, `ROCE_CC_PRIO_MASK_P2=255`
