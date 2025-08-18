@@ -125,6 +125,20 @@ func (f firmwareManager) BurnNicFirmware(ctx context.Context, device *v1alpha1.N
 		return errors.New("device's firmware spec is empty")
 	}
 
+	pci := device.Status.Ports[0].PCI
+
+	// Check current firmware versions before proceeding with burn
+	burnedVersion, err := f.utils.GetBurnedFirmwareVersionFromDevice(pci)
+	if err != nil {
+		log.Log.V(2).Info("Could not retrieve current firmware version, proceeding with burn", "device", device.Name, "error", err.Error())
+	} else if burnedVersion == version {
+		// If burned version matches requested version, no burn needed
+		log.Log.Info("Burned firmware version already matches requested version, skipping burn", "device", device.Name, "version", version)
+		return nil
+	}
+
+	log.Log.Info("Burned firmware version does not match requested version, proceeding with burn", "device", device.Name, "burned", burnedVersion, "requested", version)
+
 	fwSourceName := device.Spec.Firmware.NicFirmwareSourceRef
 	cacheDir := path.Join(f.cacheRootDir, fwSourceName)
 
@@ -214,7 +228,7 @@ func (f firmwareManager) burnDefaultFirmware(ctx context.Context, device *v1alph
 		return fmt.Errorf("couldn't find FW binary file for the %s version and %s PSID", version, devicePSID)
 	}
 
-	versionInFile, psidInFile, err := f.utils.GetFirmwareVersionAndPSID(fwPath)
+	versionInFile, psidInFile, err := f.utils.GetFirmwareVersionAndPSIDFromFWBinary(fwPath)
 	if err != nil {
 		log.Log.Error(err, "couldn't get FW version and PSID from FW binary file", "path", fwPath)
 		return err

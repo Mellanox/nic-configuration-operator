@@ -237,11 +237,15 @@ var _ = Describe("FirmwareManager", func() {
 		})
 
 		It("should return an error if cache is empty", func() {
+			fwUtilsMock.On("GetBurnedFirmwareVersionFromDevice", pci).
+				Return("", errors.New("version check failed")).Once()
 			err := manager.BurnNicFirmware(context.Background(), createNicDevice(), fwVersion)
 			Expect(err).To(MatchError(ContainSubstring("no such file or directory")))
 		})
 
 		It("should return an error if there is no fw binary file", func() {
+			fwUtilsMock.On("GetBurnedFirmwareVersionFromDevice", pci).
+				Return("", errors.New("version check failed")).Once()
 			fwFolder := path.Join(cacheDir, fwSourceName, consts.NicFirmwareBinariesFolder, fwVersion, psid)
 			Expect(os.MkdirAll(fwFolder, 0755)).To(Succeed())
 
@@ -250,6 +254,8 @@ var _ = Describe("FirmwareManager", func() {
 		})
 
 		It("should return an error if are more than one fw binary file in Version/PSID dir", func() {
+			fwUtilsMock.On("GetBurnedFirmwareVersionFromDevice", pci).
+				Return("", errors.New("version check failed")).Once()
 			fwFolder := path.Join(cacheDir, fwSourceName, consts.NicFirmwareBinariesFolder, fwVersion, psid)
 			Expect(os.MkdirAll(fwFolder, 0755)).To(Succeed())
 			Expect(os.WriteFile(path.Join(fwFolder, "first-file.bin"), []byte(""), 0644)).To(Succeed())
@@ -276,9 +282,49 @@ var _ = Describe("FirmwareManager", func() {
 				tempFwBinaryPath = path.Join(tmpDir, path.Base(fwBinary))
 			})
 
+			It("should proceed with burning when device version check fails", func() {
+				fwUtilsMock.On("GetBurnedFirmwareVersionFromDevice", pci).
+					Return("", errors.New("version check failed")).Once()
+				fwUtilsMock.On("GetFirmwareVersionAndPSIDFromFWBinary", fwBinary).
+					Return(fwVersion, psid, nil).Once()
+				fwUtilsMock.On("VerifyImageBootable", tempFwBinaryPath).
+					Return(nil).Once()
+				fwUtilsMock.On("BurnNicFirmware", mock.Anything, pci, tempFwBinaryPath).
+					Return(nil).Once()
+
+				Expect(manager.BurnNicFirmware(context.Background(), createNicDevice(), fwVersion)).To(Succeed())
+
+				_, err := os.Stat(fwBinary)
+				Expect(err).To(BeNil())
+
+				_, err = os.Stat(path.Join(tmpDir, path.Base(fwBinary)))
+				Expect(err).To(BeNil())
+			})
+
+			It("should proceed with burning when device version doesn't match requested", func() {
+				fwUtilsMock.On("GetBurnedFirmwareVersionFromDevice", pci).
+					Return("22.39.00", nil).Once()
+				fwUtilsMock.On("GetFirmwareVersionAndPSIDFromFWBinary", fwBinary).
+					Return(fwVersion, psid, nil).Once()
+				fwUtilsMock.On("VerifyImageBootable", tempFwBinaryPath).
+					Return(nil).Once()
+				fwUtilsMock.On("BurnNicFirmware", mock.Anything, pci, tempFwBinaryPath).
+					Return(nil).Once()
+
+				Expect(manager.BurnNicFirmware(context.Background(), createNicDevice(), fwVersion)).To(Succeed())
+
+				_, err := os.Stat(fwBinary)
+				Expect(err).To(BeNil())
+
+				_, err = os.Stat(path.Join(tmpDir, path.Base(fwBinary)))
+				Expect(err).To(BeNil())
+			})
+
 			It("should return an error if failed to get version and PSID from fw binary file", func() {
 				errText := "some fw version error"
-				fwUtilsMock.On("GetFirmwareVersionAndPSID", fwBinary).
+				fwUtilsMock.On("GetBurnedFirmwareVersionFromDevice", pci).
+					Return("", errors.New("version check failed")).Once()
+				fwUtilsMock.On("GetFirmwareVersionAndPSIDFromFWBinary", fwBinary).
 					Return("", "", errors.New(errText)).Once()
 
 				err := manager.BurnNicFirmware(context.Background(), createNicDevice(), fwVersion)
@@ -286,7 +332,9 @@ var _ = Describe("FirmwareManager", func() {
 			})
 
 			It("should return an error if version and PSID from fw binary file don't match the requested", func() {
-				fwUtilsMock.On("GetFirmwareVersionAndPSID", fwBinary).
+				fwUtilsMock.On("GetBurnedFirmwareVersionFromDevice", pci).
+					Return("", errors.New("version check failed")).Once()
+				fwUtilsMock.On("GetFirmwareVersionAndPSIDFromFWBinary", fwBinary).
 					Return("some-version", "some-psid", nil).Once()
 
 				err := manager.BurnNicFirmware(context.Background(), createNicDevice(), fwVersion)
@@ -295,7 +343,9 @@ var _ = Describe("FirmwareManager", func() {
 
 			It("should copy fw file to tmp dir and return error if it's unbootable", func() {
 				err := errors.New("image is not bootable")
-				fwUtilsMock.On("GetFirmwareVersionAndPSID", fwBinary).
+				fwUtilsMock.On("GetBurnedFirmwareVersionFromDevice", pci).
+					Return("", errors.New("version check failed")).Once()
+				fwUtilsMock.On("GetFirmwareVersionAndPSIDFromFWBinary", fwBinary).
 					Return(fwVersion, psid, nil).Once()
 				fwUtilsMock.On("VerifyImageBootable", tempFwBinaryPath).
 					Return(err).Once()
@@ -312,7 +362,9 @@ var _ = Describe("FirmwareManager", func() {
 
 			It("should return an error if failed to burn fw", func() {
 				errText := "fw internal error"
-				fwUtilsMock.On("GetFirmwareVersionAndPSID", fwBinary).
+				fwUtilsMock.On("GetBurnedFirmwareVersionFromDevice", pci).
+					Return("", errors.New("version check failed")).Once()
+				fwUtilsMock.On("GetFirmwareVersionAndPSIDFromFWBinary", fwBinary).
 					Return(fwVersion, psid, nil).Once()
 				fwUtilsMock.On("VerifyImageBootable", tempFwBinaryPath).
 					Return(nil).Once()
@@ -324,7 +376,39 @@ var _ = Describe("FirmwareManager", func() {
 			})
 
 			It("should copy fw file to tmp dir and return nil if successfully burned fw", func() {
-				fwUtilsMock.On("GetFirmwareVersionAndPSID", fwBinary).
+				fwUtilsMock.On("GetBurnedFirmwareVersionFromDevice", pci).
+					Return("", errors.New("version check failed")).Once()
+				fwUtilsMock.On("GetFirmwareVersionAndPSIDFromFWBinary", fwBinary).
+					Return(fwVersion, psid, nil).Once()
+				fwUtilsMock.On("VerifyImageBootable", tempFwBinaryPath).
+					Return(nil).Once()
+				fwUtilsMock.On("BurnNicFirmware", mock.Anything, pci, tempFwBinaryPath).
+					Return(nil).Once()
+
+				Expect(manager.BurnNicFirmware(context.Background(), createNicDevice(), fwVersion)).To(Succeed())
+
+				_, err := os.Stat(fwBinary)
+				Expect(err).To(BeNil())
+
+				_, err = os.Stat(path.Join(tmpDir, path.Base(fwBinary)))
+				Expect(err).To(BeNil())
+			})
+
+			It("should skip burning when burned firmware version matches requested version", func() {
+				fwUtilsMock.On("GetBurnedFirmwareVersionFromDevice", pci).
+					Return(fwVersion, nil).Once()
+
+				Expect(manager.BurnNicFirmware(context.Background(), createNicDevice(), fwVersion)).To(Succeed())
+
+				// Verify no other methods were called since we skipped burning
+				fwUtilsMock.AssertNotCalled(GinkgoT(), "VerifyImageBootable", mock.Anything)
+				fwUtilsMock.AssertNotCalled(GinkgoT(), "BurnNicFirmware", mock.Anything, mock.Anything, mock.Anything)
+			})
+
+			It("should proceed with burning when burned firmware version doesn't match requested", func() {
+				fwUtilsMock.On("GetBurnedFirmwareVersionFromDevice", pci).
+					Return("22.39.00", nil).Once()
+				fwUtilsMock.On("GetFirmwareVersionAndPSIDFromFWBinary", fwBinary).
 					Return(fwVersion, psid, nil).Once()
 				fwUtilsMock.On("VerifyImageBootable", tempFwBinaryPath).
 					Return(nil).Once()
@@ -388,6 +472,8 @@ var _ = Describe("FirmwareManager", func() {
 				device := createBlueFieldDevice(consts.BlueField2DeviceID)
 				expectedBFBPath := path.Join(bfbCacheDir, bfbFileName)
 
+				fwUtilsMock.On("GetBurnedFirmwareVersionFromDevice", pci).
+					Return("", errors.New("version check failed")).Once()
 				dmsManagerMock.On("GetDMSClientBySerialNumber", testSerial).Return(dmsClientMock, nil).Once()
 				dmsClientMock.On("InstallBFB", mock.Anything, fwVersion, expectedBFBPath).Return(nil).Once()
 
@@ -399,6 +485,8 @@ var _ = Describe("FirmwareManager", func() {
 				device := createBlueFieldDevice(consts.BlueField3DeviceID)
 				expectedBFBPath := path.Join(bfbCacheDir, bfbFileName)
 
+				fwUtilsMock.On("GetBurnedFirmwareVersionFromDevice", pci).
+					Return("", errors.New("version check failed")).Once()
 				dmsManagerMock.On("GetDMSClientBySerialNumber", testSerial).Return(dmsClientMock, nil).Once()
 				dmsClientMock.On("InstallBFB", mock.Anything, fwVersion, expectedBFBPath).Return(nil).Once()
 
@@ -412,6 +500,8 @@ var _ = Describe("FirmwareManager", func() {
 				// Remove the BFB file to simulate missing file
 				Expect(os.Remove(path.Join(bfbCacheDir, bfbFileName))).To(Succeed())
 
+				fwUtilsMock.On("GetBurnedFirmwareVersionFromDevice", pci).
+					Return("", errors.New("version check failed")).Once()
 				dmsManagerMock.On("GetDMSClientBySerialNumber", testSerial).Return(dmsClientMock, nil).Once()
 
 				err := manager.BurnNicFirmware(context.Background(), device, fwVersion)
@@ -423,6 +513,8 @@ var _ = Describe("FirmwareManager", func() {
 				device := createBlueFieldDevice(consts.BlueField2DeviceID)
 				dmsError := errors.New("DMS client not available")
 
+				fwUtilsMock.On("GetBurnedFirmwareVersionFromDevice", pci).
+					Return("", errors.New("version check failed")).Once()
 				dmsManagerMock.On("GetDMSClientBySerialNumber", testSerial).Return(nil, dmsError).Once()
 
 				err := manager.BurnNicFirmware(context.Background(), device, fwVersion)
@@ -435,6 +527,8 @@ var _ = Describe("FirmwareManager", func() {
 				expectedBFBPath := path.Join(bfbCacheDir, bfbFileName)
 				installError := errors.New("BFB installation failed")
 
+				fwUtilsMock.On("GetBurnedFirmwareVersionFromDevice", pci).
+					Return("", errors.New("version check failed")).Once()
 				dmsManagerMock.On("GetDMSClientBySerialNumber", testSerial).Return(dmsClientMock, nil).Once()
 				dmsClientMock.On("InstallBFB", mock.Anything, fwVersion, expectedBFBPath).Return(installError).Once()
 
@@ -456,7 +550,9 @@ var _ = Describe("FirmwareManager", func() {
 				Expect(os.MkdirAll(fwFolder, 0755)).To(Succeed())
 				Expect(os.WriteFile(fwBinary, []byte(""), 0644)).To(Succeed())
 
-				fwUtilsMock.On("GetFirmwareVersionAndPSID", fwBinary).
+				fwUtilsMock.On("GetBurnedFirmwareVersionFromDevice", pci).
+					Return("", errors.New("version check failed")).Once()
+				fwUtilsMock.On("GetFirmwareVersionAndPSIDFromFWBinary", fwBinary).
 					Return(fwVersion, psid, nil).Once()
 				fwUtilsMock.On("VerifyImageBootable", tempFwBinaryPath).
 					Return(nil).Once()
