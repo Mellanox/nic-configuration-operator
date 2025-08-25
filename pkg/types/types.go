@@ -20,6 +20,13 @@ import (
 	"strings"
 )
 
+// VPD represents the Vital Product Data of a device
+type VPD struct {
+	PartNumber   string
+	SerialNumber string
+	ModelName    string
+}
+
 // NvConfigQuery contains a nv config query for a single device, values can contain both the string alias and the numeric value
 type NvConfigQuery struct {
 	DefaultConfig  map[string][]string

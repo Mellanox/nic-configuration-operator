@@ -21,13 +21,14 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	"github.com/Mellanox/nic-configuration-operator/pkg/dms"
+	"github.com/Mellanox/nic-configuration-operator/pkg/nvconfig"
+	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 )
 
 // ConfigurationManager contains logic for configuring NIC devices on the host
@@ -54,6 +55,7 @@ type ConfigurationManager interface {
 type configurationManager struct {
 	configurationUtils ConfigurationUtils
 	configValidation   configValidation
+	nvConfigUtils      nvconfig.NVConfigUtils
 }
 
 // ValidateDeviceNvSpec will validate device's non-volatile spec against already applied configuration on the host
@@ -66,7 +68,7 @@ type configurationManager struct {
 func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *v1alpha1.NicDevice) (bool, bool, error) {
 	log.Log.Info("configurationManager.ValidateDeviceNvSpec", "device", device.Name)
 
-	nvConfig, err := h.configurationUtils.QueryNvConfig(ctx, device.Status.Ports[0].PCI)
+	nvConfig, err := h.nvConfigUtils.QueryNvConfig(ctx, device.Status.Ports[0].PCI, "")
 	if err != nil {
 		log.Log.Error(err, "failed to query nv config", "device", device.Name)
 		return false, false, err
@@ -118,7 +120,7 @@ func (h configurationManager) ApplyDeviceNvSpec(ctx context.Context, device *v1a
 
 	pciAddr := device.Status.Ports[0].PCI
 
-	nvConfig, err := h.configurationUtils.QueryNvConfig(ctx, device.Status.Ports[0].PCI)
+	nvConfig, err := h.nvConfigUtils.QueryNvConfig(ctx, device.Status.Ports[0].PCI, "")
 	if err != nil {
 		log.Log.Error(err, "failed to query nv config", "device", device.Name)
 		return false, err
@@ -128,7 +130,7 @@ func (h configurationManager) ApplyDeviceNvSpec(ctx context.Context, device *v1a
 		log.Log.Info("resetting nv config to default", "device", device.Name)
 		bf3OperationModeValue, isBF3device := nvConfig.CurrentConfig[consts.BF3OperationModeParam]
 
-		err := h.configurationUtils.ResetNvConfig(pciAddr)
+		err := h.nvConfigUtils.ResetNvConfig(pciAddr)
 		if err != nil {
 			log.Log.Error(err, "Failed to reset nv config", "device", device.Name)
 			return false, err
@@ -144,14 +146,14 @@ func (h configurationManager) ApplyDeviceNvSpec(ctx context.Context, device *v1a
 				mode = "NIC"
 			}
 			log.Log.Info(fmt.Sprintf("The device %s is the BlueField-3, restoring the previous mode of operation (%s mode) after configuration reset", device.Name, mode))
-			err = h.configurationUtils.SetNvConfigParameter(pciAddr, consts.BF3OperationModeParam, val)
+			err = h.nvConfigUtils.SetNvConfigParameter(pciAddr, consts.BF3OperationModeParam, val)
 			if err != nil {
 				log.Log.Error(err, "Failed to restore the BlueField device mode of operation", "device", device.Name, "mode", mode, "param", consts.BF3OperationModeParam, "value", val)
 				return false, err
 			}
 		}
 
-		err = h.configurationUtils.SetNvConfigParameter(pciAddr, consts.AdvancedPCISettingsParam, consts.NvParamTrue)
+		err = h.nvConfigUtils.SetNvConfigParameter(pciAddr, consts.AdvancedPCISettingsParam, consts.NvParamTrue)
 		if err != nil {
 			log.Log.Error(err, "Failed to apply nv config parameter", "device", device.Name, "param", consts.AdvancedPCISettingsParam, "value", consts.NvParamTrue)
 			return false, err
@@ -164,7 +166,7 @@ func (h configurationManager) ApplyDeviceNvSpec(ctx context.Context, device *v1a
 	// we enable this parameter first to unlock them
 	if !h.configValidation.AdvancedPCISettingsEnabled(nvConfig) {
 		log.Log.V(2).Info("AdvancedPciSettings not enabled, fw reset required", "device", device.Name)
-		err = h.configurationUtils.SetNvConfigParameter(pciAddr, consts.AdvancedPCISettingsParam, consts.NvParamTrue)
+		err = h.nvConfigUtils.SetNvConfigParameter(pciAddr, consts.AdvancedPCISettingsParam, consts.NvParamTrue)
 		if err != nil {
 			log.Log.Error(err, "Failed to apply nv config parameter", "device", device.Name, "param", consts.AdvancedPCISettingsParam, "value", consts.NvParamTrue)
 			return false, err
@@ -180,7 +182,7 @@ func (h configurationManager) ApplyDeviceNvSpec(ctx context.Context, device *v1a
 		}
 
 		// Query nv config again, additional options could become available
-		nvConfig, err = h.configurationUtils.QueryNvConfig(ctx, device.Status.Ports[0].PCI)
+		nvConfig, err = h.nvConfigUtils.QueryNvConfig(ctx, device.Status.Ports[0].PCI, "")
 		if err != nil {
 			log.Log.Error(err, "failed to query nv config", "device", device.Name)
 			return false, err
@@ -211,7 +213,7 @@ func (h configurationManager) ApplyDeviceNvSpec(ctx context.Context, device *v1a
 	log.Log.V(2).Info("applying nv config to device", "device", device.Name, "config", paramsToApply)
 
 	for param, value := range paramsToApply {
-		err = h.configurationUtils.SetNvConfigParameter(pciAddr, param, value)
+		err = h.nvConfigUtils.SetNvConfigParameter(pciAddr, param, value)
 		if err != nil {
 			log.Log.Error(err, "Failed to apply nv config parameter", "device", device.Name, "param", param, "value", value)
 			return false, err
@@ -280,7 +282,7 @@ func (h configurationManager) ResetNicFirmware(ctx context.Context, device *v1al
 	return nil
 }
 
-func NewConfigurationManager(eventRecorder record.EventRecorder, dmsManager dms.DMSManager) ConfigurationManager {
+func NewConfigurationManager(eventRecorder record.EventRecorder, dmsManager dms.DMSManager, nvConfigUtils nvconfig.NVConfigUtils) ConfigurationManager {
 	utils := newConfigurationUtils(dmsManager)
-	return configurationManager{configurationUtils: utils, configValidation: newConfigValidation(utils, eventRecorder)}
+	return configurationManager{configurationUtils: utils, configValidation: newConfigValidation(utils, eventRecorder), nvConfigUtils: nvConfigUtils}
 }

@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
 
@@ -38,8 +39,8 @@ type DeviceDiscoveryUtils interface {
 	// GetPCIDevices returns a list of PCI devices on the host
 	GetPCIDevices() ([]*pci.Device, error)
 
-	// GetPartAndSerialNumber uses mstvpd util to retrieve Part and Serial numbers of the PCI device
-	GetPartAndSerialNumber(pciAddr string) (string, string, error)
+	// GetVPD uses mstvpd util to retrieve Part Number, Serial Number, Model Name of the PCI device
+	GetVPD(pciAddr string) (*types.VPD, error)
 	// GetFirmwareVersionAndPSID uses mstflint tool to retrieve FW version and PSID of the device
 	GetFirmwareVersionAndPSID(pciAddr string) (string, string, error)
 
@@ -67,22 +68,22 @@ func (d *deviceDiscoveryUtils) GetPCIDevices() ([]*pci.Device, error) {
 	return pciRegistry.Devices, nil
 }
 
-// GetPartAndSerialNumber uses mstvpd util to retrieve Part and Serial numbers of the PCI device
-func (d *deviceDiscoveryUtils) GetPartAndSerialNumber(pciAddr string) (string, string, error) {
+// GetVPD uses mstvpd util to retrieve Part Number, Serial Number, Model Name of the PCI device
+func (d *deviceDiscoveryUtils) GetVPD(pciAddr string) (*types.VPD, error) {
 	log.Log.Info("HostUtils.GetPartAndSerialNumber()", "pciAddr", pciAddr)
 	cmd := d.execInterface.Command("mstvpd", pciAddr)
 	output, err := utils.RunCommand(cmd)
 	if err != nil {
 		log.Log.Error(err, "GetPartAndSerialNumber(): Failed to run mstvpd")
-		return "", "", err
+		return nil, err
 	}
 
 	// Parse the output for PN and SN
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
-	var partNumber, serialNumber string
+	var partNumber, serialNumber, modelName string
 
 	for scanner.Scan() {
-		line := strings.ToLower(scanner.Text())
+		line := scanner.Text()
 
 		if strings.HasPrefix(line, consts.PartNumberPrefix) {
 			partNumber = strings.TrimSpace(strings.TrimPrefix(line, consts.PartNumberPrefix))
@@ -90,18 +91,25 @@ func (d *deviceDiscoveryUtils) GetPartAndSerialNumber(pciAddr string) (string, s
 		if strings.HasPrefix(line, consts.SerialNumberPrefix) {
 			serialNumber = strings.TrimSpace(strings.TrimPrefix(line, consts.SerialNumberPrefix))
 		}
+		if strings.HasPrefix(line, consts.ModelNamePrefix) {
+			modelName = strings.TrimSpace(strings.TrimPrefix(line, consts.ModelNamePrefix))
+		}
 	}
 
 	if err := scanner.Err(); err != nil {
 		log.Log.Error(err, "GetPartAndSerialNumber(): Error reading mstvpd output")
-		return "", "", err
+		return nil, err
 	}
 
 	if partNumber == "" || serialNumber == "" {
-		return "", "", fmt.Errorf("GetPartAndSerialNumber(): part number (%v) or serial number (%v) is empty", partNumber, serialNumber)
+		return nil, fmt.Errorf("GetPartAndSerialNumber(): part number (%v) or serial number (%v) is empty", partNumber, serialNumber)
 	}
 
-	return partNumber, serialNumber, nil
+	return &types.VPD{
+		PartNumber:   partNumber,
+		SerialNumber: serialNumber,
+		ModelName:    modelName,
+	}, nil
 }
 
 // GetFirmwareVersionAndPSID uses mstflint tool to retrieve FW version and PSID of the device

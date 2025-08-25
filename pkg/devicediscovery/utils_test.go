@@ -28,10 +28,11 @@ const pciAddress = "0000:03:00.0"
 
 var _ = Describe("HostUtils", func() {
 	//nolint:dupl
-	Describe("GetPartAndSerialNumber", func() {
-		It("should return lowercased part and serial numbers", func() {
+	Describe("GetVPD", func() {
+		It("should return part, serial and model name", func() {
 			partNumber := "partNumber"
 			serialNumber := "serialNumber"
+			modelName := "ConnectX-6 LX"
 
 			fakeExec := &execTesting.FakeExec{}
 
@@ -40,6 +41,7 @@ var _ = Describe("HostUtils", func() {
 				return []byte("irrelevant line\n" +
 						"PN: partNumber\n" +
 						"SN: serialNumber\n" +
+						"ID: ConnectX-6 LX\n" +
 						"another irrelevant line"),
 					nil, nil
 			})
@@ -54,18 +56,19 @@ var _ = Describe("HostUtils", func() {
 				execInterface: fakeExec,
 			}
 
-			part, serial, err := h.GetPartAndSerialNumber(pciAddress)
+			vpd, err := h.GetVPD(pciAddress)
 
 			Expect(err).NotTo(HaveOccurred())
-			Expect(part).To(Equal(strings.ToLower(partNumber)))
-			Expect(serial).To(Equal(strings.ToLower(serialNumber)))
+			Expect(vpd.PartNumber).To(Equal(partNumber))
+			Expect(vpd.SerialNumber).To(Equal(serialNumber))
+			Expect(vpd.ModelName).To(Equal(modelName))
 		})
-		It("should return empty string for both numbers if one is empty", func() {
+		It("should return error when PN or SN is missing", func() {
 			fakeExec := &execTesting.FakeExec{}
 
 			fakeCmd := &execTesting.FakeCmd{}
 			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
-				return []byte("sn: serialNumber"), nil, nil
+				return []byte("SN: serialNumber"), nil, nil
 			})
 
 			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
@@ -78,11 +81,10 @@ var _ = Describe("HostUtils", func() {
 				execInterface: fakeExec,
 			}
 
-			part, serial, err := h.GetPartAndSerialNumber(pciAddress)
+			vpd, err := h.GetVPD(pciAddress)
 
 			Expect(err).To(HaveOccurred())
-			Expect(part).To(Equal(""))
-			Expect(serial).To(Equal(""))
+			Expect(vpd).To(BeNil())
 
 			fakeCmd = &execTesting.FakeCmd{}
 			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
@@ -95,11 +97,42 @@ var _ = Describe("HostUtils", func() {
 				return fakeCmd
 			})
 
-			part, serial, err = h.GetPartAndSerialNumber(pciAddress)
+			vpd, err = h.GetVPD(pciAddress)
 
 			Expect(err).To(HaveOccurred())
-			Expect(part).To(Equal(""))
-			Expect(serial).To(Equal(""))
+			Expect(vpd).To(BeNil())
+		})
+		It("should set empty model name when ID is absent", func() {
+			partNumber := "PN123"
+			serialNumber := "SN456"
+
+			fakeExec := &execTesting.FakeExec{}
+
+			fakeCmd := &execTesting.FakeCmd{}
+			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+				return []byte("irrelevant line\n" +
+						"PN: " + partNumber + "\n" +
+						"SN: " + serialNumber + "\n" +
+						"another irrelevant line"),
+					nil, nil
+			})
+
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				Expect(cmd).To(Equal("mstvpd"))
+				Expect(args[0]).To(Equal(pciAddress))
+				return fakeCmd
+			})
+
+			h := &deviceDiscoveryUtils{
+				execInterface: fakeExec,
+			}
+
+			vpd, err := h.GetVPD(pciAddress)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(vpd.PartNumber).To(Equal(partNumber))
+			Expect(vpd.SerialNumber).To(Equal(serialNumber))
+			Expect(vpd.ModelName).To(Equal(""))
 		})
 	})
 	//nolint:dupl

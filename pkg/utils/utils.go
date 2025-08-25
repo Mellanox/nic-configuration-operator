@@ -16,8 +16,19 @@
 
 package utils
 
-import "github.com/Mellanox/nic-configuration-operator/pkg/consts"
+import (
+	"strings"
+
+	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+)
 
 func IsBlueFieldDevice(deviceID string) bool {
 	return deviceID == consts.BlueField3DeviceID || deviceID == consts.BlueField2DeviceID
+}
+
+func ContainsIgnoreCase(s, substr string) bool {
+	return strings.Contains(
+		strings.ToLower(s),
+		strings.ToLower(substr),
+	)
 }

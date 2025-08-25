@@ -42,6 +42,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/pkg/host"
 	"github.com/Mellanox/nic-configuration-operator/pkg/maintenance"
 	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
+	"github.com/Mellanox/nic-configuration-operator/pkg/nvconfig"
 )
 
 var (
@@ -93,7 +94,9 @@ func main() {
 	eventRecorder := mgr.GetEventRecorderFor("NicDeviceReconciler")
 
 	hostUtils := host.NewHostUtils()
-	deviceDiscovery := devicediscovery.NewDeviceDiscovery(nodeName)
+	nvConfigUtils := nvconfig.NewNVConfigUtils()
+
+	deviceDiscovery := devicediscovery.NewDeviceDiscovery(nodeName, nvConfigUtils)
 
 	// Initialize DMS manager
 	dmsManager := dms.NewDMSManager()
@@ -117,7 +120,7 @@ func main() {
 		}
 	}()
 
-	configurationManager := configuration.NewConfigurationManager(eventRecorder, dmsManager)
+	configurationManager := configuration.NewConfigurationManager(eventRecorder, dmsManager, nvConfigUtils)
 	maintenanceManager := maintenance.New(mgr.GetClient(), hostUtils, nodeName, namespace)
 	firmwareManager := firmware.NewFirmwareManager(mgr.GetClient(), dmsManager, namespace)
 
