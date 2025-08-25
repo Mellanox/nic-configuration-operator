@@ -41,8 +41,10 @@ type FirmwareUtils interface {
 	// UnzipFiles extract files from the zip archive to destDir
 	// Returns a list of extracted files, error if occurred
 	UnzipFiles(zipPath, destDir string) ([]string, error)
-	// GetFirmwareVersionAndPSID retrieves the version and PSID from the firmware binary
-	GetFirmwareVersionAndPSID(firmwareBinaryPath string) (string, string, error)
+	// GetBurnedFirmwareVersionFromDevice retrieves the burned FW version from the device
+	GetBurnedFirmwareVersionFromDevice(pciAddress string) (string, error)
+	// GetFirmwareVersionAndPSIDFromFWBinary retrieves the version and PSID from the firmware binary
+	GetFirmwareVersionAndPSIDFromFWBinary(firmwareBinaryPath string) (string, string, error)
 	// GetFWVersionsFromBFB retrieves the FW versions from the BFB file
 	GetFWVersionsFromBFB(bfbPath string) (map[string]string, error)
 	// VerifyImageBootable verifies if the image file is valid and bootable
@@ -158,13 +160,47 @@ func extractFile(zf *zip.File, destPath string) error {
 	return nil
 }
 
-// GetFirmwareVersionAndPSID retrieves the version and PSID from the firmware binary
-func (u *utils) GetFirmwareVersionAndPSID(firmwareBinaryPath string) (string, string, error) {
-	log.Log.V(2).Info("FirmwareUtils.GetFirmwareVersionAndPSID()", "firmwareBinaryPath", firmwareBinaryPath)
+// GetBurnedFirmwareVersionFromDevice retrieves the burned FW version from the device
+func (u *utils) GetBurnedFirmwareVersionFromDevice(pciAddress string) (string, error) {
+	log.Log.V(2).Info("FirmwareUtils.GetFirmwareVersionAndPSIDFromDevice()", "pciAddress", pciAddress)
+
+	cmd := u.execInterface.Command("mlxfwmanager", "-d", pciAddress)
+	output, err := cmd.Output()
+	if err != nil {
+		log.Log.Error(err, "GetBurnedFirmwareVersionFromDevice(): Failed to run mlxfwmanager")
+		return "", err
+	}
+
+	// Parse the output for FW versions
+	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+
+		// Look for FW version line under Versions section. Skip FW (Running) line as it might be different from the burned version
+		if strings.HasPrefix(line, "FW") && !strings.HasPrefix(line, "FW (Running)") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				return parts[1], nil
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Log.Error(err, "GetFirmwareVersionAndPSIDFromDevice(): Error reading mlxfwmanager output")
+		return "", err
+	}
+
+	return "", fmt.Errorf("GetBurnedFirmwareVersionFromDevice(): burned firmware version is empty")
+}
+
+// GetFirmwareVersionAndPSIDFromFWBinary retrieves the version and PSID from the firmware binary
+func (u *utils) GetFirmwareVersionAndPSIDFromFWBinary(firmwareBinaryPath string) (string, string, error) {
+	log.Log.V(2).Info("FirmwareUtils.GetFirmwareVersionAndPSIDFromFWBinary()", "firmwareBinaryPath", firmwareBinaryPath)
 	cmd := u.execInterface.Command("mstflint", "-i", firmwareBinaryPath, "q")
 	output, err := cmd.Output()
 	if err != nil {
-		log.Log.Error(err, "GetFirmwareVersionAndPSID(): Failed to run mstflint")
+		log.Log.Error(err, "GetFirmwareVersionAndPSIDFromFWBinary(): Failed to run mstflint")
 		return "", "", err
 	}
 
@@ -184,12 +220,12 @@ func (u *utils) GetFirmwareVersionAndPSID(firmwareBinaryPath string) (string, st
 	}
 
 	if err := scanner.Err(); err != nil {
-		log.Log.Error(err, "GetFirmwareVersionAndPSID(): Error reading mstflint output")
+		log.Log.Error(err, "GetFirmwareVersionAndPSIDFromFWBinary(): Error reading mstflint output")
 		return "", "", err
 	}
 
 	if firmwareVersion == "" || PSID == "" {
-		return "", "", fmt.Errorf("GetFirmwareVersionAndPSID(): firmware version (%v) or PSID (%v) is empty", firmwareVersion, PSID)
+		return "", "", fmt.Errorf("GetFirmwareVersionAndPSIDFromFWBinary(): firmware version (%v) or PSID (%v) is empty", firmwareVersion, PSID)
 	}
 
 	log.Log.V(2).Info("Firmware version and PSID found in .bin file", "version", firmwareVersion, "psid", PSID, "path", firmwareBinaryPath)

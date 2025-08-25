@@ -135,7 +135,138 @@ var _ = Describe("utils", func() {
 		})
 	})
 
-	Describe("GetFirmwareVersionAndPSID", func() {
+	Describe("GetBurnedFirmwareVersionFromDevice", func() {
+		var pciAddress = "0000:03:00.0"
+
+		It("should return burned firmware version when both burned and running are present", func() {
+			burnedVersion := "22.45.3608"
+
+			fakeExec := &execTesting.FakeExec{}
+
+			fakeCmd := &execTesting.FakeCmd{}
+			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+				return []byte("Querying Mellanox devices firmware ...\n\n" +
+						"Device #1:\n" +
+						"----------\n\n" +
+						"  Device Type:      ConnectX6DX\n" +
+						"  Part Number:      MCX623106AC-CDA_Ax\n" +
+						"  Description:      ConnectX-6 Dx EN adapter card; 100GbE; Dual-port QSFP56; PCIe 4.0 x16; Crypto and Secure Boot\n" +
+						"  PSID:             MT_0000000436\n" +
+						"  PCI Device Name:  03:00.0\n" +
+						"  Base GUID:        1c34da030073458a\n" +
+						"  Base MAC:         1c34da73458a\n" +
+						"  Versions:         Current        Available\n" +
+						"     FW             22.45.3608     N/A\n" +
+						"     FW (Running)   22.43.1020     N/A\n" +
+						"     PXE            3.6.0204       N/A\n" +
+						"     UEFI           14.22.0016     N/A\n"),
+					nil, nil
+			})
+
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				Expect(cmd).To(Equal("mlxfwmanager"))
+				Expect(args).To(Equal([]string{"-d", pciAddress}))
+				return fakeCmd
+			})
+
+			testedUtils := &utils{execInterface: fakeExec}
+
+			version, err := testedUtils.GetBurnedFirmwareVersionFromDevice(pciAddress)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(version).To(Equal(burnedVersion))
+		})
+
+		It("should return burned firmware version when only burned version is present", func() {
+			fwVersion := "22.29.2002"
+
+			fakeExec := &execTesting.FakeExec{}
+
+			fakeCmd := &execTesting.FakeCmd{}
+			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+				return []byte("Querying Mellanox devices firmware ...\n\n" +
+						"Device #1:\n" +
+						"----------\n\n" +
+						"  Device Type:      ConnectX6DX\n" +
+						"  Part Number:      MCX623106AC-CDA_Ax\n" +
+						"  Description:      ConnectX-6 Dx EN adapter card; 100GbE; Dual-port QSFP56; PCIe 4.0 x16; Crypto and Secure Boot\n" +
+						"  PSID:             MT_0000000436\n" +
+						"  PCI Device Name:  03:00.0\n" +
+						"  Base GUID:        1c34da030073458a\n" +
+						"  Base MAC:         1c34da73458a\n" +
+						"  Versions:         Current        Available\n" +
+						"     FW             22.29.2002     N/A\n" +
+						"     PXE            3.6.0204       N/A\n" +
+						"     UEFI           14.22.0016     N/A\n"),
+					nil, nil
+			})
+
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				Expect(cmd).To(Equal("mlxfwmanager"))
+				Expect(args).To(Equal([]string{"-d", pciAddress}))
+				return fakeCmd
+			})
+
+			testedUtils := &utils{execInterface: fakeExec}
+
+			version, err := testedUtils.GetBurnedFirmwareVersionFromDevice(pciAddress)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(version).To(Equal(fwVersion))
+		})
+
+		It("should return error if firmware version is missing", func() {
+			fakeExec := &execTesting.FakeExec{}
+
+			fakeCmd := &execTesting.FakeCmd{}
+			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+				return []byte("Querying Mellanox devices firmware ...\n\n" +
+						"Device #1:\n" +
+						"----------\n\n" +
+						"  PSID:             MT_0000000436\n" +
+						"  Versions:         Current        Available\n"),
+					nil, nil
+			})
+
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				Expect(cmd).To(Equal("mlxfwmanager"))
+				Expect(args).To(Equal([]string{"-d", pciAddress}))
+				return fakeCmd
+			})
+
+			testedUtils := &utils{execInterface: fakeExec}
+
+			version, err := testedUtils.GetBurnedFirmwareVersionFromDevice(pciAddress)
+
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("burned firmware version"))
+			Expect(version).To(Equal(""))
+		})
+
+		It("should return error if mlxfwmanager command fails", func() {
+			fakeExec := &execTesting.FakeExec{}
+
+			fakeCmd := &execTesting.FakeCmd{}
+			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+				return nil, []byte("device not found"), fmt.Errorf("command failed")
+			})
+
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				Expect(cmd).To(Equal("mlxfwmanager"))
+				Expect(args).To(Equal([]string{"-d", pciAddress}))
+				return fakeCmd
+			})
+
+			testedUtils := &utils{execInterface: fakeExec}
+
+			version, err := testedUtils.GetBurnedFirmwareVersionFromDevice(pciAddress)
+
+			Expect(err).To(HaveOccurred())
+			Expect(version).To(Equal(""))
+		})
+	})
+
+	Describe("GetFirmwareVersionAndPSIDFromFWBinary", func() {
 		var firmwareBinaryPath = "/tmp/somepath"
 
 		It("should return lowercased firmware version and psid", func() {
@@ -161,12 +292,13 @@ var _ = Describe("utils", func() {
 
 			testedUtils := &utils{execInterface: fakeExec}
 
-			part, serial, err := testedUtils.GetFirmwareVersionAndPSID(firmwareBinaryPath)
+			part, serial, err := testedUtils.GetFirmwareVersionAndPSIDFromFWBinary(firmwareBinaryPath)
 
 			Expect(err).NotTo(HaveOccurred())
 			Expect(part).To(Equal(strings.ToLower(fwVersion)))
 			Expect(serial).To(Equal(strings.ToLower(PSID)))
 		})
+
 		It("should return empty string for both numbers if one is empty", func() {
 			fakeExec := &execTesting.FakeExec{}
 
@@ -183,7 +315,7 @@ var _ = Describe("utils", func() {
 
 			testedUtils := &utils{execInterface: fakeExec}
 
-			part, serial, err := testedUtils.GetFirmwareVersionAndPSID(firmwareBinaryPath)
+			part, serial, err := testedUtils.GetFirmwareVersionAndPSIDFromFWBinary(firmwareBinaryPath)
 
 			Expect(err).To(HaveOccurred())
 			Expect(part).To(Equal(""))
@@ -200,7 +332,7 @@ var _ = Describe("utils", func() {
 				return fakeCmd
 			})
 
-			part, serial, err = testedUtils.GetFirmwareVersionAndPSID(firmwareBinaryPath)
+			part, serial, err = testedUtils.GetFirmwareVersionAndPSIDFromFWBinary(firmwareBinaryPath)
 
 			Expect(err).To(HaveOccurred())
 			Expect(part).To(Equal(""))

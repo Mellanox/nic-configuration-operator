@@ -97,12 +97,40 @@ func (_m *FirmwareUtils) GetFWVersionsFromBFB(bfbPath string) (map[string]string
 	return r0, r1
 }
 
-// GetFirmwareVersionAndPSID provides a mock function with given fields: firmwareBinaryPath
-func (_m *FirmwareUtils) GetFirmwareVersionAndPSID(firmwareBinaryPath string) (string, string, error) {
+// GetBurnedFirmwareVersionFromDevice provides a mock function with given fields: pciAddress
+func (_m *FirmwareUtils) GetBurnedFirmwareVersionFromDevice(pciAddress string) (string, error) {
+	ret := _m.Called(pciAddress)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetBurnedFirmwareVersionFromDevice")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (string, error)); ok {
+		return rf(pciAddress)
+	}
+	if rf, ok := ret.Get(0).(func(string) string); ok {
+		r0 = rf(pciAddress)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(pciAddress)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetFirmwareVersionAndPSIDFromFWBinary provides a mock function with given fields: firmwareBinaryPath
+func (_m *FirmwareUtils) GetFirmwareVersionAndPSIDFromFWBinary(firmwareBinaryPath string) (string, string, error) {
 	ret := _m.Called(firmwareBinaryPath)
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetFirmwareVersionAndPSID")
+		panic("no return value specified for GetFirmwareVersionAndPSIDFromFWBinary")
 	}
 
 	var r0 string

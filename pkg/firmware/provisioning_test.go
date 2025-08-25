@@ -263,10 +263,10 @@ var _ = Describe("FirmwareProvisioner", func() {
 			binFileB := path.Join(cacheDir, "fwB.bin")
 			Expect(os.WriteFile(binFileB, []byte("dummy content"), 0644)).To(Succeed())
 
-			fwUtilsMock.On("GetFirmwareVersionAndPSID", binFileA).
-				Return("1.2.3", "PSID123", nil).Once()
-			fwUtilsMock.On("GetFirmwareVersionAndPSID", binFileB).
-				Return("3.2.1", "PSID321", nil).Once()
+			fwUtilsMock.On("GetFirmwareVersionAndPSIDFromFWBinary", binFileA).
+				Return("1.0.0", "MT_123", nil).Once()
+			fwUtilsMock.On("GetFirmwareVersionAndPSIDFromFWBinary", binFileB).
+				Return("2.0.0", "MT_456", nil).Once()
 
 			err := fwProv.AddFirmwareBinariesToCacheByMetadata(cacheName)
 			Expect(err).NotTo(HaveOccurred())
@@ -277,9 +277,9 @@ var _ = Describe("FirmwareProvisioner", func() {
 			_, err = os.Stat(binFileB)
 			Expect(err).To(MatchError(os.ErrNotExist))
 
-			_, err = os.Stat(path.Join(cacheDir, "1.2.3", "PSID123", "fwA.bin"))
+			_, err = os.Stat(path.Join(cacheDir, "1.0.0", "MT_123", "fwA.bin"))
 			Expect(err).NotTo(HaveOccurred())
-			_, err = os.Stat(path.Join(cacheDir, "3.2.1", "PSID321", "fwB.bin"))
+			_, err = os.Stat(path.Join(cacheDir, "2.0.0", "MT_456", "fwB.bin"))
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -288,7 +288,7 @@ var _ = Describe("FirmwareProvisioner", func() {
 				binFileA := path.Join(cacheDir, "fwA.bin")
 				Expect(os.WriteFile(binFileA, []byte("dummy content"), 0644)).To(Succeed())
 
-				fwUtilsMock.On("GetFirmwareVersionAndPSID", mock.AnythingOfType("string")).
+				fwUtilsMock.On("GetFirmwareVersionAndPSIDFromFWBinary", mock.AnythingOfType("string")).
 					Return("", "", errors.New("parse error")).Once()
 
 				err := fwProv.AddFirmwareBinariesToCacheByMetadata(cacheName)

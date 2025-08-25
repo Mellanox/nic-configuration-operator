@@ -298,7 +298,7 @@ func (f firmwareProvisioner) AddFirmwareBinariesToCacheByMetadata(cacheName stri
 
 		sourcePath := filepath.Join(firmwareBinariesDir, entry.Name())
 
-		version, psid, err := f.utils.GetFirmwareVersionAndPSID(sourcePath)
+		version, psid, err := f.utils.GetFirmwareVersionAndPSIDFromFWBinary(sourcePath)
 		if err != nil {
 			log.Log.Error(err, "failed to get firmware binary version and PSID", "cacheName", cacheName, "file", entry.Name())
 			return err
