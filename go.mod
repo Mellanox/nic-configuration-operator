@@ -8,7 +8,7 @@ require (
 	github.com/Mellanox/maintenance-operator/api v0.2.3
 	github.com/Mellanox/rdmamap v1.1.0
 	github.com/jaypipes/ghw v0.17.0
-	github.com/jaypipes/pcidb v1.0.1
+	github.com/jaypipes/pcidb v1.1.0
 	github.com/onsi/ginkgo/v2 v2.25.1
 	github.com/onsi/gomega v1.38.2
 	github.com/stretchr/testify v1.11.0
@@ -50,7 +50,6 @@ require (
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.17.9 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
-	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
