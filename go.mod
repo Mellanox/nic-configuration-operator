@@ -9,7 +9,7 @@ require (
 	github.com/Mellanox/rdmamap v1.1.0
 	github.com/jaypipes/ghw v0.17.0
 	github.com/jaypipes/pcidb v1.0.1
-	github.com/onsi/ginkgo/v2 v2.24.0
+	github.com/onsi/ginkgo/v2 v2.25.1
 	github.com/onsi/gomega v1.38.0
 	github.com/stretchr/testify v1.11.0
 	github.com/vishvananda/netlink v1.3.1
