@@ -21,6 +21,7 @@ import (
 	"reflect"
 	"slices"
 	"strconv"
+	"strings"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/record"
@@ -198,15 +199,14 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 	} else {
 		applyDefaultNvConfigValueIfExists(consts.AtsEnabledParam, desiredParameters, query)
 	}
-	//TODO: Uncomment once we'll fix DPU mode reset procedure
-	//for _, rawParam := range template.RawNvConfig {
-	//	// Ignore second port params if device has a single port
-	//	if strings.HasSuffix(rawParam.Name, consts.SecondPortPrefix) && !secondPortPresent {
-	//		continue
-	//	}
-	//
-	//	desiredParameters[rawParam.Name] = rawParam.Value
-	//}
+	for _, rawParam := range template.RawNvConfig {
+		// Ignore second port params if device has a single port
+		if strings.HasSuffix(rawParam.Name, consts.SecondPortPrefix) && !secondPortPresent {
+			continue
+		}
+
+		desiredParameters[rawParam.Name] = rawParam.Value
+	}
 
 	return desiredParameters, nil
 }

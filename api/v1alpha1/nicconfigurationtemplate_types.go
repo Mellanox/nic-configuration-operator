@@ -70,6 +70,13 @@ type GpuDirectOptimizedSpec struct {
 	Env string `json:"env"`
 }
 
+type NvConfigParam struct {
+	// Name of the arbitrary nvconfig parameter
+	Name string `json:"name"`
+	// Value of the arbitrary nvconfig parameter
+	Value string `json:"value"`
+}
+
 // ConfigurationTemplateSpec is a set of configurations for the NICs
 type ConfigurationTemplateSpec struct {
 	// Number of VFs to be configured
@@ -85,6 +92,8 @@ type ConfigurationTemplateSpec struct {
 	RoceOptimized *RoceOptimizedSpec `json:"roceOptimized,omitempty"`
 	// GPU Direct optimization settings
 	GpuDirectOptimized *GpuDirectOptimizedSpec `json:"gpuDirectOptimized,omitempty"`
+	// List of arbitrary nv config parameters
+	RawNvConfig []NvConfigParam `json:"rawNvConfig,omitempty"`
 }
 
 // NicConfigurationTemplateSpec defines the desired state of NicConfigurationTemplate

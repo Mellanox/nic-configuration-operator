@@ -1,6 +1,6 @@
 Packages:
 
--   [configuration.net.nvidia.com/v1alpha1](#configurationnetnvidiacomv1alpha1)
+- [configuration.net.nvidia.com/v1alpha1](#configurationnetnvidiacomv1alpha1)
 
 ## configuration.net.nvidia.com/v1alpha1
 
@@ -51,6 +51,11 @@ ConfigurationTemplateSpec is a set of configurations for the NICs
 <td><code>gpuDirectOptimized</code><br />
 <em><a href="#GpuDirectOptimizedSpec">GpuDirectOptimizedSpec</a></em></td>
 <td><p>GPU Direct optimization settings</p></td>
+</tr>
+<tr>
+<td><code>rawNvConfig</code><br />
+<em><a href="#NvConfigParam">[]NvConfigParam</a></em></td>
+<td><p>List of arbitrary nv config parameters</p></td>
 </tr>
 </tbody>
 </table>
@@ -306,9 +311,8 @@ NicDeviceConfigurationSpec contains desired configuration of the NIC
 <tr>
 <td><code>resetToDefault</code><br />
 <em>bool</em></td>
-<td><p>ResetToDefault specifies whether node agent needs to perform a reset flow. In NIC Configuration Operator template v0.1.14 BF2/BF3 DPUs (not SuperNics) FW reset flow isn’t supported. The
-following operations will be performed: * Nvconfig reset of all non-volatile configurations - Mstconfig -d reset for each PF - Mstconfig -d set ADVANCED_PCI_SETTINGS=1 * Node reboot - Applies new NIC
-NV config - Will undo any runtime configuration previously performed for the device/driver</p></td>
+<td><p>ResetToDefault specifies whether node agent needs to perform a reset flow. The following operations will be performed: * Nvconfig reset of all non-volatile configurations - Mstconfig -d reset
+for each PF - Mstconfig -d set ADVANCED_PCI_SETTINGS=1 * Node reboot - Applies new NIC NV config - Will undo any runtime configuration previously performed for the device/driver</p></td>
 </tr>
 <tr>
 <td><code>template</code><br />
@@ -432,6 +436,21 @@ NicDeviceStatus defines the observed state of NicDevice
 <td><code>firmwareVersion</code><br />
 <em>string</em></td>
 <td><p>Firmware version currently installed on the device, e.g. 22.31.1014</p></td>
+</tr>
+<tr>
+<td><code>dpu</code><br />
+<em>bool</em></td>
+<td><p>DPU indicates if the device is a BlueField in DPU mode</p></td>
+</tr>
+<tr>
+<td><code>modelName</code><br />
+<em>string</em></td>
+<td><p>ModelName is the model name of the device, e.g. ConnectX-6 or BlueField-3</p></td>
+</tr>
+<tr>
+<td><code>superNIC</code><br />
+<em>bool</em></td>
+<td><p>SuperNIC indicates if the device is a SuperNIC</p></td>
 </tr>
 <tr>
 <td><code>ports</code><br />
@@ -563,9 +582,9 @@ NicFirmwareSourceStatus represents the status of the FW from given sources, e.g.
 <td><p>Reason shows an error message if occurred</p></td>
 </tr>
 <tr>
-<td><code>versions</code><br />
+<td><code>binaryVersions</code><br />
 <em>map[string][]string</em></td>
-<td><p>Versions is a map of available FW versions to PSIDs a PSID should have only a single FW version available for it</p></td>
+<td><p>Versions is a map of available FW binaries versions to PSIDs a PSID should have only a single FW version available for it</p></td>
 </tr>
 <tr>
 <td><code>bfbVersions</code><br />
@@ -732,6 +751,35 @@ NicTemplateStatus defines the observed state of NicConfigurationTemplate and Nic
 </tbody>
 </table>
 
+### NvConfigParam
+
+(*Appears on:*[ConfigurationTemplateSpec](#ConfigurationTemplateSpec))
+
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code><br />
+<em>string</em></td>
+<td><p>Name of the arbitrary nvconfig parameter</p></td>
+</tr>
+<tr>
+<td><code>value</code><br />
+<em>string</em></td>
+<td><p>Value of the arbitrary nvconfig parameter</p></td>
+</tr>
+</tbody>
+</table>
+
 ### PciPerformanceOptimizedSpec
 
 (*Appears on:*[ConfigurationTemplateSpec](#ConfigurationTemplateSpec))
@@ -832,4 +880,4 @@ RoceOptimizedSpec specifies RoCE optimization settings
 
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-*Generated with `gen-crd-api-reference-docs` on git commit `5c0e1e9`.*
+*Generated with `gen-crd-api-reference-docs` on git commit `b864d19`.*
