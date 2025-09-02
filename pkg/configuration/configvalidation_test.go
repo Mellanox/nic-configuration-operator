@@ -313,17 +313,16 @@ var _ = Describe("ConfigValidationImpl", func() {
 						Template: &v1alpha1.ConfigurationTemplateSpec{
 							NumVfs:   0,
 							LinkType: consts.Ethernet,
-							//TODO: Uncomment once we'll fix DPU mode reset procedure
-							//RawNvConfig: []v1alpha1.NvConfigParam{
-							//	{
-							//		Name:  "TEST_P1",
-							//		Value: "test",
-							//	},
-							//	{
-							//		Name:  "TEST_P2",
-							//		Value: "test",
-							//	},
-							//},
+							RawNvConfig: []v1alpha1.NvConfigParam{
+								{
+									Name:  "TEST_P1",
+									Value: "test",
+								},
+								{
+									Name:  "TEST_P2",
+									Value: "test",
+								},
+							},
 						},
 					},
 				},
@@ -336,11 +335,10 @@ var _ = Describe("ConfigValidationImpl", func() {
 
 			query := types.NewNvConfigQuery()
 
-			_, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
 			Expect(err).NotTo(HaveOccurred())
-			// TODO: Uncomment once we'll fix DPU mode reset procedure
-			//Expect(nvParams).To(HaveKeyWithValue("TEST_P1", "test"))
-			//Expect(nvParams).NotTo(HaveKey("TEST_P2"))
+			Expect(nvParams).To(HaveKeyWithValue("TEST_P1", "test"))
+			Expect(nvParams).NotTo(HaveKey("TEST_P2"))
 		})
 		It("should apply raw config for the second port if device is dual port", func() {
 			mockHostUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
@@ -351,17 +349,16 @@ var _ = Describe("ConfigValidationImpl", func() {
 						Template: &v1alpha1.ConfigurationTemplateSpec{
 							NumVfs:   0,
 							LinkType: consts.Ethernet,
-							// TODO: Uncomment once we'll fix DPU mode reset procedure
-							//RawNvConfig: []v1alpha1.NvConfigParam{
-							//	{
-							//		Name:  "TEST_P1",
-							//		Value: "test",
-							//	},
-							//	{
-							//		Name:  "TEST_P2",
-							//		Value: "test",
-							//	},
-							//},
+							RawNvConfig: []v1alpha1.NvConfigParam{
+								{
+									Name:  "TEST_P1",
+									Value: "test",
+								},
+								{
+									Name:  "TEST_P2",
+									Value: "test",
+								},
+							},
 						},
 					},
 				},
@@ -375,11 +372,10 @@ var _ = Describe("ConfigValidationImpl", func() {
 
 			query := types.NewNvConfigQuery()
 
-			_, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
 			Expect(err).NotTo(HaveOccurred())
-			// TODO: Uncomment once we'll fix DPU mode reset procedure
-			//Expect(nvParams).To(HaveKeyWithValue("TEST_P1", "test"))
-			//Expect(nvParams).To(HaveKeyWithValue("TEST_P2", "test"))
+			Expect(nvParams).To(HaveKeyWithValue("TEST_P1", "test"))
+			Expect(nvParams).To(HaveKeyWithValue("TEST_P2", "test"))
 		})
 		It("should report an error when LinkType cannot be changed and template differs from the actual status", func() {
 			mockHostUtils.On("GetLinkType", mock.Anything).Return(consts.Ethernet)

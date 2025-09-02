@@ -22,7 +22,6 @@ import (
 // NicDeviceConfigurationSpec contains desired configuration of the NIC
 type NicDeviceConfigurationSpec struct {
 	// ResetToDefault specifies whether node agent needs to perform a reset flow.
-	// In NIC Configuration Operator template v0.1.14 BF2/BF3 DPUs (not SuperNics) FW reset flow isn't supported.
 	// The following operations will be performed:
 	// * Nvconfig reset of all non-volatile configurations
 	//   - Mstconfig -d <device> reset for each PF

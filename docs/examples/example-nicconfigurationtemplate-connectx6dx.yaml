@@ -49,3 +49,8 @@ spec:
     gpuDirectOptimized:
       enabled: true
       env: Baremetal
+    rawNvConfig:
+      - name: THIS_IS_A_SPECIAL_NVCONFIG_PARAM
+        value: "55"
+      - name: SOME_ADVANCED_NVCONFIG_PARAM
+        value: "true"
