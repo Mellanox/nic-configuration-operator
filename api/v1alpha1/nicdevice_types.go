@@ -67,6 +67,12 @@ type NicDeviceStatus struct {
 	PSID string `json:"psid"`
 	// Firmware version currently installed on the device, e.g. 22.31.1014
 	FirmwareVersion string `json:"firmwareVersion"`
+	// DPU indicates if the device is a BlueField in DPU mode
+	DPU bool `json:"dpu"`
+	// ModelName is the model name of the device, e.g. ConnectX-6 or BlueField-3
+	ModelName string `json:"modelName"`
+	// SuperNIC indicates if the device is a SuperNIC
+	SuperNIC bool `json:"superNIC"`
 	// List of ports for the device
 	Ports []NicDevicePortSpec `json:"ports"`
 	// List of conditions observed for the device

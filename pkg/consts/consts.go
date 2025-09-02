@@ -50,14 +50,17 @@ const (
 	DeviceFwMismatchReason        = "DeviceFirmwareConfigMismatch"
 	DeviceFwMismatchMessage       = "Firmware doesn't match the requested version, can't proceed with update because policy is set to Validate"
 
-	PartNumberPrefix      = "pn:"
-	SerialNumberPrefix    = "sn:"
+	PartNumberPrefix      = "PN:"
+	SerialNumberPrefix    = "SN:"
+	ModelNamePrefix       = "ID:"
 	FirmwareVersionPrefix = "fw version:"
 	PSIDPrefix            = "psid:"
 	LinkStatsPrefix       = "lnksta"
 	MaxReadReqPrefix      = "maxreadreq"
 	TrustStatePrefix      = "priority trust state:"
 	PfcEnabledPrefix      = "enabled"
+
+	SuperNIC = "SuperNIC"
 
 	NetClass = 0x02
 

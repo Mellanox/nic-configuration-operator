@@ -228,9 +228,16 @@ spec:
                   - type
                   type: object
                 type: array
+              dpu:
+                description: DPU indicates if the device is a BlueField in DPU mode
+                type: boolean
               firmwareVersion:
                 description: Firmware version currently installed on the device, e.g.
                   22.31.1014
+                type: string
+              modelName:
+                description: ModelName is the model name of the device, e.g. ConnectX-6
+                  or BlueField-3
                 type: string
               node:
                 description: Node where the device is located
@@ -264,16 +271,22 @@ spec:
               serialNumber:
                 description: Serial number of the device, e.g. MT2116X09299
                 type: string
+              superNIC:
+                description: SuperNIC indicates if the device is a SuperNIC
+                type: boolean
               type:
                 description: Type of device, e.g. ConnectX7
                 type: string
             required:
+            - dpu
             - firmwareVersion
+            - modelName
             - node
             - partNumber
             - ports
             - psid
             - serialNumber
+            - superNIC
             - type
             type: object
         type: object

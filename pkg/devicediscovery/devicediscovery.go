@@ -17,11 +17,15 @@ package devicediscovery
 
 import (
 	"strconv"
+	"strings"
 
+	"golang.org/x/net/context"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	"github.com/Mellanox/nic-configuration-operator/pkg/nvconfig"
+	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
 
 type DeviceDiscovery interface {
@@ -30,7 +34,8 @@ type DeviceDiscovery interface {
 }
 
 type deviceDiscovery struct {
-	utils DeviceDiscoveryUtils
+	utils         DeviceDiscoveryUtils
+	nvConfigUtils nvconfig.NVConfigUtils
 
 	nodeName string
 }
@@ -71,14 +76,14 @@ func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDeviceStat
 
 		log.Log.Info("Found Mellanox device", "address", device.Address, "type", device.Product.Name)
 
-		partNumber, serialNumber, err := d.utils.GetPartAndSerialNumber(device.Address)
+		vpd, err := d.utils.GetVPD(device.Address)
 		if err != nil {
 			log.Log.Error(err, "Failed to get device's part and serial numbers", "address", device.Address)
 			return nil, err
 		}
 
 		// Devices with the same serial number are ports of the same NIC, so grouping them
-		deviceStatus, ok := devices[serialNumber]
+		deviceStatus, ok := devices[vpd.SerialNumber]
 
 		if !ok {
 			firmwareVersion, psid, err := d.utils.GetFirmwareVersionAndPSID(device.Address)
@@ -87,17 +92,33 @@ func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDeviceStat
 				return nil, err
 			}
 
+			// Trim the model name to the first word, e.g. ConnectX-6 or BlueField-2
+			shortName := strings.SplitN(vpd.ModelName, " ", 2)[0]
+
+			dpu := false
+			if utils.IsBlueFieldDevice(device.Product.ID) {
+				nvConfig, err := d.nvConfigUtils.QueryNvConfig(context.Background(), device.Address, consts.BF3OperationModeParam)
+				if err != nil {
+					log.Log.Error(err, "Failed to get BlueField device's operation mode", "address", device.Address)
+					return nil, err
+				}
+				dpu = nvConfig.CurrentConfig[consts.BF3OperationModeParam][0] == consts.NvParamBF3DpuMode
+			}
+
 			deviceStatus = v1alpha1.NicDeviceStatus{
 				Node:            d.nodeName,
 				Type:            device.Product.ID,
-				SerialNumber:    serialNumber,
-				PartNumber:      partNumber,
+				SerialNumber:    vpd.SerialNumber,
+				PartNumber:      vpd.PartNumber,
+				ModelName:       shortName,
 				PSID:            psid,
 				FirmwareVersion: firmwareVersion,
+				SuperNIC:        utils.ContainsIgnoreCase(vpd.ModelName, consts.SuperNIC),
+				DPU:             dpu,
 				Ports:           []v1alpha1.NicDevicePortSpec{},
 			}
 
-			devices[serialNumber] = deviceStatus
+			devices[vpd.SerialNumber] = deviceStatus
 		}
 
 		networkInterface := d.utils.GetInterfaceName(device.Address)
@@ -117,6 +138,6 @@ func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDeviceStat
 	return devices, nil
 }
 
-func NewDeviceDiscovery(nodeName string) DeviceDiscovery {
-	return &deviceDiscovery{nodeName: nodeName, utils: newDeviceDiscoveryUtils()}
+func NewDeviceDiscovery(nodeName string, nvConfigUtils nvconfig.NVConfigUtils) DeviceDiscovery {
+	return &deviceDiscovery{nodeName: nodeName, utils: newDeviceDiscoveryUtils(), nvConfigUtils: nvConfigUtils}
 }
