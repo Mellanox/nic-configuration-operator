@@ -53,6 +53,11 @@ ConfigurationTemplateSpec is a set of configurations for the NICs
 <td><p>GPU Direct optimization settings</p></td>
 </tr>
 <tr>
+<td><code>spectrumXOptimized</code><br />
+<em><a href="#SpectrumXOptimizedSpec">SpectrumXOptimizedSpec</a></em></td>
+<td><p>Spectrum-X optimization settings. Works only with linkType==Ethernet &amp;&amp; numVfs==0. Other optimizations must be skipped or disabled. RawNvConfig must be empty.</p></td>
+</tr>
+<tr>
 <td><code>rawNvConfig</code><br />
 <em><a href="#NvConfigParam">[]NvConfigParam</a></em></td>
 <td><p>List of arbitrary nv config parameters</p></td>
@@ -878,6 +883,32 @@ RoceOptimizedSpec specifies RoCE optimization settings
 </tbody>
 </table>
 
+### SpectrumXOptimizedSpec
+
+(*Appears on:*[ConfigurationTemplateSpec](#ConfigurationTemplateSpec))
+
+SpectrumXOptimizedSpec enables Spectrum-X specific optimizations
+
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>enabled</code><br />
+<em>bool</em></td>
+<td><p>Optimize Spectrum X</p></td>
+</tr>
+</tbody>
+</table>
+
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-*Generated with `gen-crd-api-reference-docs` on git commit `b864d19`.*
+*Generated with `gen-crd-api-reference-docs` on git commit `512241e`.*
