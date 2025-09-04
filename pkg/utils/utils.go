@@ -23,7 +23,7 @@ import (
 )
 
 func IsBlueFieldDevice(deviceID string) bool {
-	return deviceID == consts.BlueField3DeviceID || deviceID == consts.BlueField2DeviceID
+	return deviceID == consts.BlueField3DeviceID || deviceID == consts.BlueField3LxDeviceID || deviceID == consts.BlueField2DeviceID
 }
 
 func ContainsIgnoreCase(s, substr string) bool {

@@ -19,6 +19,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -28,6 +30,7 @@ import (
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
 
@@ -35,10 +38,18 @@ const (
 	ValueNameTrustMode = "trust-mode"
 	ValueNamePFC       = "pfc"
 	ValueTypeString    = "string"
-	QoSConfigPath      = "/interfaces/interface/nvidia/qos/config"
-	QoSTrustModePath   = QoSConfigPath + "/" + ValueNameTrustMode
-	QoSPFCPath         = QoSConfigPath + "/" + ValueNamePFC
-	dmsClientPath      = "/opt/mellanox/doca/services/dms/dmsc"
+	ValueTypeBool      = "bool"
+	ValueTypeInt       = "int"
+
+	QoSConfigPath    = "/interfaces/interface/nvidia/qos/config"
+	QoSTrustModePath = QoSConfigPath + "/" + ValueNameTrustMode
+	QoSPFCPath       = QoSConfigPath + "/" + ValueNamePFC
+	ToSPath          = "/interfaces/interface/nvidia/roce/config/tos"
+
+	Interface = "interface"
+	Priority  = "priority"
+
+	dmsClientPath = "/opt/mellanox/doca/services/dms/dmsc"
 )
 
 // DMSClient interface defines methods for interacting with a DMS instance to manage NIC device configuration
@@ -46,9 +57,15 @@ type DMSClient interface {
 	// IsRunning returns whether the DMS instance is running
 	IsRunning() bool
 	// GetQoSSettings returns the current QoS settings (trust mode and PFC configuration)
-	GetQoSSettings(interfaceName string) (string, string, error)
+	GetQoSSettings(interfaceName string) (*v1alpha1.QosSpec, error)
 	// SetQoSSettings sets the QoS settings for the device (trust mode and PFC configuration). Settings are applied to all ports of the device.
-	SetQoSSettings(trustMode, pfc string) error
+	SetQoSSettings(spec *v1alpha1.QosSpec) error
+	// GetParameters returns the current parameters for the device
+	// returns a map of DMS paths to their values
+	GetParameters(params []types.ConfigurationParameter) (map[string]string, error)
+	// SetParameters sets the parameters for the device
+	// params is a map of DMS paths to their values
+	SetParameters(params []types.ConfigurationParameter) error
 	// InstallBFB installs the BFB file with the new firmware version on a BlueField device
 	InstallBFB(ctx context.Context, version string, bfbPath string) error
 }
@@ -95,6 +112,21 @@ func injectFilterRules(path string, filters map[string]string) string {
 func interfaceNameFilter(interfaceName string) map[string]string {
 	log.Log.V(2).Info("interfaceNameFilter", "interfaceName", interfaceName)
 	return map[string]string{"interface": fmt.Sprintf("name=%s", interfaceName)}
+}
+
+func priorityIdFilter(priorityId int) map[string]string {
+	log.Log.V(2).Info("priorityIdFilter", "priorityId", priorityId)
+	return map[string]string{"priority": fmt.Sprintf("id=%d", priorityId)}
+}
+
+func mergeFilterRules(filterRules ...map[string]string) map[string]string {
+	result := make(map[string]string)
+	for _, filterRule := range filterRules {
+		for key, value := range filterRule {
+			result[key] = value
+		}
+	}
+	return result
 }
 
 func (i *dmsInstance) RunGetPathCommand(path string, filterRules map[string]string) (string, error) {
@@ -170,19 +202,19 @@ func (i *dmsInstance) RunSetPathCommand(path, value, valueType string, filterRul
 }
 
 // GetQoSSettings returns the current QoS settings (trust mode and PFC configuration)
-func (i *dmsInstance) GetQoSSettings(interfaceName string) (string, string, error) {
+func (i *dmsInstance) GetQoSSettings(interfaceName string) (*v1alpha1.QosSpec, error) {
 	log.Log.V(2).Info("dmsInstance.GetQoSSettings()", "interfaceName", interfaceName, "device", i.device.SerialNumber)
 
 	if !i.running.Load() {
 		log.Log.V(2).Info("DMS instance not running", "device", i.device.SerialNumber)
-		return "", "", fmt.Errorf("DMS instance is not running")
+		return nil, fmt.Errorf("DMS instance is not running")
 	}
 
 	log.Log.V(2).Info("Getting trust mode", "device", i.device.SerialNumber, "interface", interfaceName)
 	trust, err := i.RunGetPathCommand(QoSTrustModePath, interfaceNameFilter(interfaceName))
 	if err != nil {
 		log.Log.V(2).Error(err, "Failed to get trust mode", "device", i.device.SerialNumber, "interface", interfaceName)
-		return "", "", fmt.Errorf("failed to get trust mode: %v", err)
+		return nil, fmt.Errorf("failed to get trust mode: %v", err)
 	}
 	log.Log.V(2).Info("Trust mode retrieved", "device", i.device.SerialNumber, "trust", trust)
 
@@ -190,7 +222,7 @@ func (i *dmsInstance) GetQoSSettings(interfaceName string) (string, string, erro
 	pfc, err := i.RunGetPathCommand(QoSPFCPath, interfaceNameFilter(interfaceName))
 	if err != nil {
 		log.Log.V(2).Error(err, "Failed to get PFC configuration", "device", i.device.SerialNumber, "interface", interfaceName)
-		return "", "", fmt.Errorf("failed to get PFC configuration: %v", err)
+		return nil, fmt.Errorf("failed to get PFC configuration: %v", err)
 	}
 	log.Log.V(2).Info("PFC configuration retrieved", "device", i.device.SerialNumber, "pfc", pfc)
 
@@ -201,19 +233,37 @@ func (i *dmsInstance) GetQoSSettings(interfaceName string) (string, string, erro
 	pfcFormatted := strings.Join(strings.Split(pfc, ""), ",")
 	log.Log.V(2).Info("Formatted PFC configuration", "device", i.device.SerialNumber, "original", pfc, "formatted", pfcFormatted)
 
-	return trust, pfcFormatted, nil
+	log.Log.V(2).Info("Getting ToS configuration", "device", i.device.SerialNumber, "interface", interfaceName)
+	tos, err := i.RunGetPathCommand(ToSPath, interfaceNameFilter(interfaceName))
+	if err != nil {
+		log.Log.V(2).Error(err, "Failed to get ToS configuration", "device", i.device.SerialNumber, "interface", interfaceName)
+		return nil, fmt.Errorf("failed to get ToS configuration: %v", err)
+	}
+	tosFormatted, err := strconv.Atoi(tos)
+	if err != nil {
+		log.Log.V(2).Error(err, "Failed to convert ToS to int", "device", i.device.SerialNumber, "interface", interfaceName)
+		return nil, fmt.Errorf("failed to convert ToS to int: %v", err)
+	}
+	log.Log.V(2).Info("ToS configuration retrieved", "device", i.device.SerialNumber, "tos", tosFormatted)
+
+	return &v1alpha1.QosSpec{
+		Trust: trust,
+		PFC:   pfcFormatted,
+		ToS:   tosFormatted,
+	}, nil
 }
 
 // SetQoSSettings sets the QoS settings for the device (trust and PFC configuration). Settings are applied to all ports of the device.
-func (i *dmsInstance) SetQoSSettings(trust, pfc string) error {
-	log.Log.V(2).Info("dmsInstance.SetQoSSettings()", "trust", trust, "pfc", pfc, "device", i.device.SerialNumber)
+func (i *dmsInstance) SetQoSSettings(spec *v1alpha1.QosSpec) error {
+	log.Log.V(2).Info("dmsInstance.SetQoSSettings()", "spec", spec, "device", i.device.SerialNumber)
 
 	if !i.running.Load() {
 		log.Log.V(2).Info("DMS instance not running", "device", i.device.SerialNumber)
 		return fmt.Errorf("DMS instance is not running")
 	}
 
-	switch trust {
+	trust := ""
+	switch spec.Trust {
 	case consts.TrustModeDscp:
 		trust = "dscp"
 	case consts.TrustModePfc:
@@ -225,8 +275,8 @@ func (i *dmsInstance) SetQoSSettings(trust, pfc string) error {
 	log.Log.V(2).Info("Normalized trust mode", "device", i.device.SerialNumber, "trust", trust)
 
 	// PFC settings are comma-separated values, e.g. "0,0,0,1,0,0,0,0". DMS requires a digit-only string, e.g. "00001000"
-	pfcFormatted := strings.ReplaceAll(pfc, ",", "")
-	log.Log.V(2).Info("Formatted PFC configuration", "device", i.device.SerialNumber, "original", pfc, "formatted", pfcFormatted)
+	pfcFormatted := strings.ReplaceAll(spec.PFC, ",", "")
+	log.Log.V(2).Info("Formatted PFC configuration", "device", i.device.SerialNumber, "original", spec.PFC, "formatted", pfcFormatted)
 
 	portCount := len(i.device.Ports)
 	log.Log.V(2).Info("Setting QoS settings on all ports", "device", i.device.SerialNumber, "portCount", portCount)
@@ -247,6 +297,14 @@ func (i *dmsInstance) SetQoSSettings(trust, pfc string) error {
 			return fmt.Errorf("failed to set PFC configuration: %v", err)
 		}
 		log.Log.V(2).Info("PFC configuration set successfully", "device", i.device.SerialNumber, "interface", port.NetworkInterface)
+
+		log.Log.V(2).Info("Setting ToS configuration", "device", i.device.SerialNumber, "port", idx+1, "interface", port.NetworkInterface)
+		err = i.RunSetPathCommand(ToSPath, fmt.Sprintf("%d", spec.ToS), ValueTypeInt, interfaceNameFilter(port.NetworkInterface))
+		if err != nil {
+			log.Log.V(2).Error(err, "Failed to set ToS configuration", "device", i.device.SerialNumber, "interface", port.NetworkInterface)
+			return fmt.Errorf("failed to set ToS configuration: %v", err)
+		}
+		log.Log.V(2).Info("ToS configuration set successfully", "device", i.device.SerialNumber, "interface", port.NetworkInterface)
 	}
 
 	log.Log.V(2).Info("QoS settings applied to all ports", "device", i.device.SerialNumber, "portCount", portCount)
@@ -291,6 +349,107 @@ func (i *dmsInstance) InstallBFB(ctx context.Context, version string, bfbPath st
 	}
 
 	log.Log.V(2).Info("BFB activated successfully", "device", i.device.SerialNumber, "version", version, "output", string(output))
+
+	return nil
+}
+
+func (i *dmsInstance) getCompareReplaceValue(param *types.ConfigurationParameter, filterRules map[string]string, value *string) error {
+	result, err := i.RunGetPathCommand(param.DMSPath, filterRules)
+	if err != nil {
+		log.Log.V(2).Error(err, "Failed to get parameter", "device", i.device.SerialNumber, "param", param)
+		return fmt.Errorf("failed to get parameter: %v", err)
+	}
+
+	if *value != "" && result != *value {
+		err = types.ValuesDoNotMatchError(*param, result)
+		log.Log.V(2).Error(err, "Failed to get parameter", "device", i.device.SerialNumber, "param", param)
+		return err
+	}
+
+	*value = result
+	return nil
+
+}
+
+func (i *dmsInstance) GetParameters(params []types.ConfigurationParameter) (map[string]string, error) {
+	log.Log.V(2).Info("dmsInstance.GetParameters()", "params", params, "device", i.device.SerialNumber)
+
+	values := make(map[string]string)
+
+	for _, param := range params {
+		paramPathParts := strings.Split(param.DMSPath, "/")
+		value := ""
+
+		if slices.Contains(paramPathParts, Interface) {
+			for _, port := range i.device.Ports {
+				filterRules := interfaceNameFilter(port.NetworkInterface)
+
+				if slices.Contains(paramPathParts, Priority) {
+					for id := 0; id < 8; id++ {
+						filterRules := mergeFilterRules(filterRules, priorityIdFilter(id))
+
+						err := i.getCompareReplaceValue(&param, filterRules, &value)
+						if err != nil {
+							return nil, err
+						}
+					}
+				} else {
+					err := i.getCompareReplaceValue(&param, filterRules, &value)
+					if err != nil {
+						return nil, err
+					}
+				}
+			}
+
+		}
+
+		value, err := i.RunGetPathCommand(param.DMSPath, nil)
+		if err != nil {
+			log.Log.V(2).Error(err, "Failed to get parameter", "device", i.device.SerialNumber, "param", param)
+			return nil, fmt.Errorf("failed to get parameter: %v", err)
+		}
+
+		values[param.DMSPath] = value
+	}
+	return values, nil
+}
+
+func (i *dmsInstance) SetParameters(params []types.ConfigurationParameter) error {
+	log.Log.V(2).Info("dmsInstance.SetParameters()", "params", params, "device", i.device.SerialNumber)
+
+	for _, param := range params {
+		paramPathParts := strings.Split(param.DMSPath, "/")
+
+		if slices.Contains(paramPathParts, Interface) {
+			for _, port := range i.device.Ports {
+				filterRules := interfaceNameFilter(port.NetworkInterface)
+
+				if slices.Contains(paramPathParts, Priority) {
+					for id := 0; id < 8; id++ {
+						filterRules := mergeFilterRules(filterRules, priorityIdFilter(id))
+
+						err := i.RunSetPathCommand(param.DMSPath, param.Value, param.ValueType, filterRules)
+
+						if err != nil {
+							return err
+						}
+					}
+
+				} else {
+					err := i.RunSetPathCommand(param.DMSPath, param.Value, param.ValueType, filterRules)
+
+					if err != nil {
+						return err
+					}
+				}
+			}
+		}
+
+		err := i.RunSetPathCommand(param.DMSPath, param.Value, param.ValueType, nil)
+		if err != nil {
+			return err
+		}
+	}
 
 	return nil
 }

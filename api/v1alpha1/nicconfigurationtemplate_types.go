@@ -52,6 +52,8 @@ type QosSpec struct {
 	// Priority-based Flow Control configuration, e.g. "0,0,0,1,0,0,0,0"
 	// +kubebuilder:validation:Pattern=`^([01],){7}[01]$`
 	PFC string `json:"pfc"`
+	// 8-bit value for type of service
+	ToS int `json:"tos,omitempty"`
 }
 
 // RoceOptimizedSpec specifies RoCE optimization settings
@@ -70,6 +72,16 @@ type GpuDirectOptimizedSpec struct {
 	Env string `json:"env"`
 }
 
+// SpectrumXOptimizedSpec enables Spectrum-X specific optimizations
+type SpectrumXOptimizedSpec struct {
+	// Optimize Spectrum X
+	Enabled bool `json:"enabled"`
+	// Version of the Spectrum-X architecture to optimize for
+	// +kubebuilder:validation:Enum=RA1.3;RA2.0
+	// +required
+	Version string `json:"version"`
+}
+
 type NvConfigParam struct {
 	// Name of the arbitrary nvconfig parameter
 	Name string `json:"name"`
@@ -78,6 +90,9 @@ type NvConfigParam struct {
 }
 
 // ConfigurationTemplateSpec is a set of configurations for the NICs
+// +kubebuilder:validation:XValidation:rule="!(has(self.spectrumXOptimized) && self.spectrumXOptimized.enabled) || (self.linkType == 'Ethernet' && self.numVfs == 1)",message="spectrumXOptimized can be enabled only when linkType=='Ethernet' and numVfs==1"
+// +kubebuilder:validation:XValidation:rule="!(has(self.spectrumXOptimized) && self.spectrumXOptimized.enabled) || !(has(self.roceOptimized) && self.roceOptimized.enabled)",message="spectrumXOptimized includes RoCE optimizations, so separate roceOptimized section must not be enabled"
+// +kubebuilder:validation:XValidation:rule="!(has(self.spectrumXOptimized) && self.spectrumXOptimized.enabled) || !has(self.rawNvConfig) || size(self.rawNvConfig) == 0",message="when spectrumXOptimized is enabled, rawNvConfig must be empty"
 type ConfigurationTemplateSpec struct {
 	// Number of VFs to be configured
 	// +required
@@ -92,11 +107,14 @@ type ConfigurationTemplateSpec struct {
 	RoceOptimized *RoceOptimizedSpec `json:"roceOptimized,omitempty"`
 	// GPU Direct optimization settings
 	GpuDirectOptimized *GpuDirectOptimizedSpec `json:"gpuDirectOptimized,omitempty"`
+	// Spectrum-X optimization settings. Works only with linkType==Ethernet && numVfs==0. Other optimizations must be skipped or disabled. RawNvConfig must be empty.
+	SpectrumXOptimized *SpectrumXOptimizedSpec `json:"spectrumXOptimized,omitempty"`
 	// List of arbitrary nv config parameters
 	RawNvConfig []NvConfigParam `json:"rawNvConfig,omitempty"`
 }
 
 // NicConfigurationTemplateSpec defines the desired state of NicConfigurationTemplate
+// +kubebuilder:validation:XValidation:rule="!(has(self.template.spectrumXOptimized) && self.template.spectrumXOptimized.enabled) || (self.nicSelector.nicType == '1023' || self.nicSelector.nicType == 'a2dc' || self.nicSelector.nicType == 'a2d9')",message="spectrumXOptimized can be enabled only for ConnectX-8 or BlueField-3 SuperNICs"
 type NicConfigurationTemplateSpec struct {
 	// NodeSelector contains labels required on the node. When empty, the template will be applied to matching devices on all nodes.
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`

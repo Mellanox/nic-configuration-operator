@@ -18,6 +18,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"maps"
 	"os"
 	"slices"
@@ -43,6 +44,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/pkg/maintenance"
 	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 	"github.com/Mellanox/nic-configuration-operator/pkg/nvconfig"
+	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 )
 
 var (
@@ -101,6 +103,12 @@ func main() {
 	// Initialize DMS manager
 	dmsManager := dms.NewDMSManager()
 
+	spectrumXConfigs, err := initSpectrumXConfigs()
+	if err != nil {
+		log.Log.Error(err, "failed to init spectrum-x configs")
+		os.Exit(1)
+	}
+
 	// Start DMS instances for all discovered devices
 	devices, err := deviceDiscovery.DiscoverNicDevices()
 	if err != nil {
@@ -120,7 +128,8 @@ func main() {
 		}
 	}()
 
-	configurationManager := configuration.NewConfigurationManager(eventRecorder, dmsManager, nvConfigUtils)
+	configurationManager := configuration.NewConfigurationManager(
+		eventRecorder, dmsManager, nvConfigUtils, spectrumXConfigs)
 	maintenanceManager := maintenance.New(mgr.GetClient(), hostUtils, nodeName, namespace)
 	firmwareManager := firmware.NewFirmwareManager(mgr.GetClient(), dmsManager, namespace)
 
@@ -176,4 +185,25 @@ func initNicFwMap(namespace string) error {
 	}
 
 	return nil
+}
+
+func initSpectrumXConfigs() (map[string]*types.SpectrumXConfig, error) {
+	spectrumXConfigs := make(map[string]*types.SpectrumXConfig)
+	entries, err := os.ReadDir("bindata/spectrum-x")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read spectrum-x directory: %w", err)
+	}
+	for _, file := range entries {
+		if file.IsDir() {
+			continue
+		}
+
+		config, err := types.LoadSpectrumXConfig("bindata/spectrum-x/" + file.Name())
+		if err != nil {
+			return nil, fmt.Errorf("failed to load spectrum-x config: %w", err)
+		}
+		spectrumXConfigs[file.Name()] = config
+	}
+
+	return spectrumXConfigs, nil
 }
