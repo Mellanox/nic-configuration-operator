@@ -20,6 +20,17 @@ import (
 	"strings"
 )
 
+// SpectrumXNVConfig represents the Spectrum-X non-volatile configuration
+type SpectrumXNVConfig struct {
+	AdaptiveRouting      bool
+	UserProgrammable     bool
+	TxSchedLocalityMode  string
+	MultipathDSCP        string
+	RTTRespDSCP          int
+	RTTRespDSCPMode      string
+	CCSteeringExtEnabled bool
+}
+
 // VPD represents the Vital Product Data of a device
 type VPD struct {
 	PartNumber   string
