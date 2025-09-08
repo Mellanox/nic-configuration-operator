@@ -53,9 +53,10 @@ type ConfigurationManager interface {
 }
 
 type configurationManager struct {
-	configurationUtils ConfigurationUtils
-	configValidation   configValidation
-	nvConfigUtils      nvconfig.NVConfigUtils
+	configurationUtils     ConfigurationUtils
+	configValidation       configValidation
+	nvConfigUtils          nvconfig.NVConfigUtils
+	spectrumXConfigManager SpectrumXConfigManager
 }
 
 // ValidateDeviceNvSpec will validate device's non-volatile spec against already applied configuration on the host
@@ -104,6 +105,19 @@ func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *
 				rebootNeeded = true
 			}
 		} else {
+			configUpdateNeeded = true
+			rebootNeeded = true
+		}
+	}
+
+	if device.Spec.Configuration.Template.SpectrumXOptimized != nil && device.Spec.Configuration.Template.SpectrumXOptimized.Enabled {
+		spectrumXConfigApplied, err := h.spectrumXConfigManager.NvConfigApplied(device)
+		if err != nil {
+			log.Log.Error(err, "failed to get spectrumx config", "device", device.Name)
+			return false, false, err
+		}
+
+		if !spectrumXConfigApplied {
 			configUpdateNeeded = true
 			rebootNeeded = true
 		}
@@ -220,6 +234,18 @@ func (h configurationManager) ApplyDeviceNvSpec(ctx context.Context, device *v1a
 		}
 	}
 
+	if device.Spec.Configuration.Template.SpectrumXOptimized != nil && device.Spec.Configuration.Template.SpectrumXOptimized.Enabled {
+		rebootNeeded, err := h.spectrumXConfigManager.ApplyNvConfig(device)
+		if err != nil {
+			log.Log.Error(err, "failed to update spectrumx config", "device", device.Name)
+			return false, err
+		}
+
+		if rebootNeeded {
+			return true, nil
+		}
+	}
+
 	log.Log.V(2).Info("nv config successfully applied to device", "device", device.Name)
 
 	return true, nil
@@ -234,6 +260,14 @@ func (h configurationManager) ApplyDeviceRuntimeSpec(device *v1alpha1.NicDevice)
 	if err != nil {
 		log.Log.Error(err, "failed to verify runtime configuration", "device", device)
 		return err
+	}
+
+	if device.Spec.Configuration.Template.SpectrumXOptimized != nil && device.Spec.Configuration.Template.SpectrumXOptimized.Enabled {
+		err := h.spectrumXConfigManager.ApplyRuntimeConfig(device)
+		if err != nil {
+			log.Log.Error(err, "failed to get spectrumx config", "device", device.Name)
+			return err
+		}
 	}
 
 	if alreadyApplied {
@@ -284,5 +318,5 @@ func (h configurationManager) ResetNicFirmware(ctx context.Context, device *v1al
 
 func NewConfigurationManager(eventRecorder record.EventRecorder, dmsManager dms.DMSManager, nvConfigUtils nvconfig.NVConfigUtils) ConfigurationManager {
 	utils := newConfigurationUtils(dmsManager)
-	return configurationManager{configurationUtils: utils, configValidation: newConfigValidation(utils, eventRecorder), nvConfigUtils: nvConfigUtils}
+	return configurationManager{configurationUtils: utils, configValidation: newConfigValidation(utils, eventRecorder), nvConfigUtils: nvConfigUtils, spectrumXConfigManager: NewSpectrumXConfigManager(dmsManager)}
 }

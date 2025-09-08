@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
 
@@ -35,10 +37,27 @@ const (
 	ValueNameTrustMode = "trust-mode"
 	ValueNamePFC       = "pfc"
 	ValueTypeString    = "string"
-	QoSConfigPath      = "/interfaces/interface/nvidia/qos/config"
-	QoSTrustModePath   = QoSConfigPath + "/" + ValueNameTrustMode
-	QoSPFCPath         = QoSConfigPath + "/" + ValueNamePFC
-	dmsClientPath      = "/opt/mellanox/doca/services/dms/dmsc"
+	ValueTypeBool      = "bool"
+	ValueTypeInt       = "int"
+	ValueTrue          = "true"
+	ValueFalse         = "false"
+
+	QoSConfigPath    = "/interfaces/interface/nvidia/qos/config"
+	QoSTrustModePath = QoSConfigPath + "/" + ValueNameTrustMode
+	QoSPFCPath       = QoSConfigPath + "/" + ValueNamePFC
+
+	dmsClientPath = "/opt/mellanox/doca/services/dms/dmsc"
+
+	AdaptiveRoutingPath     = "/nvidia/roce/config/adaptive-routing"
+	UserProgrammablePath    = "/nvidia/cc/config/user-programmable"
+	TxSchedLocalityModePath = "/nvidia/roce/config/tx-sched-locality-mode"
+	MultipathDSCPPath       = "/nvidia/roce/config/multipath-dscp"
+	RTTRespDSCPPath         = "/interfaces/interface/nvidia/roce/config/rtt-resp-dscp"
+	RTTRespDSCPModePath     = "/interfaces/interface/nvidia/roce/config/rtt-resp-dscp-mode"
+	CCSteeringExtPath       = "/nvidia/roce/config/cc-steering-ext"
+
+	ENABLED  = "ENABLED"
+	DISABLED = "DISABLED"
 )
 
 // DMSClient interface defines methods for interacting with a DMS instance to manage NIC device configuration
@@ -49,6 +68,14 @@ type DMSClient interface {
 	GetQoSSettings(interfaceName string) (string, string, error)
 	// SetQoSSettings sets the QoS settings for the device (trust mode and PFC configuration). Settings are applied to all ports of the device.
 	SetQoSSettings(trustMode, pfc string) error
+	// GetSpectrumXNVConfig returns the current Spectrum-X non-volatile configuration
+	GetSpectrumXNVConfig() (*types.SpectrumXNVConfig, error)
+	// SetSpectrumXNVConfig sets the Spectrum-X non-volatile configuration
+	SetSpectrumXNVConfig(config *types.SpectrumXNVConfig) error
+	// GetSpectrumXRuntimeConfig returns the current Spectrum-X runtime configuration
+	GetSpectrumXRuntimeConfig() (string, error)
+	// SetSpectrumXRuntimeConfig sets the Spectrum-X runtime configuration
+	SetSpectrumXRuntimeConfig(config string) error
 	// InstallBFB installs the BFB file with the new firmware version on a BlueField device
 	InstallBFB(ctx context.Context, version string, bfbPath string) error
 }
@@ -292,5 +319,137 @@ func (i *dmsInstance) InstallBFB(ctx context.Context, version string, bfbPath st
 
 	log.Log.V(2).Info("BFB activated successfully", "device", i.device.SerialNumber, "version", version, "output", string(output))
 
+	return nil
+}
+
+// GetSpectrumXNVConfig returns the current Spectrum-X non-volatile configuration
+func (i *dmsInstance) GetSpectrumXNVConfig() (*types.SpectrumXNVConfig, error) {
+	log.Log.V(2).Info("dmsInstance.GetSpectrumXNVConfig()", "device", i.device.SerialNumber)
+
+	if !i.running.Load() {
+		log.Log.V(2).Info("DMS instance not running", "device", i.device.SerialNumber)
+		return nil, fmt.Errorf("DMS instance is not running")
+	}
+
+	spectrumXNVConfig := &types.SpectrumXNVConfig{}
+
+	adaptiveRouting, err := i.RunGetPathCommand(AdaptiveRoutingPath, nil)
+	if err != nil {
+		log.Log.V(2).Error(err, "Failed to get adaptive routing", "device", i.device.SerialNumber)
+		return nil, fmt.Errorf("failed to get adaptive routing: %v", err)
+	}
+	spectrumXNVConfig.AdaptiveRouting = adaptiveRouting == ValueTrue
+
+	userProgrammable, err := i.RunGetPathCommand(UserProgrammablePath, nil)
+	if err != nil {
+		log.Log.V(2).Error(err, "Failed to get user programmable", "device", i.device.SerialNumber)
+		return nil, fmt.Errorf("failed to get user programmable: %v", err)
+	}
+	spectrumXNVConfig.UserProgrammable = userProgrammable == ValueTrue
+
+	txSchedLocalityMode, err := i.RunGetPathCommand(TxSchedLocalityModePath, nil)
+	if err != nil {
+		log.Log.V(2).Error(err, "Failed to get tx sched locality mode", "device", i.device.SerialNumber)
+		return nil, fmt.Errorf("failed to get tx sched locality mode: %v", err)
+	}
+	spectrumXNVConfig.TxSchedLocalityMode = txSchedLocalityMode
+
+	multipathDSCP, err := i.RunGetPathCommand(MultipathDSCPPath, nil)
+	if err != nil {
+		log.Log.V(2).Error(err, "Failed to get multipath DSCP", "device", i.device.SerialNumber)
+		return nil, fmt.Errorf("failed to get multipath DSCP: %v", err)
+	}
+	spectrumXNVConfig.MultipathDSCP = multipathDSCP
+
+	rttRespDSCP, err := i.RunGetPathCommand(RTTRespDSCPPath, interfaceNameFilter(i.device.Ports[0].NetworkInterface))
+	if err != nil {
+		log.Log.V(2).Error(err, "Failed to get RTT resp DSCP", "device", i.device.SerialNumber)
+		return nil, fmt.Errorf("failed to get RTT resp DSCP: %v", err)
+	}
+	spectrumXNVConfig.RTTRespDSCP, err = strconv.Atoi(rttRespDSCP)
+	if err != nil {
+		log.Log.V(2).Error(err, "Failed to convert RTT resp DSCP to int", "device", i.device.SerialNumber)
+		return nil, fmt.Errorf("failed to convert RTT resp DSCP to int: %v", err)
+	}
+
+	rttRespDSCPMode, err := i.RunGetPathCommand(RTTRespDSCPModePath, interfaceNameFilter(i.device.Ports[0].NetworkInterface))
+	if err != nil {
+		log.Log.V(2).Error(err, "Failed to get RTT resp DSCP mode", "device", i.device.SerialNumber)
+		return nil, fmt.Errorf("failed to get RTT resp DSCP mode: %v", err)
+	}
+	spectrumXNVConfig.RTTRespDSCPMode = rttRespDSCPMode
+
+	ccSteeringExtEnabled, err := i.RunGetPathCommand(CCSteeringExtPath, nil)
+	if err != nil {
+		log.Log.V(2).Error(err, "Failed to get CC steering ext enabled", "device", i.device.SerialNumber)
+		return nil, fmt.Errorf("failed to get CC steering ext enabled: %v", err)
+	}
+	spectrumXNVConfig.CCSteeringExtEnabled = ccSteeringExtEnabled == ValueTrue
+
+	return spectrumXNVConfig, nil
+}
+
+// SetSpectrumXNVConfig sets the Spectrum-X non-volatile configuration
+func (i *dmsInstance) SetSpectrumXNVConfig(config *types.SpectrumXNVConfig) error {
+	log.Log.V(2).Info("dmsInstance.SetSpectrumXNVConfig()", "device", i.device.SerialNumber, "config", config)
+
+	if !i.running.Load() {
+		log.Log.V(2).Info("DMS instance not running", "device", i.device.SerialNumber)
+		return fmt.Errorf("DMS instance is not running")
+	}
+
+	err := i.RunSetPathCommand(AdaptiveRoutingPath, fmt.Sprintf("%t", config.AdaptiveRouting), ValueTypeBool, nil)
+	if err != nil {
+		log.Log.V(2).Error(err, "Failed to set adaptive routing", "device", i.device.SerialNumber)
+		return fmt.Errorf("failed to set adaptive routing: %v", err)
+	}
+	err = i.RunSetPathCommand(UserProgrammablePath, fmt.Sprintf("%t", config.UserProgrammable), ValueTypeBool, nil)
+	if err != nil {
+		log.Log.V(2).Error(err, "Failed to set user programmable", "device", i.device.SerialNumber)
+		return fmt.Errorf("failed to set user programmable: %v", err)
+	}
+	err = i.RunSetPathCommand(TxSchedLocalityModePath, config.TxSchedLocalityMode, ValueTypeString, nil)
+	if err != nil {
+		log.Log.V(2).Error(err, "Failed to set tx sched locality mode", "device", i.device.SerialNumber)
+		return fmt.Errorf("failed to set tx sched locality mode: %v", err)
+	}
+	err = i.RunSetPathCommand(MultipathDSCPPath, config.MultipathDSCP, ValueTypeString, nil)
+	if err != nil {
+		log.Log.V(2).Error(err, "Failed to set multipath DSCP", "device", i.device.SerialNumber)
+		return fmt.Errorf("failed to set multipath DSCP: %v", err)
+	}
+	err = i.RunSetPathCommand(RTTRespDSCPPath, fmt.Sprintf("%d", config.RTTRespDSCP), ValueTypeInt, interfaceNameFilter(i.device.Ports[0].NetworkInterface))
+	if err != nil {
+		log.Log.V(2).Error(err, "Failed to set RTT resp DSCP", "device", i.device.SerialNumber)
+		return fmt.Errorf("failed to set RTT resp DSCP: %v", err)
+	}
+	err = i.RunSetPathCommand(RTTRespDSCPModePath, config.RTTRespDSCPMode, ValueTypeString, interfaceNameFilter(i.device.Ports[0].NetworkInterface))
+	if err != nil {
+		log.Log.V(2).Error(err, "Failed to set RTT resp DSCP mode", "device", i.device.SerialNumber)
+		return fmt.Errorf("failed to set RTT resp DSCP mode: %v", err)
+	}
+
+	ccSteeringExt := DISABLED
+	if config.CCSteeringExtEnabled {
+		ccSteeringExt = ENABLED
+	}
+	err = i.RunSetPathCommand(CCSteeringExtPath, ccSteeringExt, ValueTypeString, nil)
+	if err != nil {
+		log.Log.V(2).Error(err, "Failed to set CC steering ext enabled", "device", i.device.SerialNumber)
+		return fmt.Errorf("failed to set CC steering ext enabled: %v", err)
+	}
+
+	return nil
+}
+
+// GetSpectrumXRuntimeConfig returns the current Spectrum-X runtime configuration
+func (i *dmsInstance) GetSpectrumXRuntimeConfig() (string, error) {
+	log.Log.V(2).Info("dmsInstance.GetSpectrumXRuntimeConfig()", "device", i.device.SerialNumber)
+	return "", nil
+}
+
+// SetSpectrumXRuntimeConfig sets the Spectrum-X runtime configuration
+func (i *dmsInstance) SetSpectrumXRuntimeConfig(config string) error {
+	log.Log.V(2).Info("dmsInstance.SetSpectrumXRuntimeConfig()", "device", i.device.SerialNumber, "config", config)
 	return nil
 }
