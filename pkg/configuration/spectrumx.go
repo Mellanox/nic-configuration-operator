@@ -29,6 +29,9 @@ const (
 	RTT_RESP_DSCP_DEFAULT_MODE     = "RTT_RESP_DSCP_DEFAULT"
 	RTT_RESP_DSCP_DEFAULT_VALUE    = 0
 	ENABLED                        = "ENABLED"
+
+	overlay        = "none" // overlay can be none or l3evpn
+	cxCardBreakout = 1      // cx_card_breakout can be 1 or 2 for cx-7 and 2, 4 or 8 for cx-8
 )
 
 type SpectrumXConfigManager interface {

@@ -18,6 +18,8 @@ package types
 import (
 	"fmt"
 	"strings"
+
+	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 )
 
 // SpectrumXNVConfig represents the Spectrum-X non-volatile configuration
@@ -29,6 +31,14 @@ type SpectrumXNVConfig struct {
 	RTTRespDSCP          int
 	RTTRespDSCPMode      string
 	CCSteeringExtEnabled bool
+}
+
+type SpectrumXRuntimeConfig struct {
+	InterPacketGap        int  // 25 if overlay is none, 33 if l3evpn
+	BandwidthPerPort      int  // total / breackout. Total for CX8 is 800, 400 otherwise
+	CCWithCountersEnabled bool // Also check rp and np in each slot
+	DCQCNEnabled          bool // should be false
+	QoSSettings           *v1alpha1.QosSpec
 }
 
 // VPD represents the Vital Product Data of a device
