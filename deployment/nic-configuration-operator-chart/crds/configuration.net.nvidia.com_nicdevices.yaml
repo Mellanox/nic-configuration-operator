@@ -134,6 +134,9 @@ spec:
                                   e.g. "0,0,0,1,0,0,0,0"
                                 pattern: ^([01],){7}[01]$
                                 type: string
+                              tos:
+                                description: 8-bit value for type of service
+                                type: integer
                               trust:
                                 description: Trust mode for QoS settings, e.g. trust-dscp
                                 type: string

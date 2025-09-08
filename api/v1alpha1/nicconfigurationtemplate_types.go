@@ -52,6 +52,8 @@ type QosSpec struct {
 	// Priority-based Flow Control configuration, e.g. "0,0,0,1,0,0,0,0"
 	// +kubebuilder:validation:Pattern=`^([01],){7}[01]$`
 	PFC string `json:"pfc"`
+	// 8-bit value for type of service
+	ToS int `json:"tos,omitempty"`
 }
 
 // RoceOptimizedSpec specifies RoCE optimization settings
