@@ -31,6 +31,7 @@ TARGETARCH ?= $(shell go env GOARCH)
 GO_BUILD_OPTS ?= CGO_ENABLED=0 GOOS=$(TARGETOS) GOARCH=$(TARGETARCH)
 GO_LDFLAGS ?= $(VERSION_LDFLAGS)
 GO_GCFLAGS ?=
+GOPROXY ?=
 
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
@@ -128,8 +129,8 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
-	$(CONTAINER_TOOL) build -f Dockerfile -t ${OPERATOR_IMAGE_TAG} ${CURPATH}
-	$(CONTAINER_TOOL) build -f Dockerfile.nic-configuration-daemon -t ${CONFIG_DAEMON_IMAGE_TAG} ${CURPATH}
+	$(CONTAINER_TOOL) build -f Dockerfile -t ${OPERATOR_IMAGE_TAG} --build-arg GOPROXY="$(GOPROXY)" ${CURPATH}
+	$(CONTAINER_TOOL) build -f Dockerfile.nic-configuration-daemon -t ${CONFIG_DAEMON_IMAGE_TAG} --build-arg GOPROXY="$(GOPROXY)" ${CURPATH}
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
