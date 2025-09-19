@@ -258,18 +258,18 @@ var _ = Describe("ConfigurationUtils", func() {
 			mockDMSManager := &mocks.DMSManager{}
 			mockDMSClient := &mocks.DMSClient{}
 			mockDMSManager.On("GetDMSClientBySerialNumber", "serialnumber").Return(mockDMSClient, nil)
-			mockDMSClient.On("GetQoSSettings", "enp3s0f0np0").Return(trust, pfc, nil)
+			mockDMSClient.On("GetQoSSettings", "enp3s0f0np0").Return(&v1alpha1.QosSpec{Trust: trust, PFC: pfc}, nil)
 
 			h := &configurationUtils{
 				dmsManager:    mockDMSManager,
 				execInterface: nil, // not used in this test
 			}
 
-			observedTrust, observedPFC, err := h.GetTrustAndPFC(device, "enp3s0f0np0")
+			observedQoS, err := h.GetQoSSettings(device, "enp3s0f0np0")
 
 			Expect(err).NotTo(HaveOccurred())
-			Expect(observedTrust).To(Equal(trust))
-			Expect(observedPFC).To(Equal(pfc))
+			Expect(observedQoS.Trust).To(Equal(trust))
+			Expect(observedQoS.PFC).To(Equal(pfc))
 		})
 		It("should return empty string for both numbers if one is empty", func() {
 			device := &v1alpha1.NicDevice{
@@ -282,18 +282,18 @@ var _ = Describe("ConfigurationUtils", func() {
 			mockDMSManager := &mocks.DMSManager{}
 			mockDMSClient := &mocks.DMSClient{}
 			mockDMSManager.On("GetDMSClientBySerialNumber", "serialnumber").Return(mockDMSClient, nil)
-			mockDMSClient.On("GetQoSSettings", "enp3s0f0np0").Return("", "", nil)
+			mockDMSClient.On("GetQoSSettings", "enp3s0f0np0").Return(&v1alpha1.QosSpec{}, nil)
 
 			h := &configurationUtils{
 				dmsManager:    mockDMSManager,
 				execInterface: nil, // not used in this test
 			}
 
-			observedTrust, observedPFC, err := h.GetTrustAndPFC(device, "enp3s0f0np0")
+			observedQoS, err := h.GetQoSSettings(device, "enp3s0f0np0")
 
 			Expect(err).NotTo(HaveOccurred())
-			Expect(observedTrust).To(Equal(""))
-			Expect(observedPFC).To(Equal(""))
+			Expect(observedQoS.Trust).To(Equal(""))
+			Expect(observedQoS.PFC).To(Equal(""))
 		})
 	})
 	Describe("SetMaxReadRequestSize", func() {

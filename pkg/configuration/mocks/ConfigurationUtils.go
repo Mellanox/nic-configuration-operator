@@ -88,39 +88,34 @@ func (_m *ConfigurationUtils) GetPCILinkSpeed(pciAddr string) (int, error) {
 	return r0, r1
 }
 
-// GetTrustAndPFC provides a mock function with given fields: device, interfaceName
-func (_m *ConfigurationUtils) GetTrustAndPFC(device *v1alpha1.NicDevice, interfaceName string) (string, string, error) {
+// GetQoSSettings provides a mock function with given fields: device, interfaceName
+func (_m *ConfigurationUtils) GetQoSSettings(device *v1alpha1.NicDevice, interfaceName string) (*v1alpha1.QosSpec, error) {
 	ret := _m.Called(device, interfaceName)
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetTrustAndPFC")
+		panic("no return value specified for GetQoSSettings")
 	}
 
-	var r0 string
-	var r1 string
-	var r2 error
-	if rf, ok := ret.Get(0).(func(*v1alpha1.NicDevice, string) (string, string, error)); ok {
+	var r0 *v1alpha1.QosSpec
+	var r1 error
+	if rf, ok := ret.Get(0).(func(*v1alpha1.NicDevice, string) (*v1alpha1.QosSpec, error)); ok {
 		return rf(device, interfaceName)
 	}
-	if rf, ok := ret.Get(0).(func(*v1alpha1.NicDevice, string) string); ok {
+	if rf, ok := ret.Get(0).(func(*v1alpha1.NicDevice, string) *v1alpha1.QosSpec); ok {
 		r0 = rf(device, interfaceName)
 	} else {
-		r0 = ret.Get(0).(string)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1alpha1.QosSpec)
+		}
 	}
 
-	if rf, ok := ret.Get(1).(func(*v1alpha1.NicDevice, string) string); ok {
+	if rf, ok := ret.Get(1).(func(*v1alpha1.NicDevice, string) error); ok {
 		r1 = rf(device, interfaceName)
 	} else {
-		r1 = ret.Get(1).(string)
+		r1 = ret.Error(1)
 	}
 
-	if rf, ok := ret.Get(2).(func(*v1alpha1.NicDevice, string) error); ok {
-		r2 = rf(device, interfaceName)
-	} else {
-		r2 = ret.Error(2)
-	}
-
-	return r0, r1, r2
+	return r0, r1
 }
 
 // ResetNicFirmware provides a mock function with given fields: ctx, pciAddr
@@ -159,17 +154,17 @@ func (_m *ConfigurationUtils) SetMaxReadRequestSize(pciAddr string, maxReadReque
 	return r0
 }
 
-// SetTrustAndPFC provides a mock function with given fields: device, trust, pfc
-func (_m *ConfigurationUtils) SetTrustAndPFC(device *v1alpha1.NicDevice, trust string, pfc string) error {
-	ret := _m.Called(device, trust, pfc)
+// SetQoSSettings provides a mock function with given fields: device, spec
+func (_m *ConfigurationUtils) SetQoSSettings(device *v1alpha1.NicDevice, spec *v1alpha1.QosSpec) error {
+	ret := _m.Called(device, spec)
 
 	if len(ret) == 0 {
-		panic("no return value specified for SetTrustAndPFC")
+		panic("no return value specified for SetQoSSettings")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*v1alpha1.NicDevice, string, string) error); ok {
-		r0 = rf(device, trust, pfc)
+	if rf, ok := ret.Get(0).(func(*v1alpha1.NicDevice, *v1alpha1.QosSpec) error); ok {
+		r0 = rf(device, spec)
 	} else {
 		r0 = ret.Error(0)
 	}

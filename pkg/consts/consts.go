@@ -16,9 +16,10 @@ limitations under the License.
 package consts
 
 const (
-	MellanoxVendor     = "15b3"
-	BlueField3DeviceID = "a2dc"
-	BlueField2DeviceID = "a2d6"
+	MellanoxVendor       = "15b3"
+	BlueField3DeviceID   = "a2dc"
+	BlueField3LxDeviceID = "a2d9"
+	BlueField2DeviceID   = "a2d6"
 
 	Ethernet   = "Ethernet"
 	Infiniband = "Infiniband"

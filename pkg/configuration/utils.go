@@ -41,13 +41,13 @@ type ConfigurationUtils interface {
 	GetPCILinkSpeed(pciAddr string) (int, error)
 	// GetMaxReadRequestSize returns MaxReadRequest size for PCI device
 	GetMaxReadRequestSize(pciAddr string) (int, error)
-	// GetTrustAndPFC returns trust and pfc settings for network interface
-	GetTrustAndPFC(device *v1alpha1.NicDevice, interfaceName string) (string, string, error)
+	// GetQoSSettings returns trust and pfc settings for network interface
+	GetQoSSettings(device *v1alpha1.NicDevice, interfaceName string) (*v1alpha1.QosSpec, error)
 
 	// SetMaxReadRequestSize sets max read request size for PCI device
 	SetMaxReadRequestSize(pciAddr string, maxReadRequestSize int) error
-	// SetTrustAndPFC sets trust and PFC settings for a network interface
-	SetTrustAndPFC(device *v1alpha1.NicDevice, trust string, pfc string) error
+	// SetQoSSettings sets trust and PFC settings for a network interface
+	SetQoSSettings(device *v1alpha1.NicDevice, spec *v1alpha1.QosSpec) error
 
 	// ResetNicFirmware resets NIC's firmware
 	// Operation can be long, required context to be able to terminate by timeout
@@ -155,23 +155,23 @@ func (h *configurationUtils) GetMaxReadRequestSize(pciAddr string) (int, error) 
 	return -1, nil
 }
 
-// GetTrustAndPFC returns trust and pfc settings for network interface
-func (h *configurationUtils) GetTrustAndPFC(device *v1alpha1.NicDevice, interfaceName string) (string, string, error) {
+// GetQoSSettings returns trust and pfc settings for network interface
+func (h *configurationUtils) GetQoSSettings(device *v1alpha1.NicDevice, interfaceName string) (*v1alpha1.QosSpec, error) {
 	log.Log.Info("ConfigurationUtils.GetTrustAndPFC()", "device", device.Name)
 
 	dmsClient, err := h.dmsManager.GetDMSClientBySerialNumber(device.Status.SerialNumber)
 	if err != nil {
 		log.Log.Error(err, "GetTrustAndPFC(): failed to get DMS client", "device", device.Name)
-		return "", "", err
+		return nil, err
 	}
 
-	trust, pfc, err := dmsClient.GetQoSSettings(interfaceName)
+	spec, err := dmsClient.GetQoSSettings(interfaceName)
 	if err != nil {
 		log.Log.Error(err, "GetTrustAndPFC(): failed to get QoS settings", "device", device.Name)
-		return "", "", err
+		return nil, err
 	}
 
-	return trust, pfc, nil
+	return spec, nil
 }
 
 // ResetNicFirmware resets NIC's firmware
@@ -220,9 +220,9 @@ func (h *configurationUtils) SetMaxReadRequestSize(pciAddr string, maxReadReques
 	return nil
 }
 
-// SetTrustAndPFC sets trust and PFC settings for a network interface
-func (h *configurationUtils) SetTrustAndPFC(device *v1alpha1.NicDevice, trust string, pfc string) error {
-	log.Log.Info("ConfigurationUtils.SetTrustAndPFC()", "device", device.Name, "trust", trust, "pfc", pfc)
+// SetQoSSettings sets trust and PFC settings for a network interface
+func (h *configurationUtils) SetQoSSettings(device *v1alpha1.NicDevice, spec *v1alpha1.QosSpec) error {
+	log.Log.Info("ConfigurationUtils.SetTrustAndPFC()", "device", device.Name, "spec", spec)
 
 	dmsClient, err := h.dmsManager.GetDMSClientBySerialNumber(device.Status.SerialNumber)
 	if err != nil {
@@ -230,7 +230,7 @@ func (h *configurationUtils) SetTrustAndPFC(device *v1alpha1.NicDevice, trust st
 		return err
 	}
 
-	if err := dmsClient.SetQoSSettings(trust, pfc); err != nil {
+	if err := dmsClient.SetQoSSettings(spec); err != nil {
 		log.Log.Error(err, "SetTrustAndPFC(): failed to set QoS settings", "device", device.Name)
 		return err
 	}

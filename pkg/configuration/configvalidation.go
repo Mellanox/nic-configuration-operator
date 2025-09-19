@@ -48,9 +48,8 @@ type configValidation interface {
 	RuntimeConfigApplied(device *v1alpha1.NicDevice) (bool, error)
 	// CalculateDesiredRuntimeConfig returns desired values for runtime config
 	// returns int - maxReadRequestSize
-	// returns string - qos trust mode
-	// returns string - qos pfc settings
-	CalculateDesiredRuntimeConfig(device *v1alpha1.NicDevice) (int, string, string)
+	// returns *v1alpha1.QosSpec - qos settings
+	CalculateDesiredRuntimeConfig(device *v1alpha1.NicDevice) (int, *v1alpha1.QosSpec)
 }
 
 type configValidationImpl struct {
@@ -273,7 +272,7 @@ func (v *configValidationImpl) AdvancedPCISettingsEnabled(nvConfig types.NvConfi
 func (v *configValidationImpl) RuntimeConfigApplied(device *v1alpha1.NicDevice) (bool, error) {
 	ports := device.Status.Ports
 
-	desiredMaxReadReqSize, desiredTrust, desiredPfc := v.CalculateDesiredRuntimeConfig(device)
+	desiredMaxReadReqSize, desiredQoSSpec := v.CalculateDesiredRuntimeConfig(device)
 
 	if desiredMaxReadReqSize != 0 {
 		for _, port := range ports {
@@ -289,7 +288,7 @@ func (v *configValidationImpl) RuntimeConfigApplied(device *v1alpha1.NicDevice) 
 	}
 
 	// Don't validate QoS settings if neither trust nor pfc changes are requested
-	if desiredTrust == "" && desiredPfc == "" {
+	if desiredQoSSpec != nil && desiredQoSSpec.Trust == "" && desiredQoSSpec.PFC == "" && desiredQoSSpec.ToS == 0 {
 		return true, nil
 	}
 
@@ -299,12 +298,12 @@ func (v *configValidationImpl) RuntimeConfigApplied(device *v1alpha1.NicDevice) 
 			log.Log.Error(err, "cannot validate QoS settings", "device", device.Name, "port", port.PCI)
 			return false, err
 		}
-		actualTrust, actualPfc, err := v.utils.GetTrustAndPFC(device, port.NetworkInterface)
+		actualSpec, err := v.utils.GetQoSSettings(device, port.NetworkInterface)
 		if err != nil {
 			log.Log.Error(err, "cannot validate QoS settings", "device", device.Name, "port", port.PCI)
 			return false, err
 		}
-		if actualTrust != desiredTrust || actualPfc != desiredPfc {
+		if desiredQoSSpec != nil && (actualSpec.Trust != desiredQoSSpec.Trust || actualSpec.PFC != desiredQoSSpec.PFC || actualSpec.ToS != desiredQoSSpec.ToS) {
 			return false, nil
 		}
 	}
@@ -316,7 +315,7 @@ func (v *configValidationImpl) RuntimeConfigApplied(device *v1alpha1.NicDevice) 
 // returns int - maxReadRequestSize
 // returns string - qos trust mode
 // returns string - qos pfc settings
-func (v *configValidationImpl) CalculateDesiredRuntimeConfig(device *v1alpha1.NicDevice) (int, string, string) {
+func (v *configValidationImpl) CalculateDesiredRuntimeConfig(device *v1alpha1.NicDevice) (int, *v1alpha1.QosSpec) {
 	maxReadRequestSize := 0
 
 	template := device.Spec.Configuration.Template
@@ -331,22 +330,29 @@ func (v *configValidationImpl) CalculateDesiredRuntimeConfig(device *v1alpha1.Ni
 
 	// QoS settings are not available for IB devices
 	if template.LinkType == consts.Infiniband {
-		return maxReadRequestSize, "", ""
+		return maxReadRequestSize, nil
 	}
 
-	var trust, pfc string
+	var qos *v1alpha1.QosSpec = nil
 
 	if template.RoceOptimized != nil && template.RoceOptimized.Enabled {
-		trust = "dscp"
-		pfc = "0,0,0,1,0,0,0,0"
+		trust := "dscp"
+		pfc := "0,0,0,1,0,0,0,0"
+		tos := 96
 
 		if template.RoceOptimized.Qos != nil {
 			trust = template.RoceOptimized.Qos.Trust
 			pfc = template.RoceOptimized.Qos.PFC
+			tos = template.RoceOptimized.Qos.ToS
+		}
+		qos = &v1alpha1.QosSpec{
+			Trust: trust,
+			PFC:   pfc,
+			ToS:   tos,
 		}
 	}
 
-	return maxReadRequestSize, trust, pfc
+	return maxReadRequestSize, qos
 }
 
 func newConfigValidation(utils ConfigurationUtils, eventRecorder record.EventRecorder) configValidation {

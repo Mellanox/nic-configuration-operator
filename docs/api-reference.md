@@ -1,6 +1,6 @@
 Packages:
 
-- [configuration.net.nvidia.com/v1alpha1](#configurationnetnvidiacomv1alpha1)
+-   [configuration.net.nvidia.com/v1alpha1](#configurationnetnvidiacomv1alpha1)
 
 ## configuration.net.nvidia.com/v1alpha1
 
@@ -51,6 +51,11 @@ ConfigurationTemplateSpec is a set of configurations for the NICs
 <td><code>gpuDirectOptimized</code><br />
 <em><a href="#GpuDirectOptimizedSpec">GpuDirectOptimizedSpec</a></em></td>
 <td><p>GPU Direct optimization settings</p></td>
+</tr>
+<tr>
+<td><code>spectrumXOptimized</code><br />
+<em><a href="#SpectrumXOptimizedSpec">SpectrumXOptimizedSpec</a></em></td>
+<td><p>Spectrum-X optimization settings. Works only with linkType==Ethernet &amp;&amp; numVfs==0. Other optimizations must be skipped or disabled. RawNvConfig must be empty.</p></td>
 </tr>
 <tr>
 <td><code>rawNvConfig</code><br />
@@ -844,6 +849,11 @@ QosSpec specifies Quality of Service settings
 <em>string</em></td>
 <td><p>Priority-based Flow Control configuration, e.g. “0,0,0,1,0,0,0,0”</p></td>
 </tr>
+<tr>
+<td><code>tos</code><br />
+<em>int</em></td>
+<td><p>8-bit value for type of service</p></td>
+</tr>
 </tbody>
 </table>
 
@@ -878,6 +888,37 @@ RoceOptimizedSpec specifies RoCE optimization settings
 </tbody>
 </table>
 
+### SpectrumXOptimizedSpec
+
+(*Appears on:*[ConfigurationTemplateSpec](#ConfigurationTemplateSpec))
+
+SpectrumXOptimizedSpec enables Spectrum-X specific optimizations
+
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>enabled</code><br />
+<em>bool</em></td>
+<td><p>Optimize Spectrum X</p></td>
+</tr>
+<tr>
+<td><code>version</code><br />
+<em>string</em></td>
+<td><p>Version of the Spectrum-X architecture to optimize for</p></td>
+</tr>
+</tbody>
+</table>
+
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-*Generated with `gen-crd-api-reference-docs` on git commit `b864d19`.*
+*Generated with `gen-crd-api-reference-docs` on git commit `dc4b597`.*

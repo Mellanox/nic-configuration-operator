@@ -841,7 +841,7 @@ var _ = Describe("ConfigurationManager", func() {
 		Context("when applying max read request size", func() {
 			BeforeEach(func() {
 				mockConfigValidation.On("RuntimeConfigApplied", device).Return(false, nil)
-				mockConfigValidation.On("CalculateDesiredRuntimeConfig", device).Return(2048, "", "")
+				mockConfigValidation.On("CalculateDesiredRuntimeConfig", device).Return(2048, nil)
 			})
 
 			It("should apply max read request size successfully", func() {
@@ -869,11 +869,11 @@ var _ = Describe("ConfigurationManager", func() {
 		Context("when applying QoS settings", func() {
 			BeforeEach(func() {
 				mockConfigValidation.On("RuntimeConfigApplied", device).Return(false, nil)
-				mockConfigValidation.On("CalculateDesiredRuntimeConfig", device).Return(0, "trust", "pfc")
+				mockConfigValidation.On("CalculateDesiredRuntimeConfig", device).Return(0, &v1alpha1.QosSpec{Trust: "trust", PFC: "pfc"})
 			})
 
 			It("should apply QoS settings successfully", func() {
-				mockHostUtils.On("SetTrustAndPFC", device, "trust", "pfc").Return(nil)
+				mockHostUtils.On("SetQoSSettings", device, &v1alpha1.QosSpec{Trust: "trust", PFC: "pfc"}).Return(nil)
 
 				err := manager.ApplyDeviceRuntimeSpec(device)
 				Expect(err).To(BeNil())
@@ -884,7 +884,7 @@ var _ = Describe("ConfigurationManager", func() {
 
 			It("should return error if SetTrustAndPFC fails", func() {
 				setErr := errors.New("failed to set QoS settings")
-				mockHostUtils.On("SetTrustAndPFC", device, "trust", "pfc").Return(setErr)
+				mockHostUtils.On("SetQoSSettings", device, &v1alpha1.QosSpec{Trust: "trust", PFC: "pfc"}).Return(setErr)
 
 				err := manager.ApplyDeviceRuntimeSpec(device)
 				Expect(err).To(MatchError(setErr))
@@ -897,12 +897,12 @@ var _ = Describe("ConfigurationManager", func() {
 		Context("when applying both max read request size and QoS settings", func() {
 			BeforeEach(func() {
 				mockConfigValidation.On("RuntimeConfigApplied", device).Return(false, nil)
-				mockConfigValidation.On("CalculateDesiredRuntimeConfig", device).Return(2048, "trust", "pfc")
+				mockConfigValidation.On("CalculateDesiredRuntimeConfig", device).Return(2048, &v1alpha1.QosSpec{Trust: "trust", PFC: "pfc"})
 			})
 
 			It("should apply both settings successfully", func() {
 				mockHostUtils.On("SetMaxReadRequestSize", pciAddress, 2048).Return(nil)
-				mockHostUtils.On("SetTrustAndPFC", device, "trust", "pfc").Return(nil)
+				mockHostUtils.On("SetQoSSettings", device, &v1alpha1.QosSpec{Trust: "trust", PFC: "pfc"}).Return(nil)
 
 				err := manager.ApplyDeviceRuntimeSpec(device)
 				Expect(err).To(BeNil())
@@ -926,7 +926,7 @@ var _ = Describe("ConfigurationManager", func() {
 			It("should return error if SetTrustAndPFC fails", func() {
 				mockHostUtils.On("SetMaxReadRequestSize", pciAddress, 2048).Return(nil)
 				setErr := errors.New("failed to set QoS settings")
-				mockHostUtils.On("SetTrustAndPFC", device, "trust", "pfc").Return(setErr)
+				mockHostUtils.On("SetQoSSettings", device, &v1alpha1.QosSpec{Trust: "trust", PFC: "pfc"}).Return(setErr)
 
 				err := manager.ApplyDeviceRuntimeSpec(device)
 				Expect(err).To(MatchError(setErr))
