@@ -57,6 +57,9 @@ RUN chmod +x /entrypoint.sh
 # Copy sources to the container
 ADD . /workspace
 
+# Copy bindata directory to the root directory where the binary runs
+COPY bindata /bindata
+
 ENTRYPOINT ["/entrypoint.sh"]
 
 LABEL org.opencontainers.image.source=https://nvcr.io/nvidia/cloud-native/nic-configuration-daemon
