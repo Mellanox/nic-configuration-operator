@@ -48,7 +48,6 @@ nvConfig:
     dmsPath: /nvidia/roce/config/cc-steering-ext
     valueType: string
 runtimeConfig:
-  useSoftwareCCAlgorithm: true
   roce:
     - name: Trust
       value: dscp
@@ -187,3 +186,5 @@ runtimeConfig:
         value: 33
         dmsPath: /interfaces/interface/ethernet/nvidia/config/inter-packet-gap
         valueType: int
+docaCCVersion: 3.1.0
+useSoftwareCCAlgorithm: true

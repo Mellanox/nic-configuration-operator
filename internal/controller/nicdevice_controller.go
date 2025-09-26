@@ -46,6 +46,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/pkg/firmware"
 	"github.com/Mellanox/nic-configuration-operator/pkg/host"
 	"github.com/Mellanox/nic-configuration-operator/pkg/maintenance"
+	"github.com/Mellanox/nic-configuration-operator/pkg/spectrumx"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
@@ -67,6 +68,7 @@ type NicDeviceReconciler struct {
 	ConfigurationManager configuration.ConfigurationManager
 	HostUtils            host.HostUtils
 	MaintenanceManager   maintenance.MaintenanceManager
+	SpectrumXManager     spectrumx.SpectrumXManager
 
 	EventRecorder record.EventRecorder
 }
@@ -364,7 +366,16 @@ func (r *NicDeviceReconciler) applyRuntimeConfig(ctx context.Context, status *ni
 		}
 	}
 
-	err := r.ConfigurationManager.ApplyDeviceRuntimeSpec(status.device)
+	targetVersion, err := r.SpectrumXManager.GetDocaCCTargetVersion(status.device)
+	if err != nil {
+		return err
+	}
+
+	if targetVersion != "" {
+		return r.FirmwareManager.InstallDocaSpcXCC(ctx, status.device, targetVersion)
+	}
+
+	err = r.ConfigurationManager.ApplyDeviceRuntimeSpec(status.device)
 	if err != nil {
 		updateErr := r.updateConfigInProgressStatusCondition(ctx, status.device, consts.RuntimeConfigUpdateFailedReason, metav1.ConditionFalse, err.Error())
 		if updateErr != nil {

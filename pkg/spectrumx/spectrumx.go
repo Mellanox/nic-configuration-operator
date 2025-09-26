@@ -13,27 +13,47 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package configuration
+package spectrumx
 
 import (
 	"fmt"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/dms"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
+	execUtils "k8s.io/utils/exec"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-type SpectrumXConfigManager interface {
+type SpectrumXManager interface {
 	NvConfigApplied(device *v1alpha1.NicDevice) (bool, error)
 	ApplyNvConfig(device *v1alpha1.NicDevice) (bool, error)
 	RuntimeConfigApplied(device *v1alpha1.NicDevice) (bool, error)
 	ApplyRuntimeConfig(device *v1alpha1.NicDevice) error
+	GetDocaCCTargetVersion(device *v1alpha1.NicDevice) (string, error)
+	RunDocaSpcXCC(port v1alpha1.NicDevicePortSpec) error
 }
 
 type spectrumXConfigManager struct {
 	spectrumXConfigs map[string]*types.SpectrumXConfig
 	dmsManager       dms.DMSManager
+	execInterface    execUtils.Interface
+
+	ccProcesses map[string]*ccProcess
+}
+
+type ccProcess struct {
+	port v1alpha1.NicDevicePortSpec
+	cmd  execUtils.Cmd
+
+	running atomic.Bool
+
+	// Error handling with mutex protection
+	errMutex sync.RWMutex
+	cmdErr   error
 }
 
 func (m *spectrumXConfigManager) NvConfigApplied(device *v1alpha1.NicDevice) (bool, error) {
@@ -120,6 +140,7 @@ func (m *spectrumXConfigManager) RuntimeConfigApplied(device *v1alpha1.NicDevice
 		return false, err
 	}
 
+	log.Log.V(2).Info("SpectrumXConfigManager.RuntimeConfigApplied(): checking RoCE config", "device", device.Name)
 	roceApplied, err := parametersApplied(device, desiredConfig.RuntimeConfig.Roce, dmsClient)
 	if err != nil {
 		log.Log.Error(err, "RuntimeConfigApplied(): failed to check if RoCE config is applied", "device", device.Name)
@@ -130,6 +151,7 @@ func (m *spectrumXConfigManager) RuntimeConfigApplied(device *v1alpha1.NicDevice
 		return false, nil
 	}
 
+	log.Log.V(2).Info("SpectrumXConfigManager.RuntimeConfigApplied(): checking Adaptive Routing config", "device", device.Name)
 	adaptiveRoutingApplied, err := parametersApplied(device, desiredConfig.RuntimeConfig.AdaptiveRouting, dmsClient)
 	if err != nil {
 		log.Log.Error(err, "RuntimeConfigApplied(): failed to check if Adaptive Routing config is applied", "device", device.Name)
@@ -140,8 +162,16 @@ func (m *spectrumXConfigManager) RuntimeConfigApplied(device *v1alpha1.NicDevice
 		return false, nil
 	}
 
-	// TODO check if congestion control algorithm is enabled
+	log.Log.V(2).Info("SpectrumXConfigManager.RuntimeConfigApplied(): running DOCA SPC-X CC algorithm", "device", device.Name)
+	for _, port := range device.Status.Ports {
+		err = m.RunDocaSpcXCC(port)
+		if err != nil {
+			log.Log.Error(err, "ApplyRuntimeConfig(): failed to run DOCA SPC-X CC", "device", device.Name)
+			return false, err
+		}
+	}
 
+	log.Log.V(2).Info("SpectrumXConfigManager.RuntimeConfigApplied(): checking Congestion Control config", "device", device.Name)
 	congestionControlApplied, err := parametersApplied(device, desiredConfig.RuntimeConfig.CongestionControl, dmsClient)
 	if err != nil {
 		log.Log.Error(err, "RuntimeConfigApplied(): failed to check if Congestion Control config is applied", "device", device.Name)
@@ -170,20 +200,30 @@ func (m *spectrumXConfigManager) ApplyRuntimeConfig(device *v1alpha1.NicDevice) 
 		return err
 	}
 
+	log.Log.V(2).Info("SpectrumXConfigManager.ApplyRuntimeConfig(): setting RoCE config", "device", device.Name)
 	err = dmsClient.SetParameters(desiredConfig.RuntimeConfig.Roce)
 	if err != nil {
 		log.Log.Error(err, "ApplyRuntimeConfig(): failed to set Spectrum-X RoCE config", "device", device.Name)
 		return err
 	}
 
+	log.Log.V(2).Info("SpectrumXConfigManager.ApplyRuntimeConfig(): setting Adaptive Routing config", "device", device.Name)
 	err = dmsClient.SetParameters(desiredConfig.RuntimeConfig.AdaptiveRouting)
 	if err != nil {
 		log.Log.Error(err, "ApplyRuntimeConfig(): failed to set Spectrum-X Adaptive Routing config", "device", device.Name)
 		return err
 	}
 
-	// TODO enable congestion control algorithm first
+	log.Log.V(2).Info("SpectrumXConfigManager.ApplyRuntimeConfig(): running DOCA SPC-X CC algorithm", "device", device.Name)
+	for _, port := range device.Status.Ports {
+		err = m.RunDocaSpcXCC(port)
+		if err != nil {
+			log.Log.Error(err, "ApplyRuntimeConfig(): failed to run DOCA SPC-X CC", "device", device.Name)
+			return err
+		}
+	}
 
+	log.Log.V(2).Info("SpectrumXConfigManager.ApplyRuntimeConfig(): setting Congestion Control config", "device", device.Name)
 	err = dmsClient.SetParameters(desiredConfig.RuntimeConfig.CongestionControl)
 	if err != nil {
 		log.Log.Error(err, "ApplyRuntimeConfig(): failed to set Spectrum-X Congestion Control config", "device", device.Name)
@@ -195,6 +235,81 @@ func (m *spectrumXConfigManager) ApplyRuntimeConfig(device *v1alpha1.NicDevice) 
 	return nil
 }
 
-func NewSpectrumXConfigManager(dmsManager dms.DMSManager, spectrumXConfigs map[string]*types.SpectrumXConfig) SpectrumXConfigManager {
-	return &spectrumXConfigManager{dmsManager: dmsManager, spectrumXConfigs: spectrumXConfigs}
+func (m *spectrumXConfigManager) GetDocaCCTargetVersion(device *v1alpha1.NicDevice) (string, error) {
+	if device.Spec.Configuration == nil || device.Spec.Configuration.Template == nil || device.Spec.Configuration.Template.SpectrumXOptimized == nil {
+		log.Log.V(2).Info("SpectrumXConfigManager.GetDocaCCTargetVersion(): device SPC-X spec is empty, no DOCA SPC-X CC required", "device", device.Name)
+		return "", nil
+	}
+
+	spcXVersion := device.Spec.Configuration.Template.SpectrumXOptimized.Version
+	config, found := m.spectrumXConfigs[spcXVersion]
+	if !found {
+		return "", fmt.Errorf("spectrumx config not found for version %s", spcXVersion)
+	}
+
+	if config.UseSoftwareCCAlgorithm {
+		log.Log.V(2).Info("SpectrumXConfigManager.GetDocaCCTargetVersion(): using software CC algorithm", "device", device.Name, "version", config.DocaCCVersion)
+		return config.DocaCCVersion, nil
+	}
+
+	return "", nil
+}
+
+func (m *spectrumXConfigManager) RunDocaSpcXCC(port v1alpha1.NicDevicePortSpec) error {
+	log.Log.Info("SpectrumXConfigManager.RunDocaSpcXCC()", "port", port.PCI)
+
+	runningCCProcess, found := m.ccProcesses[port.PCI]
+	if found && runningCCProcess.running.Load() {
+		log.Log.V(2).Info("SpectrumXConfigManager.RunDocaSpcXCC(): CC process already running", "port", port.PCI)
+		return nil
+	}
+
+	cmd := m.execInterface.Command("/opt/mellanox/doca/tools/doca_spcx_cc", "--device", port.RdmaInterface)
+
+	process := &ccProcess{
+		port: port,
+		cmd:  cmd,
+	}
+
+	process.running.Store(true)
+
+	go func() {
+		output, err := process.cmd.Output()
+		if err != nil {
+			process.errMutex.Lock()
+			process.cmdErr = err
+			process.errMutex.Unlock()
+			log.Log.Error(err, "SpectrumXConfigManager.RunDocaSpcXCC(): Failed to run CC process", "port", port.PCI)
+		}
+
+		log.Log.V(2).Info("SpectrumXConfigManager.RunDocaSpcXCC(): CC process output", "port", port.PCI, "output", string(output))
+		process.running.Store(false)
+	}()
+
+	log.Log.V(2).Info("Waiting 3s for DOCA SPC-X CC to start", "port", port.PCI)
+	time.Sleep(3 * time.Second)
+
+	if !process.running.Load() {
+		process.errMutex.RLock()
+		cmdErr := process.cmdErr
+		process.errMutex.RUnlock()
+
+		if cmdErr != nil {
+			log.Log.Error(cmdErr, "Failed to start DOCA SPC-X CC", "port", port.PCI)
+			return fmt.Errorf("failed to start DOCA SPC-X CC for port %s: %v", port.PCI, cmdErr)
+		}
+		return fmt.Errorf("failed to start DOCA SPC-X CC for port %s: unknown error", port.PCI)
+	}
+
+	log.Log.V(2).Info("DOCA SPC-X CC process started", "port", port.PCI)
+
+	m.ccProcesses[port.PCI] = process
+
+	log.Log.Info("Started DOCA SPC-X CC process", "port", port.PCI)
+
+	return nil
+}
+
+func NewSpectrumXConfigManager(dmsManager dms.DMSManager, spectrumXConfigs map[string]*types.SpectrumXConfig) SpectrumXManager {
+	return &spectrumXConfigManager{dmsManager: dmsManager, spectrumXConfigs: spectrumXConfigs, execInterface: execUtils.New()}
 }
