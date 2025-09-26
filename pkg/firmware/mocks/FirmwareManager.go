@@ -33,6 +33,24 @@ func (_m *FirmwareManager) BurnNicFirmware(ctx context.Context, device *v1alpha1
 	return r0
 }
 
+// InstallDocaSpcXCC provides a mock function with given fields: ctx, device, targetVersion
+func (_m *FirmwareManager) InstallDocaSpcXCC(ctx context.Context, device *v1alpha1.NicDevice, targetVersion string) error {
+	ret := _m.Called(ctx, device, targetVersion)
+
+	if len(ret) == 0 {
+		panic("no return value specified for InstallDocaSpcXCC")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *v1alpha1.NicDevice, string) error); ok {
+		r0 = rf(ctx, device, targetVersion)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // ValidateRequestedFirmwareSource provides a mock function with given fields: ctx, device
 func (_m *FirmwareManager) ValidateRequestedFirmwareSource(ctx context.Context, device *v1alpha1.NicDevice) (string, error) {
 	ret := _m.Called(ctx, device)

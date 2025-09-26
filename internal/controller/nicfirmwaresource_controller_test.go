@@ -153,7 +153,7 @@ var _ = Describe("NicFirmwareTemplate Controller", func() {
 			firmwareProvisioner.On("AddFirmwareBinariesToCacheByMetadata", crName).
 				Return(nil)
 
-			firmwareProvisioner.On("ValidateCache", crName).
+			firmwareProvisioner.On("ValidateFirmwareBinariesCache", crName).
 				Return(versionsMap, nil)
 
 			createCR(crName, crNamespace)
@@ -171,7 +171,7 @@ var _ = Describe("NicFirmwareTemplate Controller", func() {
 
 			firmwareProvisioner.AssertNotCalled(GinkgoT(), "DownloadAndUnzipFirmwareArchives", crName, []string{}, true)
 			firmwareProvisioner.AssertNotCalled(GinkgoT(), "AddFirmwareBinariesToCacheByMetadata", crName)
-			firmwareProvisioner.AssertNotCalled(GinkgoT(), "ValidateCache", crName)
+			firmwareProvisioner.AssertNotCalled(GinkgoT(), "ValidateFirmwareBinariesCache", crName)
 
 			createCR(crName, crNamespace)
 
@@ -192,7 +192,7 @@ var _ = Describe("NicFirmwareTemplate Controller", func() {
 			firmwareProvisioner.On("AddFirmwareBinariesToCacheByMetadata", crName).
 				Return(nil)
 
-			firmwareProvisioner.On("ValidateCache", crName).
+			firmwareProvisioner.On("ValidateFirmwareBinariesCache", crName).
 				Return(versionsMap, nil)
 
 			createCR(crName, crNamespace)
@@ -220,7 +220,7 @@ var _ = Describe("NicFirmwareTemplate Controller", func() {
 			firmwareProvisioner.On("AddFirmwareBinariesToCacheByMetadata", crName).
 				Return(nil)
 
-			firmwareProvisioner.On("ValidateCache", crName).
+			firmwareProvisioner.On("ValidateFirmwareBinariesCache", crName).
 				Return(versionsMap, nil)
 
 			createCR(crName, crNamespace)
@@ -254,7 +254,7 @@ var _ = Describe("NicFirmwareTemplate Controller", func() {
 				Return(errors.New(errMsg))
 
 			firmwareProvisioner.AssertNotCalled(GinkgoT(), "AddFirmwareBinariesToCacheByMetadata", crName)
-			firmwareProvisioner.AssertNotCalled(GinkgoT(), "ValidateCache", crName)
+			firmwareProvisioner.AssertNotCalled(GinkgoT(), "ValidateFirmwareBinariesCache", crName)
 
 			createCR(crName, crNamespace)
 
@@ -279,7 +279,7 @@ var _ = Describe("NicFirmwareTemplate Controller", func() {
 				}).
 				Return(nil)
 
-			firmwareProvisioner.On("ValidateCache", crName).
+			firmwareProvisioner.On("ValidateFirmwareBinariesCache", crName).
 				Return(versionsMap, nil)
 
 			createCR(crName, crNamespace)
@@ -314,7 +314,7 @@ var _ = Describe("NicFirmwareTemplate Controller", func() {
 			firmwareProvisioner.On("AddFirmwareBinariesToCacheByMetadata", crName).
 				Return(errors.New(errMsg))
 
-			firmwareProvisioner.AssertNotCalled(GinkgoT(), "ValidateCache", crName)
+			firmwareProvisioner.AssertNotCalled(GinkgoT(), "ValidateFirmwareBinariesCache", crName)
 
 			createCR(crName, crNamespace)
 
@@ -345,8 +345,9 @@ var _ = Describe("NicFirmwareTemplate Controller", func() {
 					Namespace: namespace,
 				},
 				Spec: v1alpha1.NicFirmwareSourceSpec{
-					BinUrlSources: []string{"https://firmware.example.com/fwA.zip"},
-					BFBUrlSource:  "https://firmware.example.com/firmware.bfb",
+					BinUrlSources:       []string{"https://firmware.example.com/fwA.zip"},
+					BFBUrlSource:        "https://firmware.example.com/firmware.bfb",
+					DocaSpcXCCUrlSource: "https://firmware.example.com/doca-spc-x-pcc.bin",
 				},
 			}
 			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
@@ -389,7 +390,7 @@ var _ = Describe("NicFirmwareTemplate Controller", func() {
 			firmwareProvisioner.AssertNotCalled(GinkgoT(), "VerifyCachedBinaries")
 			firmwareProvisioner.AssertNotCalled(GinkgoT(), "DownloadAndUnzipFirmwareArchives")
 			firmwareProvisioner.AssertNotCalled(GinkgoT(), "AddFirmwareBinariesToCacheByMetadata")
-			firmwareProvisioner.AssertNotCalled(GinkgoT(), "ValidateCache")
+			firmwareProvisioner.AssertNotCalled(GinkgoT(), "ValidateFirmwareBinariesCache")
 		})
 
 		It("should skip BFB download when already cached", func() {
@@ -438,7 +439,7 @@ var _ = Describe("NicFirmwareTemplate Controller", func() {
 			firmwareProvisioner.On("AddFirmwareBinariesToCacheByMetadata", crName).
 				Return(nil)
 
-			firmwareProvisioner.On("ValidateCache", crName).
+			firmwareProvisioner.On("ValidateFirmwareBinariesCache", crName).
 				Return(versionsMap, nil)
 
 			// BFB processing
@@ -451,11 +452,101 @@ var _ = Describe("NicFirmwareTemplate Controller", func() {
 			firmwareProvisioner.On("ValidateBFB", crName).
 				Return(bfbVersions, nil)
 
+			// DOCA processing
+			firmwareProvisioner.On("VerifyCachedDocaSpcXCC", crName, "https://firmware.example.com/doca-spc-x-pcc.bin").
+				Return(true, nil)
+			firmwareProvisioner.On("DownloadDocaSpcXCC", crName, "https://firmware.example.com/doca-spc-x-pcc.bin").
+				Return("doca-spc-x-pcc.bin", nil)
+			firmwareProvisioner.On("ValidateDocaSpcXCC", crName).
+				Return("1.2.3", nil)
+
 			createMixedCR(crName, crNamespace)
 
 			ValidateCRStatusAndReason(crName, crNamespace, consts.FirmwareSourceSuccessStatus, "")
 			ValidateCRReportedVersions(crName, crNamespace, versionsMap)
 			ValidateCRBFBVersions(crName, crNamespace, bfbVersions)
+			Eventually(func() string {
+				cr, err := getCR(crName, crNamespace)
+				Expect(err).NotTo(HaveOccurred())
+				return cr.Status.DocaSpcXCCVersion
+			}).Should(Equal("1.2.3"))
+		})
+
+		It("should handle DOCA SPC-X PCC only CR", func() {
+			firmwareProvisioner.On("IsFWStorageAvailable").Return(nil)
+			cr := &v1alpha1.NicFirmwareSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      crName,
+					Namespace: crNamespace,
+				},
+				Spec: v1alpha1.NicFirmwareSourceSpec{
+					DocaSpcXCCUrlSource: "https://firmware.example.com/doca-spc-x-pcc.bin",
+				},
+			}
+			firmwareProvisioner.On("VerifyCachedDocaSpcXCC", crName, "https://firmware.example.com/doca-spc-x-pcc.bin").Return(true, nil)
+			firmwareProvisioner.On("DownloadDocaSpcXCC", crName, "https://firmware.example.com/doca-spc-x-pcc.bin").Return("doca-spc-x-pcc.bin", nil)
+			firmwareProvisioner.On("ValidateDocaSpcXCC", crName).Return("4.5.6", nil)
+
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+			ValidateCRStatusAndReason(crName, crNamespace, consts.FirmwareSourceSuccessStatus, "")
+			Eventually(func() string {
+				cr, err := getCR(crName, crNamespace)
+				Expect(err).NotTo(HaveOccurred())
+				return cr.Status.DocaSpcXCCVersion
+			}).Should(Equal("4.5.6"))
+		})
+
+		It("should set CacheVerificationFailed when DOCA cache verification fails", func() {
+			firmwareProvisioner.On("IsFWStorageAvailable").Return(nil)
+			cr := &v1alpha1.NicFirmwareSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      crName,
+					Namespace: crNamespace,
+				},
+				Spec: v1alpha1.NicFirmwareSourceSpec{
+					DocaSpcXCCUrlSource: "https://firmware.example.com/doca-spc-x-pcc.bin",
+				},
+			}
+			firmwareProvisioner.On("VerifyCachedDocaSpcXCC", crName, "https://firmware.example.com/doca-spc-x-pcc.bin").Return(false, errors.New("verify error"))
+
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+			ValidateCRStatusAndReason(crName, crNamespace, consts.FirmwareSourceCacheVerificationFailedStatus, "verify error")
+		})
+
+		It("should set DownloadFailed when DOCA download fails", func() {
+			firmwareProvisioner.On("IsFWStorageAvailable").Return(nil)
+			cr := &v1alpha1.NicFirmwareSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      crName,
+					Namespace: crNamespace,
+				},
+				Spec: v1alpha1.NicFirmwareSourceSpec{
+					DocaSpcXCCUrlSource: "https://firmware.example.com/doca-spc-x-pcc.bin",
+				},
+			}
+			firmwareProvisioner.On("VerifyCachedDocaSpcXCC", crName, "https://firmware.example.com/doca-spc-x-pcc.bin").Return(true, nil)
+			firmwareProvisioner.On("DownloadDocaSpcXCC", crName, "https://firmware.example.com/doca-spc-x-pcc.bin").Return("", errors.New("download error"))
+
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+			ValidateCRStatusAndReason(crName, crNamespace, consts.FirmwareSourceDownloadFailedStatus, "download error")
+		})
+
+		It("should set ProcessingFailed when DOCA validation fails", func() {
+			firmwareProvisioner.On("IsFWStorageAvailable").Return(nil)
+			cr := &v1alpha1.NicFirmwareSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      crName,
+					Namespace: crNamespace,
+				},
+				Spec: v1alpha1.NicFirmwareSourceSpec{
+					DocaSpcXCCUrlSource: "https://firmware.example.com/doca-spc-x-pcc.bin",
+				},
+			}
+			firmwareProvisioner.On("VerifyCachedDocaSpcXCC", crName, "https://firmware.example.com/doca-spc-x-pcc.bin").Return(false, nil)
+			firmwareProvisioner.On("ValidateDocaSpcXCC", crName).Return("", errors.New("validation error"))
+
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+			ValidateCRStatusAndReason(crName, crNamespace, consts.FirmwareSourceProcessingFailedStatus, "validation error")
 		})
 
 		It("should set CacheVerificationFailed status if BFB cache verification fails", func() {
@@ -546,7 +637,7 @@ var _ = Describe("NicFirmwareTemplate Controller", func() {
 			firmwareProvisioner.On("AddFirmwareBinariesToCacheByMetadata", crName).
 				Return(nil)
 
-			firmwareProvisioner.On("ValidateCache", crName).
+			firmwareProvisioner.On("ValidateFirmwareBinariesCache", crName).
 				Return(versionsMap, nil)
 
 			// BFB processing fails
@@ -636,7 +727,7 @@ var _ = Describe("NicFirmwareTemplate Controller", func() {
 			firmwareProvisioner.On("AddFirmwareBinariesToCacheByMetadata", crName).
 				Return(nil)
 
-			firmwareProvisioner.On("ValidateCache", crName).
+			firmwareProvisioner.On("ValidateFirmwareBinariesCache", crName).
 				Return(map[string][]string{}, nil)
 
 			cr := &v1alpha1.NicFirmwareSource{
@@ -682,7 +773,7 @@ var _ = Describe("NicFirmwareTemplate Controller", func() {
 			firmwareProvisioner.On("AddFirmwareBinariesToCacheByMetadata", crName).
 				Return(nil)
 
-			firmwareProvisioner.On("ValidateCache", crName).
+			firmwareProvisioner.On("ValidateFirmwareBinariesCache", crName).
 				Return(map[string][]string{}, nil)
 
 			cr := &v1alpha1.NicFirmwareSource{

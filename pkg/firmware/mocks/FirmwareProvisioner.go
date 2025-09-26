@@ -91,6 +91,34 @@ func (_m *FirmwareProvisioner) DownloadBFB(cacheName string, url string) (string
 	return r0, r1
 }
 
+// DownloadDocaSpcXCC provides a mock function with given fields: cacheName, url
+func (_m *FirmwareProvisioner) DownloadDocaSpcXCC(cacheName string, url string) (string, error) {
+	ret := _m.Called(cacheName, url)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DownloadDocaSpcXCC")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, string) (string, error)); ok {
+		return rf(cacheName, url)
+	}
+	if rf, ok := ret.Get(0).(func(string, string) string); ok {
+		r0 = rf(cacheName, url)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(string, string) error); ok {
+		r1 = rf(cacheName, url)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // IsFWStorageAvailable provides a mock function with no fields
 func (_m *FirmwareProvisioner) IsFWStorageAvailable() error {
 	ret := _m.Called()
@@ -139,12 +167,40 @@ func (_m *FirmwareProvisioner) ValidateBFB(cacheName string) (map[string]string,
 	return r0, r1
 }
 
-// ValidateCache provides a mock function with given fields: cacheName
-func (_m *FirmwareProvisioner) ValidateCache(cacheName string) (map[string][]string, error) {
+// ValidateDocaSpcXCC provides a mock function with given fields: cacheName
+func (_m *FirmwareProvisioner) ValidateDocaSpcXCC(cacheName string) (string, error) {
 	ret := _m.Called(cacheName)
 
 	if len(ret) == 0 {
-		panic("no return value specified for ValidateCache")
+		panic("no return value specified for ValidateDocaSpcXCC")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (string, error)); ok {
+		return rf(cacheName)
+	}
+	if rf, ok := ret.Get(0).(func(string) string); ok {
+		r0 = rf(cacheName)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(cacheName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// ValidateFirmwareBinariesCache provides a mock function with given fields: cacheName
+func (_m *FirmwareProvisioner) ValidateFirmwareBinariesCache(cacheName string) (map[string][]string, error) {
+	ret := _m.Called(cacheName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ValidateFirmwareBinariesCache")
 	}
 
 	var r0 map[string][]string
@@ -220,6 +276,34 @@ func (_m *FirmwareProvisioner) VerifyCachedBinaries(cacheName string, urls []str
 
 	if rf, ok := ret.Get(1).(func(string, []string) error); ok {
 		r1 = rf(cacheName, urls)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// VerifyCachedDocaSpcXCC provides a mock function with given fields: cacheName, url
+func (_m *FirmwareProvisioner) VerifyCachedDocaSpcXCC(cacheName string, url string) (bool, error) {
+	ret := _m.Called(cacheName, url)
+
+	if len(ret) == 0 {
+		panic("no return value specified for VerifyCachedDocaSpcXCC")
+	}
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, string) (bool, error)); ok {
+		return rf(cacheName, url)
+	}
+	if rf, ok := ret.Get(0).(func(string, string) bool); ok {
+		r0 = rf(cacheName, url)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(string, string) error); ok {
+		r1 = rf(cacheName, url)
 	} else {
 		r1 = ret.Error(1)
 	}

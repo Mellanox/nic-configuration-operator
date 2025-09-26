@@ -28,6 +28,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	"github.com/Mellanox/nic-configuration-operator/pkg/dms"
 	"github.com/Mellanox/nic-configuration-operator/pkg/nvconfig"
+	"github.com/Mellanox/nic-configuration-operator/pkg/spectrumx"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 )
 
@@ -56,7 +57,7 @@ type configurationManager struct {
 	configurationUtils     ConfigurationUtils
 	configValidation       configValidation
 	nvConfigUtils          nvconfig.NVConfigUtils
-	spectrumXConfigManager SpectrumXConfigManager
+	spectrumXConfigManager spectrumx.SpectrumXManager
 }
 
 // ValidateDeviceNvSpec will validate device's non-volatile spec against already applied configuration on the host
@@ -326,7 +327,7 @@ func (h configurationManager) ResetNicFirmware(ctx context.Context, device *v1al
 	return nil
 }
 
-func NewConfigurationManager(eventRecorder record.EventRecorder, dmsManager dms.DMSManager, nvConfigUtils nvconfig.NVConfigUtils, spectrumXConfigs map[string]*types.SpectrumXConfig) ConfigurationManager {
+func NewConfigurationManager(eventRecorder record.EventRecorder, dmsManager dms.DMSManager, nvConfigUtils nvconfig.NVConfigUtils, spectrumXConfigManager spectrumx.SpectrumXManager) ConfigurationManager {
 	utils := newConfigurationUtils(dmsManager)
-	return configurationManager{configurationUtils: utils, configValidation: newConfigValidation(utils, eventRecorder), nvConfigUtils: nvConfigUtils, spectrumXConfigManager: NewSpectrumXConfigManager(dmsManager, spectrumXConfigs)}
+	return configurationManager{configurationUtils: utils, configValidation: newConfigValidation(utils, eventRecorder), nvConfigUtils: nvConfigUtils, spectrumXConfigManager: spectrumXConfigManager}
 }

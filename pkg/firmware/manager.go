@@ -50,6 +50,11 @@ type FirmwareManager interface {
 	// BurnNicFirmware will update the device's FW to the requested version
 	// returns error - there were errors while updating firmware
 	BurnNicFirmware(ctx context.Context, device *v1alpha1.NicDevice, version string) error
+
+	// InstallDocaSpcXCC will validate and install the DOCA SPC-X CC package if provided in the FirmwareSource
+	// If already installed, results in no-op. If package version doesn't match targetVersion, returns an error.
+	// returns error - DOCA SPC-X PCC .deb package is not ready or there are errors
+	InstallDocaSpcXCC(ctx context.Context, device *v1alpha1.NicDevice, targetVersion string) error
 }
 
 type firmwareManager struct {
@@ -114,6 +119,73 @@ func (f firmwareManager) ValidateRequestedFirmwareSource(ctx context.Context, de
 	default:
 		return "", types.FirmwareSourceNotReadyError(fwSourceName, status)
 	}
+}
+
+func (f firmwareManager) InstallDocaSpcXCC(ctx context.Context, device *v1alpha1.NicDevice, targetVersion string) error {
+	log.Log.Info("FirmwareManager.InstallDocaSpcXCC()", "device", device.Name, "targetVersion", targetVersion)
+
+	if device.Spec.Firmware == nil {
+		return errors.New("device's firmware spec is empty")
+	}
+
+	fwSourceName := device.Spec.Firmware.NicFirmwareSourceRef
+	fwSourceObj := v1alpha1.NicFirmwareSource{}
+	err := f.client.Get(ctx, k8sTypes.NamespacedName{Name: fwSourceName, Namespace: f.namespace}, &fwSourceObj)
+	if err != nil {
+		log.Log.Error(err, "failed to get NicFirmwareSource obj", "name", fwSourceName)
+		return err
+	}
+
+	provisionedVersion := fwSourceObj.Status.DocaSpcXCCVersion
+
+	if provisionedVersion != targetVersion {
+		return fmt.Errorf("DOCA SPC-X CC version (%s) doesn't match target version (%s)", provisionedVersion, targetVersion)
+	}
+
+	installedVersion := f.utils.GetInstalledDebPackageVersion("doca-spcx-cc")
+
+	if installedVersion == targetVersion {
+		log.Log.Info("DOCA SPC-X CC is already installed", "installedVersion", installedVersion, "targetVersion", targetVersion)
+		return nil
+	}
+
+	cacheDir := path.Join(f.cacheRootDir, fwSourceName, consts.DocaSpcXCCFolder)
+	docaSpcXCCPath := ""
+	err = filepath.WalkDir(cacheDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if strings.EqualFold(filepath.Ext(d.Name()), consts.DebPackageExtension) {
+			log.Log.V(2).Info("Found .deb package file", "path", path)
+			if docaSpcXCCPath != "" {
+				return fmt.Errorf("found second DOCA SPC-X CC file in the cache: %s", path)
+			}
+
+			docaSpcXCCPath = path
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		log.Log.Error(err, "error occurred while searching for DOCA SPC-X CC package", "cacheDir", cacheDir)
+		return err
+	}
+
+	if docaSpcXCCPath == "" {
+		return fmt.Errorf("couldn't find DOCA SPC-X CC package in the cache dir: %s", cacheDir)
+	}
+
+	err = f.utils.InstallDebPackage(docaSpcXCCPath)
+	if err != nil {
+		log.Log.Error(err, "failed to install DOCA SPC-X CC")
+		return err
+	}
+
+	log.Log.Info("InstallDocaSpcXCC(): DOCA SPC-X CC installed successfully", "version", targetVersion)
+
+	return nil
 }
 
 // BurnNicFirmware will update the device's FW to the requested version
