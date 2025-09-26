@@ -33,7 +33,7 @@ import (
 const metadataFileName = "metadata.json"
 
 type fwBinaryMetadata map[string][]string
-type bfbMetadata map[string]string
+type singleFileMetadata map[string]string
 
 type FirmwareProvisioner interface {
 	// IsFWStorageAvailable checks if the cache storage exists in the pod.
@@ -47,12 +47,12 @@ type FirmwareProvisioner interface {
 	DownloadAndUnzipFirmwareArchives(cacheName string, urls []string, cleanupArchives bool) error
 	// AddFirmwareBinariesToCacheByMetadata finds the newly downloaded firmware binary files and organizes them in the cache according to their metadata
 	AddFirmwareBinariesToCacheByMetadata(cacheName string) error
-	// ValidateCache traverses the cache directory and validates that
+	// ValidateFirmwareBinariesCache traverses the cache directory and validates that
 	// 1. There are no empty directories in the cache
 	// 2. Each PSID has only one matching firmware binary in the cache
 	// 3. Each non-empty PSID directory contains a firmware binary file (.bin)
 	// Returns mapping between firmware version to PSIDs available in the cache, error if validation failed
-	ValidateCache(cacheName string) (map[string][]string, error)
+	ValidateFirmwareBinariesCache(cacheName string) (map[string][]string, error)
 	// DeleteCache deletes the cache directory with the given name
 	DeleteCache(cacheName string) error
 	// VerifyCachedBFB checks if BFB file exists and matches URL in metadata
@@ -64,6 +64,15 @@ type FirmwareProvisioner interface {
 	// ValidateBFB checks if the BFB file exists and is valid
 	// Returns BF FW versions available in the BFB
 	ValidateBFB(cacheName string) (map[string]string, error)
+	// VerifyCachedDocaSpcXCC checks if DOCA SPC-X CC package file exists and matches URL in metadata
+	// Returns whether re-download is needed, error if occurred
+	VerifyCachedDocaSpcXCC(cacheName string, url string) (bool, error)
+	// DownloadDocaSpcXCC downloads DOCA SPC-X CC package file, validates it, updates metadata, and returns filename
+	// Returns filename on disk, error if occurred
+	DownloadDocaSpcXCC(cacheName string, url string) (string, error)
+	// ValidateDocaSpcXCC checks if the DOCA SPC-X CC package file exists and is valid
+	// Returns DOCA SPC-X PCC FW version
+	ValidateDocaSpcXCC(cacheName string) (string, error)
 }
 
 type firmwareProvisioner struct {
@@ -338,12 +347,12 @@ func (f firmwareProvisioner) AddFirmwareBinariesToCacheByMetadata(cacheName stri
 	return nil
 }
 
-// ValidateCache traverses the cache directory and validates that
+// ValidateFirmwareBinariesCache traverses the cache directory and validates that
 // 1. There are no empty directories in the cache
 // 2. Each PSID has only one matching firmware binary in the cache
 // 3. Each non-empty PSID directory contains a firmware binary file (.bin)
 // Returns mapping between firmware version to PSIDs available in the cache, error if validation failed
-func (f firmwareProvisioner) ValidateCache(cacheName string) (map[string][]string, error) {
+func (f firmwareProvisioner) ValidateFirmwareBinariesCache(cacheName string) (map[string][]string, error) {
 	cacheDir := path.Join(f.cacheRootDir, cacheName)
 	firmwareBinariesDir := path.Join(cacheDir, consts.NicFirmwareBinariesFolder)
 	cachedVersions := make(map[string][]string)
@@ -432,11 +441,72 @@ func (f firmwareProvisioner) ValidateCache(cacheName string) (map[string][]strin
 // VerifyCachedBFB checks if BFB file exists and matches URL in metadata
 // Returns whether re-download is needed, error if occurred
 func (f firmwareProvisioner) VerifyCachedBFB(cacheName string, url string) (bool, error) {
+	return f.verifyCachedFile(path.Join(f.cacheRootDir, cacheName, consts.BFBFolder), url)
+}
+
+// DownloadBFB downloads BFB file, validates it, updates metadata, and returns filename
+// Returns filename on disk, error if occurred
+// Note: BFB cache contains only one BFB file - new downloads replace any existing BFB
+func (f firmwareProvisioner) DownloadBFB(cacheName string, url string) (string, error) {
+	return f.downloadFile(path.Join(f.cacheRootDir, cacheName, consts.BFBFolder), url, consts.BFBFileExtension)
+}
+
+// ValidateBFB checks if the BFB file exists and is valid
+// Returns BF FW versions available in the BFB
+func (f firmwareProvisioner) ValidateBFB(cacheName string) (map[string]string, error) {
 	cacheDir := path.Join(f.cacheRootDir, cacheName, consts.BFBFolder)
 
+	filePath, err := f.validateCachedFile(cacheDir)
+	if err != nil {
+		log.Log.Error(err, "failed to validate BFB file", "cacheDir", cacheDir)
+		return nil, err
+	}
+
+	versions, err := f.utils.GetFWVersionsFromBFB(filePath)
+	if err != nil {
+		log.Log.Error(err, "failed to get FW versions from BFB", "path", filePath)
+		return nil, err
+	}
+
+	return versions, nil
+}
+
+// VerifyCachedDocaSpcXCC checks if DOCA SPC-X CC package file exists and matches URL in metadata
+// Returns whether re-download is needed, error if occurred
+func (f firmwareProvisioner) VerifyCachedDocaSpcXCC(cacheName string, url string) (bool, error) {
+	return f.verifyCachedFile(path.Join(f.cacheRootDir, cacheName, consts.DocaSpcXCCFolder), url)
+}
+
+func (f firmwareProvisioner) DownloadDocaSpcXCC(cacheName string, url string) (string, error) {
+	return f.downloadFile(path.Join(f.cacheRootDir, cacheName, consts.DocaSpcXCCFolder), url, consts.DebPackageExtension)
+}
+
+// ValidateDocaSpcXCC checks if the DOCA SPC-X PCC package file exists and is valid
+// Returns DOCA SPC-X PCC FW version
+func (f firmwareProvisioner) ValidateDocaSpcXCC(cacheName string) (string, error) {
+	cacheDir := path.Join(f.cacheRootDir, cacheName, consts.DocaSpcXCCFolder)
+
+	filePath, err := f.validateCachedFile(cacheDir)
+	if err != nil {
+		log.Log.Error(err, "failed to validate DOCA SPC-X CC package file", "cacheDir", cacheDir)
+		return "", err
+	}
+
+	version, err := f.utils.GetDocaSpcXCCVersion(filePath)
+	if err != nil {
+		log.Log.Error(err, "failed to get version from DOCA SPC-X CC package file", "path", filePath)
+		return "", err
+	}
+
+	return version, nil
+}
+
+// verifyCachedFile checks if file exists and matches URL in metadata
+// Returns whether re-download is needed, error if occurred
+func (f firmwareProvisioner) verifyCachedFile(cacheDir string, url string) (bool, error) {
 	metadataFile := path.Join(cacheDir, metadataFileName)
 	if _, err := os.Stat(metadataFile); os.IsNotExist(err) {
-		log.Log.Info("BFB cache directory is missing metadata file, removing it", "cacheDir", cacheDir)
+		log.Log.Info("Cache directory is missing metadata file, removing it", "cacheDir", cacheDir)
 		// If cache metadata file doesn't exist, clean up the cache directory because we can't validate the contents
 		if err = os.RemoveAll(cacheDir); err != nil {
 			return false, err
@@ -444,71 +514,69 @@ func (f firmwareProvisioner) VerifyCachedBFB(cacheName string, url string) (bool
 		return true, nil
 	}
 
-	metadata, err := readBFBMetadataFromFile(metadataFile)
+	metadata, err := readSingleFileMetadataFromFile(metadataFile)
 	if err != nil {
-		log.Log.Error(err, "failed to read BFB cache metadata file", "path", metadataFile)
+		log.Log.Error(err, "failed to read cache metadata file", "path", metadataFile)
 		return false, err
 	}
 
-	bfbFileName, found := metadata[url]
+	fileName, found := metadata[url]
 	if !found {
-		log.Log.Info("Requested BFB url not found in existing cache, processing it again", "cacheDir", cacheDir, "url", url)
+		log.Log.Info("Requested url not found in existing cache, processing it again", "cacheDir", cacheDir, "url", url)
 		return true, nil
 	}
 
 	// Check if the file still exists on disk
-	bfbFilePath := path.Join(cacheDir, bfbFileName)
-	if _, err := os.Stat(bfbFilePath); os.IsNotExist(err) {
-		log.Log.Info("BFB file missing from cache, processing it again", "cacheDir", cacheDir, "url", url, "file", bfbFileName)
+	filePath := path.Join(cacheDir, fileName)
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		log.Log.Info("File missing from cache, processing it again", "cacheDir", cacheDir, "url", url, "file", fileName)
 		return true, nil
 	} else if err != nil {
 		return false, err
 	}
 
-	log.Log.Info("BFB file already present, skipping download", "cacheDir", cacheDir, "url", url, "file", bfbFileName)
+	log.Log.Info("File already present, skipping download", "cacheDir", cacheDir, "url", url, "file", fileName)
 	return false, nil
 }
 
-// DownloadBFB downloads BFB file, validates it, updates metadata, and returns filename
+// downloadFile downloads a file, validates it, updates metadata, and returns filename
 // Returns filename on disk, error if occurred
-// Note: BFB cache contains only one BFB file - new downloads replace any existing BFB
-func (f firmwareProvisioner) DownloadBFB(cacheName string, url string) (string, error) {
-	cacheDir := path.Join(f.cacheRootDir, cacheName, consts.BFBFolder)
-
+// Note: cache contains only one file - new downloads replace any existing file
+func (f firmwareProvisioner) downloadFile(cacheDir string, url string, validateExtension string) (string, error) {
 	// Clean up directory prior to download to ensure clean state
-	// This removes any existing BFB files and metadata
+	// This removes any existing files and metadata
 	if err := os.RemoveAll(cacheDir); err != nil {
-		log.Log.Error(err, "failed to cleanup BFB cache directory", "cacheName", cacheName)
+		log.Log.Error(err, "failed to cleanup cache directory", "cacheDir", cacheDir)
 		return "", err
 	}
 
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
-		log.Log.Error(err, "failed to create new cache in bfb storage", "cacheName", cacheName)
+		log.Log.Error(err, "failed to create new cache storage", "cacheDir", cacheDir)
 		return "", err
 	}
 
-	log.Log.Info("Downloading BFB file", "cacheDir", cacheDir, "url", url)
+	log.Log.Info("Downloading a file", "cacheDir", cacheDir, "url", url)
 
-	bfbLocalPath := filepath.Join(cacheDir, filepath.Base(url))
-	err := f.utils.DownloadFile(url, bfbLocalPath)
+	fileLocalPath := filepath.Join(cacheDir, filepath.Base(url))
+	err := f.utils.DownloadFile(url, fileLocalPath)
 	if err != nil {
-		log.Log.Error(err, "failed to download BFB file", "cacheName", cacheName, "url", url)
+		log.Log.Error(err, "failed to download a file", "cacheDir", cacheDir, "url", url)
 		return "", err
 	}
 
 	// Basic validation - check file exists and has correct extension
-	if !strings.EqualFold(filepath.Ext(bfbLocalPath), consts.BFBFileExtension) {
-		err := fmt.Errorf("downloaded file does not have BFB extension: %s", bfbLocalPath)
-		log.Log.Error(err, "BFB validation failed", "cacheName", cacheName, "url", url)
+	if validateExtension != "" && !strings.EqualFold(filepath.Ext(fileLocalPath), validateExtension) {
+		err := fmt.Errorf("downloaded file does not have requested extension: %s", fileLocalPath)
+		log.Log.Error(err, "File validation failed", "cacheDir", cacheDir, "url", url)
 		return "", err
 	}
 
-	log.Log.V(2).Info("BFB file downloaded and validated", "path", bfbLocalPath)
+	log.Log.V(2).Info("File downloaded and validated", "path", fileLocalPath)
 
 	// Create new metadata with only this BFB file
-	bfbFileName := filepath.Base(bfbLocalPath)
-	metadata := bfbMetadata{
-		url: bfbFileName,
+	fileName := filepath.Base(fileLocalPath)
+	metadata := singleFileMetadata{
+		url: fileName,
 	}
 
 	// Write metadata
@@ -516,35 +584,35 @@ func (f firmwareProvisioner) DownloadBFB(cacheName string, url string) (string, 
 		return "", err
 	}
 
-	log.Log.Info("BFB file successfully processed", "cacheName", cacheName, "url", url, "filename", bfbFileName)
+	log.Log.Info("File successfully processed", "cacheName", cacheDir, "url", url, "filename", fileName)
 
-	return bfbFileName, nil
+	return fileName, nil
 }
 
-// ValidateBFB checks if the BFB file exists and is valid
-// Returns BF FW versions available in the BFB
-func (f firmwareProvisioner) ValidateBFB(cacheName string) (map[string]string, error) {
-	cacheDir := path.Join(f.cacheRootDir, cacheName, consts.BFBFolder)
+// validateCachedFile checks if the file exists and is valid
+// Returns filepath on disk, error if occurred
+func (f firmwareProvisioner) validateCachedFile(cacheDir string) (string, error) {
 	metadataFile := path.Join(cacheDir, metadataFileName)
 
-	metadata, err := readBFBMetadataFromFile(metadataFile)
+	metadata, err := readSingleFileMetadataFromFile(metadataFile)
 	if err != nil {
-		log.Log.Error(err, "failed to read BFB cache metadata file", "path", metadataFile)
-		return nil, err
+		log.Log.Error(err, "failed to read cache metadata file", "path", metadataFile)
+		return "", err
 	}
 
 	// There is a single BFB file in the cache
-	for _, bfbFileName := range metadata {
-		versions, err := f.utils.GetFWVersionsFromBFB(path.Join(cacheDir, bfbFileName))
-		if err != nil {
-			log.Log.Error(err, "failed to get FW versions from BFB", "path", path.Join(cacheDir, bfbFileName))
-			return nil, err
+	for _, fileName := range metadata {
+		filePath := path.Join(cacheDir, fileName)
+
+		if _, err := os.Stat(filePath); err != nil {
+			log.Log.Error(err, "failed to process file on disk", "cacheDir", cacheDir, "file", fileName)
+			return "", nil
 		}
 
-		return versions, nil
+		return filePath, nil
 	}
 
-	return nil, errors.New("no BFB file found in cache")
+	return "", errors.New("no file found in cache")
 }
 
 // DeleteCache deletes the cache directory with the given name
@@ -567,13 +635,13 @@ func readFwBinaryMetadataFromFile(path string) (fwBinaryMetadata, error) {
 	return metadata, nil
 }
 
-func readBFBMetadataFromFile(path string) (bfbMetadata, error) {
+func readSingleFileMetadataFromFile(path string) (singleFileMetadata, error) {
 	file, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 
-	metadata := bfbMetadata{}
+	metadata := singleFileMetadata{}
 	err = json.Unmarshal(file, &metadata)
 	if err != nil {
 		return nil, err
