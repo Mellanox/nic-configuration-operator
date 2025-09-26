@@ -18,7 +18,7 @@ package v1alpha1
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // NicFirmwareSourceSpec represents a list of url sources for FW
-// +kubebuilder:validation:XValidation:rule="size(self.binUrlSources) > 0 || size(self.bfbUrlSource) > 0",message="At least one of binUrlSources or bfbUrlSource must be specified"
+// +kubebuilder:validation:XValidation:rule="size(self.binUrlSources) > 0 || size(self.bfbUrlSource) > 0 || size(self.docaSpcXCCUrlSource) > 0",message="At least one of binUrlSources, bfbUrlSource, or docaSpcXCCUrlSource must be specified"
 type NicFirmwareSourceSpec struct {
 	// BinUrlSources represents a list of url sources for ConnectX Firmware
 	// +kubebuilder:validation:MinItems=1
@@ -27,6 +27,10 @@ type NicFirmwareSourceSpec struct {
 	// BFBUrlSource represents a url source for BlueField Bundle
 	// +optional
 	BFBUrlSource string `json:"bfbUrlSource,omitempty"`
+	// DocaSpcXCCUrlSource represents a url source for DOCA SPC-X CC .deb package for ubuntu 22.04
+	// Will be removed in the future, once Doca SPC-X CC algorithm will be publicly available
+	// +optional
+	DocaSpcXCCUrlSource string `json:"docaSpcXCCUrlSource,omitempty"`
 }
 
 // NicFirmwareSourceStatus represents the status of the FW from given sources, e.g. version available for PSIDs
@@ -42,6 +46,8 @@ type NicFirmwareSourceStatus struct {
 	BinaryVersions map[string][]string `json:"binaryVersions,omitempty"`
 	// BFBVersions represents the FW versions available in the provided BFB bundle
 	BFBVersions map[string]string `json:"bfbVersions,omitempty"`
+	// DocaSpcXCCVersion represents the FW versions available in the provided DOCA SPC-X CC .deb package for ubuntu 22.04
+	DocaSpcXCCVersion string `json:"docaSpcXCCVersion,omitempty"`
 }
 
 //+kubebuilder:object:root=true
