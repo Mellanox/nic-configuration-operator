@@ -44,6 +44,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/pkg/maintenance"
 	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 	"github.com/Mellanox/nic-configuration-operator/pkg/nvconfig"
+	"github.com/Mellanox/nic-configuration-operator/pkg/spectrumx"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 )
 
@@ -128,8 +129,9 @@ func main() {
 		}
 	}()
 
+	spectrumXConfigManager := spectrumx.NewSpectrumXConfigManager(dmsManager, spectrumXConfigs)
 	configurationManager := configuration.NewConfigurationManager(
-		eventRecorder, dmsManager, nvConfigUtils, spectrumXConfigs)
+		eventRecorder, dmsManager, nvConfigUtils, spectrumXConfigManager)
 	maintenanceManager := maintenance.New(mgr.GetClient(), hostUtils, nodeName, namespace)
 	firmwareManager := firmware.NewFirmwareManager(mgr.GetClient(), dmsManager, namespace)
 

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -562,6 +563,153 @@ var _ = Describe("FirmwareManager", func() {
 				err := manager.BurnNicFirmware(context.Background(), device, fwVersion)
 				Expect(err).NotTo(HaveOccurred())
 			})
+		})
+	})
+
+	Describe("InstallDocaSpcXCC", func() {
+		var (
+			fwUtilsMock *mocks.FirmwareUtils
+			manager     FirmwareManager
+			tmpDir      string
+			cacheDir    string
+			targetVer   = "1.2.3"
+		)
+
+		createFwSource := func(version string) *v1alpha1.NicFirmwareSource {
+			return &v1alpha1.NicFirmwareSource{
+				ObjectMeta: v1.ObjectMeta{Name: fwSourceName, Namespace: ""},
+				Status:     v1alpha1.NicFirmwareSourceStatus{DocaSpcXCCVersion: version},
+			}
+		}
+
+		BeforeEach(func() {
+			fwUtilsMock = &mocks.FirmwareUtils{}
+
+			var err error
+			tmpDir, err = os.MkdirTemp("/tmp", "fw-manager-doca-*")
+			Expect(err).NotTo(HaveOccurred())
+
+			cacheDir = tmpDir
+		})
+
+		AfterEach(func() {
+			fwUtilsMock.AssertExpectations(GinkgoT())
+			_ = os.RemoveAll(tmpDir)
+		})
+
+		It("doesn't return error when device's firmware spec is empty", func() {
+			manager = firmwareManager{client: nil, utils: fwUtilsMock, cacheRootDir: cacheDir, namespace: ""}
+			err := manager.InstallDocaSpcXCC(context.Background(), &v1alpha1.NicDevice{Spec: v1alpha1.NicDeviceSpec{Firmware: nil}}, targetVer)
+			Expect(err).To(MatchError("device's firmware spec is empty"))
+		})
+
+		It("returns error when referenced NicFirmwareSource not found", func() {
+			scheme := runtime.NewScheme()
+			Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+			cli := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+			manager = firmwareManager{client: cli, utils: fwUtilsMock, cacheRootDir: cacheDir, namespace: ""}
+			err := manager.InstallDocaSpcXCC(context.Background(), createNicDevice(), targetVer)
+			Expect(err).To(HaveOccurred())
+			Expect(k8sErrors.IsNotFound(err)).To(BeTrue())
+		})
+
+		It("returns error when provisioned version mismatches target", func() {
+			scheme := runtime.NewScheme()
+			Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+			cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(createFwSource("0.0.1")).Build()
+
+			manager = firmwareManager{client: cli, utils: fwUtilsMock, cacheRootDir: cacheDir, namespace: ""}
+			err := manager.InstallDocaSpcXCC(context.Background(), createNicDevice(), targetVer)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("doesn't match target version"))
+		})
+
+		It("no-ops when installed version matches target", func() {
+			scheme := runtime.NewScheme()
+			Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+			cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(createFwSource(targetVer)).Build()
+
+			fwUtilsMock.On("GetInstalledDebPackageVersion", "doca-spcx-cc").Return(targetVer).Once()
+
+			manager = firmwareManager{client: cli, utils: fwUtilsMock, cacheRootDir: cacheDir, namespace: ""}
+			err := manager.InstallDocaSpcXCC(context.Background(), createNicDevice(), targetVer)
+			Expect(err).NotTo(HaveOccurred())
+			fwUtilsMock.AssertNotCalled(GinkgoT(), "InstallDebPackage", mock.Anything)
+		})
+
+		It("installs when not installed and .deb exists in cache", func() {
+			scheme := runtime.NewScheme()
+			Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+			cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(createFwSource(targetVer)).Build()
+
+			fwUtilsMock.On("GetInstalledDebPackageVersion", "doca-spcx-cc").Return("").Once()
+
+			// Prepare cache with a single .deb
+			debDir := path.Join(cacheDir, fwSourceName, consts.DocaSpcXCCFolder)
+			Expect(os.MkdirAll(debDir, 0755)).To(Succeed())
+			debPath := path.Join(debDir, "doca-spcx-cc"+consts.DebPackageExtension)
+			Expect(os.WriteFile(debPath, []byte("deb content"), 0644)).To(Succeed())
+
+			fwUtilsMock.On("InstallDebPackage", debPath).Return(nil).Once()
+
+			manager = firmwareManager{client: cli, utils: fwUtilsMock, cacheRootDir: cacheDir, namespace: ""}
+			err := manager.InstallDocaSpcXCC(context.Background(), createNicDevice(), targetVer)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("returns error when multiple .deb files are present", func() {
+			scheme := runtime.NewScheme()
+			Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+			cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(createFwSource(targetVer)).Build()
+
+			fwUtilsMock.On("GetInstalledDebPackageVersion", "doca-spcx-cc").Return("").Once()
+
+			debDir := path.Join(cacheDir, fwSourceName, consts.DocaSpcXCCFolder)
+			Expect(os.MkdirAll(debDir, 0755)).To(Succeed())
+			Expect(os.WriteFile(path.Join(debDir, "a"+consts.DebPackageExtension), []byte("a"), 0644)).To(Succeed())
+			Expect(os.WriteFile(path.Join(debDir, "b"+consts.DebPackageExtension), []byte("b"), 0644)).To(Succeed())
+
+			manager = firmwareManager{client: cli, utils: fwUtilsMock, cacheRootDir: cacheDir, namespace: ""}
+			err := manager.InstallDocaSpcXCC(context.Background(), createNicDevice(), targetVer)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("found second DOCA SPC-X CC file"))
+		})
+
+		It("returns error when no .deb file found in cache", func() {
+			scheme := runtime.NewScheme()
+			Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+			cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(createFwSource(targetVer)).Build()
+
+			fwUtilsMock.On("GetInstalledDebPackageVersion", "doca-spcx-cc").Return("").Once()
+
+			debDir := path.Join(cacheDir, fwSourceName, consts.DocaSpcXCCFolder)
+			Expect(os.MkdirAll(debDir, 0755)).To(Succeed())
+
+			manager = firmwareManager{client: cli, utils: fwUtilsMock, cacheRootDir: cacheDir, namespace: ""}
+			err := manager.InstallDocaSpcXCC(context.Background(), createNicDevice(), targetVer)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("couldn't find DOCA SPC-X CC package"))
+		})
+
+		It("returns error when deb installation fails", func() {
+			scheme := runtime.NewScheme()
+			Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+			cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(createFwSource(targetVer)).Build()
+
+			fwUtilsMock.On("GetInstalledDebPackageVersion", "doca-spcx-cc").Return("").Once()
+
+			debDir := path.Join(cacheDir, fwSourceName, consts.DocaSpcXCCFolder)
+			Expect(os.MkdirAll(debDir, 0755)).To(Succeed())
+			debPath := filepath.Join(debDir, "doca"+consts.DebPackageExtension)
+			Expect(os.WriteFile(debPath, []byte("content"), 0644)).To(Succeed())
+
+			fwUtilsMock.On("InstallDebPackage", debPath).Return(errors.New("install fail")).Once()
+
+			manager = firmwareManager{client: cli, utils: fwUtilsMock, cacheRootDir: cacheDir, namespace: ""}
+			err := manager.InstallDocaSpcXCC(context.Background(), createNicDevice(), targetVer)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("install fail"))
 		})
 	})
 })

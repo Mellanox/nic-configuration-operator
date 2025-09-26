@@ -38,6 +38,7 @@ import (
 	firmwareMocks "github.com/Mellanox/nic-configuration-operator/pkg/firmware/mocks"
 	hostMocks "github.com/Mellanox/nic-configuration-operator/pkg/host/mocks"
 	maintenanceMocks "github.com/Mellanox/nic-configuration-operator/pkg/maintenance/mocks"
+	spectrumxMocks "github.com/Mellanox/nic-configuration-operator/pkg/spectrumx/mocks"
 	"github.com/Mellanox/nic-configuration-operator/pkg/testutils"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 )
@@ -53,6 +54,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 		firmwareManager      *firmwareMocks.FirmwareManager
 		maintenanceManager   *maintenanceMocks.MaintenanceManager
 		hostUtils            *hostMocks.HostUtils
+		spectrumXManager     *spectrumxMocks.SpectrumXManager
 		deviceName           = "test-device"
 		ctx                  context.Context
 		cancel               context.CancelFunc
@@ -87,6 +89,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 		firmwareManager = &firmwareMocks.FirmwareManager{}
 		maintenanceManager = &maintenanceMocks.MaintenanceManager{}
 		hostUtils = &hostMocks.HostUtils{}
+		spectrumXManager = &spectrumxMocks.SpectrumXManager{}
+		spectrumXManager.On("GetDocaCCTargetVersion", mock.Anything).Return("", nil)
 
 		reconciler = &NicDeviceReconciler{
 			Client:               mgr.GetClient(),
@@ -98,6 +102,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			MaintenanceManager:   maintenanceManager,
 			HostUtils:            hostUtils,
 			EventRecorder:        mgr.GetEventRecorderFor("testReconciler"),
+			SpectrumXManager:     spectrumXManager,
 		}
 		Expect(reconciler.SetupWithManager(mgr, false)).To(Succeed())
 
