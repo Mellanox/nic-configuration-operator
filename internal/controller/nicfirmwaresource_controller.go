@@ -115,8 +115,17 @@ func (r *NicFirmwareSourceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		}
 	}
 
+	var docaSpcXCCVersion string
+	if instance.Spec.DocaSpcXCCUrlSource != "" {
+		docaSpcXCCVersion, err = r.processDocaSpcXCCSource(ctx, instance, cacheName)
+		if err != nil {
+			log.Log.Error(err, "failed to process DOCA SPC-X PCC source", "name", instance.Name)
+			return reconcile.Result{}, err
+		}
+	}
+
 	// Update final status with both binary versions and BFB info
-	if err = r.updateStatus(ctx, instance, consts.FirmwareSourceSuccessStatus, nil, binaryVersions, bfbVersions); err != nil {
+	if err = r.updateStatus(ctx, instance, consts.FirmwareSourceSuccessStatus, nil, binaryVersions, bfbVersions, docaSpcXCCVersion); err != nil {
 		return reconcile.Result{}, err
 	}
 
@@ -129,14 +138,14 @@ func (r *NicFirmwareSourceReconciler) processBinarySources(ctx context.Context, 
 	if err != nil {
 		log.Log.Error(err, "failed to verify cached binaries", "name", instance.Name)
 
-		if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceCacheVerificationFailedStatus, err, nil, nil); updateErr != nil {
+		if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceCacheVerificationFailedStatus, err, nil, nil, ""); updateErr != nil {
 			return nil, updateErr
 		}
 		return nil, err
 	}
 
 	if len(urlsToProcess) != 0 {
-		if err = r.updateStatus(ctx, instance, consts.FirmwareSourceDownloadingStatus, nil, nil, nil); err != nil {
+		if err = r.updateStatus(ctx, instance, consts.FirmwareSourceDownloadingStatus, nil, nil, nil, ""); err != nil {
 			return nil, err
 		}
 
@@ -144,7 +153,7 @@ func (r *NicFirmwareSourceReconciler) processBinarySources(ctx context.Context, 
 		if err != nil {
 			log.Log.Error(err, "failed to download fw binaries archives", "name", instance.Name)
 
-			if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceDownloadFailedStatus, err, nil, nil); updateErr != nil {
+			if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceDownloadFailedStatus, err, nil, nil, ""); updateErr != nil {
 				return nil, updateErr
 			}
 			return nil, err
@@ -153,7 +162,7 @@ func (r *NicFirmwareSourceReconciler) processBinarySources(ctx context.Context, 
 		log.Log.Info("Files for all requested binary URLs already present, skipping download", "cacheName", instance.Name)
 	}
 
-	if err = r.updateStatus(ctx, instance, consts.FirmwareSourceProcessingStatus, nil, nil, nil); err != nil {
+	if err = r.updateStatus(ctx, instance, consts.FirmwareSourceProcessingStatus, nil, nil, nil, ""); err != nil {
 		return nil, err
 	}
 
@@ -161,16 +170,16 @@ func (r *NicFirmwareSourceReconciler) processBinarySources(ctx context.Context, 
 	if err != nil {
 		log.Log.Error(err, "failed to add fw binaries to cache", "name", instance.Name)
 
-		if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceProcessingFailedStatus, err, nil, nil); updateErr != nil {
+		if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceProcessingFailedStatus, err, nil, nil, ""); updateErr != nil {
 			return nil, updateErr
 		}
 		return nil, err
 	}
 
-	versions, err := r.FirmwareProvisioner.ValidateCache(cacheName)
+	versions, err := r.FirmwareProvisioner.ValidateFirmwareBinariesCache(cacheName)
 	if err != nil {
 		log.Log.Error(err, "failed to validate fw binaries cache", "name", instance.Name)
-		if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceProcessingFailedStatus, err, nil, nil); updateErr != nil {
+		if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceProcessingFailedStatus, err, nil, nil, ""); updateErr != nil {
 			return nil, updateErr
 		}
 		return nil, err
@@ -185,7 +194,7 @@ func (r *NicFirmwareSourceReconciler) processBFBSource(ctx context.Context, inst
 	if err != nil {
 		log.Log.Error(err, "failed to verify cached BFB", "name", instance.Name)
 
-		if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceCacheVerificationFailedStatus, err, nil, map[string]string{}); updateErr != nil {
+		if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceCacheVerificationFailedStatus, err, nil, map[string]string{}, ""); updateErr != nil {
 			return nil, updateErr
 		}
 		return nil, err
@@ -193,7 +202,7 @@ func (r *NicFirmwareSourceReconciler) processBFBSource(ctx context.Context, inst
 
 	var bfbFileName string
 	if needsDownload {
-		if err = r.updateStatus(ctx, instance, consts.FirmwareSourceDownloadingStatus, nil, nil, nil); err != nil {
+		if err = r.updateStatus(ctx, instance, consts.FirmwareSourceDownloadingStatus, nil, nil, nil, ""); err != nil {
 			return nil, err
 		}
 
@@ -201,7 +210,7 @@ func (r *NicFirmwareSourceReconciler) processBFBSource(ctx context.Context, inst
 		if err != nil {
 			log.Log.Error(err, "failed to download BFB file", "name", instance.Name)
 
-			if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceDownloadFailedStatus, err, nil, map[string]string{}); updateErr != nil {
+			if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceDownloadFailedStatus, err, nil, map[string]string{}, ""); updateErr != nil {
 				return nil, updateErr
 			}
 			return nil, err
@@ -211,7 +220,7 @@ func (r *NicFirmwareSourceReconciler) processBFBSource(ctx context.Context, inst
 	bfbVersions, err := r.FirmwareProvisioner.ValidateBFB(cacheName)
 	if err != nil {
 		log.Log.Error(err, "failed to validate BFB file", "name", instance.Name)
-		if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceProcessingFailedStatus, err, nil, map[string]string{}); updateErr != nil {
+		if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceProcessingFailedStatus, err, nil, map[string]string{}, ""); updateErr != nil {
 			return nil, updateErr
 		}
 		return nil, err
@@ -221,7 +230,48 @@ func (r *NicFirmwareSourceReconciler) processBFBSource(ctx context.Context, inst
 	return bfbVersions, nil
 }
 
-func (r *NicFirmwareSourceReconciler) updateStatus(ctx context.Context, obj *v1alpha1.NicFirmwareSource, status string, statusError error, binaryVersions map[string][]string, bfbVersions map[string]string) error {
+func (r *NicFirmwareSourceReconciler) processDocaSpcXCCSource(ctx context.Context, instance *v1alpha1.NicFirmwareSource, cacheName string) (string, error) {
+	needsDownload, err := r.FirmwareProvisioner.VerifyCachedDocaSpcXCC(cacheName, instance.Spec.DocaSpcXCCUrlSource)
+	if err != nil {
+		log.Log.Error(err, "failed to verify cached DOCA SPC-X PCC", "name", instance.Name)
+
+		if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceCacheVerificationFailedStatus, err, nil, map[string]string{}, ""); updateErr != nil {
+			return "", updateErr
+		}
+		return "", err
+	}
+
+	var docaSpcXCCFileName string
+	if needsDownload {
+		if err = r.updateStatus(ctx, instance, consts.FirmwareSourceDownloadingStatus, nil, nil, nil, ""); err != nil {
+			return "", err
+		}
+
+		docaSpcXCCFileName, err = r.FirmwareProvisioner.DownloadDocaSpcXCC(cacheName, instance.Spec.DocaSpcXCCUrlSource)
+		if err != nil {
+			log.Log.Error(err, "failed to download DOCA SPC-X PCC file", "name", instance.Name)
+
+			if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceDownloadFailedStatus, err, nil, map[string]string{}, ""); updateErr != nil {
+				return "", updateErr
+			}
+			return "", err
+		}
+	}
+
+	docaSpcXCCVersion, err := r.FirmwareProvisioner.ValidateDocaSpcXCC(cacheName)
+	if err != nil {
+		log.Log.Error(err, "failed to validate DOCA SPC-X PCC file", "name", instance.Name)
+		if updateErr := r.updateStatus(ctx, instance, consts.FirmwareSourceProcessingFailedStatus, err, nil, map[string]string{}, ""); updateErr != nil {
+			return "", updateErr
+		}
+		return "", err
+	}
+
+	log.Log.Info("DOCA SPC-X PCC file successfully processed", "cacheName", instance.Name, "filename", docaSpcXCCFileName)
+	return docaSpcXCCVersion, nil
+}
+
+func (r *NicFirmwareSourceReconciler) updateStatus(ctx context.Context, obj *v1alpha1.NicFirmwareSource, status string, statusError error, binaryVersions map[string][]string, bfbVersions map[string]string, docaSpcXCCVersion string) error {
 	obj.Status.State = status
 	if statusError != nil {
 		obj.Status.Reason = statusError.Error()
@@ -231,6 +281,7 @@ func (r *NicFirmwareSourceReconciler) updateStatus(ctx context.Context, obj *v1a
 
 	obj.Status.BinaryVersions = binaryVersions
 	obj.Status.BFBVersions = bfbVersions
+	obj.Status.DocaSpcXCCVersion = docaSpcXCCVersion
 
 	err := r.Status().Update(ctx, obj)
 	if err != nil {

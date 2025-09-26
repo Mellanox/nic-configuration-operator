@@ -47,6 +47,8 @@ type FirmwareUtils interface {
 	GetFirmwareVersionAndPSIDFromFWBinary(firmwareBinaryPath string) (string, string, error)
 	// GetFWVersionsFromBFB retrieves the FW versions from the BFB file
 	GetFWVersionsFromBFB(bfbPath string) (map[string]string, error)
+	// GetDocaSpcXCCVersion retrieves the version from the DOCA SPC-X PCC file
+	GetDocaSpcXCCVersion(docaSpcXCCPath string) (string, error)
 	// VerifyImageBootable verifies if the image file is valid and bootable
 	VerifyImageBootable(firmwareBinaryPath string) error
 	// CleanupDirectory deletes any file inside a root directory except for allowedSet. Empty directories are cleaned up as well at the end
@@ -54,6 +56,11 @@ type FirmwareUtils interface {
 	// BurnNicFirmware burns the requested firmware on the requested device
 	// Operation can be long, require context to be able to terminate by timeout
 	BurnNicFirmware(ctx context.Context, pciAddress, fwPath string) error
+	// InstallDebPackage installs the .deb package
+	InstallDebPackage(debPath string) error
+	// GetInstalledDebPackageVersion retrieves the version from the installed .deb package
+	// Return empty string if the package is not installed
+	GetInstalledDebPackageVersion(packageName string) string
 }
 
 type utils struct {
@@ -387,6 +394,41 @@ func (u *utils) BurnNicFirmware(ctx context.Context, pciAddress, fwPath string) 
 		return err
 	}
 	return nil
+}
+
+// GetDocaSpcXCCVersion retrieves the version from the DOCA SPC-X PCC file
+func (u *utils) GetDocaSpcXCCVersion(docaSpcXCCPath string) (string, error) {
+	log.Log.V(2).Info("FirmwareUtils.GetDocaSpcXCCVersion()", "docaSpcXCCPath", docaSpcXCCPath)
+	cmd := u.execInterface.Command("dpk-deb", "-f", docaSpcXCCPath, "Version")
+	output, err := cmd.Output()
+	if err != nil {
+		log.Log.Error(err, "GetDocaSpcXCCVersion(): Failed to get version from DOCA SPC-X PCC deb package")
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+// InstallDebPackage installs the .deb package
+func (u *utils) InstallDebPackage(debPath string) error {
+	log.Log.V(2).Info("FirmwareUtils.InstallDebPackage()", "debPath", debPath)
+	cmd := u.execInterface.Command("dpkg", "-i", debPath)
+	_, err := cmd.CombinedOutput()
+	return err
+}
+
+// GetInstalledDebPackageVersion retrieves the version from the installed .deb package
+// Return empty string if the package is not installed
+func (u *utils) GetInstalledDebPackageVersion(packageName string) string {
+	log.Log.V(2).Info("FirmwareUtils.GetInstalledDebPackageVersion()", "packageName", packageName)
+	cmd := u.execInterface.Command("dpkg-query", "-W", "-f='${Version}\n'", packageName)
+	output, err := commonUtils.RunCommand(cmd)
+	if err != nil {
+		log.Log.Info("GetInstalledDebPackageVersion(): Failed to get installed version of package", "package", packageName, "output", string(output), "error", err)
+		return ""
+	} else {
+		installedVersion := strings.TrimSpace(string(output))
+		return installedVersion
+	}
 }
 
 func newFirmwareUtils() FirmwareUtils {

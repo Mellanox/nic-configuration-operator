@@ -311,7 +311,7 @@ var _ = Describe("FirmwareProvisioner", func() {
 			binFileB := path.Join(cacheDir, "1.2.3", "PSID321", "fwB.bin")
 			Expect(os.WriteFile(binFileB, []byte("dummy content"), 0644)).To(Succeed())
 
-			versions, err := fwProv.ValidateCache(cacheName)
+			versions, err := fwProv.ValidateFirmwareBinariesCache(cacheName)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(versions).To(Equal(map[string][]string{"1.2.3": {"PSID123", "PSID321"}}))
 		})
@@ -320,7 +320,7 @@ var _ = Describe("FirmwareProvisioner", func() {
 			It("should return an error", func() {
 				Expect(os.MkdirAll(path.Join(cacheDir, "1.2.3", "PSID123"), 0755)).To(Succeed())
 
-				_, err := fwProv.ValidateCache(cacheName)
+				_, err := fwProv.ValidateFirmwareBinariesCache(cacheName)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("cache directory is empty"))
 			})
@@ -335,7 +335,7 @@ var _ = Describe("FirmwareProvisioner", func() {
 				Expect(os.WriteFile(path.Join(psidDir1, "fileA.bin"), []byte("dummy content"), 0644)).To(Succeed())
 				Expect(os.WriteFile(path.Join(psidDir2, "fileB.bin"), []byte("dummy content"), 0644)).To(Succeed())
 
-				_, err := fwProv.ValidateCache(cacheName)
+				_, err := fwProv.ValidateFirmwareBinariesCache(cacheName)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("multiple firmware binary files for the same PSID"))
 			})
@@ -348,7 +348,7 @@ var _ = Describe("FirmwareProvisioner", func() {
 				Expect(os.WriteFile(path.Join(psidDir, "fileA.bin"), []byte("dummy content"), 0644)).To(Succeed())
 				Expect(os.WriteFile(path.Join(psidDir, "fileB.bin"), []byte("dummy content"), 0644)).To(Succeed())
 
-				_, err := fwProv.ValidateCache(cacheName)
+				_, err := fwProv.ValidateFirmwareBinariesCache(cacheName)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("multiple firmware binary files in the same directory"))
 			})
@@ -359,7 +359,7 @@ var _ = Describe("FirmwareProvisioner", func() {
 				psidDir := path.Join(cacheDir, "1.2.3", "PSID123")
 				Expect(os.MkdirAll(psidDir, 0755)).To(Succeed())
 
-				_, err := fwProv.ValidateCache(cacheName)
+				_, err := fwProv.ValidateFirmwareBinariesCache(cacheName)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("cache directory is empty. Expected firmware binary file."))
 			})
@@ -371,7 +371,7 @@ var _ = Describe("FirmwareProvisioner", func() {
 				Expect(os.MkdirAll(psidDir, 0755)).To(Succeed())
 				Expect(os.WriteFile(path.Join(psidDir, "fileA.nobin"), []byte("dummy content"), 0644)).To(Succeed())
 
-				_, err := fwProv.ValidateCache(cacheName)
+				_, err := fwProv.ValidateFirmwareBinariesCache(cacheName)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("no firmware binary files in the PSID directory"))
 			})
@@ -508,7 +508,7 @@ var _ = Describe("FirmwareProvisioner", func() {
 				data, err := os.ReadFile(metadataFile)
 				Expect(err).NotTo(HaveOccurred())
 
-				var metadata bfbMetadata
+				var metadata singleFileMetadata
 				Expect(json.Unmarshal(data, &metadata)).To(Succeed())
 				Expect(metadata).To(HaveKeyWithValue(bfbUrl, testBFBFileName))
 			})
@@ -540,7 +540,7 @@ var _ = Describe("FirmwareProvisioner", func() {
 				data, err := os.ReadFile(metadataFile)
 				Expect(err).NotTo(HaveOccurred())
 
-				var metadata bfbMetadata
+				var metadata singleFileMetadata
 				Expect(json.Unmarshal(data, &metadata)).To(Succeed())
 				Expect(metadata).To(HaveLen(1))
 				Expect(metadata).To(HaveKeyWithValue(bfbUrl, testBFBFileName))
@@ -567,7 +567,7 @@ var _ = Describe("FirmwareProvisioner", func() {
 
 					_, err := fwProv.DownloadBFB(cacheName, wrongUrl)
 					Expect(err).To(HaveOccurred())
-					Expect(err.Error()).To(ContainSubstring("downloaded file does not have BFB extension"))
+					Expect(err.Error()).To(ContainSubstring("downloaded file does not have requested extension"))
 				})
 			})
 
@@ -586,14 +586,14 @@ var _ = Describe("FirmwareProvisioner", func() {
 					metadata := `{"http://example.com/firmware.bfb": "firmware.bfb"}`
 					Expect(os.WriteFile(metadataFile, []byte(metadata), 0644)).To(Succeed())
 
-					result, err := readBFBMetadataFromFile(metadataFile)
+					result, err := readSingleFileMetadataFromFile(metadataFile)
 					Expect(err).NotTo(HaveOccurred())
 					Expect(result).To(HaveLen(1))
 					Expect(result).To(HaveKeyWithValue("http://example.com/firmware.bfb", "firmware.bfb"))
 				})
 
 				It("should return error when file does not exist", func() {
-					_, err := readBFBMetadataFromFile("/nonexistent/file.json")
+					_, err := readSingleFileMetadataFromFile("/nonexistent/file.json")
 					Expect(err).To(HaveOccurred())
 					Expect(os.IsNotExist(err)).To(BeTrue())
 				})
@@ -601,7 +601,7 @@ var _ = Describe("FirmwareProvisioner", func() {
 				It("should return error when JSON is corrupted", func() {
 					Expect(os.WriteFile(metadataFile, []byte("invalid json"), 0644)).To(Succeed())
 
-					_, err := readBFBMetadataFromFile(metadataFile)
+					_, err := readSingleFileMetadataFromFile(metadataFile)
 					Expect(err).To(HaveOccurred())
 					Expect(err.Error()).To(ContainSubstring("invalid character"))
 				})
@@ -609,7 +609,7 @@ var _ = Describe("FirmwareProvisioner", func() {
 
 			Describe("writeMetadataFile with BFB metadata", func() {
 				It("should write single BFB metadata correctly", func() {
-					metadata := bfbMetadata{
+					metadata := singleFileMetadata{
 						"http://example.com/firmware.bfb": "firmware.bfb",
 					}
 
@@ -621,7 +621,7 @@ var _ = Describe("FirmwareProvisioner", func() {
 					data, err := os.ReadFile(metadataFile)
 					Expect(err).NotTo(HaveOccurred())
 
-					var readBack bfbMetadata
+					var readBack singleFileMetadata
 					Expect(json.Unmarshal(data, &readBack)).To(Succeed())
 					Expect(readBack).To(Equal(metadata))
 					Expect(readBack).To(HaveLen(1))
@@ -721,7 +721,7 @@ var _ = Describe("FirmwareProvisioner", func() {
 
 				_, err := fwProv.ValidateBFB(cacheName)
 				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("no BFB file found in cache"))
+				Expect(err.Error()).To(ContainSubstring("no file found in cache"))
 			})
 
 			It("should return versions for first BFB file when multiple exist", func() {
@@ -774,6 +774,224 @@ var _ = Describe("FirmwareProvisioner", func() {
 				// Verify metadata exists
 				metadataFile := path.Join(bfbCacheDir, metadataFileName)
 				Expect(metadataFile).To(BeARegularFile())
+			})
+		})
+	})
+
+	Describe("DOCA SPC-X PCC Functionality", func() {
+		var (
+			docaCacheDir string
+			docaUrl      string
+		)
+
+		BeforeEach(func() {
+			docaCacheDir = path.Join(tmpDir, cacheName, consts.DocaSpcXCCFolder)
+			docaUrl = "http://example.com/doca-spc-x-pcc.deb"
+		})
+
+		Describe("VerifyCachedDocaSpcXCC", func() {
+			Context("when the DOCA cache directory does not exist", func() {
+				It("should return true (needs download)", func() {
+					needsDownload, err := fwProv.VerifyCachedDocaSpcXCC(cacheName, docaUrl)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(needsDownload).To(BeTrue())
+				})
+			})
+
+			Context("when the metadata file is missing", func() {
+				It("should clean up the directory and return true", func() {
+					Expect(os.MkdirAll(docaCacheDir, 0755)).To(Succeed())
+
+					// Create a dummy file to verify cleanup
+					dummyFile := path.Join(docaCacheDir, "dummy.deb")
+					Expect(os.WriteFile(dummyFile, []byte("dummy"), 0644)).To(Succeed())
+
+					needsDownload, err := fwProv.VerifyCachedDocaSpcXCC(cacheName, docaUrl)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(needsDownload).To(BeTrue())
+
+					// Directory should be cleaned up
+					_, statErr := os.Stat(docaCacheDir)
+					Expect(os.IsNotExist(statErr)).To(BeTrue())
+				})
+			})
+
+			Context("when metadata file exists but is corrupted", func() {
+				It("should return an error", func() {
+					Expect(os.MkdirAll(docaCacheDir, 0755)).To(Succeed())
+
+					metadataFile := path.Join(docaCacheDir, metadataFileName)
+					Expect(os.WriteFile(metadataFile, []byte("invalid json"), 0644)).To(Succeed())
+
+					_, err := fwProv.VerifyCachedDocaSpcXCC(cacheName, docaUrl)
+					Expect(err).To(HaveOccurred())
+					Expect(err.Error()).To(ContainSubstring("invalid character"))
+				})
+			})
+
+			Context("when URL is not found in metadata", func() {
+				It("should return true (needs download)", func() {
+					Expect(os.MkdirAll(docaCacheDir, 0755)).To(Succeed())
+
+					metadataFile := path.Join(docaCacheDir, metadataFileName)
+					metadata := `{"http://other.com/doca.deb": "other.deb"}`
+					Expect(os.WriteFile(metadataFile, []byte(metadata), 0644)).To(Succeed())
+
+					needsDownload, err := fwProv.VerifyCachedDocaSpcXCC(cacheName, docaUrl)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(needsDownload).To(BeTrue())
+				})
+			})
+
+			Context("when URL is found but file is missing", func() {
+				It("should return true (needs download)", func() {
+					Expect(os.MkdirAll(docaCacheDir, 0755)).To(Succeed())
+
+					metadataFile := path.Join(docaCacheDir, metadataFileName)
+					metadata := `{"` + docaUrl + `": "doca.deb"}`
+					Expect(os.WriteFile(metadataFile, []byte(metadata), 0644)).To(Succeed())
+
+					needsDownload, err := fwProv.VerifyCachedDocaSpcXCC(cacheName, docaUrl)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(needsDownload).To(BeTrue())
+				})
+			})
+
+			Context("when URL is found and file exists", func() {
+				It("should return false (skip download)", func() {
+					Expect(os.MkdirAll(docaCacheDir, 0755)).To(Succeed())
+
+					metadataFile := path.Join(docaCacheDir, metadataFileName)
+					metadata := `{"` + docaUrl + `": "doca.deb"}`
+					Expect(os.WriteFile(metadataFile, []byte(metadata), 0644)).To(Succeed())
+
+					docaFile := path.Join(docaCacheDir, "doca.deb")
+					Expect(os.WriteFile(docaFile, []byte("content"), 0644)).To(Succeed())
+
+					needsDownload, err := fwProv.VerifyCachedDocaSpcXCC(cacheName, docaUrl)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(needsDownload).To(BeFalse())
+				})
+			})
+		})
+
+		Describe("DownloadDocaSpcXCC", func() {
+			It("should clean up directory, download file, and update metadata", func() {
+				// Create existing dir and file to ensure cleanup occurs
+				Expect(os.MkdirAll(docaCacheDir, 0755)).To(Succeed())
+				oldFile := path.Join(docaCacheDir, "old.deb")
+				Expect(os.WriteFile(oldFile, []byte("old content"), 0644)).To(Succeed())
+
+				// Mock successful download
+				expectedLocalPath := path.Join(docaCacheDir, filepath.Base(docaUrl))
+				fwUtilsMock.On("DownloadFile", docaUrl, expectedLocalPath).Return(nil).Once()
+
+				filename, err := fwProv.DownloadDocaSpcXCC(cacheName, docaUrl)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(filename).To(Equal(filepath.Base(docaUrl)))
+
+				// Verify cleanup
+				_, err = os.Stat(oldFile)
+				Expect(os.IsNotExist(err)).To(BeTrue())
+
+				// Verify metadata exists and contains our URL
+				metadataFile := path.Join(docaCacheDir, metadataFileName)
+				Expect(metadataFile).To(BeARegularFile())
+
+				data, err := os.ReadFile(metadataFile)
+				Expect(err).NotTo(HaveOccurred())
+				var metadata singleFileMetadata
+				Expect(json.Unmarshal(data, &metadata)).To(Succeed())
+				Expect(metadata).To(HaveKeyWithValue(docaUrl, filepath.Base(docaUrl)))
+			})
+
+			Context("when download fails", func() {
+				It("should return an error", func() {
+					expectedLocalPath := path.Join(docaCacheDir, filepath.Base(docaUrl))
+					fwUtilsMock.On("DownloadFile", docaUrl, expectedLocalPath).
+						Return(errors.New("network error")).Once()
+
+					_, err := fwProv.DownloadDocaSpcXCC(cacheName, docaUrl)
+					Expect(err).To(HaveOccurred())
+					Expect(err.Error()).To(ContainSubstring("network error"))
+				})
+			})
+		})
+
+		Describe("ValidateDocaSpcXCC", func() {
+			var metadataFile string
+
+			BeforeEach(func() {
+				Expect(os.MkdirAll(docaCacheDir, 0755)).To(Succeed())
+				metadataFile = path.Join(docaCacheDir, metadataFileName)
+			})
+
+			It("should return version when DOCA file is valid", func() {
+				fileName := filepath.Base(docaUrl)
+				metadata := `{"` + docaUrl + `": "` + fileName + `"}`
+				Expect(os.WriteFile(metadataFile, []byte(metadata), 0644)).To(Succeed())
+
+				filePath := path.Join(docaCacheDir, fileName)
+				Expect(os.WriteFile(filePath, []byte("content"), 0644)).To(Succeed())
+
+				fwUtilsMock.On("GetDocaSpcXCCVersion", filePath).Return("1.2.3", nil).Once()
+
+				version, err := fwProv.ValidateDocaSpcXCC(cacheName)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(version).To(Equal("1.2.3"))
+			})
+
+			It("should return error when metadata file is missing", func() {
+				_, err := fwProv.ValidateDocaSpcXCC(cacheName)
+				Expect(err).To(HaveOccurred())
+				Expect(os.IsNotExist(err)).To(BeTrue())
+			})
+
+			It("should return error when metadata file is corrupted", func() {
+				Expect(os.WriteFile(metadataFile, []byte("invalid json"), 0644)).To(Succeed())
+				_, err := fwProv.ValidateDocaSpcXCC(cacheName)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("invalid character"))
+			})
+
+			It("should return error when GetDocaSpcXCCVersion fails", func() {
+				fileName := filepath.Base(docaUrl)
+				metadata := `{"` + docaUrl + `": "` + fileName + `"}`
+				Expect(os.WriteFile(metadataFile, []byte(metadata), 0644)).To(Succeed())
+				filePath := path.Join(docaCacheDir, fileName)
+				Expect(os.WriteFile(filePath, []byte("content"), 0644)).To(Succeed())
+
+				fwUtilsMock.On("GetDocaSpcXCCVersion", filePath).Return("", errors.New("parse error")).Once()
+
+				_, err := fwProv.ValidateDocaSpcXCC(cacheName)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("parse error"))
+			})
+
+			It("should return error when DOCA cache is empty", func() {
+				metadata := `{}`
+				Expect(os.WriteFile(metadataFile, []byte(metadata), 0644)).To(Succeed())
+				_, err := fwProv.ValidateDocaSpcXCC(cacheName)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("no file found in cache"))
+			})
+
+			It("should return version for first file when multiple exist", func() {
+				fileName1 := "doca1.deb"
+				fileName2 := "doca2.deb"
+				metadata := `{"http://example.com/d1.deb": "` + fileName1 + `", "http://example.com/d2.deb": "` + fileName2 + `"}`
+				Expect(os.WriteFile(metadataFile, []byte(metadata), 0644)).To(Succeed())
+
+				filePath1 := path.Join(docaCacheDir, fileName1)
+				filePath2 := path.Join(docaCacheDir, fileName2)
+				Expect(os.WriteFile(filePath1, []byte("content1"), 0644)).To(Succeed())
+				Expect(os.WriteFile(filePath2, []byte("content2"), 0644)).To(Succeed())
+
+				fwUtilsMock.On("GetDocaSpcXCCVersion", mock.AnythingOfType("string")).Return("9.9.9", nil).Once()
+
+				version, err := fwProv.ValidateDocaSpcXCC(cacheName)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(version).To(Equal("9.9.9"))
 			})
 		})
 	})
