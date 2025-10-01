@@ -44,7 +44,7 @@ var _ = Describe("LoadSpectrumXConfig", func() {
 		Expect(first.DMSPath).ToNot(BeEmpty())
 		Expect(first.ValueType).ToNot(BeEmpty())
 
-		Expect(cfg.RuntimeConfig.UseSoftwareCCAlgorithm).To(BeTrue())
+		Expect(cfg.UseSoftwareCCAlgorithm).To(BeTrue())
 		Expect(cfg.RuntimeConfig.AdaptiveRouting).ToNot(BeEmpty())
 		Expect(cfg.RuntimeConfig.CongestionControl).ToNot(BeEmpty())
 

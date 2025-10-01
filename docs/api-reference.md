@@ -514,6 +514,12 @@ NicFirmwareSource is the Schema for the nicfirmwaresources API
 <td><em>(Optional)</em>
 <p>BFBUrlSource represents a url source for BlueField Bundle</p></td>
 </tr>
+<tr>
+<td><code>docaSpcXCCUrlSource</code><br />
+<em>string</em></td>
+<td><em>(Optional)</em>
+<p>DocaSpcXCCUrlSource represents a url source for DOCA SPC-X CC .deb package for ubuntu 22.04 Will be removed in the future, once Doca SPC-X CC algorithm will be publicly available</p></td>
+</tr>
 </tbody>
 </table></td>
 </tr>
@@ -555,6 +561,12 @@ NicFirmwareSourceSpec represents a list of url sources for FW
 <td><em>(Optional)</em>
 <p>BFBUrlSource represents a url source for BlueField Bundle</p></td>
 </tr>
+<tr>
+<td><code>docaSpcXCCUrlSource</code><br />
+<em>string</em></td>
+<td><em>(Optional)</em>
+<p>DocaSpcXCCUrlSource represents a url source for DOCA SPC-X CC .deb package for ubuntu 22.04 Will be removed in the future, once Doca SPC-X CC algorithm will be publicly available</p></td>
+</tr>
 </tbody>
 </table>
 
@@ -595,6 +607,11 @@ NicFirmwareSourceStatus represents the status of the FW from given sources, e.g.
 <td><code>bfbVersions</code><br />
 <em>map[string]string</em></td>
 <td><p>BFBVersions represents the FW versions available in the provided BFB bundle</p></td>
+</tr>
+<tr>
+<td><code>docaSpcXCCVersion</code><br />
+<em>string</em></td>
+<td><p>DocaSpcXCCVersion represents the FW versions available in the provided DOCA SPC-X CC .deb package for ubuntu 22.04</p></td>
 </tr>
 </tbody>
 </table>
@@ -921,4 +938,4 @@ SpectrumXOptimizedSpec enables Spectrum-X specific optimizations
 
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-*Generated with `gen-crd-api-reference-docs` on git commit `dc4b597`.*
+*Generated with `gen-crd-api-reference-docs` on git commit `3c45987`.*

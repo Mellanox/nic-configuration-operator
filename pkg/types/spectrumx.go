@@ -24,16 +24,17 @@ import (
 )
 
 type SpectrumXConfig struct {
-	NVConfig      []ConfigurationParameter `yaml:"nvConfig"`
-	RuntimeConfig SpectrumXRuntimeConfig   `yaml:"runtimeConfig"`
+	NVConfig               []ConfigurationParameter `yaml:"nvConfig"`
+	RuntimeConfig          SpectrumXRuntimeConfig   `yaml:"runtimeConfig"`
+	UseSoftwareCCAlgorithm bool                     `yaml:"useSoftwareCCAlgorithm"`
+	DocaCCVersion          string                   `yaml:"docaCCVersion"`
 }
 
 type SpectrumXRuntimeConfig struct {
-	UseSoftwareCCAlgorithm bool                     `yaml:"useSoftwareCCAlgorithm"`
-	Roce                   []ConfigurationParameter `yaml:"roce"`
-	AdaptiveRouting        []ConfigurationParameter `yaml:"adaptiveRouting"`
-	CongestionControl      []ConfigurationParameter `yaml:"congestionControl"`
-	InterPacketGap         InterPacketGapConfig     `yaml:"interPacketGap"`
+	Roce              []ConfigurationParameter `yaml:"roce"`
+	AdaptiveRouting   []ConfigurationParameter `yaml:"adaptiveRouting"`
+	CongestionControl []ConfigurationParameter `yaml:"congestionControl"`
+	InterPacketGap    InterPacketGapConfig     `yaml:"interPacketGap"`
 }
 
 type InterPacketGapConfig struct {

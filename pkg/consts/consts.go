@@ -107,8 +107,10 @@ const (
 	NicFirmwareStorage             = "/nic-firmware"
 	NicFirmwareBinariesFolder      = "firmware-binaries"
 	BFBFolder                      = "bfb"
+	DocaSpcXCCFolder               = "doca-spc-x-cc"
 	NicFirmwareBinaryFileExtension = ".bin"
 	BFBFileExtension               = ".bfb"
+	DebPackageExtension            = ".deb"
 
 	TempDir = "/tmp"
 

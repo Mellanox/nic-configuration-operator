@@ -67,6 +67,62 @@ func (_m *FirmwareUtils) DownloadFile(url string, destPath string) error {
 	return r0
 }
 
+// GetBurnedFirmwareVersionFromDevice provides a mock function with given fields: pciAddress
+func (_m *FirmwareUtils) GetBurnedFirmwareVersionFromDevice(pciAddress string) (string, error) {
+	ret := _m.Called(pciAddress)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetBurnedFirmwareVersionFromDevice")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (string, error)); ok {
+		return rf(pciAddress)
+	}
+	if rf, ok := ret.Get(0).(func(string) string); ok {
+		r0 = rf(pciAddress)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(pciAddress)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetDocaSpcXCCVersion provides a mock function with given fields: docaSpcXCCPath
+func (_m *FirmwareUtils) GetDocaSpcXCCVersion(docaSpcXCCPath string) (string, error) {
+	ret := _m.Called(docaSpcXCCPath)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetDocaSpcXCCVersion")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (string, error)); ok {
+		return rf(docaSpcXCCPath)
+	}
+	if rf, ok := ret.Get(0).(func(string) string); ok {
+		r0 = rf(docaSpcXCCPath)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(docaSpcXCCPath)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetFWVersionsFromBFB provides a mock function with given fields: bfbPath
 func (_m *FirmwareUtils) GetFWVersionsFromBFB(bfbPath string) (map[string]string, error) {
 	ret := _m.Called(bfbPath)
@@ -90,34 +146,6 @@ func (_m *FirmwareUtils) GetFWVersionsFromBFB(bfbPath string) (map[string]string
 
 	if rf, ok := ret.Get(1).(func(string) error); ok {
 		r1 = rf(bfbPath)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// GetBurnedFirmwareVersionFromDevice provides a mock function with given fields: pciAddress
-func (_m *FirmwareUtils) GetBurnedFirmwareVersionFromDevice(pciAddress string) (string, error) {
-	ret := _m.Called(pciAddress)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetBurnedFirmwareVersionFromDevice")
-	}
-
-	var r0 string
-	var r1 error
-	if rf, ok := ret.Get(0).(func(string) (string, error)); ok {
-		return rf(pciAddress)
-	}
-	if rf, ok := ret.Get(0).(func(string) string); ok {
-		r0 = rf(pciAddress)
-	} else {
-		r0 = ret.Get(0).(string)
-	}
-
-	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(pciAddress)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -158,6 +186,42 @@ func (_m *FirmwareUtils) GetFirmwareVersionAndPSIDFromFWBinary(firmwareBinaryPat
 	}
 
 	return r0, r1, r2
+}
+
+// GetInstalledDebPackageVersion provides a mock function with given fields: packageName
+func (_m *FirmwareUtils) GetInstalledDebPackageVersion(packageName string) string {
+	ret := _m.Called(packageName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetInstalledDebPackageVersion")
+	}
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func(string) string); ok {
+		r0 = rf(packageName)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
+// InstallDebPackage provides a mock function with given fields: debPath
+func (_m *FirmwareUtils) InstallDebPackage(debPath string) error {
+	ret := _m.Called(debPath)
+
+	if len(ret) == 0 {
+		panic("no return value specified for InstallDebPackage")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(debPath)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
 }
 
 // UnzipFiles provides a mock function with given fields: zipPath, destDir
