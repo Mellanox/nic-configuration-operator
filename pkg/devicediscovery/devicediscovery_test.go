@@ -134,14 +134,14 @@ var _ = Describe("DeviceDiscovery", func() {
 				mockUtils.AssertExpectations(GinkgoT())
 			})
 
-			It("should fails if GetPartAndSerialNumber fails", func() {
+			It("should not fail if GetPartAndSerialNumber fails", func() {
 				mockUtils.On("IsSriovVF", "0000:00:00.0").Return(false)
 				mockUtils.On("GetVPD", "0000:00:00.0").
 					Return(nil, errors.New("serial number error"))
 
 				devices, err := manager.DiscoverNicDevices()
-				Expect(err).To(HaveOccurred())
-				Expect(devices).To(BeNil())
+				Expect(err).NotTo(HaveOccurred())
+				Expect(devices).To(BeEmpty())
 				mockUtils.AssertExpectations(GinkgoT())
 			})
 
@@ -259,7 +259,7 @@ var _ = Describe("DeviceDiscovery", func() {
 			mockUtils.AssertExpectations(GinkgoT())
 		})
 
-		It("should log and skip only a faulty device if GetPartAndSerialNumber fails", func() {
+		It("should log and skip only a faulty device if GetVPD fails", func() {
 			mockUtils.On("IsSriovVF", "0000:00:00.0").
 				Return(false)
 			mockUtils.On("GetVPD", "0000:00:00.0").
@@ -277,8 +277,8 @@ var _ = Describe("DeviceDiscovery", func() {
 				Return(nil, errors.New("serial number error"))
 
 			devices, err := manager.DiscoverNicDevices()
-			Expect(err).To(HaveOccurred())
-			Expect(devices).To(BeNil())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(devices).To(HaveLen(1))
 			mockUtils.AssertExpectations(GinkgoT())
 		})
 

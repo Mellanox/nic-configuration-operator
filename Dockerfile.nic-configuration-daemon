@@ -29,7 +29,7 @@ FROM nvcr.io/nvidia/doca/doca:3.1.0-full-rt-host
 ARG TARGETARCH
 ENV MFT_VERSION=4.32.0-120
 
-ARG PACKAGES="dpkg-dev=1.21.1ubuntu2.3 libusb-1.0-0=2:1.0.25-1ubuntu2 ipmitool=1.8.18-11ubuntu2.2 rshim  curl=7.81.0-1ubuntu1.20 systemd-sysv=249.11-0ubuntu3.16 mstflint=4.21.0+1-1ubuntu0.1~22.04.1"
+ARG PACKAGES="dpkg-dev=1.21.1ubuntu2.6 libusb-1.0-0=2:1.0.25-1ubuntu2 ipmitool=1.8.18-11ubuntu2.2 rshim  curl=7.81.0-1ubuntu1.21 systemd-sysv=249.11-0ubuntu3.16 mstflint=4.21.0+1-1ubuntu0.1~22.04.1"
 
 # enable deb-src repos
 RUN sed -i 's/^# deb-src/deb-src/g' /etc/apt/sources.list /etc/apt/sources.list.d/*

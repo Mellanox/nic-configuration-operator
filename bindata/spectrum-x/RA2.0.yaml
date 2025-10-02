@@ -53,6 +53,7 @@ runtimeConfig:
       value: dscp
       dmsPath: /interfaces/interface/nvidia/qos/config/trust-mode
       valueType: string
+      alternativeValue: QOS_TRUST_MODE_DSCP
     - name: PFC
       value: "00010000"
       dmsPath: /interfaces/interface/nvidia/qos/config/pfc
@@ -64,23 +65,23 @@ runtimeConfig:
   adaptiveRouting:
     - name: Adaptive Retransmission
       value: true
-      dmsPath: /nvidia/roce/config/adaptive-retransmission
+      dmsPath: /interfaces/interface/nvidia/roce/config/adaptive-retransmission
       valueType: bool
     - name: Tx Window
       value: true
-      dmsPath: /nvidia/roce/config/tx-window
+      dmsPath: /interfaces/interface/nvidia/roce/config/tx-window
       valueType: bool
     - name: Slow Restart
       value: false
-      dmsPath: /nvidia/roce/config/slow-restart
+      dmsPath: /interfaces/interface/nvidia/roce/config/slow-restart
       valueType: bool
     - name: Slow Restart Idle
       value: false
-      dmsPath: /nvidia/roce/config/slow-restart-idle
+      dmsPath: /interfaces/interface/nvidia/roce/config/slow-restart-idle
       valueType: bool
     - name: Adaptive Routing Force
       value: true
-      dmsPath: /nvidia/roce/config/adaptive-routing-force
+      dmsPath: /interfaces/interface/nvidia/roce/config/adaptive-routing-force
       valueType: bool
   congestionControl:
     - name: Congestion Control on RP points

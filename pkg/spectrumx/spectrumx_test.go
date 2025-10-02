@@ -117,6 +117,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					AdaptiveRouting:   []types.ConfigurationParameter{{Name: "ar", Value: "y", DMSPath: "/ar"}},
 					CongestionControl: []types.ConfigurationParameter{{Name: "cc", Value: "z", DMSPath: "/cc"}},
 				},
+				UseSoftwareCCAlgorithm: true,
 			},
 		}
 

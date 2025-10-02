@@ -279,6 +279,18 @@ func (h configurationManager) ApplyDeviceRuntimeSpec(device *v1alpha1.NicDevice)
 				return err
 			}
 		}
+
+		spectrumXConfigApplied, err = h.spectrumXConfigManager.RuntimeConfigApplied(device)
+		if err != nil {
+			log.Log.Error(err, "failed to verify spectrumx runtime configuration", "device", device.Name)
+			return err
+		}
+
+		if !spectrumXConfigApplied {
+			err = fmt.Errorf("spectrumx runtime config failed to apply")
+			log.Log.Error(err, "device", device.Name)
+			return err
+		}
 	}
 
 	if alreadyApplied {
