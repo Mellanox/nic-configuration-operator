@@ -288,7 +288,7 @@ func (v *configValidationImpl) RuntimeConfigApplied(device *v1alpha1.NicDevice) 
 	}
 
 	// Don't validate QoS settings if neither trust nor pfc changes are requested
-	if desiredQoSSpec != nil && desiredQoSSpec.Trust == "" && desiredQoSSpec.PFC == "" && desiredQoSSpec.ToS == 0 {
+	if desiredQoSSpec == nil || (desiredQoSSpec.Trust == "" && desiredQoSSpec.PFC == "" && desiredQoSSpec.ToS == 0) {
 		return true, nil
 	}
 
@@ -338,7 +338,7 @@ func (v *configValidationImpl) CalculateDesiredRuntimeConfig(device *v1alpha1.Ni
 	if template.RoceOptimized != nil && template.RoceOptimized.Enabled {
 		trust := "dscp"
 		pfc := "0,0,0,1,0,0,0,0"
-		tos := 96
+		tos := 0
 
 		if template.RoceOptimized.Qos != nil {
 			trust = template.RoceOptimized.Qos.Trust

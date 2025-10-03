@@ -77,7 +77,7 @@ func (m *spectrumXConfigManager) NvConfigApplied(device *v1alpha1.NicDevice) (bo
 	}
 
 	for _, param := range desiredConfig.NVConfig {
-		if values[param.DMSPath] != param.Value {
+		if values[param.DMSPath] != param.Value && values[param.DMSPath] != param.AlternativeValue {
 			return false, nil
 		}
 	}
@@ -118,7 +118,8 @@ func parametersApplied(device *v1alpha1.NicDevice, params []types.ConfigurationP
 	}
 
 	for _, param := range params {
-		if values[param.DMSPath] != param.Value {
+		if values[param.DMSPath] != param.Value && values[param.DMSPath] != param.AlternativeValue {
+			log.Log.V(2).Info("SpectrumXConfigManager.ApplyRuntimeConfig(): parameter not applied", "device", device.Name, "param", param)
 			return false, nil
 		}
 	}
@@ -162,13 +163,17 @@ func (m *spectrumXConfigManager) RuntimeConfigApplied(device *v1alpha1.NicDevice
 		return false, nil
 	}
 
-	log.Log.V(2).Info("SpectrumXConfigManager.RuntimeConfigApplied(): running DOCA SPC-X CC algorithm", "device", device.Name)
-	for _, port := range device.Status.Ports {
-		err = m.RunDocaSpcXCC(port)
-		if err != nil {
-			log.Log.Error(err, "ApplyRuntimeConfig(): failed to run DOCA SPC-X CC", "device", device.Name)
-			return false, err
+	if desiredConfig.UseSoftwareCCAlgorithm {
+		log.Log.V(2).Info("SpectrumXConfigManager.RuntimeConfigApplied(): running DOCA SPC-X CC algorithm", "device", device.Name)
+		for _, port := range device.Status.Ports {
+			err = m.RunDocaSpcXCC(port)
+			if err != nil {
+				log.Log.Error(err, "ApplyRuntimeConfig(): failed to run DOCA SPC-X CC", "device", device.Name)
+				return false, err
+			}
 		}
+	} else {
+		log.Log.V(2).Info("SpectrumXConfigManager.ApplyRuntimeConfig(): not running DOCA SPC-X CC algorithm as specified in config", "device", device.Name)
 	}
 
 	log.Log.V(2).Info("SpectrumXConfigManager.RuntimeConfigApplied(): checking Congestion Control config", "device", device.Name)
@@ -214,13 +219,17 @@ func (m *spectrumXConfigManager) ApplyRuntimeConfig(device *v1alpha1.NicDevice) 
 		return err
 	}
 
-	log.Log.V(2).Info("SpectrumXConfigManager.ApplyRuntimeConfig(): running DOCA SPC-X CC algorithm", "device", device.Name)
-	for _, port := range device.Status.Ports {
-		err = m.RunDocaSpcXCC(port)
-		if err != nil {
-			log.Log.Error(err, "ApplyRuntimeConfig(): failed to run DOCA SPC-X CC", "device", device.Name)
-			return err
+	if desiredConfig.UseSoftwareCCAlgorithm {
+		log.Log.V(2).Info("SpectrumXConfigManager.ApplyRuntimeConfig(): running DOCA SPC-X CC algorithm", "device", device.Name)
+		for _, port := range device.Status.Ports {
+			err = m.RunDocaSpcXCC(port)
+			if err != nil {
+				log.Log.Error(err, "ApplyRuntimeConfig(): failed to run DOCA SPC-X CC", "device", device.Name)
+				return err
+			}
 		}
+	} else {
+		log.Log.V(2).Info("SpectrumXConfigManager.ApplyRuntimeConfig(): not running DOCA SPC-X CC algorithm as specified in config", "device", device.Name)
 	}
 
 	log.Log.V(2).Info("SpectrumXConfigManager.ApplyRuntimeConfig(): setting Congestion Control config", "device", device.Name)

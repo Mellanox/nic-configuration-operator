@@ -704,7 +704,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 			Expect(qos).ToNot(BeNil())
 			Expect(qos.Trust).To(Equal("dscp"))
 			Expect(qos.PFC).To(Equal("0,0,0,1,0,0,0,0"))
-			Expect(qos.ToS).To(Equal(96))
+			Expect(qos.ToS).To(Equal(0))
 		})
 
 		It("should prioritize RoceOptimized settings over defaults when both optimizations are enabled", func() {

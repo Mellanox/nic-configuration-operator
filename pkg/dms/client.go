@@ -298,13 +298,15 @@ func (i *dmsInstance) SetQoSSettings(spec *v1alpha1.QosSpec) error {
 		}
 		log.Log.V(2).Info("PFC configuration set successfully", "device", i.device.SerialNumber, "interface", port.NetworkInterface)
 
-		log.Log.V(2).Info("Setting ToS configuration", "device", i.device.SerialNumber, "port", idx+1, "interface", port.NetworkInterface)
-		err = i.RunSetPathCommand(ToSPath, fmt.Sprintf("%d", spec.ToS), ValueTypeInt, interfaceNameFilter(port.NetworkInterface))
-		if err != nil {
-			log.Log.V(2).Error(err, "Failed to set ToS configuration", "device", i.device.SerialNumber, "interface", port.NetworkInterface)
-			return fmt.Errorf("failed to set ToS configuration: %v", err)
+		if spec.ToS != 0 {
+			log.Log.V(2).Info("Setting ToS configuration", "device", i.device.SerialNumber, "port", idx+1, "interface", port.NetworkInterface)
+			err = i.RunSetPathCommand(ToSPath, fmt.Sprintf("%d", spec.ToS), ValueTypeInt, interfaceNameFilter(port.NetworkInterface))
+			if err != nil {
+				log.Log.V(2).Error(err, "Failed to set ToS configuration", "device", i.device.SerialNumber, "interface", port.NetworkInterface)
+				return fmt.Errorf("failed to set ToS configuration: %v", err)
+			}
+			log.Log.V(2).Info("ToS configuration set successfully", "device", i.device.SerialNumber, "interface", port.NetworkInterface)
 		}
-		log.Log.V(2).Info("ToS configuration set successfully", "device", i.device.SerialNumber, "interface", port.NetworkInterface)
 	}
 
 	log.Log.V(2).Info("QoS settings applied to all ports", "device", i.device.SerialNumber, "portCount", portCount)
@@ -401,12 +403,13 @@ func (i *dmsInstance) GetParameters(params []types.ConfigurationParameter) (map[
 				}
 			}
 
-		}
-
-		value, err := i.RunGetPathCommand(param.DMSPath, nil)
-		if err != nil {
-			log.Log.V(2).Error(err, "Failed to get parameter", "device", i.device.SerialNumber, "param", param)
-			return nil, fmt.Errorf("failed to get parameter: %v", err)
+		} else {
+			var err error
+			value, err = i.RunGetPathCommand(param.DMSPath, nil)
+			if err != nil {
+				log.Log.V(2).Error(err, "Failed to get parameter", "device", i.device.SerialNumber, "param", param)
+				return nil, fmt.Errorf("failed to get parameter: %v", err)
+			}
 		}
 
 		values[param.DMSPath] = value
@@ -443,11 +446,11 @@ func (i *dmsInstance) SetParameters(params []types.ConfigurationParameter) error
 					}
 				}
 			}
-		}
-
-		err := i.RunSetPathCommand(param.DMSPath, param.Value, param.ValueType, nil)
-		if err != nil {
-			return err
+		} else {
+			err := i.RunSetPathCommand(param.DMSPath, param.Value, param.ValueType, nil)
+			if err != nil {
+				return err
+			}
 		}
 	}
 

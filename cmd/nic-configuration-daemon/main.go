@@ -21,7 +21,9 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 
 	maintenanceoperator "github.com/Mellanox/maintenance-operator/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -156,6 +158,7 @@ func main() {
 		MaintenanceManager:   maintenanceManager,
 		FirmwareManager:      firmwareManager,
 		EventRecorder:        eventRecorder,
+		SpectrumXManager:     spectrumXConfigManager,
 		HostUtils:            hostUtils,
 	}
 	err = nicDeviceReconciler.SetupWithManager(mgr, true)
@@ -190,8 +193,9 @@ func initNicFwMap(namespace string) error {
 }
 
 func initSpectrumXConfigs() (map[string]*types.SpectrumXConfig, error) {
+	log.Log.V(2).Info("initSpectrumXConfigs(): reading spectrum-x configs")
 	spectrumXConfigs := make(map[string]*types.SpectrumXConfig)
-	entries, err := os.ReadDir("bindata/spectrum-x")
+	entries, err := os.ReadDir("/bindata/spectrum-x")
 	if err != nil {
 		return nil, fmt.Errorf("failed to read spectrum-x directory: %w", err)
 	}
@@ -200,11 +204,15 @@ func initSpectrumXConfigs() (map[string]*types.SpectrumXConfig, error) {
 			continue
 		}
 
-		config, err := types.LoadSpectrumXConfig("bindata/spectrum-x/" + file.Name())
+		log.Log.V(2).Info("initSpectrumXConfigs(): loading spectrum-x config", "file", file.Name())
+		config, err := types.LoadSpectrumXConfig("/bindata/spectrum-x/" + file.Name())
 		if err != nil {
 			return nil, fmt.Errorf("failed to load spectrum-x config: %w", err)
 		}
-		spectrumXConfigs[file.Name()] = config
+
+		configName := strings.TrimSuffix(file.Name(), filepath.Ext(file.Name()))
+		spectrumXConfigs[configName] = config
+		log.Log.V(2).Info("initSpectrumXConfigs(): added spectrum-x config", "configName", configName)
 	}
 
 	return spectrumXConfigs, nil

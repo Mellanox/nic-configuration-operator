@@ -78,8 +78,8 @@ func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDeviceStat
 
 		vpd, err := d.utils.GetVPD(device.Address)
 		if err != nil {
-			log.Log.Error(err, "Failed to get device's part and serial numbers", "address", device.Address)
-			return nil, err
+			log.Log.Error(err, "Failed to get device's part and serial numbers, skipping", "address", device.Address)
+			continue
 		}
 
 		// Devices with the same serial number are ports of the same NIC, so grouping them
