@@ -27,7 +27,7 @@ RUN --mount=type=cache,target=/go/pkg/mod/ GO_GCFLAGS=${GCFLAGS} make build-daem
 FROM nvcr.io/nvidia/doca/doca:3.1.0-full-rt-host
 
 ARG TARGETARCH
-ENV MFT_VERSION=4.32.0-120
+ENV MFT_VERSION=4.33.0-169
 
 ARG PACKAGES="dpkg-dev=1.21.1ubuntu2.6 libusb-1.0-0=2:1.0.25-1ubuntu2 ipmitool=1.8.18-11ubuntu2.2 rshim  curl=7.81.0-1ubuntu1.21 systemd-sysv=249.11-0ubuntu3.17 mstflint=4.21.0+1-1ubuntu0.1~22.04.1"
 
