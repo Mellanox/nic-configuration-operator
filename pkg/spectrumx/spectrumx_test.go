@@ -147,6 +147,19 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			_, err := manager.NvConfigApplied(device)
 			Expect(err).To(HaveOccurred())
 		})
+
+		It("filters out non-matching DeviceId parameters", func() {
+			cfgs["v1"].NVConfig = []types.ConfigurationParameter{
+				{Name: "match", Value: "ok", DMSPath: "/m", DeviceId: "1023"},
+				{Name: "skip", Value: "bad", DMSPath: "/s", DeviceId: "a2dc"},
+			}
+			device.Status.Type = "1023"
+			expected := []types.ConfigurationParameter{{Name: "match", Value: "ok", DMSPath: "/m", DeviceId: "1023"}}
+			dmsCli.On("GetParameters", expected).Return(map[string]string{"/m": "ok"}, nil)
+			applied, err := manager.NvConfigApplied(device)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(applied).To(BeTrue())
+		})
 	})
 
 	Describe("ApplyNvConfig", func() {
@@ -160,6 +173,18 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			dmsCli.On("SetParameters", cfgs["v1"].NVConfig).Return(errors.New("set error"))
 			_, err := manager.ApplyNvConfig(device)
 			Expect(err).To(HaveOccurred())
+		})
+
+		It("filters out non-matching DeviceId parameters before setting", func() {
+			cfgs["v1"].NVConfig = []types.ConfigurationParameter{
+				{Name: "match", Value: "ok", DMSPath: "/m", DeviceId: "1023"},
+				{Name: "skip", Value: "bad", DMSPath: "/s", DeviceId: "a2dc"},
+			}
+			device.Status.Type = "1023"
+			expected := []types.ConfigurationParameter{{Name: "match", Value: "ok", DMSPath: "/m", DeviceId: "1023"}}
+			dmsCli.On("SetParameters", expected).Return(nil)
+			_, err := manager.ApplyNvConfig(device)
+			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 
@@ -187,14 +212,55 @@ var _ = Describe("SpectrumXConfigManager", func() {
 	})
 
 	Describe("ApplyRuntimeConfig", func() {
-		It("sets sections and runs CC", func() {
+		It("sets sections, inter-packet gap for overlay=none, and runs CC", func() {
+			device.Spec.Configuration.Template.SpectrumXOptimized.Overlay = "none"
+			cfgs["v1"].RuntimeConfig.InterPacketGap = types.InterPacketGapConfig{
+				PureL3: types.ConfigurationParameter{Name: "ipg_pure", DMSPath: "/ipg/pure", Value: "10"},
+				L3EVPN: types.ConfigurationParameter{Name: "ipg_l3evpn", DMSPath: "/ipg/evpn", Value: "20"},
+			}
+
+			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(nil)
+			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(nil)
+			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
+			dmsCli.On("SetParameters", []types.ConfigurationParameter{cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3}).Return(nil)
+
+			nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
+			err := manager.ApplyRuntimeConfig(device)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("sets inter-packet gap for overlay=l3", func() {
+			device.Spec.Configuration.Template.SpectrumXOptimized.Overlay = "l3"
+			cfgs["v1"].RuntimeConfig.InterPacketGap = types.InterPacketGapConfig{
+				PureL3: types.ConfigurationParameter{Name: "ipg_pure", DMSPath: "/ipg/pure", Value: "10"},
+				L3EVPN: types.ConfigurationParameter{Name: "ipg_l3evpn", DMSPath: "/ipg/evpn", Value: "20"},
+			}
+
+			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(nil)
+			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(nil)
+			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
+			dmsCli.On("SetParameters", []types.ConfigurationParameter{cfgs["v1"].RuntimeConfig.InterPacketGap.L3EVPN}).Return(nil)
+
+			nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
+			err := manager.ApplyRuntimeConfig(device)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("returns error for invalid overlay", func() {
+			device.Spec.Configuration.Template.SpectrumXOptimized.Overlay = "invalid"
+			cfgs["v1"].RuntimeConfig.InterPacketGap = types.InterPacketGapConfig{
+				PureL3: types.ConfigurationParameter{Name: "ipg_pure", DMSPath: "/ipg/pure", Value: "10"},
+				L3EVPN: types.ConfigurationParameter{Name: "ipg_l3evpn", DMSPath: "/ipg/evpn", Value: "20"},
+			}
+
 			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(nil)
 			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(nil)
 			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
 
 			nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
 			err := manager.ApplyRuntimeConfig(device)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(err).To(HaveOccurred())
+			Expect(strings.ToLower(err.Error())).To(ContainSubstring("invalid overlay"))
 		})
 
 		It("bubbles up DMS errors", func() {
@@ -202,6 +268,31 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			err := manager.ApplyRuntimeConfig(device)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("roce set error"))
+		})
+	})
+
+	Describe("GetDocaCCTargetVersion", func() {
+		It("returns empty when SpectrumXOptimized is nil", func() {
+			device.Spec.Configuration.Template.SpectrumXOptimized = nil
+			v, err := manager.GetDocaCCTargetVersion(device)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(v).To(Equal(""))
+		})
+
+		It("returns version when UseSoftwareCCAlgorithm is true", func() {
+			cfgs["v1"].UseSoftwareCCAlgorithm = true
+			cfgs["v1"].DocaCCVersion = "1.2.3"
+			device.Spec.Configuration.Template.SpectrumXOptimized = &v1alpha1.SpectrumXOptimizedSpec{Enabled: true, Version: "v1"}
+			v, err := manager.GetDocaCCTargetVersion(device)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(v).To(Equal("1.2.3"))
+		})
+
+		It("returns error when version not found", func() {
+			device.Spec.Configuration.Template.SpectrumXOptimized = &v1alpha1.SpectrumXOptimizedSpec{Enabled: true, Version: "v2-missing"}
+			_, err := manager.GetDocaCCTargetVersion(device)
+			Expect(err).To(HaveOccurred())
+			Expect(strings.ToLower(err.Error())).To(ContainSubstring("spectrumx config not found"))
 		})
 	})
 

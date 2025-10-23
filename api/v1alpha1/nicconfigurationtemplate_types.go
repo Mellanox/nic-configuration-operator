@@ -80,6 +80,12 @@ type SpectrumXOptimizedSpec struct {
 	// +kubebuilder:validation:Enum=RA1.3;RA2.0
 	// +required
 	Version string `json:"version"`
+	// Overlay mode to be configured
+	// Can be "l3" or "none"
+	// +kubebuilder:validation:Enum=l3;none
+	// +kubebuilder:default:=none
+	// +optional
+	Overlay string `json:"overlay,omitempty"`
 }
 
 type NvConfigParam struct {
@@ -114,7 +120,7 @@ type ConfigurationTemplateSpec struct {
 }
 
 // NicConfigurationTemplateSpec defines the desired state of NicConfigurationTemplate
-// +kubebuilder:validation:XValidation:rule="!(has(self.template.spectrumXOptimized) && self.template.spectrumXOptimized.enabled) || (self.nicSelector.nicType == '1023' || self.nicSelector.nicType == 'a2dc' || self.nicSelector.nicType == 'a2d9')",message="spectrumXOptimized can be enabled only for ConnectX-8 or BlueField-3 SuperNICs"
+// +kubebuilder:validation:XValidation:rule="!(has(self.template.spectrumXOptimized) && self.template.spectrumXOptimized.enabled) || (self.nicSelector.nicType == '1023' || self.nicSelector.nicType == 'a2dc')",message="spectrumXOptimized can be enabled only for ConnectX-8 or BlueField-3 SuperNICs"
 type NicConfigurationTemplateSpec struct {
 	// NodeSelector contains labels required on the node. When empty, the template will be applied to matching devices on all nodes.
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`

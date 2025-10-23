@@ -152,13 +152,6 @@ var _ = Describe("NicConfigurationTemplate CEL validation", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("allows SpectrumXOptimized enabled for BlueField-3 ConnectX-7 Lx (NicType a2d9)", func() {
-		obj := newNicConfigurationTemplate("spcx-allow-a2d9", "Ethernet", 1, &SpectrumXOptimizedSpec{Enabled: true, Version: "RA2.0"})
-		obj.Spec.NicSelector.NicType = "a2d9"
-		err := k8sClient.Create(ctx, obj)
-		Expect(err).NotTo(HaveOccurred())
-	})
-
 	It("rejects SpectrumXOptimized enabled for unsupported NicType", func() {
 		obj := newNicConfigurationTemplate("spcx-reject-unsupported-nictype", "Ethernet", 1, &SpectrumXOptimizedSpec{Enabled: true, Version: "RA2.0"})
 		obj.Spec.NicSelector.NicType = "a2d0"

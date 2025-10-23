@@ -43,11 +43,12 @@ type InterPacketGapConfig struct {
 }
 
 type ConfigurationParameter struct {
-	Name             string `yaml:"name"`
-	Value            string `yaml:"value"`
-	ValueType        string `yaml:"valueType"`
-	DMSPath          string `yaml:"dmsPath"`
+	Name             string `yaml:"name,omitempty"`
+	Value            string `yaml:"value,omitempty"`
+	ValueType        string `yaml:"valueType,omitempty"`
+	DMSPath          string `yaml:"dmsPath,omitempty"`
 	AlternativeValue string `yaml:"alternativeValue,omitempty"`
+	DeviceId         string `yaml:"deviceId,omitempty"`
 }
 
 func LoadSpectrumXConfig(configPath string) (*SpectrumXConfig, error) {

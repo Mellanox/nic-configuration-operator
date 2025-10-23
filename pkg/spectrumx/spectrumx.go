@@ -64,6 +64,14 @@ func (m *spectrumXConfigManager) NvConfigApplied(device *v1alpha1.NicDevice) (bo
 		return false, fmt.Errorf("spectrumx config not found for version %s", device.Spec.Configuration.Template.SpectrumXOptimized.Version)
 	}
 
+	for i, param := range desiredConfig.NVConfig {
+		// Drop device-specific parameters for non-matching devices
+		if param.DeviceId != "" && param.DeviceId != device.Status.Type {
+			desiredConfig.NVConfig[i] = desiredConfig.NVConfig[len(desiredConfig.NVConfig)-1]
+			desiredConfig.NVConfig = desiredConfig.NVConfig[:len(desiredConfig.NVConfig)-1]
+		}
+	}
+
 	dmsClient, err := m.dmsManager.GetDMSClientBySerialNumber(device.Status.SerialNumber)
 	if err != nil {
 		log.Log.Error(err, "NvConfigApplied(): failed to get DMS client", "device", device.Name)
@@ -92,6 +100,13 @@ func (m *spectrumXConfigManager) ApplyNvConfig(device *v1alpha1.NicDevice) (bool
 	if !found {
 		return false, fmt.Errorf("spectrumx config not found for version %s", device.Spec.Configuration.Template.SpectrumXOptimized.Version)
 	}
+	for i, param := range desiredConfig.NVConfig {
+		// Drop device-specific parameters for non-matching devices
+		if param.DeviceId != "" && param.DeviceId != device.Status.Type {
+			desiredConfig.NVConfig[i] = desiredConfig.NVConfig[len(desiredConfig.NVConfig)-1]
+			desiredConfig.NVConfig = desiredConfig.NVConfig[:len(desiredConfig.NVConfig)-1]
+		}
+	}
 
 	dmsClient, err := m.dmsManager.GetDMSClientBySerialNumber(device.Status.SerialNumber)
 	if err != nil {
@@ -99,6 +114,7 @@ func (m *spectrumXConfigManager) ApplyNvConfig(device *v1alpha1.NicDevice) (bool
 		return false, err
 	}
 
+	log.Log.V(2).Info("SpectrumXConfigManager.ApplyNvConfig(): setting Spectrum-X NV config", "device", device.Name, "config", desiredConfig.NVConfig)
 	err = dmsClient.SetParameters(desiredConfig.NVConfig)
 	if err != nil {
 		log.Log.Error(err, "ApplyNvConfig(): failed to set Spectrum-X NV config", "device", device.Name)
@@ -239,7 +255,22 @@ func (m *spectrumXConfigManager) ApplyRuntimeConfig(device *v1alpha1.NicDevice) 
 		return err
 	}
 
-	// TODO for InterPacketGap check overlay first
+	overlay := device.Spec.Configuration.Template.SpectrumXOptimized.Overlay
+	var interPacketGapParam types.ConfigurationParameter
+	switch overlay {
+	case "l3":
+		interPacketGapParam = desiredConfig.RuntimeConfig.InterPacketGap.L3EVPN
+	case "none":
+		interPacketGapParam = desiredConfig.RuntimeConfig.InterPacketGap.PureL3
+	default:
+		return fmt.Errorf("invalid overlay %s", overlay)
+	}
+
+	err = dmsClient.SetParameters([]types.ConfigurationParameter{interPacketGapParam})
+	if err != nil {
+		log.Log.Error(err, "ApplyRuntimeConfig(): failed to set Spectrum-X InterPacketGap config", "device", device.Name)
+		return err
+	}
 
 	return nil
 }
