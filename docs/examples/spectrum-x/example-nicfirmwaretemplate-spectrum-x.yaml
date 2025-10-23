@@ -22,7 +22,7 @@ metadata:
   namespace: nvidia-network-operator
 spec:
   nicSelector:
-    nicType: "1023" # Can also be "a2dc" or "a2d9"
+    nicType: "a2dc" # BlueField-3 SuperNIC, Can also be "1023" for ConnectX-8
   template:
     nicFirmwareSourceRef: spectrum-x-configuration
     updatePolicy: Update

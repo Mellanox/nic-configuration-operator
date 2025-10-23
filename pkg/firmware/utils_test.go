@@ -285,7 +285,7 @@ var _ = Describe("utils", func() {
 			})
 
 			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
-				Expect(cmd).To(Equal("mstflint"))
+				Expect(cmd).To(Equal("flint"))
 				Expect(args[1]).To(Equal(firmwareBinaryPath))
 				return fakeCmd
 			})
@@ -308,7 +308,7 @@ var _ = Describe("utils", func() {
 			})
 
 			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
-				Expect(cmd).To(Equal("mstflint"))
+				Expect(cmd).To(Equal("flint"))
 				Expect(args[1]).To(Equal(firmwareBinaryPath))
 				return fakeCmd
 			})
@@ -327,7 +327,7 @@ var _ = Describe("utils", func() {
 			})
 
 			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
-				Expect(cmd).To(Equal("mstflint"))
+				Expect(cmd).To(Equal("flint"))
 				Expect(args[1]).To(Equal(firmwareBinaryPath))
 				return fakeCmd
 			})

@@ -204,10 +204,10 @@ func (u *utils) GetBurnedFirmwareVersionFromDevice(pciAddress string) (string, e
 // GetFirmwareVersionAndPSIDFromFWBinary retrieves the version and PSID from the firmware binary
 func (u *utils) GetFirmwareVersionAndPSIDFromFWBinary(firmwareBinaryPath string) (string, string, error) {
 	log.Log.V(2).Info("FirmwareUtils.GetFirmwareVersionAndPSIDFromFWBinary()", "firmwareBinaryPath", firmwareBinaryPath)
-	cmd := u.execInterface.Command("mstflint", "-i", firmwareBinaryPath, "q")
+	cmd := u.execInterface.Command("flint", "-i", firmwareBinaryPath, "q")
 	output, err := cmd.Output()
 	if err != nil {
-		log.Log.Error(err, "GetFirmwareVersionAndPSIDFromFWBinary(): Failed to run mstflint")
+		log.Log.Error(err, "GetFirmwareVersionAndPSIDFromFWBinary(): Failed to run flint")
 		return "", "", err
 	}
 
@@ -227,7 +227,7 @@ func (u *utils) GetFirmwareVersionAndPSIDFromFWBinary(firmwareBinaryPath string)
 	}
 
 	if err := scanner.Err(); err != nil {
-		log.Log.Error(err, "GetFirmwareVersionAndPSIDFromFWBinary(): Error reading mstflint output")
+		log.Log.Error(err, "GetFirmwareVersionAndPSIDFromFWBinary(): Error reading flint output")
 		return "", "", err
 	}
 
@@ -295,10 +295,10 @@ func (u *utils) GetFWVersionsFromBFB(bfbPath string) (map[string]string, error) 
 // VerifyImageBootable verifies if the image file is valid and bootable
 func (u utils) VerifyImageBootable(firmwareBinaryPath string) error {
 	log.Log.V(2).Info("FirmwareUtils.VerifyImageBootable()", "firmwareBinaryPath", firmwareBinaryPath)
-	cmd := u.execInterface.Command("mstflint", "-i", firmwareBinaryPath, "v")
+	cmd := u.execInterface.Command("flint", "-i", firmwareBinaryPath, "v")
 	_, err := commonUtils.RunCommand(cmd)
 	if err != nil {
-		log.Log.Error(err, "VerifyImageBootable(): mstflint check failed")
+		log.Log.Error(err, "VerifyImageBootable(): flint check failed")
 		return err
 	}
 
@@ -387,10 +387,10 @@ func (u *utils) removeEmptyDirs(dir string) error {
 func (u *utils) BurnNicFirmware(ctx context.Context, pciAddress, fwPath string) error {
 	log.Log.V(2).Info("FirmwareUtils.BurnNicFirmware()", "pciAddress", pciAddress, "fwPath", fwPath)
 
-	cmd := u.execInterface.CommandContext(ctx, "mstflint", "--device", pciAddress, "--image", fwPath, "--yes", "burn")
+	cmd := u.execInterface.CommandContext(ctx, "flint", "--device", pciAddress, "--image", fwPath, "--yes", "burn")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Log.Error(err, "BurnNicFirmware(): Failed to run mstflint", "output", output)
+		log.Log.Error(err, "BurnNicFirmware(): Failed to run flint", "output", output)
 		return err
 	}
 	return nil

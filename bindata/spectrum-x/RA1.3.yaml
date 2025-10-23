@@ -31,22 +31,6 @@ nvConfig:
     value: TX_SCHED_LOCALITY_ACCUMULATIVE
     dmsPath: /nvidia/roce/config/tx-sched-locality-mode
     valueType: string
-  - name: RoCE Multipath DSCP
-    value: MULTIPATH_DSCP_DEFAULT
-    dmsPath: /nvidia/roce/config/multipath-dscp
-    valueType: string
-  - name: CNP DSCP
-    value: 0
-    dmsPath: /interfaces/interface/nvidia/roce/config/rtt-resp-dscp
-    valueType: int
-  - name: CNP DSCP mode
-    value: RTT_RESP_DSCP_DEFAULT
-    dmsPath: /interfaces/interface/nvidia/roce/config/rtt-resp-dscp-mode
-    valueType: string
-  - name: RoCE CC Steering Ext
-    value: ENABLED
-    dmsPath: /nvidia/roce/config/cc-steering-ext
-    valueType: string
 runtimeConfig:
   roce:
     - name: Trust
@@ -92,89 +76,41 @@ runtimeConfig:
       value: true
       dmsPath: /interfaces/interface/nvidia/cc/config/priority/np_enabled # priority[id=0..7]
       valueType: bool
-    - name: Congestion Control  
-      value: true
-      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/config/enabled
+    - name: Congestion Control Enable 
+      value: false
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=1]/config/enabled
       valueType: bool
     - name: Congestion Control with Counters
       value: true
-      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/config/counter_enable
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=1]/config/counter_enable
       valueType: bool
     - name: DCQCN
       value: false
       dmsPath: /interfaces/interface/nvidia/cc/slot[id=15]/config/enabled
       valueType: bool
-    - name: Bandwidth
-      value: 400
-      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=0]/config/value
-      valueType: int
-    - name: Responsiveness Alpha Factor
-      value: 6553
-      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=1]/config/value
-      valueType: int
-    - name: Maximum Decrease Factor
-      value: 63570
-      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=2]/config/value
-      valueType: int
-    - name: Maximum Increase Factor
-      value: 69468
-      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=3]/config/value
-      valueType: int
-    - name: Additive Increase Step Size
-      value: 36
-      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=4]/config/value
-      valueType: int
-    - name: High Additive Increase Step Size
-      value: 1200
-      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=5]/config/value
-      valueType: int
-    - name: High Additive Increase Interval Period
-      value: 7000000
-      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=6]/config/value
-      valueType: int
-    - name: Base Round Trip Time
+    - name: Base Round Trip Time Slot 0
       value: 15000
       dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=7]/config/value
       valueType: int
-    - name: Maximum Queuing Delay
-      value: 250000
-      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=8]/config/value
+    - name: Base Round Trip Time Slot 1
+      value: 15000
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=1]/param[id=7]/config/value
       valueType: int
-    - name: Rate on First Congestion
-      value: 524288
-      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=9]/config/value
-      valueType: int
-    - name: Delay Only
-      value: 0
-      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=10]/config/value
-      valueType: int
-    - name: CNP Validity
-      value: 1
-      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=11]/config/value
-      valueType: int
-    - name: Transmit Rate Decrement Step
-      value: 0
-      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=12]/config/value
-      valueType: int
-    - name: Fixed Transmission Rate
-      value: 0
-      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=13]/config/value
-      valueType: int
-    - name: Fast Scheduling Factor
-      value: 2097152
-      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=14]/config/value
-      valueType: int
-    - name: Topology Awareness
+    - name: Global Minimum Round Trip Time Slot 0 Param 15
       value: 1
       dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=15]/config/value
       valueType: int
-    - name: Advanced Features
+    - name: Global Minimum Round Trip Time Slot 0 Param 16
       value: 1
       dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=16]/config/value
       valueType: int
-    - name: Troubleshooting Capabilities
-      value: 0
-      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=17]/config/value
+    - name: Global Minimum Round Trip Time Slot 1 Param 15
+      value: 1
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=1]/param[id=15]/config/value
+      valueType: int
+    - name: Global Minimum Round Trip Time Slot 1 Param 16
+      value: 1
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=1]/param[id=16]/config/value
       valueType: int
   interPacketGap:
      pureL3:
@@ -187,5 +123,5 @@ runtimeConfig:
         value: 33
         dmsPath: /interfaces/interface/ethernet/nvidia/config/inter-packet-gap
         valueType: int
-docaCCVersion: 3.1.0105-1
+docaCCVersion: 2.10.0-0.5.3
 useSoftwareCCAlgorithm: true
