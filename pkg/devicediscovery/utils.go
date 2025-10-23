@@ -41,7 +41,7 @@ type DeviceDiscoveryUtils interface {
 
 	// GetVPD uses mstvpd util to retrieve Part Number, Serial Number, Model Name of the PCI device
 	GetVPD(pciAddr string) (*types.VPD, error)
-	// GetFirmwareVersionAndPSID uses mstflint tool to retrieve FW version and PSID of the device
+	// GetFirmwareVersionAndPSID uses flint tool to retrieve FW version and PSID of the device
 	GetFirmwareVersionAndPSID(pciAddr string) (string, string, error)
 
 	// GetRDMADeviceName returns a RDMA device name for the given PCI address
@@ -112,13 +112,13 @@ func (d *deviceDiscoveryUtils) GetVPD(pciAddr string) (*types.VPD, error) {
 	}, nil
 }
 
-// GetFirmwareVersionAndPSID uses mstflint tool to retrieve FW version and PSID of the device
+// GetFirmwareVersionAndPSID uses flint tool to retrieve FW version and PSID of the device
 func (d *deviceDiscoveryUtils) GetFirmwareVersionAndPSID(pciAddr string) (string, string, error) {
 	log.Log.Info("HostUtils.GetFirmwareVersionAndPSID()", "pciAddr", pciAddr)
-	cmd := d.execInterface.Command("mstflint", "-d", pciAddr, "q")
+	cmd := d.execInterface.Command("flint", "-d", pciAddr, "q")
 	output, err := utils.RunCommand(cmd)
 	if err != nil {
-		log.Log.Error(err, "GetFirmwareVersionAndPSID(): Failed to run mstflint")
+		log.Log.Error(err, "GetFirmwareVersionAndPSID(): Failed to run flint")
 		return "", "", err
 	}
 
@@ -138,7 +138,7 @@ func (d *deviceDiscoveryUtils) GetFirmwareVersionAndPSID(pciAddr string) (string
 	}
 
 	if err := scanner.Err(); err != nil {
-		log.Log.Error(err, "GetFirmwareVersionAndPSID(): Error reading mstflint output")
+		log.Log.Error(err, "GetFirmwareVersionAndPSID(): Error reading flint output")
 		return "", "", err
 	}
 

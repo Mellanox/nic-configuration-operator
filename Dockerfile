@@ -44,9 +44,9 @@ RUN --mount=type=cache,target=/go/pkg/mod/ GO_GCFLAGS=${GCFLAGS} make build-mana
 FROM nvcr.io/nvidia/doca/doca:3.1.0-full-rt-host
 
 ARG TARGETARCH
-ENV MFT_VERSION=4.29.0-131
+ENV MFT_VERSION=4.33.0-169
 
-ARG PACKAGES="dpkg-dev=1.21.1ubuntu2.6 mstflint=4.21.0+1-1ubuntu0.1~22.04.1"
+ARG PACKAGES="dpkg-dev=1.21.1ubuntu2.6"
 
 # enable deb-src repos
 RUN sed -i 's/^# deb-src/deb-src/g' /etc/apt/sources.list /etc/apt/sources.list.d/*
