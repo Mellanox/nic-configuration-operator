@@ -9,7 +9,7 @@ require (
 	github.com/Mellanox/rdmamap v1.1.0
 	github.com/jaypipes/ghw v0.19.1
 	github.com/jaypipes/pcidb v1.1.1
-	github.com/onsi/ginkgo/v2 v2.26.0
+	github.com/onsi/ginkgo/v2 v2.27.2
 	github.com/onsi/gomega v1.38.2
 	github.com/stretchr/testify v1.11.1
 	github.com/vishvananda/netlink v1.3.1
@@ -65,7 +65,6 @@ require (
 	github.com/vishvananda/netns v0.0.5 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	go.uber.org/automaxprocs v1.6.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/exp v0.0.0-20240823005443-9b4947da3948 // indirect
