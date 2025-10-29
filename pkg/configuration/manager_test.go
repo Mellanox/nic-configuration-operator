@@ -32,6 +32,7 @@ import (
 )
 
 const pciAddress = "0000:3b:00.0"
+const pciAddress2 = "0000:3b:00.1"
 
 var _ = Describe("ConfigurationManager", func() {
 	Describe("configurationManager.ValidateDeviceNvSpec", func() {
@@ -334,6 +335,95 @@ var _ = Describe("ConfigurationManager", func() {
 					Expect(configUpdate).To(BeTrue())
 					Expect(reboot).To(BeTrue())
 					Expect(err).To(BeNil())
+
+					mockNVConfigUtils.AssertExpectations(GinkgoT())
+					mockConfigValidation.AssertExpectations(GinkgoT())
+				})
+			})
+
+			Context("when handling per-port TRACER_ENABLED across two ports", func() {
+				It("requires reboot when one port's current differs but next matches", func() {
+					// two ports
+					device.Status.Ports = []v1alpha1.NicDevicePortSpec{{PCI: pciAddress}, {PCI: pciAddress2}}
+
+					// First port config (used for ConstructNvParamMapFromTemplate and AdvancedPCISettingsEnabled)
+					nvConfig0 := types.NvConfigQuery{
+						CurrentConfig:  map[string][]string{"TRACER_ENABLED": {"1"}},
+						NextBootConfig: map[string][]string{"TRACER_ENABLED": {"1"}},
+						DefaultConfig:  map[string][]string{},
+					}
+					// Second port already matches desired in current and next
+					nvConfig1 := types.NvConfigQuery{
+						CurrentConfig:  map[string][]string{"TRACER_ENABLED": {"0"}},
+						NextBootConfig: map[string][]string{"TRACER_ENABLED": {"1"}},
+						DefaultConfig:  map[string][]string{},
+					}
+
+					mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, "").Return(nvConfig0, nil)
+					mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress2, "").Return(nvConfig1, nil)
+					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig0).Return(map[string]string{"TRACER_ENABLED": "1"}, nil)
+					mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig0).Return(false)
+
+					configUpdate, reboot, err := manager.ValidateDeviceNvSpec(ctx, device)
+					Expect(err).To(BeNil())
+					Expect(configUpdate).To(BeFalse())
+					Expect(reboot).To(BeTrue())
+
+					mockNVConfigUtils.AssertExpectations(GinkgoT())
+					mockConfigValidation.AssertExpectations(GinkgoT())
+				})
+
+				It("requires config update when a port's next boot mismatches desired", func() {
+					device.Status.Ports = []v1alpha1.NicDevicePortSpec{{PCI: pciAddress}, {PCI: pciAddress2}}
+
+					nvConfig0 := types.NvConfigQuery{
+						CurrentConfig:  map[string][]string{"TRACER_ENABLED": {"0"}},
+						NextBootConfig: map[string][]string{"TRACER_ENABLED": {"1"}},
+						DefaultConfig:  map[string][]string{},
+					}
+					nvConfig1 := types.NvConfigQuery{
+						CurrentConfig:  map[string][]string{"TRACER_ENABLED": {"0"}},
+						NextBootConfig: map[string][]string{"TRACER_ENABLED": {"0"}},
+						DefaultConfig:  map[string][]string{},
+					}
+
+					mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, "").Return(nvConfig0, nil)
+					mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress2, "").Return(nvConfig1, nil)
+					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig0).Return(map[string]string{"TRACER_ENABLED": "1"}, nil)
+					mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig0).Return(false)
+
+					configUpdate, reboot, err := manager.ValidateDeviceNvSpec(ctx, device)
+					Expect(err).To(BeNil())
+					Expect(configUpdate).To(BeTrue())
+					Expect(reboot).To(BeTrue())
+
+					mockNVConfigUtils.AssertExpectations(GinkgoT())
+					mockConfigValidation.AssertExpectations(GinkgoT())
+				})
+
+				It("returns IncorrectSpecError when advanced enabled and a port misses param in current", func() {
+					device.Status.Ports = []v1alpha1.NicDevicePortSpec{{PCI: pciAddress}, {PCI: pciAddress2}}
+
+					nvConfig0 := types.NvConfigQuery{
+						CurrentConfig:  map[string][]string{"TRACER_ENABLED": {"1"}},
+						NextBootConfig: map[string][]string{"TRACER_ENABLED": {"1"}},
+						DefaultConfig:  map[string][]string{},
+					}
+					nvConfig1 := types.NvConfigQuery{
+						CurrentConfig:  map[string][]string{}, // TRACER_ENABLED missing in current
+						NextBootConfig: map[string][]string{"TRACER_ENABLED": {"1"}},
+						DefaultConfig:  map[string][]string{},
+					}
+
+					mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, "").Return(nvConfig0, nil)
+					mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress2, "").Return(nvConfig1, nil)
+					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig0).Return(map[string]string{"TRACER_ENABLED": "1"}, nil)
+					mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig0).Return(true)
+
+					configUpdate, reboot, err := manager.ValidateDeviceNvSpec(ctx, device)
+					Expect(configUpdate).To(BeFalse())
+					Expect(reboot).To(BeFalse())
+					Expect(types.IsIncorrectSpecError(err)).To(BeTrue())
 
 					mockNVConfigUtils.AssertExpectations(GinkgoT())
 					mockConfigValidation.AssertExpectations(GinkgoT())
@@ -707,6 +797,65 @@ var _ = Describe("ConfigurationManager", func() {
 						reboot, err := manager.ApplyDeviceNvSpec(ctx, device)
 						Expect(reboot).To(BeFalse())
 						Expect(err).To(MatchError(setParamErr))
+
+						mockNV.AssertExpectations(GinkgoT())
+						mockConfigValidation.AssertExpectations(GinkgoT())
+					})
+
+					It("applies per-port TRACER_ENABLED only to ports that need it", func() {
+						// two ports
+						device.Status.Ports = []v1alpha1.NicDevicePortSpec{{PCI: pciAddress}, {PCI: pciAddress2}}
+
+						// First port already has desired in next boot
+						nvConfig0 := types.NvConfigQuery{
+							CurrentConfig:  map[string][]string{"TRACER_ENABLED": {"1"}},
+							NextBootConfig: map[string][]string{"TRACER_ENABLED": {"1"}},
+							DefaultConfig:  map[string][]string{},
+						}
+						// Second port needs update
+						nvConfig1 := types.NvConfigQuery{
+							CurrentConfig:  map[string][]string{"TRACER_ENABLED": {"0"}},
+							NextBootConfig: map[string][]string{"TRACER_ENABLED": {"0"}},
+							DefaultConfig:  map[string][]string{},
+						}
+
+						mockNV.On("QueryNvConfig", ctx, pciAddress, "").Return(nvConfig0, nil)
+						mockNV.On("QueryNvConfig", ctx, pciAddress2, "").Return(nvConfig1, nil)
+						mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig0).Return(true)
+						mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig0).Return(map[string]string{"TRACER_ENABLED": "1"}, nil)
+						// Only port2 should be updated
+						mockNV.On("SetNvConfigParameter", pciAddress2, "TRACER_ENABLED", "1").Return(nil)
+
+						reboot, err := manager.ApplyDeviceNvSpec(ctx, device)
+						Expect(err).To(BeNil())
+						Expect(reboot).To(BeTrue())
+
+						mockNV.AssertExpectations(GinkgoT())
+						mockConfigValidation.AssertExpectations(GinkgoT())
+					})
+
+					It("returns IncorrectSpecError when a port lacks TRACER_ENABLED in NextBoot", func() {
+						device.Status.Ports = []v1alpha1.NicDevicePortSpec{{PCI: pciAddress}, {PCI: pciAddress2}}
+
+						nvConfig0 := types.NvConfigQuery{
+							CurrentConfig:  map[string][]string{"TRACER_ENABLED": {"1"}},
+							NextBootConfig: map[string][]string{"TRACER_ENABLED": {"1"}},
+							DefaultConfig:  map[string][]string{},
+						}
+						nvConfig1 := types.NvConfigQuery{
+							CurrentConfig:  map[string][]string{"OTHER": {"x"}},
+							NextBootConfig: map[string][]string{"OTHER": {"x"}}, // TRACER_ENABLED missing entirely
+							DefaultConfig:  map[string][]string{},
+						}
+
+						mockNV.On("QueryNvConfig", ctx, pciAddress, "").Return(nvConfig0, nil)
+						mockNV.On("QueryNvConfig", ctx, pciAddress2, "").Return(nvConfig1, nil)
+						mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig0).Return(true)
+						mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig0).Return(map[string]string{"TRACER_ENABLED": "1"}, nil)
+
+						reboot, err := manager.ApplyDeviceNvSpec(ctx, device)
+						Expect(reboot).To(BeFalse())
+						Expect(err).To(MatchError(types.IncorrectSpecError(fmt.Sprintf("Parameter %s unsupported for device %s", "TRACER_ENABLED", device.Name))))
 
 						mockNV.AssertExpectations(GinkgoT())
 						mockConfigValidation.AssertExpectations(GinkgoT())
