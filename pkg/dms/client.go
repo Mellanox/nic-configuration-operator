@@ -129,6 +129,34 @@ func mergeFilterRules(filterRules ...map[string]string) map[string]string {
 	return result
 }
 
+// stripSquareBracketClauses removes any substrings enclosed in square brackets, including the brackets themselves.
+// For example: "interface[name=enp3s0]/nvidia" -> "interface/nvidia".
+// If brackets are unbalanced, all characters from the first unmatched '[' to the end are discarded.
+func stripSquareBracketClauses(s string) string {
+	if s == "" {
+		return s
+	}
+	var builder strings.Builder
+	builder.Grow(len(s))
+	depth := 0
+	for _, r := range s {
+		if r == '[' {
+			depth++
+			continue
+		}
+		if r == ']' {
+			if depth > 0 {
+				depth--
+			}
+			continue
+		}
+		if depth == 0 {
+			builder.WriteRune(r)
+		}
+	}
+	return builder.String()
+}
+
 func (i *dmsInstance) RunGetPathCommand(path string, filterRules map[string]string) (string, error) {
 	log.Log.V(2).Info("dmsInstance.RunGetPathCommand()", "path", path, "filterRules", filterRules, "device", i.device.SerialNumber)
 
@@ -170,7 +198,9 @@ func (i *dmsInstance) RunGetPathCommand(path string, filterRules map[string]stri
 	}
 
 	// we have to remove the leading "/" from the path, because DMS returns the path without it
-	value, ok := result[0].Updates[0].Values[path[1:]]
+	// Remove all "[... ]" blocks from the path for lookup to match the values map keys
+	lookupPath := stripSquareBracketClauses(strings.TrimPrefix(path, "/"))
+	value, ok := result[0].Updates[0].Values[lookupPath]
 	if !ok {
 		log.Log.V(2).Info("Value not found for path", "device", i.device.SerialNumber, "path", path)
 		return "", fmt.Errorf("value not found for path %s", path)

@@ -26,6 +26,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
+	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	"github.com/Mellanox/nic-configuration-operator/pkg/dms/mocks"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 	execUtils "k8s.io/utils/exec"
@@ -91,7 +92,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			Spec: v1alpha1.NicDeviceSpec{
 				Configuration: &v1alpha1.NicDeviceConfigurationSpec{
 					Template: &v1alpha1.ConfigurationTemplateSpec{
-						SpectrumXOptimized: &v1alpha1.SpectrumXOptimizedSpec{Enabled: true, Version: "v1"},
+						SpectrumXOptimized: &v1alpha1.SpectrumXOptimizedSpec{Enabled: true, Version: "v1", Overlay: "none"},
 						NumVfs:             1,
 						LinkType:           v1alpha1.LinkTypeEnum("Ethernet"),
 					},
@@ -116,6 +117,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					Roce:              []types.ConfigurationParameter{{Name: "r", Value: "x", DMSPath: "/r"}},
 					AdaptiveRouting:   []types.ConfigurationParameter{{Name: "ar", Value: "y", DMSPath: "/ar"}},
 					CongestionControl: []types.ConfigurationParameter{{Name: "cc", Value: "z", DMSPath: "/cc"}},
+					InterPacketGap: types.InterPacketGapConfig{
+						PureL3: types.ConfigurationParameter{Name: "ipg_pure", DMSPath: "/ipg", Value: "25"},
+						L3EVPN: types.ConfigurationParameter{Name: "ipg_l3evpn", DMSPath: "/ipg", Value: "33"},
+					},
 				},
 				UseSoftwareCCAlgorithm: true,
 			},
@@ -190,6 +195,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 	Describe("RuntimeConfigApplied", func() {
 		It("returns true when all runtime sections applied and CC runs", func() {
+			dmsCli.On("GetParameters", []types.ConfigurationParameter{cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3}).Return(map[string]string{"/ipg": "25"}, nil)
 			dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
 			dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(map[string]string{"/ar": "y"}, nil)
 			dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(map[string]string{"/cc": "z"}, nil)
@@ -213,7 +219,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 	Describe("ApplyRuntimeConfig", func() {
 		It("sets sections, inter-packet gap for overlay=none, and runs CC", func() {
-			device.Spec.Configuration.Template.SpectrumXOptimized.Overlay = "none"
+			device.Spec.Configuration.Template.SpectrumXOptimized.Overlay = consts.OverlayNone
 			cfgs["v1"].RuntimeConfig.InterPacketGap = types.InterPacketGapConfig{
 				PureL3: types.ConfigurationParameter{Name: "ipg_pure", DMSPath: "/ipg/pure", Value: "10"},
 				L3EVPN: types.ConfigurationParameter{Name: "ipg_l3evpn", DMSPath: "/ipg/evpn", Value: "20"},

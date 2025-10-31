@@ -125,7 +125,7 @@ func (f firmwareManager) InstallDocaSpcXCC(ctx context.Context, device *v1alpha1
 	log.Log.Info("FirmwareManager.InstallDocaSpcXCC()", "device", device.Name, "targetVersion", targetVersion)
 
 	if device.Spec.Firmware == nil {
-		return errors.New("device's firmware spec is empty")
+		return errors.New("device's firmware spec is empty, cannot install DOCA SPC-X CC")
 	}
 
 	fwSourceName := device.Spec.Firmware.NicFirmwareSourceRef

@@ -600,7 +600,7 @@ var _ = Describe("FirmwareManager", func() {
 		It("doesn't return error when device's firmware spec is empty", func() {
 			manager = firmwareManager{client: nil, utils: fwUtilsMock, cacheRootDir: cacheDir, namespace: ""}
 			err := manager.InstallDocaSpcXCC(context.Background(), &v1alpha1.NicDevice{Spec: v1alpha1.NicDeviceSpec{Firmware: nil}}, targetVer)
-			Expect(err).To(MatchError("device's firmware spec is empty"))
+			Expect(err).To(MatchError("device's firmware spec is empty, cannot install DOCA SPC-X CC"))
 		})
 
 		It("returns error when referenced NicFirmwareSource not found", func() {
