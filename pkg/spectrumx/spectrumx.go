@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
+	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	"github.com/Mellanox/nic-configuration-operator/pkg/dms"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 	execUtils "k8s.io/utils/exec"
@@ -125,17 +126,18 @@ func (m *spectrumXConfigManager) ApplyNvConfig(device *v1alpha1.NicDevice) (bool
 }
 
 func parametersApplied(device *v1alpha1.NicDevice, params []types.ConfigurationParameter, dmsClient dms.DMSClient) (bool, error) {
-	log.Log.Info("SpectrumXConfigManager.ApplyRuntimeConfig()", "device", device.Name)
+	log.Log.Info("SpectrumXConfigManager.parametersApplied()", "device", device.Name)
 
 	values, err := dmsClient.GetParameters(params)
 	if err != nil {
 		log.Log.Error(err, "checkIfSectionApplied(): failed to get Spectrum-X config", "device", device.Name)
 		return false, err
 	}
+	log.Log.V(2).Info("SpectrumXConfigManager.parametersApplied(): got the following values", "device", device.Name, "values", values)
 
 	for _, param := range params {
 		if values[param.DMSPath] != param.Value && values[param.DMSPath] != param.AlternativeValue {
-			log.Log.V(2).Info("SpectrumXConfigManager.ApplyRuntimeConfig(): parameter not applied", "device", device.Name, "param", param)
+			log.Log.V(2).Info("SpectrumXConfigManager.parametersApplied(): parameter not applied", "device", device.Name, "param", param)
 			return false, nil
 		}
 	}
@@ -203,7 +205,26 @@ func (m *spectrumXConfigManager) RuntimeConfigApplied(device *v1alpha1.NicDevice
 		return false, nil
 	}
 
-	// For InterPacketGap check overlay first
+	overlay := device.Spec.Configuration.Template.SpectrumXOptimized.Overlay
+	var interPacketGapParam types.ConfigurationParameter
+	switch overlay {
+	case consts.OverlayL3:
+		interPacketGapParam = desiredConfig.RuntimeConfig.InterPacketGap.L3EVPN
+	case consts.OverlayNone:
+		interPacketGapParam = desiredConfig.RuntimeConfig.InterPacketGap.PureL3
+	default:
+		return false, fmt.Errorf("invalid overlay %s", overlay)
+	}
+
+	overlayParamsApplied, err := parametersApplied(device, []types.ConfigurationParameter{interPacketGapParam}, dmsClient)
+	if err != nil {
+		log.Log.Error(err, "ApplyRuntimeConfig(): failed to set Spectrum-X InterPacketGap config", "device", device.Name)
+		return false, err
+	}
+
+	if !overlayParamsApplied {
+		return false, nil
+	}
 
 	return true, nil
 
@@ -258,9 +279,9 @@ func (m *spectrumXConfigManager) ApplyRuntimeConfig(device *v1alpha1.NicDevice) 
 	overlay := device.Spec.Configuration.Template.SpectrumXOptimized.Overlay
 	var interPacketGapParam types.ConfigurationParameter
 	switch overlay {
-	case "l3":
+	case consts.OverlayL3:
 		interPacketGapParam = desiredConfig.RuntimeConfig.InterPacketGap.L3EVPN
-	case "none":
+	case consts.OverlayNone:
 		interPacketGapParam = desiredConfig.RuntimeConfig.InterPacketGap.PureL3
 	default:
 		return fmt.Errorf("invalid overlay %s", overlay)
@@ -351,5 +372,5 @@ func (m *spectrumXConfigManager) RunDocaSpcXCC(port v1alpha1.NicDevicePortSpec) 
 }
 
 func NewSpectrumXConfigManager(dmsManager dms.DMSManager, spectrumXConfigs map[string]*types.SpectrumXConfig) SpectrumXManager {
-	return &spectrumXConfigManager{dmsManager: dmsManager, spectrumXConfigs: spectrumXConfigs, execInterface: execUtils.New()}
+	return &spectrumXConfigManager{dmsManager: dmsManager, spectrumXConfigs: spectrumXConfigs, execInterface: execUtils.New(), ccProcesses: make(map[string]*ccProcess)}
 }
