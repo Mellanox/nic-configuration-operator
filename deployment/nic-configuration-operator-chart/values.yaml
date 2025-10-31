@@ -51,7 +51,8 @@ configDaemon:
     # -- image tag to use for the config daemon image
     tag: latest
   # -- node selector for the config daemon
-  nodeSelector: {}
+  nodeSelector:
+    network.nvidia.com/operator.mofed.wait: "false"
   # -- resources and limits for the config daemon
   resources:
     limits:
@@ -70,7 +71,7 @@ imagePullSecrets: []
 nicFirmwareStorage:
   # -- create a new pvc or use an existing one
   create: true
-  # -- name of the PVC to mount as NIC Firmware storage. If not provided, the NIC FW upgrade feature will be disabled.
+  # -- name of the PVC to mount as NIC Firmware storage. If set to empty string, the NIC FW upgrade feature will be disabled.
   pvcName: nic-fw-storage-pvc
   # -- storage class name to be used to store NIC FW binaries during NIC FW upgrade. If not provided, the cluster-default storage class will be used
   storageClassName: ""

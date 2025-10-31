@@ -88,10 +88,12 @@ runtimeConfig:
       value: true
       dmsPath:  /interfaces/interface/nvidia/cc/config/priority/rp_enabled # priority[id=0..7]
       valueType: bool
+      alternativeValue: "1"
     - name:  Congestion Control on NP points
       value: true
       dmsPath: /interfaces/interface/nvidia/cc/config/priority/np_enabled # priority[id=0..7]
       valueType: bool
+      alternativeValue: "1"
     - name: Congestion Control  
       value: true
       dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/config/enabled

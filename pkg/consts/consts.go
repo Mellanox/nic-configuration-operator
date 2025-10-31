@@ -134,4 +134,7 @@ const (
 
 	TrustModeDscp = "dscp"
 	TrustModePfc  = "pfc"
+
+	OverlayNone = "none"
+	OverlayL3   = "l3"
 )

@@ -21,7 +21,7 @@ spec:
         control-plane: nic-configuration-daemon
         {{- include "nic-configuration-operator.selectorLabels" . | nindent 8 }}
     spec:
-      nodeSelector: {{- toYaml .Values.operator.nodeSelector | nindent 8 }}
+      nodeSelector: {{- toYaml .Values.configDaemon.nodeSelector | nindent 8 }}
       serviceAccountName: {{ include "nic-configuration-operator.serviceAccountName" . }}
       terminationGracePeriodSeconds: 10
       hostNetwork: true

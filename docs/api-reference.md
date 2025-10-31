@@ -1,6 +1,6 @@
 Packages:
 
--   [configuration.net.nvidia.com/v1alpha1](#configurationnetnvidiacomv1alpha1)
+- [configuration.net.nvidia.com/v1alpha1](#configurationnetnvidiacomv1alpha1)
 
 ## configuration.net.nvidia.com/v1alpha1
 
@@ -933,9 +933,15 @@ SpectrumXOptimizedSpec enables Spectrum-X specific optimizations
 <em>string</em></td>
 <td><p>Version of the Spectrum-X architecture to optimize for</p></td>
 </tr>
+<tr>
+<td><code>overlay</code><br />
+<em>string</em></td>
+<td><em>(Optional)</em>
+<p>Overlay mode to be configured Can be “l3” or “none”</p></td>
+</tr>
 </tbody>
 </table>
 
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-*Generated with `gen-crd-api-reference-docs` on git commit `3c45987`.*
+*Generated with `gen-crd-api-reference-docs` on git commit `6fd71d2`.*
