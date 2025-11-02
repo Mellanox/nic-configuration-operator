@@ -31,3 +31,4 @@ spec:
       spectrumXOptimized:
           enabled: true
           version: "RA2.0" # For Reference Architecture v1.3, use "RA1.3" value for this field.
+          overlay: "none" # For L3 overlay, use "l3" value for this field.
