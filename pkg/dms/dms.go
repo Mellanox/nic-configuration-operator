@@ -18,7 +18,6 @@ package dms
 import (
 	"fmt"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
@@ -92,17 +91,12 @@ func (m *dmsManager) StartDMSInstances(devices []v1alpha1.NicDeviceStatus) error
 			log.Log.V(2).Info("Port in use, trying next", "port", m.nextPort)
 		}
 
-		// Convert PCI address from "0000:03:00.0" to "03:00" format required by DMS
 		pciAddr := device.Ports[0].PCI
-		start := strings.Index(pciAddr, ":") + 1
-		end := strings.LastIndex(pciAddr, ".")
-		targetPCI := pciAddr[start:end]
-		log.Log.V(2).Info("Converted PCI address", "original", pciAddr, "target", targetPCI)
 
-		log.Log.V(2).Info("Starting DMS server", "path", dmsServerPath, "bindAddress", bindAddress, "targetPCI", targetPCI)
+		log.Log.V(2).Info("Starting DMS server", "path", dmsServerPath, "bindAddress", bindAddress, "targetPCI", pciAddr)
 		cmd := m.execInterface.Command(dmsServerPath,
 			"-bind_address", bindAddress,
-			"-target_pci", targetPCI,
+			"-target_pci", pciAddr,
 			"-auth", "credentials",
 			"-noauth", "-tls_enabled=false")
 
