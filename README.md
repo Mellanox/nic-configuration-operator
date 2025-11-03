@@ -16,7 +16,7 @@ NVIDIA NIC Configuration Operator uses the [Maintenance Operator](https://github
 ### Prerequisites
 
 * Kubernetes cluster
-* [NVIDIA Network Operator](https://github.com/Mellanox/network-operator) deployed
+* [NVIDIA Network Operator](https://github.com/Mellanox/network-operator) deployed. It is recommended to deploy the [DOCA-OFED driver](https://github.com/Mellanox/network-operator?tab=readme-ov-file#driver-containers)
 * [Maintenance Operator](https://github.com/Mellanox/maintenance-operator) deployed
 
 NVIDIA NIC Configuration Operator can be deployed as part of the [NIC Cluster Policy CRD](https://github.com/Mellanox/network-operator?tab=readme-ov-file#nicclusterpolicy-spec).
@@ -65,6 +65,7 @@ spec:
          qos:
             trust: dscp
             pfc: "0,0,0,1,0,0,0,0"
+            tos: 0
       gpuDirectOptimized:
          enabled: true
          env: Baremetal
@@ -92,9 +93,9 @@ spec:
       * `ROCE_CC_PRIO_MASK_P1=255`, `ROCE_CC_PRIO_MASK_P2=255`
       * `CNP_DSCP_P1=4`, `CNP_DSCP_P2=4`
       * `CNP_802P_PRIO_P1=6`, `CNP_802P_PRIO_P2=6`
-  * Configure pfc (Priority Flow Control) for priority 3 and set trust to dscp on each PF
+  * Configure pfc (Priority Flow Control) for priority 3, set trust to dscp on each PF, set ToS (Type of Service) to 0.
     * Non-persistent (need to be applied after each boot)
-    * Users can override values via `trust` and `pfc` parameters
+    * Users can override values via `trust`, `pfc` and `tos` parameters
   * Can only be enabled with `linkType=Ethernet`
 * `gpuDirectOptimized`: performs gpu direct optimizations. ATM only optimizations for Baremetal environment are supported. If enabled perform the following:
   * Set nvconfig `ATS_ENABLED=0`
@@ -227,3 +228,11 @@ status:
 #### Implementation details:
 
 The NicDevice CRD is created and reconciled by the configuration daemon. The reconciliation logic scheme can be found [here](docs/nic-configuration-reconcile-diagram.png).
+
+## Order of operations
+
+To include the NIC Configuration Operator as part of network configuration workflows, strict order of operations might need to be enforced. For example, [SR-IOV Network Configuration Daemon](https://github.com/k8snetworkplumbingwg/sriov-network-operator) pod should start AFTER the NIC Configuration Daemon has finished.
+To indicate when NIC configuration is in progress to the pods that depend on it, the operator manages the `nvidia.com/operator.nic-configuration.wait` label, which has the value `false` when the requested NIC configuration has successfuly been applied, and the value `true` when the NIC configuration is in progress.
+To use this mechanism, the next pods in the pipeline can add `nvidia.com/operator.nic-configuration.wait=false` to their node label selectors. That way, they will automatically be evicted from the node when the NICs are being configured.
+
+The NIC Configuration Daemon itself relies on the `network.nvidia.com/operator.mofed.wait=false` label to be present on the node as it requires the DOCA-OFED driver to be running for some of the configurations.

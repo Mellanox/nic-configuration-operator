@@ -17,10 +17,13 @@ package maintenance
 
 import (
 	"context"
+	"fmt"
 
 	maintenanceoperator "github.com/Mellanox/maintenance-operator/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -67,6 +70,7 @@ type MaintenanceManager interface {
 	ScheduleMaintenance(ctx context.Context) error
 	MaintenanceAllowed(ctx context.Context) (bool, error)
 	ReleaseMaintenance(ctx context.Context) error
+	SetNodeWaitLabel(ctx context.Context, value string) error
 	Reboot() error
 }
 
@@ -132,6 +136,12 @@ func (m maintenanceManager) ScheduleMaintenance(ctx context.Context) error {
 		return err
 	}
 
+	err = m.SetNodeWaitLabel(ctx, consts.LabelValueTrue)
+	if err != nil {
+		log.Log.Error(err, "failed to set the nic configuration wait label on the node to true")
+		return err
+	}
+
 	return nil
 }
 
@@ -179,6 +189,12 @@ func (m maintenanceManager) ReleaseMaintenance(ctx context.Context) error {
 		}
 	}
 
+	err = m.SetNodeWaitLabel(ctx, consts.LabelValueFalse)
+	if err != nil {
+		log.Log.Error(err, "failed to set the nic configuration wait label on the node to false")
+		return err
+	}
+
 	return nil
 }
 
@@ -186,6 +202,27 @@ func (m maintenanceManager) Reboot() error {
 	log.Log.Info("maintenanceManager.Reboot()")
 
 	return m.hostUtils.ScheduleReboot()
+}
+
+// SetNodeWaitLabel ensures the node has the network.nvidia.com/operator.nic-configuration.wait label with provided value.
+// It performs a merge patch and is idempotent when the label already has the desired value.
+func (m maintenanceManager) SetNodeWaitLabel(ctx context.Context, value string) error {
+	log.Log.Info("maintenanceManager.SetNodeLabel()", "node", m.nodeName, "key", consts.NodeNicConfigurationWaitLabel, "value", value)
+
+	var patch []byte
+	if value == "" {
+		// Remove label when value is empty
+		patch = []byte(fmt.Sprintf(`{"metadata":{"labels":{%q: null}}}`, consts.NodeNicConfigurationWaitLabel))
+	} else {
+		// Set/update label
+		patch = []byte(fmt.Sprintf(`{"metadata":{"labels":{%q: %q}}}`, consts.NodeNicConfigurationWaitLabel, value))
+	}
+
+	if err := m.client.Patch(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: m.nodeName}}, client.RawPatch(types.StrategicMergePatchType, patch)); err != nil {
+		log.Log.Error(err, "failed to patch node label", "node", m.nodeName, "key", consts.NodeNicConfigurationWaitLabel, "value", value)
+		return err
+	}
+	return nil
 }
 
 func New(client client.Client, hostUtils host.HostUtils, nodeName string, namespace string) MaintenanceManager {
