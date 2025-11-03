@@ -19,6 +19,7 @@ spec:
         kubectl.kubernetes.io/default-container: nic-configuration-daemon
       labels:
         control-plane: nic-configuration-daemon
+        nvidia.com/nic-configuration-daemon: ""
         {{- include "nic-configuration-operator.selectorLabels" . | nindent 8 }}
     spec:
       nodeSelector: {{- toYaml .Values.configDaemon.nodeSelector | nindent 8 }}
