@@ -137,4 +137,8 @@ const (
 
 	OverlayNone = "none"
 	OverlayL3   = "l3"
+
+	NodeNicConfigurationWaitLabel = "network.nvidia.com/operator.nic-configuration.wait"
+	LabelValueTrue                = "true"
+	LabelValueFalse               = "false"
 )

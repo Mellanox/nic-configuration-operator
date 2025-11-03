@@ -38,6 +38,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/internal/controller"
 	"github.com/Mellanox/nic-configuration-operator/pkg/configuration"
+	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	"github.com/Mellanox/nic-configuration-operator/pkg/devicediscovery"
 	"github.com/Mellanox/nic-configuration-operator/pkg/dms"
 	"github.com/Mellanox/nic-configuration-operator/pkg/firmware"
@@ -168,6 +169,13 @@ func main() {
 	}
 
 	ctx := ctrl.SetupSignalHandler()
+
+	// Set the nic configuration wait label on the node to true until desired configuration is confirmed to be applied
+	err = maintenanceManager.SetNodeWaitLabel(ctx, consts.LabelValueTrue)
+	if err != nil {
+		log.Log.Error(err, "failed to set the nic configuration wait label on the node to true")
+		os.Exit(1)
+	}
 
 	err = mgr.GetCache().IndexField(ctx, &v1alpha1.NicDevice{}, "status.node", func(o client.Object) []string {
 		return []string{o.(*v1alpha1.NicDevice).Status.Node}
