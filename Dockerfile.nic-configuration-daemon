@@ -1,3 +1,5 @@
+ARG BASE_IMAGE_DOCA_FULL_RT_HOST
+
 # Build the manager binary
 FROM golang:1.24 AS builder
 ARG TARGETOS
@@ -24,7 +26,7 @@ COPY ./ ./
 # by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
 RUN --mount=type=cache,target=/go/pkg/mod/ GO_GCFLAGS=${GCFLAGS} make build-daemon
 
-FROM nvcr.io/nvidia/doca/doca:3.1.0-full-rt-host
+FROM ${BASE_IMAGE_DOCA_FULL_RT_HOST:-nvcr.io/nvidia/doca/doca:3.1.0-full-rt-host}
 
 ARG TARGETARCH
 ENV MFT_VERSION=4.33.0-169
