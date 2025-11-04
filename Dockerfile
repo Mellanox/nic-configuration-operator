@@ -14,6 +14,8 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
+ARG BASE_IMAGE_DOCA_FULL_RT_HOST
+
 # Build the manager binary
 FROM golang:1.24 AS builder
 ARG TARGETOS
@@ -41,7 +43,7 @@ COPY ./ ./
 #RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/maintenance-manager/main.go
 RUN --mount=type=cache,target=/go/pkg/mod/ GO_GCFLAGS=${GCFLAGS} make build-manager
 
-FROM nvcr.io/nvidia/doca/doca:3.1.0-full-rt-host
+FROM ${BASE_IMAGE_DOCA_FULL_RT_HOST:-nvcr.io/nvidia/doca/doca:3.1.0-full-rt-host}
 
 ARG TARGETARCH
 ENV MFT_VERSION=4.33.0-169
