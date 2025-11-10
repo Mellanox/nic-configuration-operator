@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"sync"
 	"time"
@@ -481,6 +482,18 @@ func (r *NicDeviceReconciler) applyNvConfig(ctx context.Context, status *nicDevi
 	err = r.updateConfigInProgressStatusCondition(ctx, status.device, consts.PendingRebootReason, metav1.ConditionTrue, "")
 	if err != nil {
 		return err
+	}
+
+	// On some platforms, explicit FW reset is required before reboot to apply the changes to NV spec
+	featureGate := os.Getenv(consts.FEATURE_GATE_FW_RESET_AFTER_CONFIG_UPDATE)
+	if featureGate == consts.LabelValueTrue {
+		log.Log.Info("Feature gate FW_RESET_AFTER_CONFIG_UPDATE is enabled, resetting NIC firmware before reboot", "device", status.device.Name)
+		err = r.ConfigurationManager.ResetNicFirmware(ctx, status.device)
+		if err != nil {
+			log.Log.Error(err, "failed to reset NIC firmware before reboot", "device", status.device.Name)
+			return err
+		}
+		log.Log.Info("NIC firmware reset successful", "device", status.device.Name)
 	}
 
 	status.rebootRequired = rebootRequired

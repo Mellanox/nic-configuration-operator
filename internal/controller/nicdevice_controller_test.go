@@ -18,6 +18,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"os"
 	"sync"
 	"time"
 
@@ -413,6 +414,66 @@ var _ = Describe("NicDeviceReconciler", func() {
 
 			maintenanceManager.AssertCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
 			maintenanceManager.AssertExpectations(GinkgoT())
+		})
+		//nolint:errcheck
+		It("Should reset FW after nv config update if feature gate FW_RESET_AFTER_CONFIG_UPDATE is enabled", func() {
+			os.Setenv(consts.FEATURE_GATE_FW_RESET_AFTER_CONFIG_UPDATE, consts.LabelValueTrue)
+			defer os.Unsetenv(consts.FEATURE_GATE_FW_RESET_AFTER_CONFIG_UPDATE)
+
+			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(true, true, nil)
+			configurationManager.On("ApplyDeviceNvSpec", mock.Anything, mock.Anything).Return(true, nil)
+			configurationManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(nil)
+			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
+			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
+
+			createDevice(false, nil)
+
+			device := &v1alpha1.NicDevice{}
+			Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
+			_, err := json.Marshal(device.Spec)
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
+				Type:   consts.ConfigUpdateInProgressCondition,
+				Status: metav1.ConditionTrue,
+				Reason: consts.UpdateStartedReason,
+			}))
+
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
+				Type:   consts.ConfigUpdateInProgressCondition,
+				Status: metav1.ConditionTrue,
+				Reason: consts.PendingRebootReason,
+			}))
+
+			configurationManager.AssertCalled(GinkgoT(), "ResetNicFirmware", mock.Anything, mock.Anything)
+		})
+		It("Should NOT reset FW after nv config update if feature gate FW_RESET_AFTER_CONFIG_UPDATE is NOT enabled", func() {
+			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(true, true, nil)
+			configurationManager.On("ApplyDeviceNvSpec", mock.Anything, mock.Anything).Return(true, nil)
+			configurationManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(nil)
+			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
+			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
+
+			createDevice(false, nil)
+
+			device := &v1alpha1.NicDevice{}
+			Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
+			_, err := json.Marshal(device.Spec)
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
+				Type:   consts.ConfigUpdateInProgressCondition,
+				Status: metav1.ConditionTrue,
+				Reason: consts.UpdateStartedReason,
+			}))
+
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
+				Type:   consts.ConfigUpdateInProgressCondition,
+				Status: metav1.ConditionTrue,
+				Reason: consts.PendingRebootReason,
+			}))
+
+			configurationManager.AssertNotCalled(GinkgoT(), "ResetNicFirmware", mock.Anything, mock.Anything)
 		})
 		It("Should keep in UpdateStarted status if maintenance fails to schedule", func() {
 			errorText := "maintenance request failed"
