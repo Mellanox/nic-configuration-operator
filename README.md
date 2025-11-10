@@ -236,3 +236,8 @@ To indicate when NIC configuration is in progress to the pods that depend on it,
 To use this mechanism, the next pods in the pipeline can add `nvidia.com/operator.nic-configuration.wait=false` to their node label selectors. That way, they will automatically be evicted from the node when the NICs are being configured.
 
 The NIC Configuration Daemon itself relies on the `network.nvidia.com/operator.mofed.wait=false` label to be present on the node as it requires the DOCA-OFED driver to be running for some of the configurations.
+
+## Feature flags
+Feature flags can be enabled via environment variables in the helm chart or NVIDIA Network Operator's NicClusterPolicy.
+Supported flags:
+* `FW_RESET_AFTER_CONFIG_UPDATE`=`true`: explicitely reset the NIC's Firmware before the reboot and after updating its non-volatile configuration. Might be required on DGX servers where configuration update is not successfully applied after the warm reboot.

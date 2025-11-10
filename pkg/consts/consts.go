@@ -141,4 +141,6 @@ const (
 	NodeNicConfigurationWaitLabel = "network.nvidia.com/operator.nic-configuration.wait"
 	LabelValueTrue                = "true"
 	LabelValueFalse               = "false"
+
+	FEATURE_GATE_FW_RESET_AFTER_CONFIG_UPDATE = "FW_RESET_AFTER_CONFIG_UPDATE"
 )

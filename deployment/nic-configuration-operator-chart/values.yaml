@@ -50,6 +50,11 @@ configDaemon:
     name: nic-configuration-operator-daemon
     # -- image tag to use for the config daemon image
     tag: latest
+  # -- environment variables for the config daemon
+  # env:
+    # -- feature gate to enable FW reset after nv config update
+    # - name: FW_RESET_AFTER_CONFIG_UPDATE
+    #   value: "true"
   # -- node selector for the config daemon
   nodeSelector:
     network.nvidia.com/operator.mofed.wait: "false"
