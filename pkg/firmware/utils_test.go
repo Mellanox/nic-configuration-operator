@@ -135,11 +135,12 @@ var _ = Describe("utils", func() {
 		})
 	})
 
-	Describe("GetBurnedFirmwareVersionFromDevice", func() {
+	Describe("GetFirmwareVersionsFromDevice", func() {
 		var pciAddress = "0000:03:00.0"
 
-		It("should return burned firmware version when both burned and running are present", func() {
+		It("should return different burned and running firmware versions when both are present", func() {
 			burnedVersion := "22.45.3608"
+			runningVersion := "22.43.1020"
 
 			fakeExec := &execTesting.FakeExec{}
 
@@ -171,13 +172,14 @@ var _ = Describe("utils", func() {
 
 			testedUtils := &utils{execInterface: fakeExec}
 
-			version, err := testedUtils.GetBurnedFirmwareVersionFromDevice(pciAddress)
+			retrievedBurnedVersion, retrievedRunningVersion, err := testedUtils.GetFirmwareVersionsFromDevice(pciAddress)
 
 			Expect(err).NotTo(HaveOccurred())
-			Expect(version).To(Equal(burnedVersion))
+			Expect(retrievedBurnedVersion).To(Equal(burnedVersion))
+			Expect(retrievedRunningVersion).To(Equal(runningVersion))
 		})
 
-		It("should return burned firmware version when only burned version is present", func() {
+		It("should return burned and running firmware versions even when only burned version is present", func() {
 			fwVersion := "22.29.2002"
 
 			fakeExec := &execTesting.FakeExec{}
@@ -209,10 +211,11 @@ var _ = Describe("utils", func() {
 
 			testedUtils := &utils{execInterface: fakeExec}
 
-			version, err := testedUtils.GetBurnedFirmwareVersionFromDevice(pciAddress)
+			retrievedBurnedVersion, retrievedRunningVersion, err := testedUtils.GetFirmwareVersionsFromDevice(pciAddress)
 
 			Expect(err).NotTo(HaveOccurred())
-			Expect(version).To(Equal(fwVersion))
+			Expect(retrievedBurnedVersion).To(Equal(fwVersion))
+			Expect(retrievedRunningVersion).To(Equal(fwVersion))
 		})
 
 		It("should return error if firmware version is missing", func() {
@@ -236,11 +239,12 @@ var _ = Describe("utils", func() {
 
 			testedUtils := &utils{execInterface: fakeExec}
 
-			version, err := testedUtils.GetBurnedFirmwareVersionFromDevice(pciAddress)
+			retrievedBurnedVersion, retrievedRunningVersion, err := testedUtils.GetFirmwareVersionsFromDevice(pciAddress)
 
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("burned firmware version"))
-			Expect(version).To(Equal(""))
+			Expect(retrievedBurnedVersion).To(Equal(""))
+			Expect(retrievedRunningVersion).To(Equal(""))
 		})
 
 		It("should return error if mlxfwmanager command fails", func() {
@@ -259,10 +263,11 @@ var _ = Describe("utils", func() {
 
 			testedUtils := &utils{execInterface: fakeExec}
 
-			version, err := testedUtils.GetBurnedFirmwareVersionFromDevice(pciAddress)
+			retrievedBurnedVersion, retrievedRunningVersion, err := testedUtils.GetFirmwareVersionsFromDevice(pciAddress)
 
 			Expect(err).To(HaveOccurred())
-			Expect(version).To(Equal(""))
+			Expect(retrievedBurnedVersion).To(Equal(""))
+			Expect(retrievedRunningVersion).To(Equal(""))
 		})
 	})
 
