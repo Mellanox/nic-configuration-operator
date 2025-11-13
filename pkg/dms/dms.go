@@ -18,6 +18,8 @@ package dms
 import (
 	"fmt"
 	"net"
+	"os"
+	"path"
 	"sync"
 	"time"
 
@@ -93,12 +95,20 @@ func (m *dmsManager) StartDMSInstances(devices []v1alpha1.NicDeviceStatus) error
 
 		pciAddr := device.Ports[0].PCI
 
+		imagesDir := path.Join("/tmp", "images", device.SerialNumber)
+		err := os.MkdirAll(imagesDir, 0755)
+		if err != nil {
+			log.Log.Error(err, "failed to create images directory", "directory", imagesDir)
+			return fmt.Errorf("failed to create images directory: %v", err)
+		}
+
 		log.Log.V(2).Info("Starting DMS server", "path", dmsServerPath, "bindAddress", bindAddress, "targetPCI", pciAddr)
 		cmd := m.execInterface.Command(dmsServerPath,
 			"-bind_address", bindAddress,
 			"-target_pci", pciAddr,
 			"-auth", "credentials",
-			"-noauth", "-tls_enabled=false")
+			"-noauth", "-tls_enabled=false",
+			"--image_folder", imagesDir)
 
 		instance := &dmsInstance{
 			device:        device,

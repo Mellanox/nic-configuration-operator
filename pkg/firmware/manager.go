@@ -55,6 +55,12 @@ type FirmwareManager interface {
 	// If already installed, results in no-op. If package version doesn't match targetVersion, returns an error.
 	// returns error - DOCA SPC-X PCC .deb package is not ready or there are errors
 	InstallDocaSpcXCC(ctx context.Context, device *v1alpha1.NicDevice, targetVersion string) error
+
+	// GetFirmwareVersionsFromDevice retrieves the burned and running FW versions from the device
+	// returns string - burned FW version
+	// returns string - running FW version
+	// returns error - there were errors while retrieving the firmware versions
+	GetFirmwareVersionsFromDevice(device *v1alpha1.NicDevice) (string, string, error)
 }
 
 type firmwareManager struct {
@@ -200,7 +206,7 @@ func (f firmwareManager) BurnNicFirmware(ctx context.Context, device *v1alpha1.N
 	pci := device.Status.Ports[0].PCI
 
 	// Check current firmware versions before proceeding with burn
-	burnedVersion, err := f.utils.GetBurnedFirmwareVersionFromDevice(pci)
+	burnedVersion, _, err := f.utils.GetFirmwareVersionsFromDevice(pci)
 	if err != nil {
 		log.Log.V(2).Info("Could not retrieve current firmware version, proceeding with burn", "device", device.Name, "error", err.Error())
 	} else if burnedVersion == version {
@@ -338,6 +344,15 @@ func (f firmwareManager) burnDefaultFirmware(ctx context.Context, device *v1alph
 	}
 
 	return nil
+}
+
+// GetFirmwareVersionsFromDevice retrieves the burned and running FW versions from the device
+// returns string - burned FW version
+// returns string - running FW version
+// returns error - there were errors while retrieving the firmware versions
+func (f firmwareManager) GetFirmwareVersionsFromDevice(device *v1alpha1.NicDevice) (string, string, error) {
+	log.Log.Info("FirmwareManager.GetFirmwareVersionsFromDevice()", "device", device.Name)
+	return f.utils.GetFirmwareVersionsFromDevice(device.Status.Ports[0].PCI)
 }
 
 func NewFirmwareManager(client client.Client, dmsManager dms.DMSManager, namespace string) FirmwareManager {

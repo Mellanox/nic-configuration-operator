@@ -67,34 +67,6 @@ func (_m *FirmwareUtils) DownloadFile(url string, destPath string) error {
 	return r0
 }
 
-// GetBurnedFirmwareVersionFromDevice provides a mock function with given fields: pciAddress
-func (_m *FirmwareUtils) GetBurnedFirmwareVersionFromDevice(pciAddress string) (string, error) {
-	ret := _m.Called(pciAddress)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetBurnedFirmwareVersionFromDevice")
-	}
-
-	var r0 string
-	var r1 error
-	if rf, ok := ret.Get(0).(func(string) (string, error)); ok {
-		return rf(pciAddress)
-	}
-	if rf, ok := ret.Get(0).(func(string) string); ok {
-		r0 = rf(pciAddress)
-	} else {
-		r0 = ret.Get(0).(string)
-	}
-
-	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(pciAddress)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
 // GetDocaSpcXCCVersion provides a mock function with given fields: docaSpcXCCPath
 func (_m *FirmwareUtils) GetDocaSpcXCCVersion(docaSpcXCCPath string) (string, error) {
 	ret := _m.Called(docaSpcXCCPath)
@@ -181,6 +153,41 @@ func (_m *FirmwareUtils) GetFirmwareVersionAndPSIDFromFWBinary(firmwareBinaryPat
 
 	if rf, ok := ret.Get(2).(func(string) error); ok {
 		r2 = rf(firmwareBinaryPath)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// GetFirmwareVersionsFromDevice provides a mock function with given fields: pciAddress
+func (_m *FirmwareUtils) GetFirmwareVersionsFromDevice(pciAddress string) (string, string, error) {
+	ret := _m.Called(pciAddress)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetFirmwareVersionsFromDevice")
+	}
+
+	var r0 string
+	var r1 string
+	var r2 error
+	if rf, ok := ret.Get(0).(func(string) (string, string, error)); ok {
+		return rf(pciAddress)
+	}
+	if rf, ok := ret.Get(0).(func(string) string); ok {
+		r0 = rf(pciAddress)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(string) string); ok {
+		r1 = rf(pciAddress)
+	} else {
+		r1 = ret.Get(1).(string)
+	}
+
+	if rf, ok := ret.Get(2).(func(string) error); ok {
+		r2 = rf(pciAddress)
 	} else {
 		r2 = ret.Error(2)
 	}

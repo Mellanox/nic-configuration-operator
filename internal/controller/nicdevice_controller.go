@@ -622,7 +622,25 @@ func (r *NicDeviceReconciler) handleFirmwareValidation(ctx context.Context, stat
 			log.Log.Error(err, "firmware source failed", "device", status.device.Name)
 			return r.updateFirmwareUpdateInProgressStatusCondition(ctx, status.device, consts.FirmwareSourceFailedReason, metav1.ConditionFalse, err.Error())
 		}
-	} else if status.firmwareUpdateRequired() {
+	}
+
+	_, runningFirmwareVersion, err := r.FirmwareManager.GetFirmwareVersionsFromDevice(status.device)
+	if err != nil {
+		log.Log.Error(err, "failed to get firmware versions from device", "device", status.device.Name)
+		return err
+	}
+
+	if runningFirmwareVersion != status.device.Status.FirmwareVersion {
+		log.Log.Info("Running firmware version is different from the last observed, updating the device status first", "device", status.device.Name, "new version", status.requestedFirmwareVersion)
+		status.device.Status.FirmwareVersion = runningFirmwareVersion
+		err = r.Client.Status().Update(ctx, status.device)
+		if err != nil {
+			log.Log.Error(err, "failed to update device status", "device", status.device.Name)
+			return err
+		}
+	}
+
+	if status.firmwareUpdateRequired() {
 		return r.updateFirmwareUpdateInProgressStatusCondition(ctx, status.device, consts.PendingNodeMaintenanceReason, metav1.ConditionTrue, "")
 	} else if !status.firmwareUpToDate() && status.device.Spec.Firmware.UpdatePolicy == consts.FirmwareUpdatePolicyValidate {
 		log.Log.Info("firmware doesn't match the requested version, update policy set to Validate", "device", status.device.Name)
