@@ -836,6 +836,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 
 		It("Should set successful status if fw update is not required", func() {
 			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return(newFwVersion, nil)
+			firmwareManager.On("GetFirmwareVersionsFromDevice", mock.Anything).Return(newFwVersion, newFwVersion, nil)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ScheduleMaintenance", mock.Anything)
 			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil)
@@ -855,9 +856,37 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.AssertExpectations(GinkgoT())
 		})
 
+		It("Should update the firmware version in the status if it is different from the last observed", func() {
+			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return(newFwVersion, nil)
+			firmwareManager.On("GetFirmwareVersionsFromDevice", mock.Anything).Return(newFwVersion, newFwVersion, nil)
+			maintenanceManager.AssertNotCalled(GinkgoT(), "ScheduleMaintenance", mock.Anything)
+			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
+			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil)
+			configurationManager.On("ApplyDeviceRuntimeSpec", mock.Anything).Return(nil)
+
+			createDevice(oldFwVersion, consts.FirmwareUpdatePolicyUpdate)
+
+			Eventually(getDeviceConditions, time.Second*10).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.FirmwareUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.DeviceFwMatchReason,
+				Message: consts.DeviceFwMatchMessage,
+			}))
+
+			Consistently(getDeviceConditions, time.Second).ShouldNot(testutils.MatchCondition(metav1.Condition{Type: consts.FirmwareUpdateInProgressCondition, Status: metav1.ConditionTrue}))
+
+			Eventually(func() string {
+				device := &v1alpha1.NicDevice{}
+				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
+				return device.Status.FirmwareVersion
+			}).Should(Equal(newFwVersion))
+			maintenanceManager.AssertExpectations(GinkgoT())
+		})
+
 		It("Should not start firmware update if maintenance is not allowed", func() {
 			err := errors.New("maintenance not allowed")
 			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return(newFwVersion, nil)
+			firmwareManager.On("GetFirmwareVersionsFromDevice", mock.Anything).Return(oldFwVersion, oldFwVersion, nil)
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(err)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
 			firmwareManager.AssertNotCalled(GinkgoT(), "BurnNicFirmware", mock.Anything, mock.Anything, mock.Anything)
@@ -883,6 +912,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 
 		It("Should set the version mismatch status if policy is set to validate", func() {
 			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return(newFwVersion, nil)
+			firmwareManager.On("GetFirmwareVersionsFromDevice", mock.Anything).Return(oldFwVersion, oldFwVersion, nil)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ScheduleMaintenance", mock.Anything)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
 			firmwareManager.AssertNotCalled(GinkgoT(), "BurnNicFirmware", mock.Anything, mock.Anything, mock.Anything)
@@ -910,6 +940,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 		It("Should set the error status if fw update has failed", func() {
 			err := errors.New("fw update failed")
 			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return(newFwVersion, nil)
+			firmwareManager.On("GetFirmwareVersionsFromDevice", mock.Anything).Return(oldFwVersion, oldFwVersion, nil)
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
@@ -943,6 +974,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 
 		It("Should set the success status after fw update", func() {
 			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return(newFwVersion, nil)
+			firmwareManager.On("GetFirmwareVersionsFromDevice", mock.Anything).Return(oldFwVersion, oldFwVersion, nil)
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
 			maintenanceManager.On("ReleaseMaintenance", mock.Anything)
@@ -1034,6 +1066,9 @@ var _ = Describe("NicDeviceReconciler", func() {
 
 		It("Should not stop firmware update on one device if firmware version doesn't match on the second device and policy is to Validate", func() {
 			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return(newFwVersion, nil)
+			firmwareManager.On("GetFirmwareVersionsFromDevice", matchFirstDevice).Return(oldFwVersion, oldFwVersion, nil).Times(1)
+			firmwareManager.On("GetFirmwareVersionsFromDevice", matchFirstDevice).Return(newFwVersion, newFwVersion, nil)
+			firmwareManager.On("GetFirmwareVersionsFromDevice", matchSecondDevice).Return(oldFwVersion, oldFwVersion, nil)
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
 			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
@@ -1044,7 +1079,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 
 			createDevices(consts.FirmwareUpdatePolicyValidate)
 
-			Eventually(getDeviceConditions, time.Second*10).Should(testutils.MatchCondition(metav1.Condition{
+			Eventually(getDeviceConditions, time.Second*20).Should(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.FirmwareUpdateInProgressCondition,
 				Status:  metav1.ConditionFalse,
 				Reason:  consts.DeviceFwMatchReason,
@@ -1086,6 +1121,9 @@ var _ = Describe("NicDeviceReconciler", func() {
 		It("Should stop configuration update on one device if firmware update failed for another one", func() {
 			err := errors.New("fw update failed")
 			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return(newFwVersion, nil)
+			firmwareManager.On("GetFirmwareVersionsFromDevice", matchFirstDevice).Return(oldFwVersion, oldFwVersion, nil).Times(1)
+			firmwareManager.On("GetFirmwareVersionsFromDevice", matchFirstDevice).Return(newFwVersion, newFwVersion, nil)
+			firmwareManager.On("GetFirmwareVersionsFromDevice", matchSecondDevice).Return(oldFwVersion, oldFwVersion, nil)
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
@@ -1138,6 +1176,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 
 		It("Should not stop configuration update if all devices have up-to-date firmware", func() {
 			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return(newFwVersion, nil)
+			firmwareManager.On("GetFirmwareVersionsFromDevice", mock.Anything).Return(oldFwVersion, oldFwVersion, nil).Times(2)
+			firmwareManager.On("GetFirmwareVersionsFromDevice", mock.Anything).Return(newFwVersion, newFwVersion, nil)
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
 			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
