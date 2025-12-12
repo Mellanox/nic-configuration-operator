@@ -143,4 +143,9 @@ const (
 	LabelValueFalse               = "false"
 
 	FEATURE_GATE_FW_RESET_AFTER_CONFIG_UPDATE = "FW_RESET_AFTER_CONFIG_UPDATE"
+
+	MultiplaneModeNone     = "none"
+	MultiplaneModeSwplb    = "swplb"
+	MultiplaneModeHwplb    = "hwplb"
+	MultiplaneModeUniplane = "uniplane"
 )
