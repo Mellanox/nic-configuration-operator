@@ -24,10 +24,17 @@ import (
 )
 
 type SpectrumXConfig struct {
-	NVConfig               []ConfigurationParameter `yaml:"nvConfig"`
-	RuntimeConfig          SpectrumXRuntimeConfig   `yaml:"runtimeConfig"`
-	UseSoftwareCCAlgorithm bool                     `yaml:"useSoftwareCCAlgorithm"`
-	DocaCCVersion          string                   `yaml:"docaCCVersion"`
+	MultiplaneConfig       SpectrumXMultiplaneConfig `yaml:"multiplane"`
+	NVConfig               []ConfigurationParameter  `yaml:"nvConfig"`
+	RuntimeConfig          SpectrumXRuntimeConfig    `yaml:"runtimeConfig"`
+	UseSoftwareCCAlgorithm bool                      `yaml:"useSoftwareCCAlgorithm"`
+	DocaCCVersion          string                    `yaml:"docaCCVersion"`
+}
+
+type SpectrumXMultiplaneConfig struct {
+	Swplb    map[int][]ConfigurationParameter `yaml:"swplb"`
+	Hwplb    map[int][]ConfigurationParameter `yaml:"hwplb"`
+	Uniplane map[int][]ConfigurationParameter `yaml:"uniplane"`
 }
 
 type SpectrumXRuntimeConfig struct {
@@ -44,6 +51,7 @@ type InterPacketGapConfig struct {
 
 type ConfigurationParameter struct {
 	Name             string `yaml:"name,omitempty"`
+	MlxConfig        string `yaml:"mlxConfig,omitempty"`
 	Value            string `yaml:"value,omitempty"`
 	ValueType        string `yaml:"valueType,omitempty"`
 	DMSPath          string `yaml:"dmsPath,omitempty"`
