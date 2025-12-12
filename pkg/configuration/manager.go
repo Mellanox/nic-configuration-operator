@@ -129,7 +129,7 @@ func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *
 	}
 
 	if device.Spec.Configuration.Template != nil && device.Spec.Configuration.Template.SpectrumXOptimized != nil && device.Spec.Configuration.Template.SpectrumXOptimized.Enabled {
-		spectrumXConfigApplied, err := h.spectrumXConfigManager.NvConfigApplied(device)
+		spectrumXConfigApplied, err := h.spectrumXConfigManager.NvConfigApplied(ctx, device)
 		if err != nil {
 			log.Log.Error(err, "failed to get spectrumx config", "device", device.Name)
 			return false, false, err
@@ -256,7 +256,7 @@ func (h configurationManager) ApplyDeviceNvSpec(ctx context.Context, device *v1a
 	}
 
 	if device.Spec.Configuration.Template != nil && device.Spec.Configuration.Template.SpectrumXOptimized != nil && device.Spec.Configuration.Template.SpectrumXOptimized.Enabled {
-		rebootNeeded, err := h.spectrumXConfigManager.ApplyNvConfig(device)
+		rebootNeeded, err := h.spectrumXConfigManager.ApplyNvConfig(ctx, device)
 		if err != nil {
 			log.Log.Error(err, "failed to update spectrumx config", "device", device.Name)
 			return false, err

@@ -16,6 +16,7 @@ limitations under the License.
 package spectrumx
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -24,14 +25,15 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	"github.com/Mellanox/nic-configuration-operator/pkg/dms"
+	"github.com/Mellanox/nic-configuration-operator/pkg/nvconfig"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 	execUtils "k8s.io/utils/exec"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 type SpectrumXManager interface {
-	NvConfigApplied(device *v1alpha1.NicDevice) (bool, error)
-	ApplyNvConfig(device *v1alpha1.NicDevice) (bool, error)
+	NvConfigApplied(ctx context.Context, device *v1alpha1.NicDevice) (bool, error)
+	ApplyNvConfig(ctx context.Context, device *v1alpha1.NicDevice) (bool, error)
 	RuntimeConfigApplied(device *v1alpha1.NicDevice) (bool, error)
 	ApplyRuntimeConfig(device *v1alpha1.NicDevice) error
 	GetDocaCCTargetVersion(device *v1alpha1.NicDevice) (string, error)
@@ -42,6 +44,7 @@ type spectrumXConfigManager struct {
 	spectrumXConfigs map[string]*types.SpectrumXConfig
 	dmsManager       dms.DMSManager
 	execInterface    execUtils.Interface
+	nvConfigUtils    nvconfig.NVConfigUtils
 
 	ccProcesses map[string]*ccProcess
 }
@@ -57,19 +60,58 @@ type ccProcess struct {
 	cmdErr   error
 }
 
-func (m *spectrumXConfigManager) NvConfigApplied(device *v1alpha1.NicDevice) (bool, error) {
+func (m *spectrumXConfigManager) NvConfigApplied(ctx context.Context, device *v1alpha1.NicDevice) (bool, error) {
 	log.Log.Info("SpectrumXConfigManager.NvConfigApplied()", "device", device.Name)
 
-	desiredConfig, found := m.spectrumXConfigs[device.Spec.Configuration.Template.SpectrumXOptimized.Version]
+	spcXSpec := device.Spec.Configuration.Template.SpectrumXOptimized
+
+	desiredConfig, found := m.spectrumXConfigs[spcXSpec.Version]
 	if !found {
-		return false, fmt.Errorf("spectrumx config not found for version %s", device.Spec.Configuration.Template.SpectrumXOptimized.Version)
+		return false, fmt.Errorf("spectrumx config not found for version %s", spcXSpec.Version)
 	}
 
-	for i, param := range desiredConfig.NVConfig {
+	desiredParams := desiredConfig.NVConfig
+
+	multiplaneMode, numberOfPlanes := spcXSpec.MultiplaneMode, spcXSpec.NumberOfPlanes
+	var multiplaneConfig []types.ConfigurationParameter
+	switch multiplaneMode {
+	case consts.MultiplaneModeNone:
+		break
+	case consts.MultiplaneModeSwplb:
+		multiplaneConfig = desiredConfig.MultiplaneConfig.Swplb[numberOfPlanes]
+	case consts.MultiplaneModeHwplb:
+		multiplaneConfig = desiredConfig.MultiplaneConfig.Hwplb[numberOfPlanes]
+	case consts.MultiplaneModeUniplane:
+		multiplaneConfig = desiredConfig.MultiplaneConfig.Uniplane[numberOfPlanes]
+	default:
+		return false, fmt.Errorf("invalid multiplane mode %s", multiplaneMode)
+	}
+
+	desiredParams = append(desiredParams, multiplaneConfig...)
+	mlxconfigParams := []types.ConfigurationParameter{}
+	dmsParams := []types.ConfigurationParameter{}
+
+	for _, param := range desiredParams {
 		// Drop device-specific parameters for non-matching devices
 		if param.DeviceId != "" && param.DeviceId != device.Status.Type {
-			desiredConfig.NVConfig[i] = desiredConfig.NVConfig[len(desiredConfig.NVConfig)-1]
-			desiredConfig.NVConfig = desiredConfig.NVConfig[:len(desiredConfig.NVConfig)-1]
+			continue
+		}
+		if param.MlxConfig != "" { // mlxconfig parameters are handled separately
+			mlxconfigParams = append(mlxconfigParams, param)
+		} else {
+			dmsParams = append(dmsParams, param)
+		}
+	}
+
+	for _, param := range mlxconfigParams {
+		mlxConfig, err := m.nvConfigUtils.QueryNvConfig(ctx, device.Status.Ports[0].PCI, param.MlxConfig)
+		if err != nil {
+			log.Log.Error(err, "NvConfigApplied(): failed to get mlxconfig", "device", device.Name)
+			return false, err
+		}
+		if mlxConfig.CurrentConfig[param.MlxConfig][0] != param.Value {
+			log.Log.V(2).Info("SpectrumXConfigManager.NvConfigApplied(): mlxconfig parameter not applied", "device", device.Name, "param", param)
+			return false, nil
 		}
 	}
 
@@ -79,14 +121,15 @@ func (m *spectrumXConfigManager) NvConfigApplied(device *v1alpha1.NicDevice) (bo
 		return false, err
 	}
 
-	values, err := dmsClient.GetParameters(desiredConfig.NVConfig)
+	values, err := dmsClient.GetParameters(dmsParams)
 	if err != nil {
 		log.Log.Error(err, "NvConfigApplied(): failed to get Spectrum-X NV config", "device", device.Name)
 		return false, err
 	}
 
-	for _, param := range desiredConfig.NVConfig {
+	for _, param := range dmsParams {
 		if values[param.DMSPath] != param.Value && values[param.DMSPath] != param.AlternativeValue {
+			log.Log.V(2).Info("SpectrumXConfigManager.NvConfigApplied(): parameter not applied", "device", device.Name, "param", param)
 			return false, nil
 		}
 	}
@@ -94,18 +137,55 @@ func (m *spectrumXConfigManager) NvConfigApplied(device *v1alpha1.NicDevice) (bo
 	return true, nil
 }
 
-func (m *spectrumXConfigManager) ApplyNvConfig(device *v1alpha1.NicDevice) (bool, error) {
+func (m *spectrumXConfigManager) ApplyNvConfig(ctx context.Context, device *v1alpha1.NicDevice) (bool, error) {
 	log.Log.Info("SpectrumXConfigManager.ApplyNvConfig()", "device", device.Name)
 
-	desiredConfig, found := m.spectrumXConfigs[device.Spec.Configuration.Template.SpectrumXOptimized.Version]
+	spcXSpec := device.Spec.Configuration.Template.SpectrumXOptimized
+
+	desiredConfig, found := m.spectrumXConfigs[spcXSpec.Version]
 	if !found {
-		return false, fmt.Errorf("spectrumx config not found for version %s", device.Spec.Configuration.Template.SpectrumXOptimized.Version)
+		return false, fmt.Errorf("spectrumx config not found for version %s", spcXSpec.Version)
 	}
-	for i, param := range desiredConfig.NVConfig {
+
+	desiredParams := desiredConfig.NVConfig
+	mlxconfigParams := []types.ConfigurationParameter{}
+
+	multiplaneMode, numberOfPlanes := spcXSpec.MultiplaneMode, spcXSpec.NumberOfPlanes
+	var multiplaneConfig []types.ConfigurationParameter
+	switch multiplaneMode {
+	case consts.MultiplaneModeNone:
+		break
+	case consts.MultiplaneModeSwplb:
+		multiplaneConfig = desiredConfig.MultiplaneConfig.Swplb[numberOfPlanes]
+	case consts.MultiplaneModeHwplb:
+		multiplaneConfig = desiredConfig.MultiplaneConfig.Hwplb[numberOfPlanes]
+	case consts.MultiplaneModeUniplane:
+		multiplaneConfig = desiredConfig.MultiplaneConfig.Uniplane[numberOfPlanes]
+	default:
+		return false, fmt.Errorf("invalid multiplane mode %s", multiplaneMode)
+	}
+
+	desiredParams = append(desiredParams, multiplaneConfig...)
+	dmsParams := []types.ConfigurationParameter{}
+
+	for _, param := range desiredParams {
 		// Drop device-specific parameters for non-matching devices
 		if param.DeviceId != "" && param.DeviceId != device.Status.Type {
-			desiredConfig.NVConfig[i] = desiredConfig.NVConfig[len(desiredConfig.NVConfig)-1]
-			desiredConfig.NVConfig = desiredConfig.NVConfig[:len(desiredConfig.NVConfig)-1]
+			continue
+		}
+		if param.MlxConfig != "" { // mlxconfig parameters are handled separately
+			mlxconfigParams = append(mlxconfigParams, param)
+		} else {
+			dmsParams = append(dmsParams, param)
+		}
+	}
+
+	log.Log.V(2).Info("SpectrumXConfigManager.ApplyNvConfig(): setting Spectrum-X NV MLXconfig params", "device", device.Name, "config", mlxconfigParams)
+	for _, param := range mlxconfigParams {
+		err := m.nvConfigUtils.SetNvConfigParameter(device.Status.Ports[0].PCI, param.MlxConfig, param.Value)
+		if err != nil {
+			log.Log.Error(err, "ApplyNvConfig(): failed to set mlxconfig parameter", "device", device.Name, "param", param)
+			return false, err
 		}
 	}
 
@@ -115,8 +195,8 @@ func (m *spectrumXConfigManager) ApplyNvConfig(device *v1alpha1.NicDevice) (bool
 		return false, err
 	}
 
-	log.Log.V(2).Info("SpectrumXConfigManager.ApplyNvConfig(): setting Spectrum-X NV config", "device", device.Name, "config", desiredConfig.NVConfig)
-	err = dmsClient.SetParameters(desiredConfig.NVConfig)
+	log.Log.V(2).Info("SpectrumXConfigManager.ApplyNvConfig(): setting Spectrum-X NV DMS config", "device", device.Name, "config", dmsParams)
+	err = dmsClient.SetParameters(dmsParams)
 	if err != nil {
 		log.Log.Error(err, "ApplyNvConfig(): failed to set Spectrum-X NV config", "device", device.Name)
 		return false, err
@@ -372,5 +452,11 @@ func (m *spectrumXConfigManager) RunDocaSpcXCC(port v1alpha1.NicDevicePortSpec) 
 }
 
 func NewSpectrumXConfigManager(dmsManager dms.DMSManager, spectrumXConfigs map[string]*types.SpectrumXConfig) SpectrumXManager {
-	return &spectrumXConfigManager{dmsManager: dmsManager, spectrumXConfigs: spectrumXConfigs, execInterface: execUtils.New(), ccProcesses: make(map[string]*ccProcess)}
+	return &spectrumXConfigManager{
+		dmsManager:       dmsManager,
+		spectrumXConfigs: spectrumXConfigs,
+		execInterface:    execUtils.New(),
+		nvConfigUtils:    nvconfig.NewNVConfigUtils(),
+		ccProcesses:      make(map[string]*ccProcess),
+	}
 }

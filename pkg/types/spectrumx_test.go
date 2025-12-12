@@ -30,8 +30,8 @@ func repoRootFromThisFile() string {
 }
 
 var _ = Describe("LoadSpectrumXConfig", func() {
-	It("parses RA2.0.yaml and populates fields", func() {
-		configPath := filepath.Join(repoRootFromThisFile(), "bindata", "spectrum-x", "RA2.0.yaml")
+	It("parses RA2.1.yaml and populates fields", func() {
+		configPath := filepath.Join(repoRootFromThisFile(), "bindata", "spectrum-x", "RA2.1.yaml")
 
 		cfg, err := LoadSpectrumXConfig(configPath)
 		Expect(err).ToNot(HaveOccurred())
@@ -50,5 +50,14 @@ var _ = Describe("LoadSpectrumXConfig", func() {
 
 		Expect(cfg.RuntimeConfig.InterPacketGap.PureL3.Name).ToNot(BeEmpty())
 		Expect(cfg.RuntimeConfig.InterPacketGap.L3EVPN.Name).ToNot(BeEmpty())
+
+		Expect(cfg.MultiplaneConfig.Swplb).ToNot(BeEmpty())
+		Expect(cfg.MultiplaneConfig.Swplb[2]).ToNot(BeEmpty())
+		Expect(cfg.MultiplaneConfig.Swplb[4]).ToNot(BeEmpty())
+		Expect(cfg.MultiplaneConfig.Hwplb).ToNot(BeEmpty())
+		Expect(cfg.MultiplaneConfig.Hwplb[2]).ToNot(BeEmpty())
+		Expect(cfg.MultiplaneConfig.Hwplb[4]).ToNot(BeEmpty())
+		Expect(cfg.MultiplaneConfig.Uniplane).ToNot(BeEmpty())
+		Expect(cfg.MultiplaneConfig.Uniplane[2]).ToNot(BeEmpty())
 	})
 })

@@ -939,9 +939,21 @@ SpectrumXOptimizedSpec enables Spectrum-X specific optimizations
 <td><em>(Optional)</em>
 <p>Overlay mode to be configured Can be “l3” or “none”</p></td>
 </tr>
+<tr>
+<td><code>multiplaneMode</code><br />
+<em>string</em></td>
+<td><em>(Optional)</em>
+<p>Multiplane mode to be configured Can be “none”, “swplb”, “hwplb”, or “uniplane”</p></td>
+</tr>
+<tr>
+<td><code>numberOfPlanes</code><br />
+<em>int</em></td>
+<td><em>(Optional)</em>
+<p>Number of planes to be configured</p></td>
+</tr>
 </tbody>
 </table>
 
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-*Generated with `gen-crd-api-reference-docs` on git commit `6fd71d2`.*
+*Generated with `gen-crd-api-reference-docs` on git commit `61bd065`.*
