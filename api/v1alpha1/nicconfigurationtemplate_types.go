@@ -73,11 +73,14 @@ type GpuDirectOptimizedSpec struct {
 }
 
 // SpectrumXOptimizedSpec enables Spectrum-X specific optimizations
+// +kubebuilder:validation:XValidation:rule="!has(self.multiplaneMode) || !has(self.numberOfPlanes) || self.multiplaneMode != 'none' || self.numberOfPlanes == 1",message="when MultiplaneMode is none, numberOfPlanes must be 1"
+// +kubebuilder:validation:XValidation:rule="!has(self.multiplaneMode) || !has(self.numberOfPlanes) || self.multiplaneMode == 'none' || self.numberOfPlanes != 1",message="when MultiplaneMode is not none, numberOfPlanes must not be 1"
+// +kubebuilder:validation:XValidation:rule="!has(self.version) || !has(self.multiplaneMode) || !has(self.numberOfPlanes) || !(self.version == 'RA1.3' || self.version == 'RA2.0') || (self.multiplaneMode == 'none' && self.numberOfPlanes == 1)",message="when Version is RA1.3 or RA2.0, MultiplaneMode must be none and numberOfPlanes must be 1"
 type SpectrumXOptimizedSpec struct {
 	// Optimize Spectrum X
 	Enabled bool `json:"enabled"`
 	// Version of the Spectrum-X architecture to optimize for
-	// +kubebuilder:validation:Enum=RA1.3;RA2.0
+	// +kubebuilder:validation:Enum=RA1.3;RA2.0;RA2.1
 	// +required
 	Version string `json:"version"`
 	// Overlay mode to be configured
@@ -86,6 +89,17 @@ type SpectrumXOptimizedSpec struct {
 	// +kubebuilder:default:=none
 	// +optional
 	Overlay string `json:"overlay,omitempty"`
+	// Multiplane mode to be configured
+	// Can be "none", "swplb", "hwplb", or "uniplane"
+	// +kubebuilder:validation:Enum=none;swplb;hwplb;uniplane
+	// +kubebuilder:default:=none
+	// +optional
+	MultiplaneMode string `json:"multiplaneMode,omitempty"`
+	// Number of planes to be configured
+	// +kubebuilder:validation:Enum=1;2;4
+	// +kubebuilder:default:=1
+	// +optional
+	NumberOfPlanes int `json:"numberOfPlanes,omitempty"`
 }
 
 type NvConfigParam struct {
@@ -121,6 +135,7 @@ type ConfigurationTemplateSpec struct {
 
 // NicConfigurationTemplateSpec defines the desired state of NicConfigurationTemplate
 // +kubebuilder:validation:XValidation:rule="!(has(self.template.spectrumXOptimized) && self.template.spectrumXOptimized.enabled) || (self.nicSelector.nicType == '1023' || self.nicSelector.nicType == 'a2dc')",message="spectrumXOptimized can be enabled only for ConnectX-8 or BlueField-3 SuperNICs"
+// +kubebuilder:validation:XValidation:rule="!has(self.template.spectrumXOptimized) || !has(self.template.spectrumXOptimized.multiplaneMode) || self.template.spectrumXOptimized.multiplaneMode != 'hwplb' || self.nicSelector.nicType == '1023'",message="hwplb MultiplaneMode can only be enabled for ConnectX-8 (NicType 1023)"
 type NicConfigurationTemplateSpec struct {
 	// NodeSelector contains labels required on the node. When empty, the template will be applied to matching devices on all nodes.
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`

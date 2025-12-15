@@ -1,0 +1,419 @@
+# Copyright 2025 NVIDIA CORPORATION & AFFILIATES
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# SPDX-License-Identifier: Apache-2.0
+multiplane:
+  swplb:
+    2:
+      - name: Number of PFs
+        value: 2
+        dmsPath: /nvidia/physical-functions/config/num-of-pf
+        valueType: int
+      - name: Number of Planes
+        value: 0
+        mlxconfig: "NUM_OF_PLANES_P1"
+      - name: LAG Resource Allocation
+        value: 0
+        mlxconfig: "LAG_RESOURCE_ALLOCATION"
+      # CX8-specific parameters  
+      - name: Lanes for Module 0 and Port 1
+        value: "0..3"
+        alternativeValue: "[0,1,2,3]"
+        valueType: string
+        dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=1]/lanes
+        deviceId: "1023"
+      - name: Lanes for Module 0 and Port 2
+        value: "4..7"
+        alternativeValue: "[4,5,6,7]"
+        valueType: string
+        dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=2]/lanes
+        deviceId: "1023"
+      - name: Lanes for Module 0 and Port 255
+        value: "8..15"
+        alternativeValue: "[8,9,10,11,12,13,14,15]"
+        valueType: string
+        dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=255]/lanes
+        deviceId: "1023"
+      # BF3-specific parameters  
+      - name: Lanes for Module 0 and Port 1
+        value: "0..1"
+        alternativeValue: "[0,1]"
+        valueType: string
+        dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=1]/lanes
+        deviceId: "a2dc"
+      - name: Lanes for Module 0 and Port 2
+        value: "2..3"
+        alternativeValue: "[2,3]"
+        valueType: string
+        dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=2]/lanes
+        deviceId: "a2dc"
+      - name: Lanes for Module 0 and Port 255
+        value: "4..15"
+        alternativeValue: "[4,5,6,7,8,9,10,11,12,13,14,15]"
+        valueType: string
+        dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=255]/lanes
+        deviceId: "a2dc"
+    4:
+      - name: Number of PFs
+        value: 4
+        dmsPath: /nvidia/physical-functions/config/num-of-pf
+        valueType: int
+      - name: Number of Planes
+        value: 0
+        mlxconfig: "NUM_OF_PLANES_P1"
+      - name: LAG Resource Allocation
+        value: 0
+        mlxconfig: "LAG_RESOURCE_ALLOCATION"
+      # CX8-specific parameters  
+      - name: Lanes for Module 0 and Port 1
+        value: "0..1"
+        alternativeValue: "[0,1]"
+        valueType: string
+        dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=1]/lanes
+        deviceId: "1023"
+      - name: Lanes for Module 0 and Port 2
+        value: "2..3"
+        alternativeValue: "[2,3]"
+        valueType: string
+        dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=2]/lanes
+        deviceId: "1023"
+      - name: Lanes for Module 0 and Port 3
+        value: "4..5"
+        alternativeValue: "[4,5]"
+        valueType: string
+        dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=2]/lanes
+        deviceId: "1023"
+      - name: Lanes for Module 0 and Port 4
+        value: "6..7"
+        alternativeValue: "[6,7]"
+        valueType: string
+        dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=2]/lanes
+        deviceId: "1023"  
+      - name: Lanes for Module 0 and Port 255
+        value: "8..15"
+        alternativeValue: "[8,9,10,11,12,13,14,15]"
+        valueType: string
+        dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=255]/lanes
+        deviceId: "1023"
+      # BF3-specific parameters  
+      - name: Lanes for Module 0 and Port 1
+        value: "0..0"
+        alternativeValue: "[0]"
+        valueType: string
+        dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=1]/lanes
+        deviceId: "a2dc"
+      - name: Lanes for Module 0 and Port 2
+        value: "1..1"
+        alternativeValue: "[1]"
+        valueType: string
+        dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=2]/lanes
+        deviceId: "a2dc"
+      - name: Lanes for Module 0 and Port 3
+        value: "2..2"
+        alternativeValue: "[2]"
+        valueType: string
+        dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=3]/lanes
+        deviceId: "a2dc"
+      - name: Lanes for Module 0 and Port 4
+        value: "3..3"
+        alternativeValue: "[3]"
+        valueType: string
+        dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=4]/lanes
+        deviceId: "a2dc"
+      - name: Lanes for Module 0 and Port 255
+        value: "4..15"
+        alternativeValue: "[4,5,6,7,8,9,10,11,12,13,14,15]"
+        valueType: string
+        dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=255]/lanes
+        deviceId: "a2dc"
+  hwplb:
+    2:
+      - name: Number of PFs
+        value: 2
+        dmsPath: /nvidia/physical-functions/config/num-of-pf
+        valueType: int
+      - name: Number of Planes
+        value: 2
+        mlxconfig: "NUM_OF_PLANES_P1"
+      - name: LAG Resource Allocation
+        value: 1
+        mlxconfig: "LAG_RESOURCE_ALLOCATION"   
+      # CX8-specific parameters  
+      - name: Lanes for Module 0 and Port 1
+        value: "0..7"
+        alternativeValue: "[0,1,2,3,4,5,6,7]"
+        valueType: string
+        dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=1]/lanes
+        deviceId: "1023"
+      - name: Lanes for Module 0 and Port 255
+        value: "8..15"
+        alternativeValue: "[8,9,10,11,12,13,14,15]"
+        valueType: string
+        dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=255]/lanes
+        deviceId: "1023"
+    4:
+      - name: Number of PFs
+        value: 4
+        dmsPath: /nvidia/physical-functions/config/num-of-pf
+        valueType: int
+      - name: Number of Planes
+        value: 4
+        mlxconfig: "NUM_OF_PLANES_P1"
+      - name: LAG Resource Allocation
+        value: 1
+        mlxconfig: "LAG_RESOURCE_ALLOCATION"     
+      # CX8-specific parameters  
+      - name: Lanes for Module 0 and Port 1
+        value: "0..7"
+        alternativeValue: "[0,1,2,3,4,5,6,7]"
+        valueType: string
+        dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=1]/lanes
+        deviceId: "1023"
+      - name: Lanes for Module 0 and Port 255
+        value: "8..15"
+        alternativeValue: "[8,9,10,11,12,13,14,15]"
+        valueType: string
+        dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=255]/lanes  
+        deviceId: "1023" 
+  uniplane:
+    2:
+      - name: Number of PFs
+        value: 2
+        dmsPath: /nvidia/physical-functions/config/num-of-pf
+        valueType: int
+      - name: Number of Planes P1
+        value: 0
+        mlxconfig: "NUM_OF_PLANES_P1"
+      - name: Number of Planes P2
+        value: 0
+        mlxconfig: "NUM_OF_PLANES_P2"
+      - name: LAG Resource Allocation
+        value: 0
+        mlxconfig: "LAG_RESOURCE_ALLOCATION"
+      # CX8-specific parameters  
+      - name: Lanes for Module 0 and Port 1
+        value: "0..3"
+        alternativeValue: "[0,1,2,3]"
+        valueType: string
+        dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=1]/lanes
+        deviceId: "1023"
+      - name: Lanes for Module 0 and Port 2
+        value: "4..7"
+        alternativeValue: "[4,5,6,7]"
+        valueType: string
+        dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=2]/lanes
+        deviceId: "1023"
+      - name: Lanes for Module 0 and Port 255
+        value: "8..15"
+        alternativeValue: "[8,9,10,11,12,13,14,15]"
+        valueType: string
+        dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=255]/lanes
+        deviceId: "1023"
+      # BF3-specific parameters  
+      - name: Lanes for Module 0 and Port 1
+        value: "0..1"
+        alternativeValue: "[0,1]"
+        valueType: string
+        dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=1]/lanes
+        deviceId: "a2dc"
+      - name: Lanes for Module 0 and Port 2
+        value: "2..3"
+        alternativeValue: "[2,3]"
+        valueType: string
+        dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=2]/lanes
+        deviceId: "a2dc"
+      - name: Lanes for Module 0 and Port 255
+        value: "4..15"
+        alternativeValue: "[4,5,6,7,8,9,10,11,12,13,14,15]"
+        valueType: string
+        dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=255]/lanes
+        deviceId: "a2dc"
+nvConfig:
+  - name: NIC mode
+    value: NIC
+    dmsPath: /nvidia/mode/config/mode
+    valueType: string
+    deviceId: "a2dc"
+  - name: RoCE Adaptive Routing
+    value: true
+    dmsPath: /nvidia/roce/config/adaptive-routing
+    valueType: bool
+  - name: Programmable Congestion Control
+    value: true
+    dmsPath: /nvidia/cc/config/user-programmable
+    valueType: bool
+  - name: RoCE TX Scheduling Locality Mode
+    value: TX_SCHED_LOCALITY_ACCUMULATIVE
+    dmsPath: /nvidia/roce/config/tx-sched-locality-mode
+    valueType: string
+  - name: RoCE Multipath DSCP
+    value: MULTIPATH_DSCP_DEFAULT
+    dmsPath: /nvidia/roce/config/multipath-dscp
+    valueType: string
+  - name: CNP DSCP
+    value: 0
+    dmsPath: /interfaces/interface/nvidia/roce/config/rtt-resp-dscp
+    valueType: int
+  - name: CNP DSCP mode
+    value: RTT_RESP_DSCP_DEFAULT
+    dmsPath: /interfaces/interface/nvidia/roce/config/rtt-resp-dscp-mode
+    valueType: string
+  - name: RoCE CC Steering Ext
+    value: ENABLED
+    dmsPath: /nvidia/roce/config/cc-steering-ext
+    valueType: string
+runtimeConfig:
+  roce:
+    - name: Trust
+      value: dscp
+      dmsPath: /interfaces/interface/nvidia/qos/config/trust-mode
+      valueType: string
+      alternativeValue: QOS_TRUST_MODE_DSCP
+    - name: PFC
+      value: "00010000"
+      dmsPath: /interfaces/interface/nvidia/qos/config/pfc
+      valueType: string
+    - name: Type of Service
+      value: 96
+      dmsPath: /interfaces/interface/nvidia/roce/config/tos
+      valueType: int
+  adaptiveRouting:
+    - name: Adaptive Retransmission
+      value: true
+      dmsPath: /interfaces/interface/nvidia/roce/config/adaptive-retransmission
+      valueType: bool
+    - name: Tx Window
+      value: true
+      dmsPath: /interfaces/interface/nvidia/roce/config/tx-window
+      valueType: bool
+    - name: Slow Restart
+      value: false
+      dmsPath: /interfaces/interface/nvidia/roce/config/slow-restart
+      valueType: bool
+    - name: Slow Restart Idle
+      value: false
+      dmsPath: /interfaces/interface/nvidia/roce/config/slow-restart-idle
+      valueType: bool
+    - name: Adaptive Routing Force
+      value: true
+      dmsPath: /interfaces/interface/nvidia/roce/config/adaptive-routing-force
+      valueType: bool
+  congestionControl:
+    - name: Congestion Control on RP points
+      value: true
+      dmsPath:  /interfaces/interface/nvidia/cc/config/priority/rp_enabled # priority[id=0..7]
+      valueType: bool
+      alternativeValue: "1"
+    - name:  Congestion Control on NP points
+      value: true
+      dmsPath: /interfaces/interface/nvidia/cc/config/priority/np_enabled # priority[id=0..7]
+      valueType: bool
+      alternativeValue: "1"
+    - name: Congestion Control  
+      value: true
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/config/enabled
+      valueType: bool
+    - name: Congestion Control with Counters
+      value: true
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/config/counter_enable
+      valueType: bool
+    - name: DCQCN
+      value: false
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=15]/config/enabled
+      valueType: bool
+    - name: Bandwidth
+      value: 400
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=0]/config/value
+      valueType: int
+    - name: Responsiveness Alpha Factor
+      value: 6553
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=1]/config/value
+      valueType: int
+    - name: Maximum Decrease Factor
+      value: 63570
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=2]/config/value
+      valueType: int
+    - name: Maximum Increase Factor
+      value: 69468
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=3]/config/value
+      valueType: int
+    - name: Additive Increase Step Size
+      value: 36
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=4]/config/value
+      valueType: int
+    - name: High Additive Increase Step Size
+      value: 1200
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=5]/config/value
+      valueType: int
+    - name: High Additive Increase Interval Period
+      value: 7000000
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=6]/config/value
+      valueType: int
+    - name: Base Round Trip Time
+      value: 15000
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=7]/config/value
+      valueType: int
+    - name: Maximum Queuing Delay
+      value: 250000
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=8]/config/value
+      valueType: int
+    - name: Rate on First Congestion
+      value: 524288
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=9]/config/value
+      valueType: int
+    - name: Delay Only
+      value: 0
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=10]/config/value
+      valueType: int
+    - name: CNP Validity
+      value: 1
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=11]/config/value
+      valueType: int
+    - name: Transmit Rate Decrement Step
+      value: 0
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=12]/config/value
+      valueType: int
+    - name: Fixed Transmission Rate
+      value: 0
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=13]/config/value
+      valueType: int
+    - name: Fast Scheduling Factor
+      value: 2097152
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=14]/config/value
+      valueType: int
+    - name: Topology Awareness
+      value: 1
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=15]/config/value
+      valueType: int
+    - name: Advanced Features
+      value: 1
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=16]/config/value
+      valueType: int
+    - name: Troubleshooting Capabilities
+      value: 0
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=17]/config/value
+      valueType: int
+  interPacketGap:
+     pureL3:
+        name: Inter Packet Gap for no overlay
+        value: 25
+        dmsPath: /interfaces/interface/ethernet/nvidia/config/inter-packet-gap
+        valueType: int
+     l3EVPN:
+        name: Inter Packet Gap for L3 EVPN overlay
+        value: 33
+        dmsPath: /interfaces/interface/ethernet/nvidia/config/inter-packet-gap
+        valueType: int
+docaCCVersion: 3.1.0105-1
+useSoftwareCCAlgorithm: true
