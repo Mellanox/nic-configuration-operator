@@ -48,16 +48,26 @@ var _ = Describe("LoadSpectrumXConfig", func() {
 		Expect(cfg.RuntimeConfig.AdaptiveRouting).ToNot(BeEmpty())
 		Expect(cfg.RuntimeConfig.CongestionControl).ToNot(BeEmpty())
 
-		Expect(cfg.RuntimeConfig.InterPacketGap.PureL3.Name).ToNot(BeEmpty())
-		Expect(cfg.RuntimeConfig.InterPacketGap.L3EVPN.Name).ToNot(BeEmpty())
+		Expect(cfg.RuntimeConfig.InterPacketGap.PureL3[0].Name).ToNot(BeEmpty())
+		Expect(cfg.RuntimeConfig.InterPacketGap.L3EVPN[0].Name).ToNot(BeEmpty())
 
 		Expect(cfg.MultiplaneConfig.Swplb).ToNot(BeEmpty())
 		Expect(cfg.MultiplaneConfig.Swplb[2]).ToNot(BeEmpty())
+		Expect(cfg.MultiplaneConfig.Swplb[2]).To(ContainElement(
+			ConfigurationParameter{Name: "Number of Planes", Value: "0", DMSPath: "", ValueType: "", MlxConfig: "NUM_OF_PLANES_P1"}),
+		)
 		Expect(cfg.MultiplaneConfig.Swplb[4]).ToNot(BeEmpty())
 		Expect(cfg.MultiplaneConfig.Hwplb).ToNot(BeEmpty())
 		Expect(cfg.MultiplaneConfig.Hwplb[2]).ToNot(BeEmpty())
+		Expect(cfg.MultiplaneConfig.Hwplb[2]).To(ContainElement(
+			ConfigurationParameter{Name: "Number of Planes", Value: "2", DMSPath: "", ValueType: "", MlxConfig: "NUM_OF_PLANES_P1"}),
+		)
 		Expect(cfg.MultiplaneConfig.Hwplb[4]).ToNot(BeEmpty())
 		Expect(cfg.MultiplaneConfig.Uniplane).ToNot(BeEmpty())
 		Expect(cfg.MultiplaneConfig.Uniplane[2]).ToNot(BeEmpty())
+		Expect(cfg.MultiplaneConfig.Uniplane[2]).To(ContainElements(
+			ConfigurationParameter{Name: "Number of Planes P1", Value: "0", DMSPath: "", ValueType: "", MlxConfig: "NUM_OF_PLANES_P1"},
+			ConfigurationParameter{Name: "Number of Planes P2", Value: "0", DMSPath: "", ValueType: "", MlxConfig: "NUM_OF_PLANES_P2"}),
+		)
 	})
 })
