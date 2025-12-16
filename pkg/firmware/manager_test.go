@@ -597,8 +597,10 @@ var _ = Describe("FirmwareManager", func() {
 			_ = os.RemoveAll(tmpDir)
 		})
 
-		It("doesn't return error when device's firmware spec is empty", func() {
+		It("returns error when device's firmware spec is empty", func() {
 			manager = firmwareManager{client: nil, utils: fwUtilsMock, cacheRootDir: cacheDir, namespace: ""}
+			fwUtilsMock.On("GetInstalledDebPackageVersion", "doca-spcx-cc").Return("").Once()
+
 			err := manager.InstallDocaSpcXCC(context.Background(), &v1alpha1.NicDevice{Spec: v1alpha1.NicDeviceSpec{Firmware: nil}}, targetVer)
 			Expect(err).To(MatchError("device's firmware spec is empty, cannot install DOCA SPC-X CC"))
 		})
@@ -609,6 +611,8 @@ var _ = Describe("FirmwareManager", func() {
 			cli := fake.NewClientBuilder().WithScheme(scheme).Build()
 
 			manager = firmwareManager{client: cli, utils: fwUtilsMock, cacheRootDir: cacheDir, namespace: ""}
+			fwUtilsMock.On("GetInstalledDebPackageVersion", "doca-spcx-cc").Return("").Once()
+
 			err := manager.InstallDocaSpcXCC(context.Background(), createNicDevice(), targetVer)
 			Expect(err).To(HaveOccurred())
 			Expect(k8sErrors.IsNotFound(err)).To(BeTrue())
@@ -620,6 +624,8 @@ var _ = Describe("FirmwareManager", func() {
 			cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(createFwSource("0.0.1")).Build()
 
 			manager = firmwareManager{client: cli, utils: fwUtilsMock, cacheRootDir: cacheDir, namespace: ""}
+			fwUtilsMock.On("GetInstalledDebPackageVersion", "doca-spcx-cc").Return("").Once()
+
 			err := manager.InstallDocaSpcXCC(context.Background(), createNicDevice(), targetVer)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("doesn't match target version"))
@@ -628,7 +634,8 @@ var _ = Describe("FirmwareManager", func() {
 		It("no-ops when installed version matches target", func() {
 			scheme := runtime.NewScheme()
 			Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
-			cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(createFwSource(targetVer)).Build()
+			// Not creating a NicFirmwareSource object, should validate the installed package first
+			cli := fake.NewClientBuilder().WithScheme(scheme).Build()
 
 			fwUtilsMock.On("GetInstalledDebPackageVersion", "doca-spcx-cc").Return(targetVer).Once()
 

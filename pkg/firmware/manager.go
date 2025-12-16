@@ -127,8 +127,17 @@ func (f firmwareManager) ValidateRequestedFirmwareSource(ctx context.Context, de
 	}
 }
 
+// InstallDocaSpcXCC validates and installs the DOCA SPC-X CC package if provided in the FirmwareSource
+// If already installed, results in no-op. If package version doesn't match targetVersion, returns an error.
+// returns error - DOCA SPC-X PCC .deb package is not ready or there are errors
 func (f firmwareManager) InstallDocaSpcXCC(ctx context.Context, device *v1alpha1.NicDevice, targetVersion string) error {
 	log.Log.Info("FirmwareManager.InstallDocaSpcXCC()", "device", device.Name, "targetVersion", targetVersion)
+
+	installedVersion := f.utils.GetInstalledDebPackageVersion("doca-spcx-cc")
+	if installedVersion == targetVersion {
+		log.Log.Info("DOCA SPC-X CC is already installed", "installedVersion", installedVersion, "targetVersion", targetVersion)
+		return nil
+	}
 
 	if device.Spec.Firmware == nil {
 		return errors.New("device's firmware spec is empty, cannot install DOCA SPC-X CC")
@@ -146,13 +155,6 @@ func (f firmwareManager) InstallDocaSpcXCC(ctx context.Context, device *v1alpha1
 
 	if provisionedVersion != targetVersion {
 		return fmt.Errorf("DOCA SPC-X CC version (%s) doesn't match target version (%s)", provisionedVersion, targetVersion)
-	}
-
-	installedVersion := f.utils.GetInstalledDebPackageVersion("doca-spcx-cc")
-
-	if installedVersion == targetVersion {
-		log.Log.Info("DOCA SPC-X CC is already installed", "installedVersion", installedVersion, "targetVersion", targetVersion)
-		return nil
 	}
 
 	cacheDir := path.Join(f.cacheRootDir, fwSourceName, consts.DocaSpcXCCFolder)
