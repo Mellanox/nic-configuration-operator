@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"context"
+
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
