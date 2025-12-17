@@ -662,6 +662,184 @@ var _ = Describe("utils", func() {
 		})
 	})
 
+	Describe("GetInstalledDebPackageVersion", func() {
+		var packageName = "mlnx-fw-updater"
+
+		It("should return the package version with clean output", func() {
+			expectedVersion := "1.2.3-1"
+			fakeExec := &execTesting.FakeExec{}
+
+			fakeCmd := &execTesting.FakeCmd{}
+			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+				return []byte(expectedVersion), nil, nil
+			})
+
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				Expect(cmd).To(Equal("dpkg-query"))
+				Expect(args).To(Equal([]string{"-W", "-f='${Version}\n'", packageName}))
+				return fakeCmd
+			})
+
+			testedUtils := &utils{execInterface: fakeExec}
+
+			version := testedUtils.GetInstalledDebPackageVersion(packageName)
+
+			Expect(version).To(Equal(expectedVersion))
+		})
+
+		It("should trim single quotes from output", func() {
+			expectedVersion := "1.2.3-1"
+			fakeExec := &execTesting.FakeExec{}
+
+			fakeCmd := &execTesting.FakeCmd{}
+			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+				return []byte("'" + expectedVersion + "'"), nil, nil
+			})
+
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				Expect(cmd).To(Equal("dpkg-query"))
+				Expect(args).To(Equal([]string{"-W", "-f='${Version}\n'", packageName}))
+				return fakeCmd
+			})
+
+			testedUtils := &utils{execInterface: fakeExec}
+
+			version := testedUtils.GetInstalledDebPackageVersion(packageName)
+
+			Expect(version).To(Equal(expectedVersion))
+		})
+
+		It("should trim double quotes from output", func() {
+			expectedVersion := "2.4.6-2"
+			fakeExec := &execTesting.FakeExec{}
+
+			fakeCmd := &execTesting.FakeCmd{}
+			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+				return []byte("\"" + expectedVersion + "\""), nil, nil
+			})
+
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				Expect(cmd).To(Equal("dpkg-query"))
+				Expect(args).To(Equal([]string{"-W", "-f='${Version}\n'", packageName}))
+				return fakeCmd
+			})
+
+			testedUtils := &utils{execInterface: fakeExec}
+
+			version := testedUtils.GetInstalledDebPackageVersion(packageName)
+
+			Expect(version).To(Equal(expectedVersion))
+		})
+
+		It("should trim newlines from output", func() {
+			expectedVersion := "3.5.7-3"
+			fakeExec := &execTesting.FakeExec{}
+
+			fakeCmd := &execTesting.FakeCmd{}
+			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+				return []byte(expectedVersion + "\n"), nil, nil
+			})
+
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				Expect(cmd).To(Equal("dpkg-query"))
+				Expect(args).To(Equal([]string{"-W", "-f='${Version}\n'", packageName}))
+				return fakeCmd
+			})
+
+			testedUtils := &utils{execInterface: fakeExec}
+
+			version := testedUtils.GetInstalledDebPackageVersion(packageName)
+
+			Expect(version).To(Equal(expectedVersion))
+		})
+
+		It("should trim both quotes and newlines from output", func() {
+			expectedVersion := "4.6.8-4"
+			fakeExec := &execTesting.FakeExec{}
+
+			fakeCmd := &execTesting.FakeCmd{}
+			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+				return []byte("'" + expectedVersion + "'\n"), nil, nil
+			})
+
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				Expect(cmd).To(Equal("dpkg-query"))
+				Expect(args).To(Equal([]string{"-W", "-f='${Version}\n'", packageName}))
+				return fakeCmd
+			})
+
+			testedUtils := &utils{execInterface: fakeExec}
+
+			version := testedUtils.GetInstalledDebPackageVersion(packageName)
+
+			Expect(version).To(Equal(expectedVersion))
+		})
+
+		It("should trim mixed quotes and multiple newlines from output", func() {
+			expectedVersion := "5.7.9-5"
+			fakeExec := &execTesting.FakeExec{}
+
+			fakeCmd := &execTesting.FakeCmd{}
+			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+				return []byte("\"'" + expectedVersion + "'\"\n\n"), nil, nil
+			})
+
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				Expect(cmd).To(Equal("dpkg-query"))
+				Expect(args).To(Equal([]string{"-W", "-f='${Version}\n'", packageName}))
+				return fakeCmd
+			})
+
+			testedUtils := &utils{execInterface: fakeExec}
+
+			version := testedUtils.GetInstalledDebPackageVersion(packageName)
+
+			Expect(version).To(Equal(expectedVersion))
+		})
+
+		It("should return empty string when package is not installed", func() {
+			fakeExec := &execTesting.FakeExec{}
+
+			fakeCmd := &execTesting.FakeCmd{}
+			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+				return nil, []byte("dpkg-query: no packages found matching " + packageName), fmt.Errorf("exit status 1")
+			})
+
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				Expect(cmd).To(Equal("dpkg-query"))
+				Expect(args).To(Equal([]string{"-W", "-f='${Version}\n'", packageName}))
+				return fakeCmd
+			})
+
+			testedUtils := &utils{execInterface: fakeExec}
+
+			version := testedUtils.GetInstalledDebPackageVersion(packageName)
+
+			Expect(version).To(Equal(""))
+		})
+
+		It("should return empty string when dpkg-query command fails", func() {
+			fakeExec := &execTesting.FakeExec{}
+
+			fakeCmd := &execTesting.FakeCmd{}
+			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+				return nil, []byte("command error"), fmt.Errorf("command failed")
+			})
+
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				Expect(cmd).To(Equal("dpkg-query"))
+				Expect(args).To(Equal([]string{"-W", "-f='${Version}\n'", packageName}))
+				return fakeCmd
+			})
+
+			testedUtils := &utils{execInterface: fakeExec}
+
+			version := testedUtils.GetInstalledDebPackageVersion(packageName)
+
+			Expect(version).To(Equal(""))
+		})
+	})
+
 	Describe("standalone util functions", func() {
 		BeforeEach(func() {
 			var err error

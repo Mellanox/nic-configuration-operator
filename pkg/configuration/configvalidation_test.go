@@ -85,6 +85,35 @@ var _ = Describe("ConfigValidationImpl", func() {
 			Expect(nvParams).To(HaveKeyWithValue(consts.AtsEnabledParam, "testAts"))
 		})
 
+		It("should check if dual-port device has LINK_TYPE_P2 param", func() {
+			device := &v1alpha1.NicDevice{
+				Spec: v1alpha1.NicDeviceSpec{
+					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
+						Template: &v1alpha1.ConfigurationTemplateSpec{
+							NumVfs:   0,
+							LinkType: consts.Ethernet,
+						},
+					},
+				},
+				Status: v1alpha1.NicDeviceStatus{
+					Ports: []v1alpha1.NicDevicePortSpec{
+						{PCI: "0000:03:00.0"},
+						{PCI: "0000:03:00.1"},
+					},
+				},
+			}
+
+			defaultValues := map[string][]string{
+				consts.LinkTypeP1Param: {"testLinkTypeP1"},
+			}
+			query := types.NewNvConfigQuery()
+			query.DefaultConfig = defaultValues
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(nvParams).To(HaveKeyWithValue(consts.LinkTypeP1Param, consts.NvParamLinkTypeEthernet))
+			Expect(nvParams).ToNot(HaveKey(consts.LinkTypeP2Param))
+		})
+
 		It("should omit parameters for the second port if device is single port", func() {
 			device := &v1alpha1.NicDevice{
 				Spec: v1alpha1.NicDeviceSpec{

@@ -446,7 +446,8 @@ func (u *utils) GetInstalledDebPackageVersion(packageName string) string {
 		log.Log.Info("GetInstalledDebPackageVersion(): Failed to get installed version of package", "package", packageName, "output", string(output), "error", err)
 		return ""
 	} else {
-		installedVersion := strings.TrimSpace(string(output))
+		installedVersion := strings.Trim(string(output), "'\"\n")
+		log.Log.V(2).Info("GetInstalledDebPackageVersion(): Installed version of package", "package", packageName, "version", installedVersion)
 		return installedVersion
 	}
 }

@@ -98,7 +98,8 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 	if canChangeLinkType {
 		linkType := nvParamLinkTypeFromName(string(template.LinkType))
 		desiredParameters[consts.LinkTypeP1Param] = linkType
-		if secondPortPresent {
+		_, hasLinkTypeP2Param := query.DefaultConfig[consts.LinkTypeP2Param]
+		if secondPortPresent && hasLinkTypeP2Param {
 			desiredParameters[consts.LinkTypeP2Param] = linkType
 		}
 	} else {

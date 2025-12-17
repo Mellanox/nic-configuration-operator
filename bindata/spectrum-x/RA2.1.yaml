@@ -13,6 +13,7 @@
 # limitations under the License.
 #
 # SPDX-License-Identifier: Apache-2.0
+# TODO: set CNP DSCP in runtime: echo <24/48> > /sys/class/net/<interface>/ecn/roce_np/cnp_dscp
 multiplane:
   swplb:
     2:
@@ -26,6 +27,14 @@ multiplane:
       - name: LAG Resource Allocation
         value: 0
         mlxconfig: "LAG_RESOURCE_ALLOCATION"
+      - name: CNP DSCP
+        value: 0
+        dmsPath: /interfaces/interface/nvidia/roce/config/rtt-resp-dscp
+        valueType: int
+      - name: CNP DSCP mode
+        value: RTT_RESP_DSCP_DEFAULT
+        dmsPath: /interfaces/interface/nvidia/roce/config/rtt-resp-dscp-mode
+        valueType: string
       # CX8-specific parameters  
       - name: Lanes for Module 0 and Port 1
         value: "0..3"
@@ -75,6 +84,14 @@ multiplane:
       - name: LAG Resource Allocation
         value: 0
         mlxconfig: "LAG_RESOURCE_ALLOCATION"
+      - name: CNP DSCP
+        value: 0
+        dmsPath: /interfaces/interface/nvidia/roce/config/rtt-resp-dscp
+        valueType: int
+      - name: CNP DSCP mode
+        value: RTT_RESP_DSCP_DEFAULT
+        dmsPath: /interfaces/interface/nvidia/roce/config/rtt-resp-dscp-mode
+        valueType: string
       # CX8-specific parameters  
       - name: Lanes for Module 0 and Port 1
         value: "0..1"
@@ -138,6 +155,7 @@ multiplane:
         dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=255]/lanes
         deviceId: "a2dc"
   hwplb:
+  # TODO: /interfaces/interface[name=*]/nvidia/roce/config/cc-per-plane == true in runtime
     2:
       - name: Number of PFs
         value: 2
@@ -149,6 +167,15 @@ multiplane:
       - name: LAG Resource Allocation
         value: 1
         mlxconfig: "LAG_RESOURCE_ALLOCATION"   
+      - name: CNP DSCP
+        value: 48
+        mlxconfig: "ROCE_RTT_RESP_DSCP_P1"
+      - name: CNP DSCP mode
+        value: 1
+        mlxconfig: "ROCE_RTT_RESP_DSCP_MODE_P1"
+      - name: Flex Parser Profile
+        value: 10
+        mlxconfig: "FLEX_PARSER_PROFILE_ENABLE"
       # CX8-specific parameters  
       - name: Lanes for Module 0 and Port 1
         value: "0..7"
@@ -173,6 +200,15 @@ multiplane:
       - name: LAG Resource Allocation
         value: 1
         mlxconfig: "LAG_RESOURCE_ALLOCATION"     
+      - name: CNP DSCP
+        value: 48
+        mlxconfig: "ROCE_RTT_RESP_DSCP_P1"
+      - name: CNP DSCP mode
+        value: 1
+        mlxconfig: "ROCE_RTT_RESP_DSCP_MODE_P1"
+      - name: Flex Parser Profile
+        value: 10
+        mlxconfig: "FLEX_PARSER_PROFILE_ENABLE"
       # CX8-specific parameters  
       - name: Lanes for Module 0 and Port 1
         value: "0..7"
@@ -201,6 +237,14 @@ multiplane:
       - name: LAG Resource Allocation
         value: 0
         mlxconfig: "LAG_RESOURCE_ALLOCATION"
+      - name: CNP DSCP
+        value: 0
+        dmsPath: /interfaces/interface/nvidia/roce/config/rtt-resp-dscp
+        valueType: int
+      - name: CNP DSCP mode
+        value: RTT_RESP_DSCP_DEFAULT
+        dmsPath: /interfaces/interface/nvidia/roce/config/rtt-resp-dscp-mode
+        valueType: string
       # CX8-specific parameters  
       - name: Lanes for Module 0 and Port 1
         value: "0..3"
@@ -261,14 +305,10 @@ nvConfig:
     value: MULTIPATH_DSCP_DEFAULT
     dmsPath: /nvidia/roce/config/multipath-dscp
     valueType: string
-  - name: CNP DSCP
-    value: 0
-    dmsPath: /interfaces/interface/nvidia/roce/config/rtt-resp-dscp
-    valueType: int
-  - name: CNP DSCP mode
-    value: RTT_RESP_DSCP_DEFAULT
-    dmsPath: /interfaces/interface/nvidia/roce/config/rtt-resp-dscp-mode
-    valueType: string
+    # TODO: verify if the behavior is correct when the parameter is not found
+    # MULTIPATH_DSCP mlxconfig parameter disappears after multiplane config is applied
+    alternativeValue: "unknown"
+    ignoreError: true
   - name: RoCE CC Steering Ext
     value: ENABLED
     dmsPath: /nvidia/roce/config/cc-steering-ext
@@ -333,7 +373,7 @@ runtimeConfig:
       dmsPath: /interfaces/interface/nvidia/cc/slot[id=15]/config/enabled
       valueType: bool
     - name: Bandwidth
-      value: 400
+      value: 400 # TODO revisit for different configs when all deployment guides are there. Should be 200 for quadplane
       dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=0]/config/value
       valueType: int
     - name: Responsiveness Alpha Factor
@@ -349,19 +389,19 @@ runtimeConfig:
       dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=3]/config/value
       valueType: int
     - name: Additive Increase Step Size
-      value: 36
+      value: 36 # TODO revisit for different configs when all deployment guides are there. Should be 96 for quadplane
       dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=4]/config/value
       valueType: int
     - name: High Additive Increase Step Size
-      value: 1200
+      value: 1200 # TODO revisit for different configs when all deployment guides are there. Should be 1700 for quadplane
       dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=5]/config/value
       valueType: int
     - name: High Additive Increase Interval Period
-      value: 7000000
+      value: 7000000 # TODO revisit for different configs when all deployment guides are there. Should be 2000000 for quadplane
       dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=6]/config/value
       valueType: int
     - name: Base Round Trip Time
-      value: 15000
+      value: 15000 # TODO revisit for different configs when all deployment guides are there. Should be 13000 for quadplane
       dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=7]/config/value
       valueType: int
     - name: Maximum Queuing Delay
@@ -381,7 +421,7 @@ runtimeConfig:
       dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=11]/config/value
       valueType: int
     - name: Transmit Rate Decrement Step
-      value: 0
+      value: 0 # TODO revisit for different configs when all deployment guides are there. Should be 1 for quadplane
       dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=12]/config/value
       valueType: int
     - name: Fixed Transmission Rate
@@ -405,15 +445,31 @@ runtimeConfig:
       dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=17]/config/value
       valueType: int
   interPacketGap:
-     pureL3:
-        name: Inter Packet Gap for no overlay
+    pureL3:
+      - name: Inter Packet Gap for no overlay
         value: 25
         dmsPath: /interfaces/interface/ethernet/nvidia/config/inter-packet-gap
         valueType: int
-     l3EVPN:
-        name: Inter Packet Gap for L3 EVPN overlay
+      - name: Shut down interface 
+        value: false
+        dmsPath: /interfaces/interface/config/enabled
+        valueType: bool
+      - name: Bring up interface to apply IPG settings 
+        value: false
+        dmsPath: /interfaces/interface/config/enabled
+        valueType: bool
+    l3EVPN:
+      - name: Inter Packet Gap for L3 EVPN overlay
         value: 33
         dmsPath: /interfaces/interface/ethernet/nvidia/config/inter-packet-gap
         valueType: int
-docaCCVersion: 3.1.0105-1
+      - name: Shut down interface 
+        value: false
+        dmsPath: /interfaces/interface/config/enabled
+        valueType: bool
+      - name: Bring up interface to apply IPG settings 
+        value: false
+        dmsPath: /interfaces/interface/config/enabled
+        valueType: bool
+docaCCVersion: 3.2.0118-1
 useSoftwareCCAlgorithm: true

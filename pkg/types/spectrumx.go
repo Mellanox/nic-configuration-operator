@@ -45,18 +45,19 @@ type SpectrumXRuntimeConfig struct {
 }
 
 type InterPacketGapConfig struct {
-	PureL3 ConfigurationParameter `yaml:"pureL3"`
-	L3EVPN ConfigurationParameter `yaml:"l3EVPN"`
+	PureL3 []ConfigurationParameter `yaml:"pureL3"`
+	L3EVPN []ConfigurationParameter `yaml:"l3EVPN"`
 }
 
 type ConfigurationParameter struct {
 	Name             string `yaml:"name,omitempty"`
-	MlxConfig        string `yaml:"mlxConfig,omitempty"`
+	MlxConfig        string `yaml:"mlxconfig,omitempty"`
 	Value            string `yaml:"value,omitempty"`
 	ValueType        string `yaml:"valueType,omitempty"`
 	DMSPath          string `yaml:"dmsPath,omitempty"`
 	AlternativeValue string `yaml:"alternativeValue,omitempty"`
 	DeviceId         string `yaml:"deviceId,omitempty"`
+	IgnoreError      bool   `yaml:"ignoreError,omitempty"`
 }
 
 func LoadSpectrumXConfig(configPath string) (*SpectrumXConfig, error) {

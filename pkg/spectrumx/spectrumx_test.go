@@ -156,8 +156,8 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					AdaptiveRouting:   []types.ConfigurationParameter{{Name: "ar", Value: "y", DMSPath: "/ar"}},
 					CongestionControl: []types.ConfigurationParameter{{Name: "cc", Value: "z", DMSPath: "/cc"}},
 					InterPacketGap: types.InterPacketGapConfig{
-						PureL3: types.ConfigurationParameter{Name: "ipg_pure", DMSPath: "/ipg", Value: "25"},
-						L3EVPN: types.ConfigurationParameter{Name: "ipg_l3evpn", DMSPath: "/ipg", Value: "33"},
+						PureL3: []types.ConfigurationParameter{{Name: "ipg_pure", DMSPath: "/ipg", Value: "25"}},
+						L3EVPN: []types.ConfigurationParameter{{Name: "ipg_l3evpn", DMSPath: "/ipg", Value: "33"}},
 					},
 				},
 				UseSoftwareCCAlgorithm: true,
@@ -239,7 +239,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 	Describe("RuntimeConfigApplied", func() {
 		It("returns true when all runtime sections applied and CC runs", func() {
-			dmsCli.On("GetParameters", []types.ConfigurationParameter{cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3}).Return(map[string]string{"/ipg": "25"}, nil)
+			dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(map[string]string{"/ipg": "25"}, nil)
 			dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
 			dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(map[string]string{"/ar": "y"}, nil)
 			dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(map[string]string{"/cc": "z"}, nil)
@@ -265,14 +265,14 @@ var _ = Describe("SpectrumXConfigManager", func() {
 		It("sets sections, inter-packet gap for overlay=none, and runs CC", func() {
 			device.Spec.Configuration.Template.SpectrumXOptimized.Overlay = consts.OverlayNone
 			cfgs["v1"].RuntimeConfig.InterPacketGap = types.InterPacketGapConfig{
-				PureL3: types.ConfigurationParameter{Name: "ipg_pure", DMSPath: "/ipg/pure", Value: "10"},
-				L3EVPN: types.ConfigurationParameter{Name: "ipg_l3evpn", DMSPath: "/ipg/evpn", Value: "20"},
+				PureL3: []types.ConfigurationParameter{{Name: "ipg_pure", DMSPath: "/ipg/pure", Value: "10"}},
+				L3EVPN: []types.ConfigurationParameter{{Name: "ipg_l3evpn", DMSPath: "/ipg/evpn", Value: "20"}},
 			}
 
 			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(nil)
 			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(nil)
 			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
-			dmsCli.On("SetParameters", []types.ConfigurationParameter{cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3}).Return(nil)
+			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(nil)
 
 			nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
 			err := manager.ApplyRuntimeConfig(device)
@@ -282,14 +282,14 @@ var _ = Describe("SpectrumXConfigManager", func() {
 		It("sets inter-packet gap for overlay=l3", func() {
 			device.Spec.Configuration.Template.SpectrumXOptimized.Overlay = "l3"
 			cfgs["v1"].RuntimeConfig.InterPacketGap = types.InterPacketGapConfig{
-				PureL3: types.ConfigurationParameter{Name: "ipg_pure", DMSPath: "/ipg/pure", Value: "10"},
-				L3EVPN: types.ConfigurationParameter{Name: "ipg_l3evpn", DMSPath: "/ipg/evpn", Value: "20"},
+				PureL3: []types.ConfigurationParameter{{Name: "ipg_pure", DMSPath: "/ipg/pure", Value: "10"}},
+				L3EVPN: []types.ConfigurationParameter{{Name: "ipg_l3evpn", DMSPath: "/ipg/evpn", Value: "20"}},
 			}
 
 			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(nil)
 			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(nil)
 			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
-			dmsCli.On("SetParameters", []types.ConfigurationParameter{cfgs["v1"].RuntimeConfig.InterPacketGap.L3EVPN}).Return(nil)
+			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.L3EVPN).Return(nil)
 
 			nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
 			err := manager.ApplyRuntimeConfig(device)
@@ -299,8 +299,8 @@ var _ = Describe("SpectrumXConfigManager", func() {
 		It("returns error for invalid overlay", func() {
 			device.Spec.Configuration.Template.SpectrumXOptimized.Overlay = "invalid"
 			cfgs["v1"].RuntimeConfig.InterPacketGap = types.InterPacketGapConfig{
-				PureL3: types.ConfigurationParameter{Name: "ipg_pure", DMSPath: "/ipg/pure", Value: "10"},
-				L3EVPN: types.ConfigurationParameter{Name: "ipg_l3evpn", DMSPath: "/ipg/evpn", Value: "20"},
+				PureL3: []types.ConfigurationParameter{{Name: "ipg_pure", DMSPath: "/ipg/pure", Value: "10"}},
+				L3EVPN: []types.ConfigurationParameter{{Name: "ipg_l3evpn", DMSPath: "/ipg/evpn", Value: "20"}},
 			}
 
 			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(nil)

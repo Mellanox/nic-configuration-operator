@@ -464,6 +464,10 @@ func (i *dmsInstance) SetParameters(params []types.ConfigurationParameter) error
 						err := i.RunSetPathCommand(param.DMSPath, param.Value, param.ValueType, filterRules)
 
 						if err != nil {
+							if param.IgnoreError {
+								log.Log.V(2).Info("IgnoreError flag explicitly set for param, ignoring error", "device", i.device.SerialNumber, "param", param)
+								continue
+							}
 							return err
 						}
 					}
@@ -472,6 +476,10 @@ func (i *dmsInstance) SetParameters(params []types.ConfigurationParameter) error
 					err := i.RunSetPathCommand(param.DMSPath, param.Value, param.ValueType, filterRules)
 
 					if err != nil {
+						if param.IgnoreError {
+							log.Log.V(2).Info("IgnoreError flag explicitly set for param, ignoring error", "device", i.device.SerialNumber, "param", param)
+							continue
+						}
 						return err
 					}
 				}
@@ -479,6 +487,10 @@ func (i *dmsInstance) SetParameters(params []types.ConfigurationParameter) error
 		} else {
 			err := i.RunSetPathCommand(param.DMSPath, param.Value, param.ValueType, nil)
 			if err != nil {
+				if param.IgnoreError {
+					log.Log.V(2).Info("IgnoreError flag explicitly set for param, ignoring error", "device", i.device.SerialNumber, "param", param)
+					continue
+				}
 				return err
 			}
 		}

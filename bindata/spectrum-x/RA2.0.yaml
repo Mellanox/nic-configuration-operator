@@ -179,15 +179,31 @@ runtimeConfig:
       dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=17]/config/value
       valueType: int
   interPacketGap:
-     pureL3:
-        name: Inter Packet Gap for no overlay
+    pureL3:
+      - name: Inter Packet Gap for no overlay
         value: 25
         dmsPath: /interfaces/interface/ethernet/nvidia/config/inter-packet-gap
         valueType: int
-     l3EVPN:
-        name: Inter Packet Gap for L3 EVPN overlay
+      - name: Shut down interface 
+        value: false
+        dmsPath: /interfaces/interface/config/enabled
+        valueType: bool
+      - name: Bring up interface to apply IPG settings 
+        value: false
+        dmsPath: /interfaces/interface/config/enabled
+        valueType: bool
+    l3EVPN:
+      - name: Inter Packet Gap for L3 EVPN overlay
         value: 33
         dmsPath: /interfaces/interface/ethernet/nvidia/config/inter-packet-gap
         valueType: int
+      - name: Shut down interface 
+        value: false
+        dmsPath: /interfaces/interface/config/enabled
+        valueType: bool
+      - name: Bring up interface to apply IPG settings 
+        value: false
+        dmsPath: /interfaces/interface/config/enabled
+        valueType: bool
 docaCCVersion: 3.1.0105-1
 useSoftwareCCAlgorithm: true
