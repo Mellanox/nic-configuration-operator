@@ -419,7 +419,7 @@ func (u *utils) BurnNicFirmware(ctx context.Context, pciAddress, fwPath string) 
 // GetDocaSpcXCCVersion retrieves the version from the DOCA SPC-X PCC file
 func (u *utils) GetDocaSpcXCCVersion(docaSpcXCCPath string) (string, error) {
 	log.Log.V(2).Info("FirmwareUtils.GetDocaSpcXCCVersion()", "docaSpcXCCPath", docaSpcXCCPath)
-	cmd := u.execInterface.Command("dpk-deb", "-f", docaSpcXCCPath, "Version")
+	cmd := u.execInterface.Command("dpkg-deb", "-f", docaSpcXCCPath, "Version")
 	output, err := cmd.Output()
 	if err != nil {
 		log.Log.Error(err, "GetDocaSpcXCCVersion(): Failed to get version from DOCA SPC-X PCC deb package")
