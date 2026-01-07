@@ -284,6 +284,11 @@ NicDevice is the Schema for the nicdevices API
 <em><a href="#FirmwareTemplateSpec">FirmwareTemplateSpec</a></em></td>
 <td><p>Firmware specifies the fw upgrade policy requested by NicFirmwareTemplate</p></td>
 </tr>
+<tr>
+<td><code>interfaceNameTemplate</code><br />
+<em><a href="#NicDeviceInterfaceNameSpec">NicDeviceInterfaceNameSpec</a></em></td>
+<td><p>InterfaceNameTemplate specifies the interface name template to be applied to the NIC</p></td>
+</tr>
 </tbody>
 </table></td>
 </tr>
@@ -323,6 +328,55 @@ for each PF - Mstconfig -d set ADVANCED_PCI_SETTINGS=1 * Node reboot - Applies n
 <td><code>template</code><br />
 <em><a href="#ConfigurationTemplateSpec">ConfigurationTemplateSpec</a></em></td>
 <td><p>Configuration template applied from the NicConfigurationTemplate CR</p></td>
+</tr>
+</tbody>
+</table>
+
+### NicDeviceInterfaceNameSpec
+
+(*Appears on:*[NicDeviceSpec](#NicDeviceSpec))
+
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nicIndex</code><br />
+<em>int</em></td>
+<td><p>NicIndex is the index of the NIC in the flattened list of NICs based on the Template</p></td>
+</tr>
+<tr>
+<td><code>railIndex</code><br />
+<em>int</em></td>
+<td><p>RailIndex is the index of the rail where the given NIC belongs to based on the Template</p></td>
+</tr>
+<tr>
+<td><code>planeIndices</code><br />
+<em>[]int</em></td>
+<td><p>PlaneIndices is the indices of the planes for the given NIC based on the Template</p></td>
+</tr>
+<tr>
+<td><code>rdmaDevicePrefix</code><br />
+<em>string</em></td>
+<td><p>— Parameters from the NicInterfaceNameTemplate CR — RdmaDevicePrefix specifies the prefix for the rdma device name</p></td>
+</tr>
+<tr>
+<td><code>netDevicePrefix</code><br />
+<em>string</em></td>
+<td><p>NetDevicePrefix specifies the prefix for the net device name</p></td>
+</tr>
+<tr>
+<td><code>railPciAddresses</code><br />
+<em>[][]string</em></td>
+<td><p>RailPciAddresses defines the PCI address to rail mapping and order</p></td>
 </tr>
 </tbody>
 </table>
@@ -390,6 +444,11 @@ NicDeviceSpec defines the desired state of NicDevice
 <td><code>firmware</code><br />
 <em><a href="#FirmwareTemplateSpec">FirmwareTemplateSpec</a></em></td>
 <td><p>Firmware specifies the fw upgrade policy requested by NicFirmwareTemplate</p></td>
+</tr>
+<tr>
+<td><code>interfaceNameTemplate</code><br />
+<em><a href="#NicDeviceInterfaceNameSpec">NicDeviceInterfaceNameSpec</a></em></td>
+<td><p>InterfaceNameTemplate specifies the interface name template to be applied to the NIC</p></td>
 </tr>
 </tbody>
 </table>
@@ -710,6 +769,132 @@ NicFirmwareTemplateSpec defines the FW templates and node/nic selectors for it
 </tbody>
 </table>
 
+### NicInterfaceNameTemplate
+
+NicInterfaceNameTemplate is the Schema for the nicinterfacenametemplates API
+
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>metadata</code><br />
+<em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta">Kubernetes meta/v1.ObjectMeta</a></em></td>
+<td>Refer to the Kubernetes API documentation for the fields of the <code>metadata</code> field.</td>
+</tr>
+<tr>
+<td><code>spec</code><br />
+<em><a href="#NicInterfaceNameTemplateSpec">NicInterfaceNameTemplateSpec</a></em></td>
+<td><br />
+<br />
+&#10;<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<tbody>
+<tr>
+<td><code>nodeSelector</code><br />
+<em>map[string]string</em></td>
+<td><p>NodeSelector contains labels required on the node. When empty, the template will be applied to matching devices on all nodes.</p></td>
+</tr>
+<tr>
+<td><code>pfsPerNic</code><br />
+<em>int</em></td>
+<td><p>PfsPerNic specifies the number of PFs per NIC Used to calculate the number of planes per NIC</p></td>
+</tr>
+<tr>
+<td><code>rdmaDevicePrefix</code><br />
+<em>string</em></td>
+<td><p>RdmaDevicePrefix specifies the prefix for the rdma device name %nic_id%, %plane_id% and %rail_id% placeholders can be used to construct the device name %nic_id% is the index of the NIC in the
+flattened list of NICs %plane_id% is the index of the plane of the specific NIC %rail_id% is the index of the rail where the given NIC belongs to</p></td>
+</tr>
+<tr>
+<td><code>netDevicePrefix</code><br />
+<em>string</em></td>
+<td><p>NetDevicePrefix specifies the prefix for the net device name %nic_id%, %plane_id% and %rail_id% placeholders can be used to construct the device name %nic_id% is the index of the NIC in the
+flattened list of NICs %plane_id% is the index of the plane of the specific NIC %rail_id% is the index of the rail where the given NIC belongs to</p></td>
+</tr>
+<tr>
+<td><code>railPciAddresses</code><br />
+<em>[][]string</em></td>
+<td><p>RailPciAddresses defines the PCI address to rail mapping and order The first dimension is the rail index, the second dimension is the PCI addresses of the NICs in the rail. The PCI addresses
+must be sorted in the order of the rails. Example: [[“0000:1a:00.0”, “0000:2a:00.0”], [“0000:3a:00.0”, “0000:4a:00.0”]] specifies 2 rails with 2 NICs each.</p></td>
+</tr>
+</tbody>
+</table></td>
+</tr>
+<tr>
+<td><code>status</code><br />
+<em><a href="#NicInterfaceNameTemplateStatus">NicInterfaceNameTemplateStatus</a></em></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+
+### NicInterfaceNameTemplateSpec
+
+(*Appears on:*[NicInterfaceNameTemplate](#NicInterfaceNameTemplate))
+
+NicInterfaceNameTemplateSpec defines the desired state of NicInterfaceNameTemplate
+
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nodeSelector</code><br />
+<em>map[string]string</em></td>
+<td><p>NodeSelector contains labels required on the node. When empty, the template will be applied to matching devices on all nodes.</p></td>
+</tr>
+<tr>
+<td><code>pfsPerNic</code><br />
+<em>int</em></td>
+<td><p>PfsPerNic specifies the number of PFs per NIC Used to calculate the number of planes per NIC</p></td>
+</tr>
+<tr>
+<td><code>rdmaDevicePrefix</code><br />
+<em>string</em></td>
+<td><p>RdmaDevicePrefix specifies the prefix for the rdma device name %nic_id%, %plane_id% and %rail_id% placeholders can be used to construct the device name %nic_id% is the index of the NIC in the
+flattened list of NICs %plane_id% is the index of the plane of the specific NIC %rail_id% is the index of the rail where the given NIC belongs to</p></td>
+</tr>
+<tr>
+<td><code>netDevicePrefix</code><br />
+<em>string</em></td>
+<td><p>NetDevicePrefix specifies the prefix for the net device name %nic_id%, %plane_id% and %rail_id% placeholders can be used to construct the device name %nic_id% is the index of the NIC in the
+flattened list of NICs %plane_id% is the index of the plane of the specific NIC %rail_id% is the index of the rail where the given NIC belongs to</p></td>
+</tr>
+<tr>
+<td><code>railPciAddresses</code><br />
+<em>[][]string</em></td>
+<td><p>RailPciAddresses defines the PCI address to rail mapping and order The first dimension is the rail index, the second dimension is the PCI addresses of the NICs in the rail. The PCI addresses
+must be sorted in the order of the rails. Example: [[“0000:1a:00.0”, “0000:2a:00.0”], [“0000:3a:00.0”, “0000:4a:00.0”]] specifies 2 rails with 2 NICs each.</p></td>
+</tr>
+</tbody>
+</table>
+
+### NicInterfaceNameTemplateStatus
+
+(*Appears on:*[NicInterfaceNameTemplate](#NicInterfaceNameTemplate))
+
+NicInterfaceNameTemplateStatus defines the observed state of NicInterfaceNameTemplate
+
 ### NicSelectorSpec
 
 (*Appears on:*[NicConfigurationTemplateSpec](#NicConfigurationTemplateSpec),
@@ -956,4 +1141,4 @@ SpectrumXOptimizedSpec enables Spectrum-X specific optimizations
 
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-*Generated with `gen-crd-api-reference-docs` on git commit `61bd065`.*
+*Generated with `gen-crd-api-reference-docs` on git commit `838c249`.*
