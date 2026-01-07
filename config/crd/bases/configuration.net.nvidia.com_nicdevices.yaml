@@ -249,6 +249,40 @@ spec:
                 - nicFirmwareSourceRef
                 - updatePolicy
                 type: object
+              interfaceNameTemplate:
+                description: InterfaceNameTemplate specifies the interface name template
+                  to be applied to the NIC
+                properties:
+                  netDevicePrefix:
+                    description: NetDevicePrefix specifies the prefix for the net
+                      device name
+                    type: string
+                  nicIndex:
+                    description: NicIndex is the index of the NIC in the flattened
+                      list of NICs based on the Template
+                    type: integer
+                  planeIndices:
+                    description: PlaneIndices is the indices of the planes for the
+                      given NIC based on the Template
+                    items:
+                      type: integer
+                    type: array
+                  railIndex:
+                    description: RailIndex is the index of the rail where the given
+                      NIC belongs to based on the Template
+                    type: integer
+                  rdmaDevicePrefix:
+                    description: |-
+                      --- Parameters from the NicInterfaceNameTemplate CR ---
+                      RdmaDevicePrefix specifies the prefix for the rdma device name
+                    type: string
+                required:
+                - netDevicePrefix
+                - nicIndex
+                - planeIndices
+                - railIndex
+                - rdmaDevicePrefix
+                type: object
             type: object
           status:
             description: NicDeviceStatus defines the observed state of NicDevice

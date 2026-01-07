@@ -34,12 +34,28 @@ type NicDeviceConfigurationSpec struct {
 	Template *ConfigurationTemplateSpec `json:"template,omitempty"`
 }
 
+type NicDeviceInterfaceNameSpec struct {
+	// NicIndex is the index of the NIC in the flattened list of NICs based on the Template
+	NicIndex int `json:"nicIndex"`
+	// RailIndex is the index of the rail where the given NIC belongs to based on the Template
+	RailIndex int `json:"railIndex"`
+	// PlaneIndices is the indices of the planes for the given NIC based on the Template
+	PlaneIndices []int `json:"planeIndices"`
+	// --- Parameters from the NicInterfaceNameTemplate CR ---
+	// RdmaDevicePrefix specifies the prefix for the rdma device name
+	RdmaDevicePrefix string `json:"rdmaDevicePrefix"`
+	// NetDevicePrefix specifies the prefix for the net device name
+	NetDevicePrefix string `json:"netDevicePrefix"`
+}
+
 // NicDeviceSpec defines the desired state of NicDevice
 type NicDeviceSpec struct {
 	// Configuration specifies the configuration requested by NicConfigurationTemplate
 	Configuration *NicDeviceConfigurationSpec `json:"configuration,omitempty"`
 	// Firmware specifies the fw upgrade policy requested by NicFirmwareTemplate
 	Firmware *FirmwareTemplateSpec `json:"firmware,omitempty"`
+	// InterfaceNameTemplate specifies the interface name template to be applied to the NIC
+	InterfaceNameTemplate *NicDeviceInterfaceNameSpec `json:"interfaceNameTemplate,omitempty"`
 }
 
 // NicDevicePortSpec describes the ports of the NIC
