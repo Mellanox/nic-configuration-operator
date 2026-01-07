@@ -168,6 +168,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	nicInterfaceNameTemplateReconciler := &controller.NicInterfaceNameTemplateReconciler{
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		NodeName:      nodeName,
+		EventRecorder: eventRecorder,
+	}
+	if err = nicInterfaceNameTemplateReconciler.SetupWithManager(mgr); err != nil {
+		log.Log.Error(err, "unable to create controller", "controller", "NicInterfaceNameTemplateReconciler")
+		os.Exit(1)
+	}
+
 	ctx := ctrl.SetupSignalHandler()
 
 	// Set the nic configuration wait label on the node to true until desired configuration is confirmed to be applied
