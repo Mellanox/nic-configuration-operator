@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/utils/exec"
@@ -150,6 +151,41 @@ Device type:    ConnectX4
 			Expect(query.DefaultConfig).To(BeEmpty())
 			Expect(query.CurrentConfig).To(BeEmpty())
 			Expect(query.NextBootConfig).To(BeEmpty())
+		})
+
+		It("should parse mlxconfig output correctly for identify if BlueField device is DPU mode", func() {
+			cmd1 := &execTesting.FakeCmd{}
+			cmd1.OutputScript = append(cmd1.OutputScript,
+				func() ([]byte, []byte, error) {
+					output := `
+Device #1:
+----------
+
+Device type:        BlueField3
+Configurations:                              Default         Current         Next Boot
+         INTERNAL_CPU_OFFLOAD_ENGINE         ENABLED(0)      ENABLED(0)      ENABLED(0)
+`
+					return []byte(output), nil, nil
+				},
+			)
+
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(cmd string, args ...string) exec.Cmd {
+					Expect(cmd).To(Equal("mlxconfig"))
+					Expect(args).To(Equal([]string{"-d", pciAddress, "-e", "query", consts.BF3OperationModeParam}))
+					return cmd1
+				},
+			}
+
+			h.execInterface = fakeExec
+
+			query, err := h.QueryNvConfig(context.TODO(), pciAddress, consts.BF3OperationModeParam)
+			Expect(err).ToNot(HaveOccurred())
+
+			// Verify regular parameters
+			Expect(query.DefaultConfig).To(HaveKeyWithValue("INTERNAL_CPU_OFFLOAD_ENGINE", []string{"enabled", "0"}))
+			Expect(query.CurrentConfig).To(HaveKeyWithValue("INTERNAL_CPU_OFFLOAD_ENGINE", []string{"enabled", "0"}))
+			Expect(query.NextBootConfig).To(HaveKeyWithValue("INTERNAL_CPU_OFFLOAD_ENGINE", []string{"enabled", "0"}))
 		})
 
 		It("should return error if mlxconfig command fails", func() {

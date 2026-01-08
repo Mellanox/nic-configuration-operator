@@ -491,13 +491,14 @@ var _ = Describe("DeviceDiscovery", func() {
 			}, nil)
 			mockUtils.On("IsSriovVF", "0000:00:00.0").Return(false)
 			mockUtils.On("GetVPD", "0000:00:00.0").Return(&types.VPD{PartNumber: "part-number", SerialNumber: "serial-number", ModelName: "BlueField-3"}, nil)
+			mockUtils.On("IsZeroTrust", "0000:00:00.0").Return(false, nil)
 			mockUtils.On("GetFirmwareVersionAndPSID", "0000:00:00.0").Return("fw-version", "psid", nil)
 			mockUtils.On("GetInterfaceName", "0000:00:00.0").Return("eth0")
 			mockUtils.On("GetRDMADeviceName", "0000:00:00.0").Return("mlx5_0")
 
 			nvConfigUtilsMock := nvmmocks.NewNVConfigUtils(GinkgoT())
 			nvConfigUtilsMock.On("QueryNvConfig", mock.Anything, "0000:00:00.0", consts.BF3OperationModeParam).Return(types.NvConfigQuery{
-				CurrentConfig:  map[string][]string{consts.BF3OperationModeParam: {consts.NvParamBF3DpuMode}},
+				CurrentConfig:  map[string][]string{consts.BF3OperationModeParam: {"enabled", consts.NvParamBF3DpuMode}},
 				NextBootConfig: map[string][]string{},
 				DefaultConfig:  map[string][]string{},
 			}, nil)
@@ -508,6 +509,25 @@ var _ = Describe("DeviceDiscovery", func() {
 			Expect(err).NotTo(HaveOccurred())
 			discoveredDeviceStatus := devicesBySerial["serial-number"]
 			Expect(discoveredDeviceStatus.DPU).To(BeTrue())
+		})
+
+		It("should skip zero-trust device", func() {
+			mockUtils.On("GetPCIDevices").Return([]*pci.Device{
+				{
+					Address: "0000:00:00.0",
+					Vendor:  &pcidb.Vendor{ID: consts.MellanoxVendor},
+					Product: &pcidb.Product{ID: consts.BlueField3DeviceID, Name: "BlueField-3"},
+					Class:   &pcidb.Class{ID: "02"},
+				},
+			}, nil)
+			mockUtils.On("IsSriovVF", "0000:00:00.0").Return(false)
+			mockUtils.On("GetVPD", "0000:00:00.0").Return(&types.VPD{PartNumber: "part-number", SerialNumber: "serial-number", ModelName: "BlueField-3"}, nil)
+			mockUtils.On("IsZeroTrust", "0000:00:00.0").Return(true, nil)
+
+			devices, err := manager.DiscoverNicDevices()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(devices).To(HaveLen(0))
+			mockUtils.AssertExpectations(GinkgoT())
 		})
 	})
 })

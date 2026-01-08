@@ -83,6 +83,19 @@ func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDeviceStat
 			continue
 		}
 
+		isBlueField := utils.IsBlueFieldDevice(device.Product.ID)
+		zeroTrust := false
+		if isBlueField {
+			zeroTrust, err = d.utils.IsZeroTrust(device.Address)
+			if err != nil {
+				log.Log.Error(err, "Failed to get device's zero-trust (host restriction) status. Proceed on premise of non-zero-trust", "address", device.Address)
+			}
+		}
+		if zeroTrust {
+			log.Log.Info("Device is zero-trust (host restriction) mode, skipping as it disallows any config change from host", "address", device.Address)
+			continue
+		}
+
 		// Devices with the same serial number are ports of the same NIC, so grouping them
 		deviceStatus, ok := devices[vpd.SerialNumber]
 
@@ -97,13 +110,14 @@ func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDeviceStat
 			shortName := strings.SplitN(vpd.ModelName, " ", 2)[0]
 
 			dpu := false
-			if utils.IsBlueFieldDevice(device.Product.ID) {
+			if isBlueField {
 				nvConfig, err := d.nvConfigUtils.QueryNvConfig(context.Background(), device.Address, consts.BF3OperationModeParam)
 				if err != nil {
 					log.Log.Error(err, "Failed to get BlueField device's operation mode", "address", device.Address)
 					return nil, err
 				}
-				dpu = nvConfig.CurrentConfig[consts.BF3OperationModeParam][0] == consts.NvParamBF3DpuMode
+				// For a field ENABLED(0) or DISABLED(1), the second parameter is the 0/1 value
+				dpu = nvConfig.CurrentConfig[consts.BF3OperationModeParam][1] == consts.NvParamBF3DpuMode
 			}
 
 			deviceStatus = v1alpha1.NicDeviceStatus{

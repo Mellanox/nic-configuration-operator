@@ -41,16 +41,21 @@ type DeviceDiscoveryUtils interface {
 
 	// GetVPD uses mstvpd util to retrieve Part Number, Serial Number, Model Name of the PCI device
 	GetVPD(pciAddr string) (*types.VPD, error)
+
 	// GetFirmwareVersionAndPSID uses flint tool to retrieve FW version and PSID of the device
 	GetFirmwareVersionAndPSID(pciAddr string) (string, string, error)
 
 	// GetRDMADeviceName returns a RDMA device name for the given PCI address
 	GetRDMADeviceName(pciAddr string) string
+
 	// GetInterfaceName returns a network interface name for the given PCI address
 	GetInterfaceName(pciAddr string) string
 
 	// IsSriovVF return true if the device is a SRIOV VF, false otherwise
 	IsSriovVF(pciAddr string) bool
+
+	// IsZeroTrust uses mlxprivhost tool to check if the device is in zero-trust mode
+	IsZeroTrust(pciAddr string) (bool, error)
 }
 
 type deviceDiscoveryUtils struct {
@@ -186,6 +191,34 @@ func (d *deviceDiscoveryUtils) IsSriovVF(pciAddr string) bool {
 		return false
 	}
 	return true
+}
+
+// IsZeroTrust uses mlxprivhost tool to check if the BlueField device is in zero-trust mode
+func (d *deviceDiscoveryUtils) IsZeroTrust(pciAddr string) (bool, error) {
+	log.Log.Info("HostUtils.IsZeroTrust()", "pciAddr", pciAddr)
+	// Check if the device is in restricted (zero-trust) mode
+	cmd := d.execInterface.Command("mlxprivhost", "-d", pciAddr, "q")
+	output, err := utils.RunCommand(cmd)
+	if err != nil {
+		log.Log.Error(err, "IsZeroTrust(): Failed to run mlxprivhost")
+		return false, err
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+
+	for scanner.Scan() {
+		line := strings.ToLower(scanner.Text())
+
+		if strings.HasPrefix(line, consts.ZeroTrustHostConfigPrefix) {
+			if strings.Contains(line, consts.HostRestrictionLevelRestricted) {
+				return true, nil
+			} else if strings.Contains(line, consts.HostRestrictionLevelPrivileged) {
+				return false, nil
+			}
+		}
+	}
+
+	return false, fmt.Errorf("IsZeroTrustDevice(): failed to parse mlxprivhost output")
 }
 
 func getNetNames(pciAddr string) ([]string, error) {
