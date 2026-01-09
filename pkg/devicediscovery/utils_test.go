@@ -210,4 +210,53 @@ var _ = Describe("HostUtils", func() {
 			Expect(serial).To(Equal(""))
 		})
 	})
+
+	Describe("IsZeroTrust", func() {
+		It("should return true if the device is in zero-trust mode", func() {
+			fakeExec := &execTesting.FakeExec{}
+
+			fakeCmd := &execTesting.FakeCmd{}
+			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+				return []byte("level	: restricted"), nil, nil
+			})
+
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				Expect(cmd).To(Equal("mlxprivhost"))
+				Expect(args[1]).To(Equal(pciAddress))
+				return fakeCmd
+			})
+
+			h := &deviceDiscoveryUtils{
+				execInterface: fakeExec,
+			}
+
+			zeroTrust, err := h.IsZeroTrust(pciAddress)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(zeroTrust).To(BeTrue())
+		})
+		It("should return false if the device is not in zero-trust mode", func() {
+			fakeExec := &execTesting.FakeExec{}
+
+			fakeCmd := &execTesting.FakeCmd{}
+			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+				return []byte("level	: privileged"), nil, nil
+			})
+
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				Expect(cmd).To(Equal("mlxprivhost"))
+				Expect(args[1]).To(Equal(pciAddress))
+				return fakeCmd
+			})
+
+			h := &deviceDiscoveryUtils{
+				execInterface: fakeExec,
+			}
+
+			zeroTrust, err := h.IsZeroTrust(pciAddress)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(zeroTrust).To(BeFalse())
+		})
+	})
 })

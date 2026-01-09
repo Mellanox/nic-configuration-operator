@@ -51,15 +51,16 @@ const (
 	DeviceFwMismatchReason        = "DeviceFirmwareConfigMismatch"
 	DeviceFwMismatchMessage       = "Firmware doesn't match the requested version, can't proceed with update because policy is set to Validate"
 
-	PartNumberPrefix      = "PN:"
-	SerialNumberPrefix    = "SN:"
-	ModelNamePrefix       = "ID:"
-	FirmwareVersionPrefix = "fw version:"
-	PSIDPrefix            = "psid:"
-	LinkStatsPrefix       = "lnksta"
-	MaxReadReqPrefix      = "maxreadreq"
-	TrustStatePrefix      = "priority trust state:"
-	PfcEnabledPrefix      = "enabled"
+	PartNumberPrefix          = "PN:"
+	SerialNumberPrefix        = "SN:"
+	ModelNamePrefix           = "ID:"
+	FirmwareVersionPrefix     = "fw version:"
+	PSIDPrefix                = "psid:"
+	LinkStatsPrefix           = "lnksta"
+	MaxReadReqPrefix          = "maxreadreq"
+	TrustStatePrefix          = "priority trust state:"
+	PfcEnabledPrefix          = "enabled"
+	ZeroTrustHostConfigPrefix = "level"
 
 	SuperNIC = "SuperNIC"
 
@@ -148,4 +149,7 @@ const (
 	MultiplaneModeSwplb    = "swplb"
 	MultiplaneModeHwplb    = "hwplb"
 	MultiplaneModeUniplane = "uniplane"
+
+	HostRestrictionLevelPrivileged = "privileged"
+	HostRestrictionLevelRestricted = "restricted"
 )
