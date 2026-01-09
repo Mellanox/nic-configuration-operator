@@ -164,7 +164,6 @@ func (r *NicInterfaceNameTemplateReconciler) Reconcile(ctx context.Context, req 
 			PlaneIndices:     planeIndices,
 			RdmaDevicePrefix: matchingTemplate.Spec.RdmaDevicePrefix,
 			NetDevicePrefix:  matchingTemplate.Spec.NetDevicePrefix,
-			RailPciAddresses: matchingTemplate.Spec.RailPciAddresses,
 		}
 
 		// Check if update is needed
@@ -243,10 +242,19 @@ func (r *NicInterfaceNameTemplateReconciler) SetupWithManager(mgr ctrl.Manager) 
 		},
 	}
 
-	// Trigger also on update of NicDevice from this node
+	// Trigger also on update of NicDevice from this node, but only if spec changed
 	nicDeviceEventHandler := handler.Funcs{
 		UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			oldDevice, ok1 := e.ObjectOld.(*v1alpha1.NicDevice)
+			newDevice, ok2 := e.ObjectNew.(*v1alpha1.NicDevice)
+			if !ok1 || !ok2 {
+				return
+			}
+			if reflect.DeepEqual(oldDevice.Spec, newDevice.Spec) {
+				return
+			}
 			log.Log.Info("Enqueuing sync for NicDevice update event", "resource", e.ObjectNew.GetName())
+			log.Log.V(2).Info("Spec changed, enqueuing sync", "old", oldDevice.Spec, "new", newDevice.Spec)
 			qHandler(q)
 		},
 	}

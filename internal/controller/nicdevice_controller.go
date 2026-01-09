@@ -44,11 +44,13 @@ import (
 	v1alpha1 "github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/configuration"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	"github.com/Mellanox/nic-configuration-operator/pkg/devicediscovery"
 	"github.com/Mellanox/nic-configuration-operator/pkg/firmware"
 	"github.com/Mellanox/nic-configuration-operator/pkg/host"
 	"github.com/Mellanox/nic-configuration-operator/pkg/maintenance"
 	"github.com/Mellanox/nic-configuration-operator/pkg/spectrumx"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
+	"github.com/Mellanox/nic-configuration-operator/pkg/udev"
 	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
 
@@ -70,6 +72,8 @@ type NicDeviceReconciler struct {
 	HostUtils            host.HostUtils
 	MaintenanceManager   maintenance.MaintenanceManager
 	SpectrumXManager     spectrumx.SpectrumXManager
+	UdevManager          udev.UdevManager
+	DeviceDiscoveryUtils devicediscovery.DeviceDiscoveryUtils
 
 	EventRecorder record.EventRecorder
 }
@@ -111,7 +115,14 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	log.Log.V(2).Info(fmt.Sprintf("reconciling %d NicDevices", len(configStatuses)))
 
-	// First we need to validate the firmware spec of all devices
+	// First, reconcile InterfaceNameTemplate specs by applying udev rules
+	err = r.reconcileInterfaceNameTemplates(ctx, configStatuses)
+	if err != nil {
+		log.Log.Error(err, "failed to reconcile interface name templates")
+		return ctrl.Result{}, err
+	}
+
+	// Next we need to validate the firmware spec of all devices
 	// NicDevices with empty FW specs are skipped during this step
 	// 1. If the NicFirmwareSource object, referenced in the spec, is not ready or has failed, update the status and proceed with other devices
 	// 2. If the updatePolicy is set to Validate and the installed FW version doesn't match the spec, update the status and requeue
@@ -234,6 +245,107 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	return ctrl.Result{RequeueAfter: longRequeueTime * 20}, nil
 }
 
+// reconcileInterfaceNameTemplates collects all devices with InterfaceNameTemplate specs, applies udev rules,
+// and verifies the interface names have been applied correctly
+func (r *NicDeviceReconciler) reconcileInterfaceNameTemplates(ctx context.Context, statuses nicDeviceConfigurationStatuses) error {
+	// Collect devices with InterfaceNameTemplate specs
+	var devicesWithTemplates []*v1alpha1.NicDevice
+	for _, status := range statuses {
+		if status.device.Spec.InterfaceNameTemplate != nil {
+			devicesWithTemplates = append(devicesWithTemplates, status.device)
+		}
+	}
+
+	if len(devicesWithTemplates) == 0 {
+		log.Log.V(2).Info("No devices with InterfaceNameTemplate specs to reconcile")
+		return nil
+	}
+
+	log.Log.V(2).Info("Reconciling InterfaceNameTemplate specs", "deviceCount", len(devicesWithTemplates))
+
+	// Apply udev rules for all devices with templates and get expected interface names
+	expectedNames, updated, err := r.UdevManager.ApplyUdevRules(ctx, devicesWithTemplates)
+	if err != nil {
+		log.Log.Error(err, "Failed to apply udev rules")
+		return err
+	}
+
+	if updated {
+		log.Log.Info("Udev rules updated for InterfaceNameTemplate specs")
+	}
+
+	// Track if any device has mismatched names
+	var hasError bool
+
+	// Iterate over devices and verify interface names for each port
+	for _, device := range devicesWithTemplates {
+		var mismatchedPorts []string
+
+		for portIdx := range device.Status.Ports {
+			port := &device.Status.Ports[portIdx]
+
+			expected, exists := expectedNames[port.PCI]
+			if !exists {
+				log.Log.Error(nil, "expected interface names not found for port", "device", device.Name, "port", port.PCI)
+				return fmt.Errorf("expected interface names not found for port %s", port.PCI)
+			}
+
+			// Get actual interface names from sysfs
+			actualNetDevice := r.DeviceDiscoveryUtils.GetInterfaceName(port.PCI)
+			actualRdmaDevice := r.DeviceDiscoveryUtils.GetRDMADeviceName(port.PCI)
+
+			// Update port status with actual names
+			port.NetworkInterface = actualNetDevice
+			port.RdmaInterface = actualRdmaDevice
+
+			// Compare actual vs expected
+			if actualNetDevice != expected.NetDevice {
+				mismatchedPorts = append(mismatchedPorts,
+					fmt.Sprintf("net:%s expected=%s actual=%s", port.PCI, expected.NetDevice, actualNetDevice))
+			}
+			if actualRdmaDevice != expected.RdmaDevice {
+				mismatchedPorts = append(mismatchedPorts,
+					fmt.Sprintf("rdma:%s expected=%s actual=%s", port.PCI, expected.RdmaDevice, actualRdmaDevice))
+			}
+		}
+
+		// Set condition based on whether names match
+		if len(mismatchedPorts) > 0 {
+			errMsg := fmt.Sprintf("interface name mismatch for ports: %v", mismatchedPorts)
+			log.Log.Error(nil, errMsg, "device", device.Name)
+
+			meta.SetStatusCondition(&device.Status.Conditions, metav1.Condition{
+				Type:               consts.InterfaceNameCondition,
+				Status:             metav1.ConditionFalse,
+				Reason:             consts.InterfaceNameMismatchReason,
+				ObservedGeneration: device.Generation,
+				Message:            errMsg,
+			})
+			hasError = true
+		} else {
+			meta.SetStatusCondition(&device.Status.Conditions, metav1.Condition{
+				Type:               consts.InterfaceNameCondition,
+				Status:             metav1.ConditionTrue,
+				Reason:             consts.InterfaceNameAppliedReason,
+				ObservedGeneration: device.Generation,
+				Message:            "Interface names applied successfully",
+			})
+		}
+
+		// Always update device status since we modify ports and conditions
+		if err := r.Client.Status().Update(ctx, device); err != nil {
+			log.Log.Error(err, "Failed to update device status", "device", device.Name)
+			return err
+		}
+	}
+
+	if hasError {
+		return fmt.Errorf("one or more devices have mismatched interface names")
+	}
+
+	return nil
+}
+
 // getDevices lists all the NicDevice objects from this node and filters those with non-empty specs,
 // updates relevant status conditions if configuration or firmware specs are empty
 func (r *NicDeviceReconciler) getDevices(ctx context.Context) (nicDeviceConfigurationStatuses, error) {
@@ -277,7 +389,7 @@ func (r *NicDeviceReconciler) getDevices(ctx context.Context) (nicDeviceConfigur
 			}
 		}
 
-		if device.Spec.Firmware != nil || device.Spec.Configuration != nil {
+		if device.Spec.Firmware != nil || device.Spec.Configuration != nil || device.Spec.InterfaceNameTemplate != nil {
 			log.Log.V(2).Info("device has non-nil spec, adding it to the list to reconcile", "name", device.Name)
 			configStatuses = append(configStatuses, &nicDeviceConfigurationStatus{
 				device: &devices.Items[i],

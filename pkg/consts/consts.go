@@ -152,4 +152,11 @@ const (
 
 	HostRestrictionLevelPrivileged = "privileged"
 	HostRestrictionLevelRestricted = "restricted"
+
+	// InterfaceNameCondition is the condition type for interface name template application
+	InterfaceNameCondition = "InterfaceNameApplied"
+	// InterfaceNameAppliedReason indicates interface names were applied successfully
+	InterfaceNameAppliedReason = "InterfaceNameApplied"
+	// InterfaceNameMismatchReason indicates interface names don't match the expected values
+	InterfaceNameMismatchReason = "InterfaceNameMismatch"
 )
