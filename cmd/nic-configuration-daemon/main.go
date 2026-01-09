@@ -49,6 +49,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/pkg/nvconfig"
 	"github.com/Mellanox/nic-configuration-operator/pkg/spectrumx"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
+	"github.com/Mellanox/nic-configuration-operator/pkg/udev"
 )
 
 var (
@@ -150,6 +151,8 @@ func main() {
 		os.Exit(1)
 	}
 
+	udevManager := udev.NewUdevManager()
+
 	nicDeviceReconciler := controller.NicDeviceReconciler{
 		Client:               mgr.GetClient(),
 		Scheme:               mgr.GetScheme(),
@@ -161,6 +164,8 @@ func main() {
 		EventRecorder:        eventRecorder,
 		SpectrumXManager:     spectrumXConfigManager,
 		HostUtils:            hostUtils,
+		UdevManager:          udevManager,
+		DeviceDiscoveryUtils: devicediscovery.NewDeviceDiscoveryUtils(),
 	}
 	err = nicDeviceReconciler.SetupWithManager(mgr, true)
 	if err != nil {
