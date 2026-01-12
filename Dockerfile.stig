@@ -1,0 +1,74 @@
+# Copyright 2026 NVIDIA CORPORATION & AFFILIATES
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+
+ARG UBUNTU_STIG_BASE_IMAGE
+
+
+# Build the manager binary
+FROM golang:1.24 AS builder
+ARG TARGETOS
+ARG TARGETARCH
+ARG GCFLAGS
+ARG GOPROXY
+ENV GOPROXY=$GOPROXY
+
+WORKDIR /workspace
+# Copy sources
+COPY go.mod go.mod
+COPY go.sum go.sum
+# cache deps before building and copying source so that we don't need to re-download as much
+# and so that source changes don't invalidate our downloaded layer
+RUN --mount=type=cache,target=/go/pkg/mod/ go mod download
+
+# Copy the go source
+COPY ./ ./
+
+# Build manager binary
+RUN --mount=type=cache,target=/go/pkg/mod/ GO_GCFLAGS=${GCFLAGS} make build-manager
+
+FROM $UBUNTU_STIG_BASE_IMAGE
+
+ARG DOCA_VERSION=3.2.1
+ARG DOCA_FULL_VERSION=3.2.1-044000-25.10
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install DOCA packages without DKMS builds
+# Note: Containers use host kernel modules at runtime, so DKMS builds during image build are not needed
+# We configure DKMS to skip automatic builds during package installation
+RUN apt-get update -y && \
+    apt-get install -y --no-install-recommends wget dkms && \
+    echo 'exit 0' > /usr/sbin/dkms && chmod +x /usr/sbin/dkms && \
+    wget https://www.mellanox.com/downloads/DOCA/DOCA_v${DOCA_VERSION}/host/doca-host_${DOCA_FULL_VERSION}-ubuntu2404_amd64.deb && \
+    dpkg -i doca-host_${DOCA_FULL_VERSION}-ubuntu2404_amd64.deb && \
+    apt-get update -y && \
+    apt-get install -y doca-all && \
+    rm -f doca-host_${DOCA_FULL_VERSION}-ubuntu2404_amd64.deb && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /
+COPY --from=builder /workspace/build/manager .
+
+# Copy sources to the container
+COPY . /workspace
+
+RUN --mount=type=secret,id=stig_script,target=/tmp/stig-fixer.sh bash /tmp/stig-fixer.sh
+
+USER 65532:65532
+
+ENTRYPOINT ["/manager"]
+
+LABEL org.opencontainers.image.source=https://nvcr.io/nvidia/cloud-native/nic-configuration-operator
