@@ -143,6 +143,26 @@ rules:
   - patch
   - update
 - apiGroups:
+  - configuration.net.nvidia.com
+  resources:
+  - nicinterfacenametemplates
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - configuration.net.nvidia.com
+  resources:
+  - nicinterfacenametemplates/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
   - maintenance.nvidia.com
   resources:
   - nodemaintenances

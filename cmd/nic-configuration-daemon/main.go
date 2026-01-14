@@ -49,6 +49,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/pkg/nvconfig"
 	"github.com/Mellanox/nic-configuration-operator/pkg/spectrumx"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
+	"github.com/Mellanox/nic-configuration-operator/pkg/udev"
 )
 
 var (
@@ -150,6 +151,8 @@ func main() {
 		os.Exit(1)
 	}
 
+	udevManager := udev.NewUdevManager()
+
 	nicDeviceReconciler := controller.NicDeviceReconciler{
 		Client:               mgr.GetClient(),
 		Scheme:               mgr.GetScheme(),
@@ -161,10 +164,23 @@ func main() {
 		EventRecorder:        eventRecorder,
 		SpectrumXManager:     spectrumXConfigManager,
 		HostUtils:            hostUtils,
+		UdevManager:          udevManager,
+		DeviceDiscoveryUtils: devicediscovery.NewDeviceDiscoveryUtils(),
 	}
 	err = nicDeviceReconciler.SetupWithManager(mgr, true)
 	if err != nil {
 		log.Log.Error(err, "unable to create controller", "controller", "NicDeviceReconciler")
+		os.Exit(1)
+	}
+
+	nicInterfaceNameTemplateReconciler := &controller.NicInterfaceNameTemplateReconciler{
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		NodeName:      nodeName,
+		EventRecorder: eventRecorder,
+	}
+	if err = nicInterfaceNameTemplateReconciler.SetupWithManager(mgr); err != nil {
+		log.Log.Error(err, "unable to create controller", "controller", "NicInterfaceNameTemplateReconciler")
 		os.Exit(1)
 	}
 

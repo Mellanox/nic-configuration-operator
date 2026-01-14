@@ -60,6 +60,8 @@ type nicConfigurationTemplate struct {
 //+kubebuilder:rbac:groups=configuration.net.nvidia.com,resources=nicfirmwaresources/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=configuration.net.nvidia.com,resources=nicfirmwaresources,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=configuration.net.nvidia.com,resources=nicfirmwaresources/finalizers,verbs=update
+//+kubebuilder:rbac:groups=configuration.net.nvidia.com,resources=nicinterfacenametemplates,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=configuration.net.nvidia.com,resources=nicinterfacenametemplates/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;update;patch
 //+kubebuilder:rbac:groups="",resources=configmaps,verbs=get
 //+kubebuilder:rbac:groups="",resources=pods,verbs=list

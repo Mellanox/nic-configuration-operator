@@ -154,5 +154,5 @@ func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDeviceStat
 }
 
 func NewDeviceDiscovery(nodeName string, nvConfigUtils nvconfig.NVConfigUtils) DeviceDiscovery {
-	return &deviceDiscovery{nodeName: nodeName, utils: newDeviceDiscoveryUtils(), nvConfigUtils: nvConfigUtils}
+	return &deviceDiscovery{nodeName: nodeName, utils: NewDeviceDiscoveryUtils(), nvConfigUtils: nvConfigUtils}
 }

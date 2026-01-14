@@ -36,12 +36,15 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	configurationMocks "github.com/Mellanox/nic-configuration-operator/pkg/configuration/mocks"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	devicediscoveryMocks "github.com/Mellanox/nic-configuration-operator/pkg/devicediscovery/mocks"
 	firmwareMocks "github.com/Mellanox/nic-configuration-operator/pkg/firmware/mocks"
 	hostMocks "github.com/Mellanox/nic-configuration-operator/pkg/host/mocks"
 	maintenanceMocks "github.com/Mellanox/nic-configuration-operator/pkg/maintenance/mocks"
 	spectrumxMocks "github.com/Mellanox/nic-configuration-operator/pkg/spectrumx/mocks"
 	"github.com/Mellanox/nic-configuration-operator/pkg/testutils"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
+	"github.com/Mellanox/nic-configuration-operator/pkg/udev"
+	udevMocks "github.com/Mellanox/nic-configuration-operator/pkg/udev/mocks"
 )
 
 const specValidationFailed = "spec validation failed"
@@ -56,6 +59,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 		maintenanceManager   *maintenanceMocks.MaintenanceManager
 		hostUtils            *hostMocks.HostUtils
 		spectrumXManager     *spectrumxMocks.SpectrumXManager
+		udevManager          *udevMocks.UdevManager
+		deviceDiscoveryUtils *devicediscoveryMocks.DeviceDiscoveryUtils
 		deviceName           = "test-device"
 		ctx                  context.Context
 		cancel               context.CancelFunc
@@ -92,6 +97,9 @@ var _ = Describe("NicDeviceReconciler", func() {
 		hostUtils = &hostMocks.HostUtils{}
 		spectrumXManager = &spectrumxMocks.SpectrumXManager{}
 		spectrumXManager.On("GetDocaCCTargetVersion", mock.Anything).Return("", nil)
+		udevManager = &udevMocks.UdevManager{}
+		udevManager.On("ApplyUdevRules", mock.Anything, mock.Anything).Return(nil, false, nil)
+		deviceDiscoveryUtils = &devicediscoveryMocks.DeviceDiscoveryUtils{}
 
 		reconciler = &NicDeviceReconciler{
 			Client:               mgr.GetClient(),
@@ -104,6 +112,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 			HostUtils:            hostUtils,
 			EventRecorder:        mgr.GetEventRecorderFor("testReconciler"),
 			SpectrumXManager:     spectrumXManager,
+			UdevManager:          udevManager,
+			DeviceDiscoveryUtils: deviceDiscoveryUtils,
 		}
 		Expect(reconciler.SetupWithManager(mgr, false)).To(Succeed())
 
@@ -1223,6 +1233,153 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Reason:  consts.UpdateSuccessfulReason,
 				Message: "",
 			}))
+		})
+	})
+
+	Describe("reconcile InterfaceNameTemplate", func() {
+		var (
+			pciAddress = "0000:3b:00.0"
+		)
+
+		var createDeviceWithInterfaceNameTemplate = func() *v1alpha1.NicDevice {
+			device := &v1alpha1.NicDevice{
+				ObjectMeta: metav1.ObjectMeta{Name: deviceName, Namespace: namespaceName},
+				Spec: v1alpha1.NicDeviceSpec{
+					InterfaceNameTemplate: &v1alpha1.NicDeviceInterfaceNameSpec{
+						NicIndex:         1,
+						RailIndex:        1,
+						PlaneIndices:     []int{1, 2},
+						RdmaDevicePrefix: "rdma%nic_id%p%plane_id%",
+						NetDevicePrefix:  "net%nic_id%p%plane_id%",
+					},
+				},
+			}
+
+			Expect(k8sClient.Create(ctx, device)).To(Succeed())
+			device.Status = v1alpha1.NicDeviceStatus{
+				Node: nodeName,
+				Ports: []v1alpha1.NicDevicePortSpec{
+					{PCI: pciAddress, NetworkInterface: "eth0", RdmaInterface: "mlx5_0"},
+				},
+			}
+			Expect(k8sClient.Status().Update(ctx, device)).To(Succeed())
+
+			return device
+		}
+
+		It("Should set success condition when interface names match expected", func() {
+			expectedNames := map[string]udev.ExpectedInterfaceNames{
+				pciAddress: {NetDevice: "net1p1", RdmaDevice: "rdma1p1"},
+			}
+
+			// Reset the mock to override the default behavior
+			udevManager.ExpectedCalls = nil
+			udevManager.On("ApplyUdevRules", mock.Anything, mock.Anything).Return(expectedNames, true, nil)
+
+			// Mock device discovery to return matching names
+			deviceDiscoveryUtils.On("GetInterfaceName", pciAddress).Return("net1p1")
+			deviceDiscoveryUtils.On("GetRDMADeviceName", pciAddress).Return("rdma1p1")
+
+			// Mock maintenance manager to release maintenance at the end
+			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
+
+			createDeviceWithInterfaceNameTemplate()
+
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.InterfaceNameCondition,
+				Status:  metav1.ConditionTrue,
+				Reason:  consts.InterfaceNameAppliedReason,
+				Message: "Interface names applied successfully",
+			}))
+		})
+
+		It("Should set failure condition when interface names don't match expected", func() {
+			expectedNames := map[string]udev.ExpectedInterfaceNames{
+				pciAddress: {NetDevice: "net1p1", RdmaDevice: "rdma1p1"},
+			}
+
+			// Reset the mock to override the default behavior
+			udevManager.ExpectedCalls = nil
+			udevManager.On("ApplyUdevRules", mock.Anything, mock.Anything).Return(expectedNames, true, nil)
+
+			// Mock device discovery to return NON-matching names
+			deviceDiscoveryUtils.On("GetInterfaceName", pciAddress).Return("eth0")
+			deviceDiscoveryUtils.On("GetRDMADeviceName", pciAddress).Return("mlx5_0")
+
+			createDeviceWithInterfaceNameTemplate()
+
+			// Check condition type, status, and reason - message contains dynamic content
+			Eventually(func() bool {
+				device := &v1alpha1.NicDevice{}
+				if err := k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device); err != nil {
+					return false
+				}
+				cond := meta.FindStatusCondition(device.Status.Conditions, consts.InterfaceNameCondition)
+				return cond != nil &&
+					cond.Status == metav1.ConditionFalse &&
+					cond.Reason == consts.InterfaceNameMismatchReason
+			}, timeout).Should(BeTrue())
+		})
+
+		It("Should update port status with actual interface names from sysfs", func() {
+			expectedNames := map[string]udev.ExpectedInterfaceNames{
+				pciAddress: {NetDevice: "net1p1", RdmaDevice: "rdma1p1"},
+			}
+
+			// Reset the mock to override the default behavior
+			udevManager.ExpectedCalls = nil
+			udevManager.On("ApplyUdevRules", mock.Anything, mock.Anything).Return(expectedNames, true, nil)
+
+			// Mock device discovery to return matching names
+			deviceDiscoveryUtils.On("GetInterfaceName", pciAddress).Return("net1p1")
+			deviceDiscoveryUtils.On("GetRDMADeviceName", pciAddress).Return("rdma1p1")
+
+			// Mock maintenance manager to release maintenance at the end
+			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
+
+			createDeviceWithInterfaceNameTemplate()
+
+			// Verify the device status is updated with actual interface names
+			Eventually(func() string {
+				device := &v1alpha1.NicDevice{}
+				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
+				if len(device.Status.Ports) > 0 {
+					return device.Status.Ports[0].NetworkInterface
+				}
+				return ""
+			}, timeout).Should(Equal("net1p1"))
+
+			Eventually(func() string {
+				device := &v1alpha1.NicDevice{}
+				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
+				if len(device.Status.Ports) > 0 {
+					return device.Status.Ports[0].RdmaInterface
+				}
+				return ""
+			}, timeout).Should(Equal("rdma1p1"))
+		})
+
+		It("Should handle udev manager error", func() {
+			udevErr := errors.New("udev rules application failed")
+
+			// Reset the mock to override the default behavior
+			udevManager.ExpectedCalls = nil
+			udevManager.On("ApplyUdevRules", mock.Anything, mock.Anything).Return(nil, false, udevErr)
+
+			createDeviceWithInterfaceNameTemplate()
+
+			// The reconciler should error and not set any interface name condition
+			// Just verify device was created and no interface name condition is set
+			Consistently(func() bool {
+				device := &v1alpha1.NicDevice{}
+				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
+				for _, cond := range device.Status.Conditions {
+					if cond.Type == consts.InterfaceNameCondition {
+						return true
+					}
+				}
+				return false
+			}, time.Second*2).Should(BeFalse())
 		})
 	})
 })

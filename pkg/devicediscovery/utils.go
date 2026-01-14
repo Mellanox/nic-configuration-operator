@@ -240,6 +240,7 @@ func getNetNames(pciAddr string) ([]string, error) {
 	return names, nil
 }
 
-func newDeviceDiscoveryUtils() DeviceDiscoveryUtils {
+// NewDeviceDiscoveryUtils creates a new DeviceDiscoveryUtils instance
+func NewDeviceDiscoveryUtils() DeviceDiscoveryUtils {
 	return &deviceDiscoveryUtils{execInterface: execUtils.New()}
 }
