@@ -1,0 +1,310 @@
+# Copyright 2026 NVIDIA CORPORATION & AFFILIATES
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+include:
+  - project: pstooling/gitlab-templates
+    ref: main
+    file:
+      - templates/pulse-in-pipeline/ContainerScanImage.gitlab-ci.yml
+      - templates/pulse-in-pipeline/ContainerStigScan.gitlab-ci.yml
+
+stages:
+  - build
+  - pulse-scan-oss
+  - pulse-scan-stig
+  - deploy
+
+variables:  # additional variables defined at the gitlab group scope
+  DOCKER_REGISTRY: nvcr.io/nvstaging/mellanox
+  OPERATOR_IMAGE_NAME: nic-configuration-operator-stig-fips
+  DAEMON_IMAGE_NAME: nic-configuration-daemon-stig-fips
+  GOV_READY_POLICY_FILE_PATH: pulse-scan-policies/prodsec_approved_govready_release_policy.json
+
+# Common job template for building STIG images
+.build-stig-image:
+  stage: build
+  tags:
+    - os/linux
+    - type/docker
+  services:
+    - docker:24-dind
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^network-operator-.*$/'
+    - if: '$CI_COMMIT_BRANCH =~ /^network-operator-.*$/'
+  image: docker:24
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+  before_script:
+    # validate variables and gitlab group variables
+    - |
+      for var in \
+        ARTIFACTORY_USERNAME \
+        ARTIFACTORY_TOKEN \
+        ARTIFACTORY_REGISTRY \
+        NVCR_USERNAME \
+        NVCR_TOKEN \
+        GITLAB_USERNAME \
+        GITLAB_TOKEN \
+        GITHUB_USERNAME \
+        GITHUB_TOKEN \
+        STIG_SCRIPTS_REPO \
+        UBUNTU_STIG_BASE_IMAGE \
+        NSPECT_ID \
+        SSA_CLIENT_ID_PULSE_OSS \
+        SSA_CLIENT_SECRET_PULSE_OSS \
+        SSA_CLIENT_ID_PULSE_STIG \
+        SSA_CLIENT_SECRET_PULSE_STIG
+      do
+        value=$(eval "echo \$$var")
+        echo "Validating variable $var..."
+        if [ -n "$value" ]; then
+          echo "$var=$value"
+        else
+          echo "ERROR: $var is empty or not set in GitLab repository settings!" >&2
+          exit 1
+        fi
+      done
+    # docker authentication
+    - echo $ARTIFACTORY_TOKEN | docker login $ARTIFACTORY_REGISTRY -u $ARTIFACTORY_USERNAME --password-stdin
+    - echo $NVCR_TOKEN        | docker login $DOCKER_REGISTRY      -u $NVCR_USERNAME        --password-stdin
+    # determine docker tag
+    - |
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        DOCKER_TAG=$CI_COMMIT_TAG-stig-fips
+      else
+        DOCKER_TAG=$(git rev-parse --short HEAD)  # short git commit sha
+      fi
+    - echo "DOCKER_TAG=$DOCKER_TAG" | tee -a build.env
+    # fetch STIG FIPS scripts
+    - |
+      git clone \
+        --depth 1 \
+        --branch main \
+        https://$GITLAB_USERNAME:$GITLAB_TOKEN@$STIG_SCRIPTS_REPO \
+        /tmp/stig-scripts
+      chmod +x /tmp/stig-scripts/*.sh
+    # fetch gov-ready pulse scanner policy (only for tagged releases)
+    - |
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        git clone \
+          --depth 1 \
+          --branch main \
+          https://$GITLAB_USERNAME:$GITLAB_TOKEN@gitlab-master.nvidia.com/pstooling/container-scan-policy-documents.git \
+          $(dirname $GOV_READY_POLICY_FILE_PATH)
+        nspect_release_version=$(echo $CI_COMMIT_TAG | grep -Eo '[0-9\.]+' | head -n 1)-fedramp  # determine nspect release version
+        echo "NSPECT_RELEASE_VERSION=$nspect_release_version" | tee -a build.env
+      else
+        mkdir -p $(dirname $GOV_READY_POLICY_FILE_PATH)
+        touch $GOV_READY_POLICY_FILE_PATH  # dummy file, to prevent pipeline log warning that expects to upload an artifact from this path
+      fi
+
+build-operator-stig-image:
+  extends: .build-stig-image
+  script:
+    # build operator image
+    - |
+      docker build \
+        --build-arg UBUNTU_STIG_BASE_IMAGE=$UBUNTU_STIG_BASE_IMAGE \
+        --file      Dockerfile.stig \
+        --tag       $DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG \
+        .
+    # FIPS package check
+    - /tmp/stig-scripts/fips-pkg-checker.sh $DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG
+    # push
+    - docker push $DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG
+    - echo "OPERATOR_IMAGE=$DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG" | tee -a build.env
+  artifacts:
+    reports:
+      dotenv: build.env
+    paths:
+      - $GOV_READY_POLICY_FILE_PATH
+
+build-daemon-stig-image:
+  extends: .build-stig-image
+  script:
+    # build daemon image
+    - |
+      docker build \
+        --build-arg UBUNTU_STIG_BASE_IMAGE=$UBUNTU_STIG_BASE_IMAGE \
+        --file      Dockerfile.nic-configuration-daemon.stig \
+        --tag       $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG \
+        .
+    # push
+    - docker push $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG
+    - echo "DAEMON_IMAGE=$DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG" | tee -a build.env
+  artifacts:
+    reports:
+      dotenv: build.env
+    paths:
+      - $GOV_READY_POLICY_FILE_PATH
+
+update-component-version-in-network-operator:
+  stage: deploy
+  needs:
+    - job: build-operator-stig-image
+      artifacts: true
+    - job: build-daemon-stig-image
+      artifacts: true
+  tags:
+    - os/linux
+    - type/docker
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /^network-operator-.*$/'
+  image: golang:1-alpine
+  variables:  # additional variables defined at the gitlab group scope
+    GITHUB_EMAIL: svc-cloud-orch-gh@nvidia.com
+    OPERATOR_COMPONENT_NAME: nicConfigurationOperatorStigFips
+    DAEMON_COMPONENT_NAME: nicConfigurationConfigDaemonStigFips
+    DRY_RUN: false
+  before_script:
+    # install packages
+    - apk add --update git github-cli yq make
+    # configure git
+    - git config --global user.name  $GITHUB_USERNAME
+    - git config --global user.email $GITHUB_EMAIL
+    - gh auth setup-git
+    # checkout
+    - gh repo clone Mellanox/network-operator network-operator
+    - cd network-operator
+  script:
+    # update versions in hack/release.yaml and examples
+    - echo "Updating version for $OPERATOR_COMPONENT_NAME to $DOCKER_TAG"
+    - yq -i ".$OPERATOR_COMPONENT_NAME.version = \"$DOCKER_TAG\"" hack/release.yaml
+    - echo "Updating version for $DAEMON_COMPONENT_NAME to $DOCKER_TAG"
+    - yq -i ".$DAEMON_COMPONENT_NAME.version = \"$DOCKER_TAG\"" hack/release.yaml
+    - make release-build
+    # create CI branch if needed
+    - |
+      if git diff --exit-code --color=always; then
+        UPDATE_BRANCH=""
+      else
+        UPDATE_BRANCH=ci/update-nic-config-operator-stig-fips-version-to-$DOCKER_TAG
+        git checkout -b $UPDATE_BRANCH
+      fi
+    - echo "UPDATE_BRANCH=$UPDATE_BRANCH"
+    # commit and push (if needed)
+    - |
+      if [ -n "$UPDATE_BRANCH" ]; then
+        git add .
+        git commit -sm "ci: update NIC Configuration Operator STIG components to $DOCKER_TAG"
+        dry_run=""
+        if [ "$DRY_RUN" = "true" ]; then
+          dry_run="echo DRY_RUN: would have run: "
+        fi
+        ${dry_run}git push -u origin "$UPDATE_BRANCH"
+      fi
+    # create PR (if needed)
+    - |
+      if [ -n "$UPDATE_BRANCH" ]; then
+        dry_run=""
+        if [ "$DRY_RUN" = "true" ]; then
+          dry_run="--dry-run"
+        fi
+        gh pr create $dry_run \
+          --head "$UPDATE_BRANCH" \
+          --base master \
+          --title "ci: update NIC Configuration Operator STIG components to $DOCKER_TAG (of branch $CI_COMMIT_BRANCH)" \
+          --body "Automated CI update for components '${OPERATOR_COMPONENT_NAME}' and '${DAEMON_COMPONENT_NAME}', created by internal GitLab CI for release branch $CI_COMMIT_BRANCH." \
+          --reviewer e0ne --reviewer almaslennikov --reviewer rollandf --reviewer heyvister1
+      fi
+
+# Pulse scan for operator image
+pulse-scan-oss-operator:
+  stage: pulse-scan-oss
+  extends: .scan-image-no-policy
+  needs:
+    - job: build-operator-stig-image
+      artifacts: true
+  tags:
+    - os/linux
+    - type/docker
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^network-operator-.*$/'
+  variables:
+    SSA_CLIENT_ID: $SSA_CLIENT_ID_PULSE_OSS
+    SSA_CLIENT_SECRET: $SSA_CLIENT_SECRET_PULSE_OSS
+    PULSE_REGISTRY_NGC_PASSWORD: $NVCR_TOKEN
+    CONTAINER_IMAGE: $DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG
+    NSPECT_ID: $NSPECT_ID
+    PROGRAM_VERSION: $NSPECT_RELEASE_VERSION
+  allow_failure: true  # non gating (pipeline stages will display warnings instead of failures)
+
+pulse-scan-stig-operator:
+  stage: pulse-scan-stig
+  extends: .stig-scan-image
+  needs:
+    - job: pulse-scan-oss-operator
+    - job: build-operator-stig-image
+      artifacts: true
+  tags:
+    - os/linux
+    - type/docker
+  services:
+    - docker:24-dind
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^network-operator-.*$/'
+  variables:
+    SSA_CLIENT_ID: $SSA_CLIENT_ID_PULSE_STIG
+    SSA_CLIENT_SECRET: $SSA_CLIENT_SECRET_PULSE_STIG
+    PULSE_REGISTRY_NGC_PASSWORD: $NVCR_TOKEN
+    CONTAINER_IMAGE: $DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG
+    NSPECT_ID: $NSPECT_ID
+    PROGRAM_VERSION: $NSPECT_RELEASE_VERSION
+  allow_failure: true  # non gating (pipeline stages will display warnings instead of failures)
+
+# Pulse scan for daemon image
+pulse-scan-oss-daemon:
+  stage: pulse-scan-oss
+  extends: .scan-image-no-policy
+  needs:
+    - job: build-daemon-stig-image
+      artifacts: true
+  tags:
+    - os/linux
+    - type/docker
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^network-operator-.*$/'
+  variables:
+    SSA_CLIENT_ID: $SSA_CLIENT_ID_PULSE_OSS
+    SSA_CLIENT_SECRET: $SSA_CLIENT_SECRET_PULSE_OSS
+    PULSE_REGISTRY_NGC_PASSWORD: $NVCR_TOKEN
+    CONTAINER_IMAGE: $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG
+    NSPECT_ID: $NSPECT_ID
+    PROGRAM_VERSION: $NSPECT_RELEASE_VERSION
+  allow_failure: true  # non gating (pipeline stages will display warnings instead of failures)
+
+pulse-scan-stig-daemon:
+  stage: pulse-scan-stig
+  extends: .stig-scan-image
+  needs:
+    - job: pulse-scan-oss-daemon
+    - job: build-daemon-stig-image
+      artifacts: true
+  tags:
+    - os/linux
+    - type/docker
+  services:
+    - docker:24-dind
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^network-operator-.*$/'
+  variables:
+    SSA_CLIENT_ID: $SSA_CLIENT_ID_PULSE_STIG
+    SSA_CLIENT_SECRET: $SSA_CLIENT_SECRET_PULSE_STIG
+    PULSE_REGISTRY_NGC_PASSWORD: $NVCR_TOKEN
+    CONTAINER_IMAGE: $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG
+    NSPECT_ID: $NSPECT_ID
+    PROGRAM_VERSION: $NSPECT_RELEASE_VERSION
+  allow_failure: true  # non gating (pipeline stages will display warnings instead of failures)
