@@ -14,9 +14,10 @@ jobs:
       registry-internal: nvcr.io/nvstaging/mellanox
       service-account-username: nvidia-ci-cd
       service-account-email: svc-cloud-orch-gh@nvidia.com
-      components: '[{"name": "nicConfigurationOperator", "imageName": "nic-configuration-operator", "dockerfile": "Dockerfile"},
-            {"name": "nicConfigurationConfigDaemon", "imageName": "nic-configuration-operator-daemon", "dockerfile": "Dockerfile.nic-configuration-daemon"}]'
+      components: '[{"name": "nicConfigurationOperator", "imageName": "nic-configuration-operator", "Dockerfile": "Dockerfile"},
+            {"name": "nicConfigurationConfigDaemon", "imageName": "nic-configuration-operator-daemon", "Dockerfile": "Dockerfile.nic-configuration-daemon"}]'
     secrets:
       registry-username: ${{ secrets.NVCR_USERNAME }}
       registry-token: ${{ secrets.NVCR_TOKEN }}
       cicd-gh-token: ${{ secrets.GH_TOKEN_NVIDIA_CI_CD }}
+      goproxy: ${{ secrets.GO_PROXY_URL }}
