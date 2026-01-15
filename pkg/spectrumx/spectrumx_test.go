@@ -19,6 +19,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -200,7 +202,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 		It("filters out non-matching DeviceId parameters", func() {
 			cfgs["v1"].NVConfig = []types.ConfigurationParameter{
 				{Name: "match", Value: "ok", DMSPath: "/m", DeviceId: "1023"},
-				{Name: "skip", Value: "bad", DMSPath: "/s", DeviceId: "a2dc"},
+				{Name: "skip", Value: "bad", DMSPath: "/s", DeviceId: consts.BlueField3DeviceID},
 			}
 			device.Status.Type = "1023"
 			expected := []types.ConfigurationParameter{{Name: "match", Value: "ok", DMSPath: "/m", DeviceId: "1023"}}
@@ -227,7 +229,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 		It("filters out non-matching DeviceId parameters before setting", func() {
 			cfgs["v1"].NVConfig = []types.ConfigurationParameter{
 				{Name: "match", Value: "ok", DMSPath: "/m", DeviceId: "1023"},
-				{Name: "skip", Value: "bad", DMSPath: "/s", DeviceId: "a2dc"},
+				{Name: "skip", Value: "bad", DMSPath: "/s", DeviceId: consts.BlueField3DeviceID},
 			}
 			device.Status.Type = "1023"
 			expected := []types.ConfigurationParameter{{Name: "match", Value: "ok", DMSPath: "/m", DeviceId: "1023"}}
@@ -349,8 +351,8 @@ var _ = Describe("SpectrumXConfigManager", func() {
 	Describe("RunDocaSpcXCC", func() {
 		It("returns nil if process already running", func() {
 			port := device.Status.Ports[0]
-			manager.ccProcesses[port.PCI] = &ccProcess{port: port}
-			manager.ccProcesses[port.PCI].running.Store(true)
+			manager.ccProcesses[port.RdmaInterface] = &ccProcess{port: port}
+			manager.ccProcesses[port.RdmaInterface].running.Store(true)
 			err := manager.RunDocaSpcXCC(port)
 			Expect(err).NotTo(HaveOccurred())
 		})
@@ -360,7 +362,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			port := device.Status.Ports[0]
 			err := manager.RunDocaSpcXCC(port)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(manager.ccProcesses).To(HaveKey(port.PCI))
+			Expect(manager.ccProcesses).To(HaveKey(port.RdmaInterface))
 		})
 
 		It("returns error if process fails to start within wait window", func() {
@@ -566,7 +568,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 				cfgs["v1"].MultiplaneConfig.Swplb[2] = []types.ConfigurationParameter{
 					{Name: "match1", Value: "ok1", DMSPath: "/m1", DeviceId: "1023"},
-					{Name: "skip1", Value: "bad1", DMSPath: "/s1", DeviceId: "a2dc"},
+					{Name: "skip1", Value: "bad1", DMSPath: "/s1", DeviceId: consts.BlueField3DeviceID},
 					{Name: "match2", Value: "ok2", DMSPath: "/m2", DeviceId: "1023"},
 				}
 
@@ -725,7 +727,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 				cfgs["v1"].MultiplaneConfig.Hwplb[4] = []types.ConfigurationParameter{
 					{Name: "match1", Value: "ok1", DMSPath: "/m1", DeviceId: "1023"},
-					{Name: "skip1", Value: "bad1", DMSPath: "/s1", DeviceId: "a2dc"},
+					{Name: "skip1", Value: "bad1", DMSPath: "/s1", DeviceId: consts.BlueField3DeviceID},
 					{Name: "match2", Value: "ok2", DMSPath: "/m2", DeviceId: "1023"},
 				}
 
@@ -937,7 +939,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 				cfgs["v1"].NVConfig = []types.ConfigurationParameter{
 					{Name: "mlx_match", MlxConfig: "PARAM1", Value: "val1", DeviceId: "1023"},
-					{Name: "mlx_skip", MlxConfig: "PARAM2", Value: "val2", DeviceId: "a2dc"},
+					{Name: "mlx_skip", MlxConfig: "PARAM2", Value: "val2", DeviceId: consts.BlueField3DeviceID},
 				}
 
 				nvConfigQuery := types.NvConfigQuery{
@@ -958,9 +960,9 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 				cfgs["v1"].NVConfig = []types.ConfigurationParameter{
 					{Name: "mlx_match", MlxConfig: "PARAM1", Value: "val1", DeviceId: "1023"},
-					{Name: "mlx_skip", MlxConfig: "PARAM2", Value: "val2", DeviceId: "a2dc"},
+					{Name: "mlx_skip", MlxConfig: "PARAM2", Value: "val2", DeviceId: consts.BlueField3DeviceID},
 					{Name: "dms_match", DMSPath: "/path1", Value: "dms1", DeviceId: "1023"},
-					{Name: "dms_skip", DMSPath: "/path2", Value: "dms2", DeviceId: "a2dc"},
+					{Name: "dms_skip", DMSPath: "/path2", Value: "dms2", DeviceId: consts.BlueField3DeviceID},
 				}
 
 				nvConfigQuery := types.NvConfigQuery{
@@ -1165,12 +1167,12 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 		Context("Device-specific filtering", func() {
 			It("filters out non-matching DeviceId in mlxconfig params before setting", func() {
-				device.Status.Type = "a2dc"
+				device.Status.Type = consts.BlueField3DeviceID
 
 				cfgs["v1"].NVConfig = []types.ConfigurationParameter{
-					{Name: "mlx_match1", MlxConfig: "PARAM1", Value: "val1", DeviceId: "a2dc"},
+					{Name: "mlx_match1", MlxConfig: "PARAM1", Value: "val1", DeviceId: consts.BlueField3DeviceID},
 					{Name: "mlx_skip", MlxConfig: "PARAM2", Value: "val2", DeviceId: "1023"},
-					{Name: "mlx_match2", MlxConfig: "PARAM3", Value: "val3", DeviceId: "a2dc"},
+					{Name: "mlx_match2", MlxConfig: "PARAM3", Value: "val3", DeviceId: consts.BlueField3DeviceID},
 				}
 
 				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "PARAM1", "val1").Return(nil).Times(1)
@@ -1186,9 +1188,9 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 				cfgs["v1"].NVConfig = []types.ConfigurationParameter{
 					{Name: "mlx_match", MlxConfig: "PARAM1", Value: "val1", DeviceId: "1023"},
-					{Name: "mlx_skip", MlxConfig: "PARAM2", Value: "val2", DeviceId: "a2dc"},
+					{Name: "mlx_skip", MlxConfig: "PARAM2", Value: "val2", DeviceId: consts.BlueField3DeviceID},
 					{Name: "dms_match", DMSPath: "/path1", Value: "dms1", DeviceId: "1023"},
-					{Name: "dms_skip", DMSPath: "/path2", Value: "dms2", DeviceId: "a2dc"},
+					{Name: "dms_skip", DMSPath: "/path2", Value: "dms2", DeviceId: consts.BlueField3DeviceID},
 				}
 
 				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "PARAM1", "val1").Return(nil)
@@ -1215,6 +1217,650 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				dmsCli.On("SetParameters", []types.ConfigurationParameter{}).Return(nil)
 
 				_, err := manager.ApplyNvConfig(ctx, device)
+				Expect(err).NotTo(HaveOccurred())
+			})
+		})
+	})
+
+	Describe("Parameter filtering by Breakout and Multiplane", func() {
+		Context("Breakout filtering", func() {
+			It("filters out non-matching Breakout parameters in NvConfigApplied", func() {
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
+
+				cfgs["v1"].NVConfig = []types.ConfigurationParameter{
+					{Name: "match_breakout", Value: "val1", DMSPath: "/breakout/match", Breakout: 2},
+					{Name: "skip_breakout", Value: "val2", DMSPath: "/breakout/skip", Breakout: 4},
+					{Name: "no_breakout", Value: "val3", DMSPath: "/no/breakout"},
+				}
+				cfgs["v1"].MultiplaneConfig.Swplb[2] = []types.ConfigurationParameter{}
+
+				expectedParams := []types.ConfigurationParameter{
+					{Name: "match_breakout", Value: "val1", DMSPath: "/breakout/match", Breakout: 2},
+					{Name: "no_breakout", Value: "val3", DMSPath: "/no/breakout"},
+				}
+
+				dmsCli.On("GetParameters", expectedParams).Return(map[string]string{
+					"/breakout/match": "val1",
+					"/no/breakout":    "val3",
+				}, nil)
+
+				applied, err := manager.NvConfigApplied(ctx, device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
+			})
+
+			It("filters out non-matching Breakout parameters in ApplyNvConfig", func() {
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeHwplb
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 4
+
+				cfgs["v1"].NVConfig = []types.ConfigurationParameter{
+					{Name: "match_breakout", Value: "val1", DMSPath: "/breakout/match", Breakout: 4},
+					{Name: "skip_breakout", Value: "val2", DMSPath: "/breakout/skip", Breakout: 2},
+				}
+				cfgs["v1"].MultiplaneConfig.Hwplb[4] = []types.ConfigurationParameter{}
+
+				expectedParams := []types.ConfigurationParameter{
+					{Name: "match_breakout", Value: "val1", DMSPath: "/breakout/match", Breakout: 4},
+				}
+
+				dmsCli.On("SetParameters", expectedParams).Return(nil)
+
+				_, err := manager.ApplyNvConfig(ctx, device)
+				Expect(err).NotTo(HaveOccurred())
+			})
+		})
+
+		Context("Multiplane mode filtering", func() {
+			It("filters out non-matching Multiplane parameters in NvConfigApplied", func() {
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeHwplb
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
+
+				cfgs["v1"].NVConfig = []types.ConfigurationParameter{
+					{Name: "match_multiplane", Value: "val1", DMSPath: "/mp/match", Multiplane: consts.MultiplaneModeHwplb},
+					{Name: "skip_multiplane", Value: "val2", DMSPath: "/mp/skip", Multiplane: consts.MultiplaneModeSwplb},
+					{Name: "no_multiplane", Value: "val3", DMSPath: "/no/mp"},
+				}
+				cfgs["v1"].MultiplaneConfig.Hwplb[2] = []types.ConfigurationParameter{}
+
+				expectedParams := []types.ConfigurationParameter{
+					{Name: "match_multiplane", Value: "val1", DMSPath: "/mp/match", Multiplane: consts.MultiplaneModeHwplb},
+					{Name: "no_multiplane", Value: "val3", DMSPath: "/no/mp"},
+				}
+
+				dmsCli.On("GetParameters", expectedParams).Return(map[string]string{
+					"/mp/match": "val1",
+					"/no/mp":    "val3",
+				}, nil)
+
+				applied, err := manager.NvConfigApplied(ctx, device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
+			})
+
+			It("filters out non-matching Multiplane parameters in ApplyNvConfig", func() {
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
+
+				cfgs["v1"].NVConfig = []types.ConfigurationParameter{
+					{Name: "match_multiplane", Value: "val1", DMSPath: "/mp/match", Multiplane: consts.MultiplaneModeSwplb},
+					{Name: "skip_multiplane", Value: "val2", DMSPath: "/mp/skip", Multiplane: consts.MultiplaneModeUniplane},
+				}
+				cfgs["v1"].MultiplaneConfig.Swplb[2] = []types.ConfigurationParameter{}
+
+				expectedParams := []types.ConfigurationParameter{
+					{Name: "match_multiplane", Value: "val1", DMSPath: "/mp/match", Multiplane: consts.MultiplaneModeSwplb},
+				}
+
+				dmsCli.On("SetParameters", expectedParams).Return(nil)
+
+				_, err := manager.ApplyNvConfig(ctx, device)
+				Expect(err).NotTo(HaveOccurred())
+			})
+		})
+
+		Context("Combined filtering", func() {
+			It("filters by DeviceId, Breakout, and Multiplane together", func() {
+				device.Status.Type = "1023"
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeHwplb
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
+
+				cfgs["v1"].NVConfig = []types.ConfigurationParameter{
+					{Name: "all_match", Value: "val1", DMSPath: "/all/match", DeviceId: "1023", Breakout: 2, Multiplane: consts.MultiplaneModeHwplb},
+					{Name: "wrong_device", Value: "val2", DMSPath: "/wrong/device", DeviceId: consts.BlueField3DeviceID, Breakout: 2, Multiplane: consts.MultiplaneModeHwplb},
+					{Name: "wrong_breakout", Value: "val3", DMSPath: "/wrong/breakout", DeviceId: "1023", Breakout: 4, Multiplane: consts.MultiplaneModeHwplb},
+					{Name: "wrong_multiplane", Value: "val4", DMSPath: "/wrong/mp", DeviceId: "1023", Breakout: 2, Multiplane: consts.MultiplaneModeSwplb},
+					{Name: "no_filters", Value: "val5", DMSPath: "/no/filters"},
+				}
+				cfgs["v1"].MultiplaneConfig.Hwplb[2] = []types.ConfigurationParameter{}
+
+				expectedParams := []types.ConfigurationParameter{
+					{Name: "all_match", Value: "val1", DMSPath: "/all/match", DeviceId: "1023", Breakout: 2, Multiplane: consts.MultiplaneModeHwplb},
+					{Name: "no_filters", Value: "val5", DMSPath: "/no/filters"},
+				}
+
+				dmsCli.On("GetParameters", expectedParams).Return(map[string]string{
+					"/all/match":  "val1",
+					"/no/filters": "val5",
+				}, nil)
+
+				applied, err := manager.NvConfigApplied(ctx, device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
+			})
+		})
+	})
+
+	Describe("CNP DSCP", func() {
+		var tmpDir string
+
+		BeforeEach(func() {
+			var err error
+			tmpDir, err = os.MkdirTemp("", "cnp-dscp-test")
+			Expect(err).NotTo(HaveOccurred())
+
+			// Override the path template to use temp dir
+			cnpDscpSysfsPathTemplate = filepath.Join(tmpDir, "%s", "ecn", "roce_np", "cnp_dscp")
+		})
+
+		AfterEach(func() {
+			_ = os.RemoveAll(tmpDir)
+			// Restore original path template
+			cnpDscpSysfsPathTemplate = "/sys/class/net/%s/ecn/roce_np/cnp_dscp"
+		})
+
+		createCnpDscpFile := func(iface, value string) {
+			dir := filepath.Join(tmpDir, iface, "ecn", "roce_np")
+			Expect(os.MkdirAll(dir, 0755)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(dir, "cnp_dscp"), []byte(value), 0644)).To(Succeed())
+		}
+
+		Context("RuntimeConfigApplied", func() {
+			It("returns true when CNP DSCP is set to expected value for swplb", func() {
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", NetworkInterface: "eth0", RdmaInterface: "mlx5_0"},
+				}
+				createCnpDscpFile("eth0", "24") // swplb expects 24
+
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(map[string]string{"/ar": "y"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(map[string]string{"/cc": "z"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(map[string]string{"/ipg": "25"}, nil)
+
+				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
+				applied, err := manager.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
+			})
+
+			It("returns true when CNP DSCP is set to expected value for hwplb", func() {
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeHwplb
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", NetworkInterface: "eth0", RdmaInterface: "mlx5_0"},
+				}
+				createCnpDscpFile("eth0", "48") // hwplb expects 48
+
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(map[string]string{"/ar": "y"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(map[string]string{"/cc": "z"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(map[string]string{"/ipg": "25"}, nil)
+
+				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
+				applied, err := manager.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
+			})
+
+			It("returns false when CNP DSCP has wrong value", func() {
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", NetworkInterface: "eth0", RdmaInterface: "mlx5_0"},
+				}
+				createCnpDscpFile("eth0", "48") // wrong value for swplb (expects 24)
+
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
+
+				applied, err := manager.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeFalse())
+			})
+
+			It("returns error when CNP DSCP file doesn't exist", func() {
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", NetworkInterface: "eth0", RdmaInterface: "mlx5_0"},
+				}
+				// Don't create the file
+
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
+
+				_, err := manager.RuntimeConfigApplied(device)
+				Expect(err).To(HaveOccurred())
+			})
+
+			It("skips ports without network interface", func() {
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", NetworkInterface: "", RdmaInterface: "mlx5_0"},
+				}
+				// No file needed since port should be skipped
+
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(map[string]string{"/ar": "y"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(map[string]string{"/cc": "z"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(map[string]string{"/ipg": "25"}, nil)
+
+				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
+				applied, err := manager.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
+			})
+
+			It("checks CNP DSCP for multiple ports", func() {
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeUniplane
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", NetworkInterface: "eth0", RdmaInterface: "mlx5_0"},
+					{PCI: "0000:00:00.1", NetworkInterface: "eth1", RdmaInterface: "mlx5_1"},
+				}
+				createCnpDscpFile("eth0", "24") // uniplane expects 24
+				createCnpDscpFile("eth1", "24")
+
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(map[string]string{"/ar": "y"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(map[string]string{"/cc": "z"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(map[string]string{"/ipg": "25"}, nil)
+
+				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
+				applied, err := manager.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
+			})
+		})
+
+		Context("ApplyRuntimeConfig", func() {
+			It("writes CNP DSCP value 24 for swplb", func() {
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", NetworkInterface: "eth0", RdmaInterface: "mlx5_0"},
+				}
+				// Create directory structure but not the file
+				dir := filepath.Join(tmpDir, "eth0", "ecn", "roce_np")
+				Expect(os.MkdirAll(dir, 0755)).To(Succeed())
+
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(nil)
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(nil)
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(nil)
+
+				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
+				err := manager.ApplyRuntimeConfig(device)
+				Expect(err).NotTo(HaveOccurred())
+
+				// Verify the file was written with swplb value
+				data, err := os.ReadFile(filepath.Join(dir, "cnp_dscp"))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(string(data)).To(Equal("24"))
+			})
+
+			It("writes CNP DSCP value 48 for hwplb", func() {
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeHwplb
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", NetworkInterface: "eth0", RdmaInterface: "mlx5_0"},
+				}
+				dir := filepath.Join(tmpDir, "eth0", "ecn", "roce_np")
+				Expect(os.MkdirAll(dir, 0755)).To(Succeed())
+
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(nil)
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(nil)
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(nil)
+
+				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
+				err := manager.ApplyRuntimeConfig(device)
+				Expect(err).NotTo(HaveOccurred())
+
+				// Verify the file was written with hwplb value
+				data, err := os.ReadFile(filepath.Join(dir, "cnp_dscp"))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(string(data)).To(Equal("48"))
+			})
+
+			It("writes CNP DSCP for multiple ports", func() {
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeUniplane
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", NetworkInterface: "eth0", RdmaInterface: "mlx5_0"},
+					{PCI: "0000:00:00.1", NetworkInterface: "eth1", RdmaInterface: "mlx5_1"},
+				}
+				dir0 := filepath.Join(tmpDir, "eth0", "ecn", "roce_np")
+				dir1 := filepath.Join(tmpDir, "eth1", "ecn", "roce_np")
+				Expect(os.MkdirAll(dir0, 0755)).To(Succeed())
+				Expect(os.MkdirAll(dir1, 0755)).To(Succeed())
+
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(nil)
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(nil)
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(nil)
+
+				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
+				err := manager.ApplyRuntimeConfig(device)
+				Expect(err).NotTo(HaveOccurred())
+
+				// uniplane expects 24
+				data0, err := os.ReadFile(filepath.Join(dir0, "cnp_dscp"))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(string(data0)).To(Equal("24"))
+
+				data1, err := os.ReadFile(filepath.Join(dir1, "cnp_dscp"))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(string(data1)).To(Equal("24"))
+			})
+
+			It("skips ports without network interface", func() {
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", NetworkInterface: "", RdmaInterface: "mlx5_0"},
+				}
+
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(nil)
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(nil)
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(nil)
+
+				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
+				err := manager.ApplyRuntimeConfig(device)
+				Expect(err).NotTo(HaveOccurred())
+			})
+		})
+	})
+
+	Describe("Runtime Config Parameter Filtering", func() {
+		Context("RuntimeConfigApplied filtering", func() {
+			It("filters runtime config params by DeviceId", func() {
+				device.Status.Type = "1023"
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeNone
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 1
+
+				cfgs["v1"].RuntimeConfig.Roce = []types.ConfigurationParameter{
+					{Name: "roce_match", Value: "val1", DMSPath: "/roce/match", DeviceId: "1023"},
+					{Name: "roce_skip", Value: "val2", DMSPath: "/roce/skip", DeviceId: consts.BlueField3DeviceID},
+				}
+				cfgs["v1"].RuntimeConfig.AdaptiveRouting = []types.ConfigurationParameter{
+					{Name: "ar_match", Value: "val3", DMSPath: "/ar/match", DeviceId: "1023"},
+				}
+				cfgs["v1"].RuntimeConfig.CongestionControl = []types.ConfigurationParameter{
+					{Name: "cc_match", Value: "val4", DMSPath: "/cc/match"},
+				}
+				cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3 = []types.ConfigurationParameter{
+					{Name: "ipg_match", Value: "val5", DMSPath: "/ipg/match"},
+				}
+				cfgs["v1"].UseSoftwareCCAlgorithm = false
+
+				// Expect filtered params (without DeviceId: consts.BlueField3DeviceID)
+				expectedRoce := []types.ConfigurationParameter{
+					{Name: "roce_match", Value: "val1", DMSPath: "/roce/match", DeviceId: "1023"},
+				}
+				expectedAR := []types.ConfigurationParameter{
+					{Name: "ar_match", Value: "val3", DMSPath: "/ar/match", DeviceId: "1023"},
+				}
+
+				dmsCli.On("GetParameters", expectedRoce).Return(map[string]string{"/roce/match": "val1"}, nil)
+				dmsCli.On("GetParameters", expectedAR).Return(map[string]string{"/ar/match": "val3"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(map[string]string{"/cc/match": "val4"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(map[string]string{"/ipg/match": "val5"}, nil)
+
+				applied, err := manager.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
+			})
+
+			It("filters runtime config params by Breakout (numberOfPlanes)", func() {
+				device.Status.Type = "1023"
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeHwplb
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
+
+				cfgs["v1"].RuntimeConfig.Roce = []types.ConfigurationParameter{
+					{Name: "roce_match", Value: "val1", DMSPath: "/roce/match", Breakout: 2},
+					{Name: "roce_skip", Value: "val2", DMSPath: "/roce/skip", Breakout: 4},
+				}
+				cfgs["v1"].RuntimeConfig.AdaptiveRouting = []types.ConfigurationParameter{
+					{Name: "ar_no_filter", Value: "val3", DMSPath: "/ar/match"},
+				}
+				cfgs["v1"].RuntimeConfig.CongestionControl = []types.ConfigurationParameter{
+					{Name: "cc_match", Value: "val4", DMSPath: "/cc/match", Breakout: 2},
+					{Name: "cc_skip", Value: "val5", DMSPath: "/cc/skip", Breakout: 4},
+				}
+				cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3 = []types.ConfigurationParameter{
+					{Name: "ipg_match", Value: "val6", DMSPath: "/ipg/match"},
+				}
+				cfgs["v1"].UseSoftwareCCAlgorithm = false
+
+				expectedRoce := []types.ConfigurationParameter{
+					{Name: "roce_match", Value: "val1", DMSPath: "/roce/match", Breakout: 2},
+				}
+				expectedCC := []types.ConfigurationParameter{
+					{Name: "cc_match", Value: "val4", DMSPath: "/cc/match", Breakout: 2},
+				}
+
+				dmsCli.On("GetParameters", expectedRoce).Return(map[string]string{"/roce/match": "val1"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(map[string]string{"/ar/match": "val3"}, nil)
+				dmsCli.On("GetParameters", expectedCC).Return(map[string]string{"/cc/match": "val4"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(map[string]string{"/ipg/match": "val6"}, nil)
+
+				applied, err := manager.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
+			})
+
+			It("filters runtime config params by Multiplane mode", func() {
+				device.Status.Type = "1023"
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeHwplb
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
+
+				cfgs["v1"].RuntimeConfig.Roce = []types.ConfigurationParameter{
+					{Name: "roce_no_filter", Value: "val1", DMSPath: "/roce/match"},
+				}
+				cfgs["v1"].RuntimeConfig.AdaptiveRouting = []types.ConfigurationParameter{
+					{Name: "ar_match", Value: "val2", DMSPath: "/ar/match", Multiplane: consts.MultiplaneModeHwplb},
+					{Name: "ar_skip_swplb", Value: "val3", DMSPath: "/ar/skip1", Multiplane: consts.MultiplaneModeSwplb},
+					{Name: "ar_skip_uniplane", Value: "val4", DMSPath: "/ar/skip2", Multiplane: consts.MultiplaneModeUniplane},
+				}
+				cfgs["v1"].RuntimeConfig.CongestionControl = []types.ConfigurationParameter{
+					{Name: "cc_match", Value: "val5", DMSPath: "/cc/match"},
+				}
+				cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3 = []types.ConfigurationParameter{
+					{Name: "ipg_match", Value: "val6", DMSPath: "/ipg/match"},
+				}
+				cfgs["v1"].UseSoftwareCCAlgorithm = false
+
+				expectedAR := []types.ConfigurationParameter{
+					{Name: "ar_match", Value: "val2", DMSPath: "/ar/match", Multiplane: consts.MultiplaneModeHwplb},
+				}
+
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/roce/match": "val1"}, nil)
+				dmsCli.On("GetParameters", expectedAR).Return(map[string]string{"/ar/match": "val2"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(map[string]string{"/cc/match": "val5"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(map[string]string{"/ipg/match": "val6"}, nil)
+
+				applied, err := manager.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
+			})
+
+			It("filters InterPacketGap params by combined filters", func() {
+				device.Status.Type = "1023"
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 4
+				device.Spec.Configuration.Template.SpectrumXOptimized.Overlay = consts.OverlayNone
+
+				cfgs["v1"].RuntimeConfig.Roce = []types.ConfigurationParameter{}
+				cfgs["v1"].RuntimeConfig.AdaptiveRouting = []types.ConfigurationParameter{}
+				cfgs["v1"].RuntimeConfig.CongestionControl = []types.ConfigurationParameter{}
+				cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3 = []types.ConfigurationParameter{
+					{Name: "ipg_match", Value: "100", DMSPath: "/ipg/match", DeviceId: "1023", Breakout: 4, Multiplane: consts.MultiplaneModeSwplb},
+					{Name: "ipg_skip_device", Value: "200", DMSPath: "/ipg/skip1", DeviceId: consts.BlueField3DeviceID, Breakout: 4, Multiplane: consts.MultiplaneModeSwplb},
+					{Name: "ipg_skip_breakout", Value: "300", DMSPath: "/ipg/skip2", DeviceId: "1023", Breakout: 2, Multiplane: consts.MultiplaneModeSwplb},
+					{Name: "ipg_skip_multiplane", Value: "400", DMSPath: "/ipg/skip3", DeviceId: "1023", Breakout: 4, Multiplane: consts.MultiplaneModeHwplb},
+				}
+				cfgs["v1"].UseSoftwareCCAlgorithm = false
+
+				expectedIPG := []types.ConfigurationParameter{
+					{Name: "ipg_match", Value: "100", DMSPath: "/ipg/match", DeviceId: "1023", Breakout: 4, Multiplane: consts.MultiplaneModeSwplb},
+				}
+
+				dmsCli.On("GetParameters", []types.ConfigurationParameter{}).Return(map[string]string{}, nil).Times(3)
+				dmsCli.On("GetParameters", expectedIPG).Return(map[string]string{"/ipg/match": "100"}, nil)
+
+				applied, err := manager.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
+			})
+		})
+
+		Context("ApplyRuntimeConfig filtering", func() {
+			It("filters runtime config params by DeviceId", func() {
+				device.Status.Type = consts.BlueField3DeviceID
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeNone
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 1
+
+				cfgs["v1"].RuntimeConfig.Roce = []types.ConfigurationParameter{
+					{Name: "roce_match", Value: "val1", DMSPath: "/roce/match", DeviceId: consts.BlueField3DeviceID},
+					{Name: "roce_skip", Value: "val2", DMSPath: "/roce/skip", DeviceId: "1023"},
+				}
+				cfgs["v1"].RuntimeConfig.AdaptiveRouting = []types.ConfigurationParameter{
+					{Name: "ar_match", Value: "val3", DMSPath: "/ar/match", DeviceId: consts.BlueField3DeviceID},
+				}
+				cfgs["v1"].RuntimeConfig.CongestionControl = []types.ConfigurationParameter{
+					{Name: "cc_no_filter", Value: "val4", DMSPath: "/cc/match"},
+				}
+				cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3 = []types.ConfigurationParameter{
+					{Name: "ipg_match", Value: "val5", DMSPath: "/ipg/match"},
+				}
+				cfgs["v1"].UseSoftwareCCAlgorithm = false
+
+				expectedRoce := []types.ConfigurationParameter{
+					{Name: "roce_match", Value: "val1", DMSPath: "/roce/match", DeviceId: consts.BlueField3DeviceID},
+				}
+				expectedAR := []types.ConfigurationParameter{
+					{Name: "ar_match", Value: "val3", DMSPath: "/ar/match", DeviceId: consts.BlueField3DeviceID},
+				}
+
+				dmsCli.On("SetParameters", expectedRoce).Return(nil)
+				dmsCli.On("SetParameters", expectedAR).Return(nil)
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(nil)
+
+				err := manager.ApplyRuntimeConfig(device)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("filters runtime config params by Breakout (numberOfPlanes)", func() {
+				device.Status.Type = "1023"
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 4
+
+				cfgs["v1"].RuntimeConfig.Roce = []types.ConfigurationParameter{
+					{Name: "roce_no_filter", Value: "val1", DMSPath: "/roce/match"},
+				}
+				cfgs["v1"].RuntimeConfig.AdaptiveRouting = []types.ConfigurationParameter{
+					{Name: "ar_match_4", Value: "val2", DMSPath: "/ar/match", Breakout: 4},
+					{Name: "ar_skip_2", Value: "val3", DMSPath: "/ar/skip", Breakout: 2},
+				}
+				cfgs["v1"].RuntimeConfig.CongestionControl = []types.ConfigurationParameter{
+					{Name: "cc_match_4", Value: "val4", DMSPath: "/cc/match", Breakout: 4},
+				}
+				cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3 = []types.ConfigurationParameter{
+					{Name: "ipg_no_filter", Value: "val5", DMSPath: "/ipg/match"},
+				}
+				cfgs["v1"].UseSoftwareCCAlgorithm = false
+
+				expectedAR := []types.ConfigurationParameter{
+					{Name: "ar_match_4", Value: "val2", DMSPath: "/ar/match", Breakout: 4},
+				}
+				expectedCC := []types.ConfigurationParameter{
+					{Name: "cc_match_4", Value: "val4", DMSPath: "/cc/match", Breakout: 4},
+				}
+
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(nil)
+				dmsCli.On("SetParameters", expectedAR).Return(nil)
+				dmsCli.On("SetParameters", expectedCC).Return(nil)
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(nil)
+
+				err := manager.ApplyRuntimeConfig(device)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("filters runtime config params by Multiplane mode", func() {
+				device.Status.Type = "1023"
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeUniplane
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
+
+				cfgs["v1"].RuntimeConfig.Roce = []types.ConfigurationParameter{
+					{Name: "roce_match", Value: "val1", DMSPath: "/roce/match", Multiplane: consts.MultiplaneModeUniplane},
+					{Name: "roce_skip_hwplb", Value: "val2", DMSPath: "/roce/skip1", Multiplane: consts.MultiplaneModeHwplb},
+					{Name: "roce_skip_swplb", Value: "val3", DMSPath: "/roce/skip2", Multiplane: consts.MultiplaneModeSwplb},
+				}
+				cfgs["v1"].RuntimeConfig.AdaptiveRouting = []types.ConfigurationParameter{
+					{Name: "ar_no_filter", Value: "val4", DMSPath: "/ar/match"},
+				}
+				cfgs["v1"].RuntimeConfig.CongestionControl = []types.ConfigurationParameter{
+					{Name: "cc_no_filter", Value: "val5", DMSPath: "/cc/match"},
+				}
+				cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3 = []types.ConfigurationParameter{
+					{Name: "ipg_no_filter", Value: "val6", DMSPath: "/ipg/match"},
+				}
+				cfgs["v1"].UseSoftwareCCAlgorithm = false
+
+				expectedRoce := []types.ConfigurationParameter{
+					{Name: "roce_match", Value: "val1", DMSPath: "/roce/match", Multiplane: consts.MultiplaneModeUniplane},
+				}
+
+				dmsCli.On("SetParameters", expectedRoce).Return(nil)
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(nil)
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(nil)
+
+				err := manager.ApplyRuntimeConfig(device)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("filters InterPacketGap params by combined filters", func() {
+				device.Status.Type = consts.BlueField3DeviceID
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeHwplb
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
+				device.Spec.Configuration.Template.SpectrumXOptimized.Overlay = consts.OverlayL3
+
+				cfgs["v1"].RuntimeConfig.Roce = []types.ConfigurationParameter{}
+				cfgs["v1"].RuntimeConfig.AdaptiveRouting = []types.ConfigurationParameter{}
+				cfgs["v1"].RuntimeConfig.CongestionControl = []types.ConfigurationParameter{}
+				cfgs["v1"].RuntimeConfig.InterPacketGap.L3EVPN = []types.ConfigurationParameter{
+					{Name: "ipg_match", Value: "100", DMSPath: "/ipg/match", DeviceId: consts.BlueField3DeviceID, Breakout: 2, Multiplane: consts.MultiplaneModeHwplb},
+					{Name: "ipg_skip_device", Value: "200", DMSPath: "/ipg/skip1", DeviceId: "1023", Breakout: 2, Multiplane: consts.MultiplaneModeHwplb},
+					{Name: "ipg_skip_breakout", Value: "300", DMSPath: "/ipg/skip2", DeviceId: consts.BlueField3DeviceID, Breakout: 4, Multiplane: consts.MultiplaneModeHwplb},
+					{Name: "ipg_skip_multiplane", Value: "400", DMSPath: "/ipg/skip3", DeviceId: consts.BlueField3DeviceID, Breakout: 2, Multiplane: consts.MultiplaneModeSwplb},
+					{Name: "ipg_no_filter", Value: "500", DMSPath: "/ipg/nofilter"},
+				}
+				cfgs["v1"].UseSoftwareCCAlgorithm = false
+
+				expectedIPG := []types.ConfigurationParameter{
+					{Name: "ipg_match", Value: "100", DMSPath: "/ipg/match", DeviceId: consts.BlueField3DeviceID, Breakout: 2, Multiplane: consts.MultiplaneModeHwplb},
+					{Name: "ipg_no_filter", Value: "500", DMSPath: "/ipg/nofilter"},
+				}
+
+				dmsCli.On("SetParameters", []types.ConfigurationParameter{}).Return(nil).Times(3)
+				dmsCli.On("SetParameters", expectedIPG).Return(nil)
+
+				err := manager.ApplyRuntimeConfig(device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})

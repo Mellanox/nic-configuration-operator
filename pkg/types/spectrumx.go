@@ -57,6 +57,8 @@ type ConfigurationParameter struct {
 	DMSPath          string `yaml:"dmsPath,omitempty"`
 	AlternativeValue string `yaml:"alternativeValue,omitempty"`
 	DeviceId         string `yaml:"deviceId,omitempty"`
+	Breakout         int    `yaml:"breakout,omitempty"`
+	Multiplane       string `yaml:"multiplane,omitempty"`
 	IgnoreError      bool   `yaml:"ignoreError,omitempty"`
 }
 
