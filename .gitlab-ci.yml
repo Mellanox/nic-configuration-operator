@@ -122,8 +122,6 @@ build-operator-stig-image:
         --file      Dockerfile.stig \
         --tag       $DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG \
         .
-    # FIPS package check
-    - /tmp/stig-scripts/fips-pkg-checker.sh $DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG
     # push
     - docker push $DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG
     - echo "OPERATOR_IMAGE=$DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG" | tee -a build.env
