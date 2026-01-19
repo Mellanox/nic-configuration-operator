@@ -30,7 +30,7 @@ stages:
 variables:  # additional variables defined at the gitlab group scope
   DOCKER_REGISTRY: nvcr.io/nvstaging/mellanox
   OPERATOR_IMAGE_NAME: nic-configuration-operator-stig-fips
-  DAEMON_IMAGE_NAME: nic-configuration-daemon-stig-fips
+  DAEMON_IMAGE_NAME: nic-configuration-operator-daemon-stig-fips
   GOV_READY_POLICY_FILE_PATH: pulse-scan-policies/prodsec_approved_govready_release_policy.json
 
 # Common job template for building STIG images
