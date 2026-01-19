@@ -53,9 +53,12 @@ ARG PACKAGES="dpkg-dev=1.21.1ubuntu2.6"
 # enable deb-src repos
 RUN sed -i 's/^# deb-src/deb-src/g' /etc/apt/sources.list /etc/apt/sources.list.d/*
 
-RUN apt-get update -y
-RUN apt-get install -y --no-install-recommends ${PACKAGES}
-RUN apt-get source ${PACKAGES}
+# DOCA repositories have a GPG issue, so we need to allow insecure repositories.
+# GPG error: https://linux.mellanox.com/public/repo/doca/3.2.1/ubuntu22.04/x86_64 ./ Release: The following signatures couldn't be verified because the public key is not available: NO_PUBKEY A024F6F0E0E6D6A281
+RUN apt-get update -o Acquire::AllowInsecureRepositories=true || true && \
+    apt-get install -y --allow-unauthenticated --no-install-recommends ${PACKAGES} && \
+    apt-get source ${PACKAGES} && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /
 COPY --from=builder /workspace/build/manager .
