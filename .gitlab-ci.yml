@@ -117,6 +117,7 @@ build-operator-stig-image:
     # build operator image
     - |
       docker build \
+        --secret    id=stig_script,src=/tmp/stig-scripts/stig-fixer.sh \
         --build-arg UBUNTU_STIG_BASE_IMAGE=$UBUNTU_STIG_BASE_IMAGE \
         --file      Dockerfile.stig \
         --tag       $DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG \
@@ -138,6 +139,7 @@ build-daemon-stig-image:
     # build daemon image
     - |
       docker build \
+        --secret    id=stig_script,src=/tmp/stig-scripts/stig-fixer.sh \
         --build-arg UBUNTU_STIG_BASE_IMAGE=$UBUNTU_STIG_BASE_IMAGE \
         --file      Dockerfile.nic-configuration-daemon.stig \
         --tag       $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG \
