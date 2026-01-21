@@ -27,7 +27,7 @@ stages:
   - pulse-scan-stig
   - deploy
 
-variables:  # additional variables defined at the gitlab group scope
+variables:  # additional variables are defined at the gitlab group scope
   DOCKER_REGISTRY: nvcr.io/nvstaging/mellanox
   OPERATOR_IMAGE_NAME: nic-configuration-operator-stig-fips
   DAEMON_IMAGE_NAME: nic-configuration-operator-daemon-stig-fips
@@ -46,9 +46,9 @@ variables:  # additional variables defined at the gitlab group scope
     - if: '$CI_COMMIT_BRANCH =~ /^network-operator-.*$/'
   image: docker:24
   variables:
-    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_TLS_CERTDIR: /certs
   before_script:
-    # validate variables and gitlab group variables
+    # validate variables (including gitlab group scoped variables)
     - |
       for var in \
         ARTIFACTORY_USERNAME \
@@ -118,6 +118,7 @@ build-operator-stig-image:
     - |
       docker build \
         --secret    id=stig_script,src=/tmp/stig-scripts/stig-fixer.sh \
+        --build-arg GOPROXY=$GOPROXY \
         --build-arg UBUNTU_STIG_BASE_IMAGE=$UBUNTU_STIG_BASE_IMAGE \
         --file      Dockerfile.stig \
         --tag       $DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG \
