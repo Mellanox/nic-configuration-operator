@@ -194,6 +194,8 @@ func (m *udevManager) writeRulesFile(rulesFile, content string) (bool, error) {
 // generateUdevRules creates udev rules content for all devices, returning separate content for net and RDMA rules,
 // along with a map of PCI addresses to expected interface names.
 // Rules are sorted by PCI address to ensure deterministic output.
+// Note: The number of PFs is determined by len(PlaneIndices), which may differ from len(Status.Ports)
+// when the device is being reconfigured for a different number of PFs.
 func (m *udevManager) generateUdevRules(devices []*v1alpha1.NicDevice) (netRules, rdmaRules string, expectedNames map[string]ExpectedInterfaceNames) {
 	// Collect rules keyed by PCI address for sorting
 	netRulesMap := make(map[string]string)
@@ -207,17 +209,30 @@ func (m *udevManager) generateUdevRules(devices []*v1alpha1.NicDevice) (netRules
 
 		spec := device.Spec.InterfaceNameTemplate
 
-		// Generate rules for each port of the device
-		for portIndex, port := range device.Status.Ports {
-			if port.PCI == "" {
+		// Get the base PCI address from the first port
+		if len(device.Status.Ports) == 0 || device.Status.Ports[0].PCI == "" {
+			continue
+		}
+		basePCI := device.Status.Ports[0].PCI
+
+		// The number of PFs is determined by PlaneIndices, not by the current ports count
+		// This allows generating rules for PFs that will exist after reconfiguration
+		numPFs := len(spec.PlaneIndices)
+		if numPFs == 0 {
+			continue
+		}
+
+		// Generate rules for each PF based on PlaneIndices count
+		for pfIndex := 0; pfIndex < numPFs; pfIndex++ {
+			// Calculate PCI address for this PF based on the base PCI address
+			pciAddr, err := CalculatePCIAddressForPF(basePCI, pfIndex)
+			if err != nil {
+				log.Log.Error(err, "Failed to calculate PCI address for PF", "device", device.Name, "basePCI", basePCI, "pfIndex", pfIndex)
 				continue
 			}
 
-			// Get the plane index for this port (if available)
-			planeIndex := 0
-			if portIndex < len(spec.PlaneIndices) {
-				planeIndex = spec.PlaneIndices[portIndex]
-			}
+			// Get the plane index for this PF
+			planeIndex := spec.PlaneIndices[pfIndex]
 
 			// Generate net device rule
 			netDeviceName := substituteTemplatePlaceholders(
@@ -227,7 +242,7 @@ func (m *udevManager) generateUdevRules(devices []*v1alpha1.NicDevice) (netRules
 				spec.RailIndex,
 			)
 			if netDeviceName != "" {
-				netRulesMap[port.PCI] = generateNetDeviceRule(port.PCI, netDeviceName)
+				netRulesMap[pciAddr] = generateNetDeviceRule(pciAddr, netDeviceName)
 			}
 
 			// Generate rdma device rule
@@ -238,11 +253,11 @@ func (m *udevManager) generateUdevRules(devices []*v1alpha1.NicDevice) (netRules
 				spec.RailIndex,
 			)
 			if rdmaDeviceName != "" {
-				rdmaRulesMap[port.PCI] = generateRdmaDeviceRule(port.PCI, rdmaDeviceName)
+				rdmaRulesMap[pciAddr] = generateRdmaDeviceRule(pciAddr, rdmaDeviceName)
 			}
 
 			// Store expected names for this PCI address
-			expectedNames[port.PCI] = ExpectedInterfaceNames{
+			expectedNames[pciAddr] = ExpectedInterfaceNames{
 				NetDevice:  netDeviceName,
 				RdmaDevice: rdmaDeviceName,
 			}
@@ -273,6 +288,30 @@ func (m *udevManager) generateUdevRules(devices []*v1alpha1.NicDevice) (netRules
 	}
 
 	return netBuilder.String(), rdmaBuilder.String(), expectedNames
+}
+
+// CalculatePCIAddressForPF calculates the PCI address for a given PF index based on a base PCI address.
+// PCI addresses are in format DDDD:BB:DD.F (domain:bus:device.function).
+// For multi-function NICs, the function number increments for each PF.
+func CalculatePCIAddressForPF(basePCI string, pfIndex int) (string, error) {
+	// Parse the base PCI address: DDDD:BB:DD.F
+	var domain, bus, device, function int
+	n, err := fmt.Sscanf(basePCI, "%x:%x:%x.%x", &domain, &bus, &device, &function)
+	if err != nil || n != 4 {
+		return "", fmt.Errorf("failed to parse PCI address %s: %w", basePCI, err)
+	}
+
+	// Calculate the new function number
+	// The function number for pfIndex N is baseFunction + N
+	newFunction := function + pfIndex
+
+	// Function number is 3 bits, so max is 7
+	if newFunction > 7 {
+		return "", fmt.Errorf("PCI function number %d exceeds maximum (7) for base %s with pfIndex %d", newFunction, basePCI, pfIndex)
+	}
+
+	// Format the new PCI address
+	return fmt.Sprintf("%04x:%02x:%02x.%x", domain, bus, device, newFunction), nil
 }
 
 // substituteTemplatePlaceholders replaces placeholder tokens with actual values

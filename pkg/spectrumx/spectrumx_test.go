@@ -26,6 +26,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
@@ -121,7 +122,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 		cfgs = map[string]*types.SpectrumXConfig{
 			"v1": {
 				NVConfig: []types.ConfigurationParameter{{Name: "a", Value: "1", DMSPath: "/a"}},
-				MultiplaneConfig: types.SpectrumXMultiplaneConfig{
+				BreakoutConfig: types.SpectrumXBreakoutConfig{
 					Swplb: map[int][]types.ConfigurationParameter{
 						2: {
 							{Name: "swplb_2_param1", Value: "sw2val1", DMSPath: "/swplb/2/p1"},
@@ -216,13 +217,13 @@ var _ = Describe("SpectrumXConfigManager", func() {
 	Describe("ApplyNvConfig", func() {
 		It("sets parameters via DMS", func() {
 			dmsCli.On("SetParameters", cfgs["v1"].NVConfig).Return(nil)
-			_, err := manager.ApplyNvConfig(ctx, device)
+			err := manager.ApplyNvConfig(ctx, device)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
 		It("returns error if DMS set fails", func() {
 			dmsCli.On("SetParameters", cfgs["v1"].NVConfig).Return(errors.New("set error"))
-			_, err := manager.ApplyNvConfig(ctx, device)
+			err := manager.ApplyNvConfig(ctx, device)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -234,7 +235,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			device.Status.Type = "1023"
 			expected := []types.ConfigurationParameter{{Name: "match", Value: "ok", DMSPath: "/m", DeviceId: "1023"}}
 			dmsCli.On("SetParameters", expected).Return(nil)
-			_, err := manager.ApplyNvConfig(ctx, device)
+			err := manager.ApplyNvConfig(ctx, device)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
@@ -275,6 +276,12 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(nil)
 			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
 			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(nil)
+			dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
+				return len(params) == 1 && params[0].Name == "Shut down interface"
+			})).Return(nil)
+			dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
+				return len(params) == 1 && params[0].Name == "Bring up interface to apply IPG settings"
+			})).Return(nil)
 
 			nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
 			err := manager.ApplyRuntimeConfig(device)
@@ -292,6 +299,12 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(nil)
 			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
 			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.L3EVPN).Return(nil)
+			dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
+				return len(params) == 1 && params[0].Name == "Shut down interface"
+			})).Return(nil)
+			dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
+				return len(params) == 1 && params[0].Name == "Bring up interface to apply IPG settings"
+			})).Return(nil)
 
 			nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
 			err := manager.ApplyRuntimeConfig(device)
@@ -374,14 +387,14 @@ var _ = Describe("SpectrumXConfigManager", func() {
 		})
 	})
 
-	Describe("NvConfigApplied with Multiplane", func() {
+	Describe("BreakoutConfigApplied", func() {
 		Context("MultiplaneMode none", func() {
-			It("returns true when MultiplaneMode is none and base config matches", func() {
+			It("returns true when MultiplaneMode is none (no breakout params)", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeNone
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 1
 
-				dmsCli.On("GetParameters", cfgs["v1"].NVConfig).Return(map[string]string{"/a": "1"}, nil)
-				applied, err := manager.NvConfigApplied(ctx, device)
+				// No breakout params to check when mode is none
+				applied, err := manager.BreakoutConfigApplied(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(applied).To(BeTrue())
 			})
@@ -392,14 +405,13 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
 
-				expectedParams := append(cfgs["v1"].NVConfig, cfgs["v1"].MultiplaneConfig.Swplb[2]...)
+				expectedParams := cfgs["v1"].BreakoutConfig.Swplb[2]
 				dmsCli.On("GetParameters", expectedParams).Return(map[string]string{
-					"/a":          "1",
 					"/swplb/2/p1": "sw2val1",
 					"/swplb/2/p2": "sw2val2",
 				}, nil)
 
-				applied, err := manager.NvConfigApplied(ctx, device)
+				applied, err := manager.BreakoutConfigApplied(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(applied).To(BeTrue())
 			})
@@ -408,30 +420,28 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 4
 
-				expectedParams := append(cfgs["v1"].NVConfig, cfgs["v1"].MultiplaneConfig.Swplb[4]...)
+				expectedParams := cfgs["v1"].BreakoutConfig.Swplb[4]
 				dmsCli.On("GetParameters", expectedParams).Return(map[string]string{
-					"/a":          "1",
 					"/swplb/4/p1": "sw4val1",
 					"/swplb/4/p2": "sw4val2",
 				}, nil)
 
-				applied, err := manager.NvConfigApplied(ctx, device)
+				applied, err := manager.BreakoutConfigApplied(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(applied).To(BeTrue())
 			})
 
-			It("returns false when MultiplaneMode is swplb but multiplane param mismatches", func() {
+			It("returns false when MultiplaneMode is swplb but breakout param mismatches", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
 
-				expectedParams := append(cfgs["v1"].NVConfig, cfgs["v1"].MultiplaneConfig.Swplb[2]...)
+				expectedParams := cfgs["v1"].BreakoutConfig.Swplb[2]
 				dmsCli.On("GetParameters", expectedParams).Return(map[string]string{
-					"/a":          "1",
 					"/swplb/2/p1": "sw2val1",
 					"/swplb/2/p2": "wrong_value",
 				}, nil)
 
-				applied, err := manager.NvConfigApplied(ctx, device)
+				applied, err := manager.BreakoutConfigApplied(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(applied).To(BeFalse())
 			})
@@ -442,14 +452,13 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeHwplb
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
 
-				expectedParams := append(cfgs["v1"].NVConfig, cfgs["v1"].MultiplaneConfig.Hwplb[2]...)
+				expectedParams := cfgs["v1"].BreakoutConfig.Hwplb[2]
 				dmsCli.On("GetParameters", expectedParams).Return(map[string]string{
-					"/a":          "1",
 					"/hwplb/2/p1": "hw2val1",
 					"/hwplb/2/p2": "hw2val2",
 				}, nil)
 
-				applied, err := manager.NvConfigApplied(ctx, device)
+				applied, err := manager.BreakoutConfigApplied(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(applied).To(BeTrue())
 			})
@@ -458,30 +467,28 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeHwplb
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 4
 
-				expectedParams := append(cfgs["v1"].NVConfig, cfgs["v1"].MultiplaneConfig.Hwplb[4]...)
+				expectedParams := cfgs["v1"].BreakoutConfig.Hwplb[4]
 				dmsCli.On("GetParameters", expectedParams).Return(map[string]string{
-					"/a":          "1",
 					"/hwplb/4/p1": "hw4val1",
 					"/hwplb/4/p2": "hw4val2",
 				}, nil)
 
-				applied, err := manager.NvConfigApplied(ctx, device)
+				applied, err := manager.BreakoutConfigApplied(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(applied).To(BeTrue())
 			})
 
-			It("returns false when MultiplaneMode is hwplb but multiplane param mismatches", func() {
+			It("returns false when MultiplaneMode is hwplb but breakout param mismatches", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeHwplb
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 4
 
-				expectedParams := append(cfgs["v1"].NVConfig, cfgs["v1"].MultiplaneConfig.Hwplb[4]...)
+				expectedParams := cfgs["v1"].BreakoutConfig.Hwplb[4]
 				dmsCli.On("GetParameters", expectedParams).Return(map[string]string{
-					"/a":          "1",
 					"/hwplb/4/p1": "wrong_value",
 					"/hwplb/4/p2": "hw4val2",
 				}, nil)
 
-				applied, err := manager.NvConfigApplied(ctx, device)
+				applied, err := manager.BreakoutConfigApplied(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(applied).To(BeFalse())
 			})
@@ -492,14 +499,13 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeUniplane
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
 
-				expectedParams := append(cfgs["v1"].NVConfig, cfgs["v1"].MultiplaneConfig.Uniplane[2]...)
+				expectedParams := cfgs["v1"].BreakoutConfig.Uniplane[2]
 				dmsCli.On("GetParameters", expectedParams).Return(map[string]string{
-					"/a":             "1",
 					"/uniplane/2/p1": "uni2val1",
 					"/uniplane/2/p2": "uni2val2",
 				}, nil)
 
-				applied, err := manager.NvConfigApplied(ctx, device)
+				applied, err := manager.BreakoutConfigApplied(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(applied).To(BeTrue())
 			})
@@ -508,30 +514,28 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeUniplane
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 4
 
-				expectedParams := append(cfgs["v1"].NVConfig, cfgs["v1"].MultiplaneConfig.Uniplane[4]...)
+				expectedParams := cfgs["v1"].BreakoutConfig.Uniplane[4]
 				dmsCli.On("GetParameters", expectedParams).Return(map[string]string{
-					"/a":             "1",
 					"/uniplane/4/p1": "uni4val1",
 					"/uniplane/4/p2": "uni4val2",
 				}, nil)
 
-				applied, err := manager.NvConfigApplied(ctx, device)
+				applied, err := manager.BreakoutConfigApplied(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(applied).To(BeTrue())
 			})
 
-			It("returns false when MultiplaneMode is uniplane but multiplane param mismatches", func() {
+			It("returns false when MultiplaneMode is uniplane but breakout param mismatches", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeUniplane
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
 
-				expectedParams := append(cfgs["v1"].NVConfig, cfgs["v1"].MultiplaneConfig.Uniplane[2]...)
+				expectedParams := cfgs["v1"].BreakoutConfig.Uniplane[2]
 				dmsCli.On("GetParameters", expectedParams).Return(map[string]string{
-					"/a":             "1",
 					"/uniplane/2/p1": "uni2val1",
 					"/uniplane/2/p2": "wrong_value",
 				}, nil)
 
-				applied, err := manager.NvConfigApplied(ctx, device)
+				applied, err := manager.BreakoutConfigApplied(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(applied).To(BeFalse())
 			})
@@ -542,156 +546,153 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = "invalid-mode"
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
 
-				_, err := manager.NvConfigApplied(ctx, device)
+				_, err := manager.BreakoutConfigApplied(ctx, device)
 				Expect(err).To(HaveOccurred())
 				Expect(strings.ToLower(err.Error())).To(ContainSubstring("invalid multiplane mode"))
 			})
 
-			It("returns error when DMS GetParameters fails with multiplane config", func() {
+			It("returns error when DMS GetParameters fails with breakout config", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
 
-				expectedParams := append(cfgs["v1"].NVConfig, cfgs["v1"].MultiplaneConfig.Swplb[2]...)
+				expectedParams := cfgs["v1"].BreakoutConfig.Swplb[2]
 				dmsCli.On("GetParameters", expectedParams).Return(nil, errors.New("dms error"))
 
-				_, err := manager.NvConfigApplied(ctx, device)
+				_, err := manager.BreakoutConfigApplied(ctx, device)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("dms error"))
 			})
 		})
 
 		Context("Device-specific filtering", func() {
-			It("filters out non-matching DeviceId in multiplane params", func() {
+			It("filters out non-matching DeviceId in breakout params", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
 				device.Status.Type = "1023"
 
-				cfgs["v1"].MultiplaneConfig.Swplb[2] = []types.ConfigurationParameter{
+				cfgs["v1"].BreakoutConfig.Swplb[2] = []types.ConfigurationParameter{
 					{Name: "match1", Value: "ok1", DMSPath: "/m1", DeviceId: "1023"},
 					{Name: "skip1", Value: "bad1", DMSPath: "/s1", DeviceId: consts.BlueField3DeviceID},
 					{Name: "match2", Value: "ok2", DMSPath: "/m2", DeviceId: "1023"},
 				}
 
 				expectedParams := []types.ConfigurationParameter{
-					{Name: "a", Value: "1", DMSPath: "/a"},
 					{Name: "match1", Value: "ok1", DMSPath: "/m1", DeviceId: "1023"},
 					{Name: "match2", Value: "ok2", DMSPath: "/m2", DeviceId: "1023"},
 				}
 
 				dmsCli.On("GetParameters", expectedParams).Return(map[string]string{
-					"/a":  "1",
 					"/m1": "ok1",
 					"/m2": "ok2",
 				}, nil)
 
-				applied, err := manager.NvConfigApplied(ctx, device)
+				applied, err := manager.BreakoutConfigApplied(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(applied).To(BeTrue())
 			})
 		})
 
 		Context("AlternativeValue support", func() {
-			It("accepts alternative value for multiplane parameters", func() {
+			It("accepts alternative value for breakout parameters", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
 
-				cfgs["v1"].MultiplaneConfig.Swplb[2] = []types.ConfigurationParameter{
+				cfgs["v1"].BreakoutConfig.Swplb[2] = []types.ConfigurationParameter{
 					{Name: "param_with_alt", Value: "primary", AlternativeValue: "alternative", DMSPath: "/alt"},
 				}
 
-				expectedParams := append(cfgs["v1"].NVConfig, cfgs["v1"].MultiplaneConfig.Swplb[2]...)
+				expectedParams := cfgs["v1"].BreakoutConfig.Swplb[2]
 				dmsCli.On("GetParameters", expectedParams).Return(map[string]string{
-					"/a":   "1",
 					"/alt": "alternative",
 				}, nil)
 
-				applied, err := manager.NvConfigApplied(ctx, device)
+				applied, err := manager.BreakoutConfigApplied(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(applied).To(BeTrue())
 			})
 		})
 	})
 
-	Describe("ApplyNvConfig with Multiplane", func() {
+	Describe("ApplyBreakoutConfig", func() {
 		Context("MultiplaneMode none", func() {
-			It("sets only base config when MultiplaneMode is none", func() {
+			It("succeeds when MultiplaneMode is none", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeNone
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 1
 
-				dmsCli.On("SetParameters", cfgs["v1"].NVConfig).Return(nil)
-				_, err := manager.ApplyNvConfig(ctx, device)
+				// No breakout params to set when mode is none
+				err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
 
 		Context("MultiplaneMode swplb", func() {
-			It("sets base and swplb config for 2 planes", func() {
+			It("sets swplb config for 2 planes", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
 
-				expectedParams := append(cfgs["v1"].NVConfig, cfgs["v1"].MultiplaneConfig.Swplb[2]...)
+				expectedParams := cfgs["v1"].BreakoutConfig.Swplb[2]
 				dmsCli.On("SetParameters", expectedParams).Return(nil)
 
-				_, err := manager.ApplyNvConfig(ctx, device)
+				err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
-			It("sets base and swplb config for 4 planes", func() {
+			It("sets swplb config for 4 planes", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 4
 
-				expectedParams := append(cfgs["v1"].NVConfig, cfgs["v1"].MultiplaneConfig.Swplb[4]...)
+				expectedParams := cfgs["v1"].BreakoutConfig.Swplb[4]
 				dmsCli.On("SetParameters", expectedParams).Return(nil)
 
-				_, err := manager.ApplyNvConfig(ctx, device)
+				err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
 
 		Context("MultiplaneMode hwplb", func() {
-			It("sets base and hwplb config for 2 planes", func() {
+			It("sets hwplb config for 2 planes", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeHwplb
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
 
-				expectedParams := append(cfgs["v1"].NVConfig, cfgs["v1"].MultiplaneConfig.Hwplb[2]...)
+				expectedParams := cfgs["v1"].BreakoutConfig.Hwplb[2]
 				dmsCli.On("SetParameters", expectedParams).Return(nil)
 
-				_, err := manager.ApplyNvConfig(ctx, device)
+				err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
-			It("sets base and hwplb config for 4 planes", func() {
+			It("sets hwplb config for 4 planes", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeHwplb
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 4
 
-				expectedParams := append(cfgs["v1"].NVConfig, cfgs["v1"].MultiplaneConfig.Hwplb[4]...)
+				expectedParams := cfgs["v1"].BreakoutConfig.Hwplb[4]
 				dmsCli.On("SetParameters", expectedParams).Return(nil)
 
-				_, err := manager.ApplyNvConfig(ctx, device)
+				err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
 
 		Context("MultiplaneMode uniplane", func() {
-			It("sets base and uniplane config for 2 planes", func() {
+			It("sets uniplane config for 2 planes", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeUniplane
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
 
-				expectedParams := append(cfgs["v1"].NVConfig, cfgs["v1"].MultiplaneConfig.Uniplane[2]...)
+				expectedParams := cfgs["v1"].BreakoutConfig.Uniplane[2]
 				dmsCli.On("SetParameters", expectedParams).Return(nil)
 
-				_, err := manager.ApplyNvConfig(ctx, device)
+				err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
-			It("sets base and uniplane config for 4 planes", func() {
+			It("sets uniplane config for 4 planes", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeUniplane
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 4
 
-				expectedParams := append(cfgs["v1"].NVConfig, cfgs["v1"].MultiplaneConfig.Uniplane[4]...)
+				expectedParams := cfgs["v1"].BreakoutConfig.Uniplane[4]
 				dmsCli.On("SetParameters", expectedParams).Return(nil)
 
-				_, err := manager.ApplyNvConfig(ctx, device)
+				err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -701,64 +702,71 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = "invalid-mode"
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
 
-				_, err := manager.ApplyNvConfig(ctx, device)
+				err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).To(HaveOccurred())
 				Expect(strings.ToLower(err.Error())).To(ContainSubstring("invalid multiplane mode"))
 			})
 
-			It("returns error when DMS SetParameters fails with multiplane config", func() {
+			It("returns error when DMS SetParameters fails with breakout config", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
 
-				expectedParams := append(cfgs["v1"].NVConfig, cfgs["v1"].MultiplaneConfig.Swplb[2]...)
+				expectedParams := cfgs["v1"].BreakoutConfig.Swplb[2]
 				dmsCli.On("SetParameters", expectedParams).Return(errors.New("dms set error"))
 
-				_, err := manager.ApplyNvConfig(ctx, device)
+				err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("dms set error"))
 			})
 		})
 
 		Context("Device-specific filtering", func() {
-			It("filters out non-matching DeviceId in multiplane params before setting", func() {
+			It("filters out non-matching DeviceId in breakout params before setting", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeHwplb
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 4
 				device.Status.Type = "1023"
 
-				cfgs["v1"].MultiplaneConfig.Hwplb[4] = []types.ConfigurationParameter{
+				cfgs["v1"].BreakoutConfig.Hwplb[4] = []types.ConfigurationParameter{
 					{Name: "match1", Value: "ok1", DMSPath: "/m1", DeviceId: "1023"},
 					{Name: "skip1", Value: "bad1", DMSPath: "/s1", DeviceId: consts.BlueField3DeviceID},
 					{Name: "match2", Value: "ok2", DMSPath: "/m2", DeviceId: "1023"},
 				}
 
 				expectedParams := []types.ConfigurationParameter{
-					{Name: "a", Value: "1", DMSPath: "/a"},
 					{Name: "match1", Value: "ok1", DMSPath: "/m1", DeviceId: "1023"},
 					{Name: "match2", Value: "ok2", DMSPath: "/m2", DeviceId: "1023"},
 				}
 
 				dmsCli.On("SetParameters", expectedParams).Return(nil)
 
-				_, err := manager.ApplyNvConfig(ctx, device)
+				err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
 	})
 
-	Describe("Edge cases with Multiplane", func() {
-		It("handles empty multiplane config for a specific plane count", func() {
+	Describe("Edge cases with Breakout", func() {
+		It("handles empty breakout config for a specific plane count", func() {
 			device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
 			device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
 
-			cfgs["v1"].MultiplaneConfig.Swplb[2] = []types.ConfigurationParameter{}
+			cfgs["v1"].BreakoutConfig.Swplb[2] = []types.ConfigurationParameter{}
 
-			// Should only apply base config
-			dmsCli.On("SetParameters", cfgs["v1"].NVConfig).Return(nil)
-			_, err := manager.ApplyNvConfig(ctx, device)
+			// No DMS call should be made when breakout config is empty
+			err := manager.ApplyBreakoutConfig(ctx, device)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("returns error when spectrumx config version not found", func() {
+		It("returns error when spectrumx config version not found for breakout", func() {
+			device.Spec.Configuration.Template.SpectrumXOptimized.Version = "non-existent"
+			device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
+
+			_, err := manager.BreakoutConfigApplied(ctx, device)
+			Expect(err).To(HaveOccurred())
+			Expect(strings.ToLower(err.Error())).To(ContainSubstring("spectrumx config not found"))
+		})
+
+		It("returns error when spectrumx config version not found for nvconfig", func() {
 			device.Spec.Configuration.Template.SpectrumXOptimized.Version = "non-existent"
 			device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
 
@@ -838,7 +846,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				cfgs["v1"].NVConfig = []types.ConfigurationParameter{
 					{Name: "mlx_param", MlxConfig: "NUM_OF_PLANES_P1", Value: "2"},
 				}
-				cfgs["v1"].MultiplaneConfig.Swplb[2] = []types.ConfigurationParameter{
+				cfgs["v1"].BreakoutConfig.Swplb[2] = []types.ConfigurationParameter{
 					{Name: "dms_param", DMSPath: "/swplb/param", Value: "val1"},
 				}
 
@@ -862,7 +870,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				cfgs["v1"].NVConfig = []types.ConfigurationParameter{
 					{Name: "dms_param", DMSPath: "/base/param", Value: "val1"},
 				}
-				cfgs["v1"].MultiplaneConfig.Swplb[2] = []types.ConfigurationParameter{
+				cfgs["v1"].BreakoutConfig.Swplb[2] = []types.ConfigurationParameter{
 					{Name: "mlx_param", MlxConfig: "NUM_OF_PLANES_P1", Value: "2"},
 				}
 
@@ -882,9 +890,9 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				Expect(applied).To(BeTrue())
 			})
 
-			It("returns false when mlxconfig in multiplane config mismatches", func() {
+			It("returns false when mlxconfig in breakout config mismatches", func() {
 				cfgs["v1"].NVConfig = []types.ConfigurationParameter{}
-				cfgs["v1"].MultiplaneConfig.Hwplb[4] = []types.ConfigurationParameter{
+				cfgs["v1"].BreakoutConfig.Hwplb[4] = []types.ConfigurationParameter{
 					{Name: "mlx_param", MlxConfig: "NUM_OF_PLANES_P1", Value: "4"},
 				}
 
@@ -897,7 +905,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 				nvConfigMgr.On("QueryNvConfig", ctx, "0000:00:00.0", "NUM_OF_PLANES_P1").Return(nvConfigQuery, nil)
 
-				applied, err := manager.NvConfigApplied(ctx, device)
+				applied, err := manager.BreakoutConfigApplied(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(applied).To(BeFalse())
 			})
@@ -1034,7 +1042,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "ADVANCED_PCI_SETTINGS", "1").Return(nil)
 				dmsCli.On("SetParameters", []types.ConfigurationParameter{}).Return(nil)
 
-				_, err := manager.ApplyNvConfig(ctx, device)
+				err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -1049,7 +1057,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "ADVANCED_PCI_SETTINGS", "1").Return(nil)
 				dmsCli.On("SetParameters", []types.ConfigurationParameter{{Name: "dms_param", DMSPath: "/dms/path", Value: "val1"}}).Return(nil)
 
-				_, err := manager.ApplyNvConfig(ctx, device)
+				err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -1060,7 +1068,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 				dmsCli.On("SetParameters", cfgs["v1"].NVConfig).Return(nil)
 
-				_, err := manager.ApplyNvConfig(ctx, device)
+				err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 				// SetNvConfigParameter should not be called
 			})
@@ -1071,7 +1079,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				cfgs["v1"].NVConfig = []types.ConfigurationParameter{
 					{Name: "mlx_param", MlxConfig: "PARAM1", Value: "val1"},
 				}
-				cfgs["v1"].MultiplaneConfig.Swplb[2] = []types.ConfigurationParameter{
+				cfgs["v1"].BreakoutConfig.Swplb[2] = []types.ConfigurationParameter{
 					{Name: "dms_param", DMSPath: "/swplb/param", Value: "val2"},
 				}
 
@@ -1081,13 +1089,13 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "PARAM1", "val1").Return(nil)
 				dmsCli.On("SetParameters", []types.ConfigurationParameter{{Name: "dms_param", DMSPath: "/swplb/param", Value: "val2"}}).Return(nil)
 
-				_, err := manager.ApplyNvConfig(ctx, device)
+				err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
 			It("sets mlxconfig in multiplane hwplb config", func() {
 				cfgs["v1"].NVConfig = []types.ConfigurationParameter{}
-				cfgs["v1"].MultiplaneConfig.Hwplb[4] = []types.ConfigurationParameter{
+				cfgs["v1"].BreakoutConfig.Hwplb[4] = []types.ConfigurationParameter{
 					{Name: "mlx_param", MlxConfig: "NUM_OF_PLANES_P1", Value: "4"},
 				}
 
@@ -1097,7 +1105,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "NUM_OF_PLANES_P1", "4").Return(nil)
 				dmsCli.On("SetParameters", []types.ConfigurationParameter{}).Return(nil)
 
-				_, err := manager.ApplyNvConfig(ctx, device)
+				err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -1105,7 +1113,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				cfgs["v1"].NVConfig = []types.ConfigurationParameter{
 					{Name: "mlx_base", MlxConfig: "BASE_PARAM", Value: "base_val"},
 				}
-				cfgs["v1"].MultiplaneConfig.Uniplane[2] = []types.ConfigurationParameter{
+				cfgs["v1"].BreakoutConfig.Uniplane[2] = []types.ConfigurationParameter{
 					{Name: "mlx_multiplane", MlxConfig: "MULTIPLANE_PARAM", Value: "mp_val"},
 				}
 
@@ -1116,7 +1124,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "MULTIPLANE_PARAM", "mp_val").Return(nil)
 				dmsCli.On("SetParameters", []types.ConfigurationParameter{}).Return(nil)
 
-				_, err := manager.ApplyNvConfig(ctx, device)
+				err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -1130,7 +1138,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "NUM_OF_PLANES_P1", "2").
 					Return(errors.New("set failed"))
 
-				_, err := manager.ApplyNvConfig(ctx, device)
+				err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("set failed"))
 			})
@@ -1144,7 +1152,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "NUM_OF_PLANES_P1", "2").
 					Return(errors.New("mlxconfig set error"))
 
-				_, err := manager.ApplyNvConfig(ctx, device)
+				err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("mlxconfig set error"))
 			})
@@ -1159,7 +1167,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "PARAM2", "val2").
 					Return(errors.New("second param failed"))
 
-				_, err := manager.ApplyNvConfig(ctx, device)
+				err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("second param failed"))
 			})
@@ -1179,7 +1187,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "PARAM3", "val3").Return(nil).Times(1)
 				dmsCli.On("SetParameters", []types.ConfigurationParameter{}).Return(nil)
 
-				_, err := manager.ApplyNvConfig(ctx, device)
+				err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -1196,7 +1204,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "PARAM1", "val1").Return(nil)
 				dmsCli.On("SetParameters", []types.ConfigurationParameter{{Name: "dms_match", DMSPath: "/path1", Value: "dms1", DeviceId: "1023"}}).Return(nil)
 
-				_, err := manager.ApplyNvConfig(ctx, device)
+				err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -1216,7 +1224,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				nvConfigMgr.On("SetNvConfigParameter", "0000:03:00.0", "NUM_OF_PLANES_P1", "2").Return(nil)
 				dmsCli.On("SetParameters", []types.ConfigurationParameter{}).Return(nil)
 
-				_, err := manager.ApplyNvConfig(ctx, device)
+				err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -1233,7 +1241,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					{Name: "skip_breakout", Value: "val2", DMSPath: "/breakout/skip", Breakout: 4},
 					{Name: "no_breakout", Value: "val3", DMSPath: "/no/breakout"},
 				}
-				cfgs["v1"].MultiplaneConfig.Swplb[2] = []types.ConfigurationParameter{}
+				cfgs["v1"].BreakoutConfig.Swplb[2] = []types.ConfigurationParameter{}
 
 				expectedParams := []types.ConfigurationParameter{
 					{Name: "match_breakout", Value: "val1", DMSPath: "/breakout/match", Breakout: 2},
@@ -1258,7 +1266,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					{Name: "match_breakout", Value: "val1", DMSPath: "/breakout/match", Breakout: 4},
 					{Name: "skip_breakout", Value: "val2", DMSPath: "/breakout/skip", Breakout: 2},
 				}
-				cfgs["v1"].MultiplaneConfig.Hwplb[4] = []types.ConfigurationParameter{}
+				cfgs["v1"].BreakoutConfig.Hwplb[4] = []types.ConfigurationParameter{}
 
 				expectedParams := []types.ConfigurationParameter{
 					{Name: "match_breakout", Value: "val1", DMSPath: "/breakout/match", Breakout: 4},
@@ -1266,7 +1274,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 				dmsCli.On("SetParameters", expectedParams).Return(nil)
 
-				_, err := manager.ApplyNvConfig(ctx, device)
+				err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -1281,7 +1289,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					{Name: "skip_multiplane", Value: "val2", DMSPath: "/mp/skip", Multiplane: consts.MultiplaneModeSwplb},
 					{Name: "no_multiplane", Value: "val3", DMSPath: "/no/mp"},
 				}
-				cfgs["v1"].MultiplaneConfig.Hwplb[2] = []types.ConfigurationParameter{}
+				cfgs["v1"].BreakoutConfig.Hwplb[2] = []types.ConfigurationParameter{}
 
 				expectedParams := []types.ConfigurationParameter{
 					{Name: "match_multiplane", Value: "val1", DMSPath: "/mp/match", Multiplane: consts.MultiplaneModeHwplb},
@@ -1306,7 +1314,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					{Name: "match_multiplane", Value: "val1", DMSPath: "/mp/match", Multiplane: consts.MultiplaneModeSwplb},
 					{Name: "skip_multiplane", Value: "val2", DMSPath: "/mp/skip", Multiplane: consts.MultiplaneModeUniplane},
 				}
-				cfgs["v1"].MultiplaneConfig.Swplb[2] = []types.ConfigurationParameter{}
+				cfgs["v1"].BreakoutConfig.Swplb[2] = []types.ConfigurationParameter{}
 
 				expectedParams := []types.ConfigurationParameter{
 					{Name: "match_multiplane", Value: "val1", DMSPath: "/mp/match", Multiplane: consts.MultiplaneModeSwplb},
@@ -1314,7 +1322,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 				dmsCli.On("SetParameters", expectedParams).Return(nil)
 
-				_, err := manager.ApplyNvConfig(ctx, device)
+				err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -1332,7 +1340,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					{Name: "wrong_multiplane", Value: "val4", DMSPath: "/wrong/mp", DeviceId: "1023", Breakout: 2, Multiplane: consts.MultiplaneModeSwplb},
 					{Name: "no_filters", Value: "val5", DMSPath: "/no/filters"},
 				}
-				cfgs["v1"].MultiplaneConfig.Hwplb[2] = []types.ConfigurationParameter{}
+				cfgs["v1"].BreakoutConfig.Hwplb[2] = []types.ConfigurationParameter{}
 
 				expectedParams := []types.ConfigurationParameter{
 					{Name: "all_match", Value: "val1", DMSPath: "/all/match", DeviceId: "1023", Breakout: 2, Multiplane: consts.MultiplaneModeHwplb},
@@ -1499,6 +1507,12 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(nil)
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(nil)
+				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
+					return len(params) == 1 && params[0].Name == "Shut down interface"
+				})).Return(nil)
+				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
+					return len(params) == 1 && params[0].Name == "Bring up interface to apply IPG settings"
+				})).Return(nil)
 
 				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
 				err := manager.ApplyRuntimeConfig(device)
@@ -1523,6 +1537,12 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(nil)
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(nil)
+				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
+					return len(params) == 1 && params[0].Name == "Shut down interface"
+				})).Return(nil)
+				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
+					return len(params) == 1 && params[0].Name == "Bring up interface to apply IPG settings"
+				})).Return(nil)
 
 				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
 				err := manager.ApplyRuntimeConfig(device)
@@ -1550,6 +1570,12 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(nil)
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(nil)
+				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
+					return len(params) == 1 && params[0].Name == "Shut down interface"
+				})).Return(nil)
+				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
+					return len(params) == 1 && params[0].Name == "Bring up interface to apply IPG settings"
+				})).Return(nil)
 
 				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
 				err := manager.ApplyRuntimeConfig(device)
@@ -1576,6 +1602,12 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(nil)
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(nil)
+				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
+					return len(params) == 1 && params[0].Name == "Shut down interface"
+				})).Return(nil)
+				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
+					return len(params) == 1 && params[0].Name == "Bring up interface to apply IPG settings"
+				})).Return(nil)
 
 				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
 				err := manager.ApplyRuntimeConfig(device)
@@ -1759,6 +1791,12 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				dmsCli.On("SetParameters", expectedAR).Return(nil)
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(nil)
+				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
+					return len(params) == 1 && params[0].Name == "Shut down interface"
+				})).Return(nil)
+				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
+					return len(params) == 1 && params[0].Name == "Bring up interface to apply IPG settings"
+				})).Return(nil)
 
 				err := manager.ApplyRuntimeConfig(device)
 				Expect(err).NotTo(HaveOccurred())
@@ -1795,6 +1833,12 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				dmsCli.On("SetParameters", expectedAR).Return(nil)
 				dmsCli.On("SetParameters", expectedCC).Return(nil)
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(nil)
+				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
+					return len(params) == 1 && params[0].Name == "Shut down interface"
+				})).Return(nil)
+				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
+					return len(params) == 1 && params[0].Name == "Bring up interface to apply IPG settings"
+				})).Return(nil)
 
 				err := manager.ApplyRuntimeConfig(device)
 				Expect(err).NotTo(HaveOccurred())
@@ -1829,6 +1873,12 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(nil)
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(nil)
+				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
+					return len(params) == 1 && params[0].Name == "Shut down interface"
+				})).Return(nil)
+				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
+					return len(params) == 1 && params[0].Name == "Bring up interface to apply IPG settings"
+				})).Return(nil)
 
 				err := manager.ApplyRuntimeConfig(device)
 				Expect(err).NotTo(HaveOccurred())
@@ -1859,6 +1909,12 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 				dmsCli.On("SetParameters", []types.ConfigurationParameter{}).Return(nil).Times(3)
 				dmsCli.On("SetParameters", expectedIPG).Return(nil)
+				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
+					return len(params) == 1 && params[0].Name == "Shut down interface"
+				})).Return(nil)
+				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
+					return len(params) == 1 && params[0].Name == "Bring up interface to apply IPG settings"
+				})).Return(nil)
 
 				err := manager.ApplyRuntimeConfig(device)
 				Expect(err).NotTo(HaveOccurred())

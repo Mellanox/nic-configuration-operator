@@ -46,10 +46,14 @@ const cnpDscpExpectedValueUniplane = "24"
 const cnpDscpExpectedValueHwplb = "48"
 
 type SpectrumXManager interface {
-	// NvConfigApplied checks if the desired Spectrum-X NV spec is applied to the device
+	// BreakoutConfigApplied checks if the desired Spectrum-X breakout config is applied to the device
+	BreakoutConfigApplied(ctx context.Context, device *v1alpha1.NicDevice) (bool, error)
+	// ApplyBreakoutConfig applies the desired Spectrum-X breakout config to the device
+	ApplyBreakoutConfig(ctx context.Context, device *v1alpha1.NicDevice) error
+	// NvConfigApplied checks if the desired Spectrum-X NV config is applied to the device
 	NvConfigApplied(ctx context.Context, device *v1alpha1.NicDevice) (bool, error)
-	// ApplyNvConfig applies the desired Spectrum-X NV spec to the device
-	ApplyNvConfig(ctx context.Context, device *v1alpha1.NicDevice) (bool, error)
+	// ApplyNvConfig applies the desired Spectrum-X NV config to the device
+	ApplyNvConfig(ctx context.Context, device *v1alpha1.NicDevice) error
 	// RuntimeConfigApplied checks if the desired Spectrum-X runtime spec is applied to the device
 	RuntimeConfigApplied(device *v1alpha1.NicDevice) (bool, error)
 	// ApplyRuntimeConfig applies the desired Spectrum-X runtime spec to the device
@@ -98,41 +102,39 @@ func filterParameters(params []types.ConfigurationParameter, deviceType string, 
 	return filtered
 }
 
-// getSpectrumXNVConfigParameters retrieves mlxconfig and dms parameters from the desired config and spec and returns them separately.
+// getBreakoutParameters retrieves breakout config parameters from the desired config based on multiplane mode.
+// Breakout parameters come from the breakout section of the config file.
 // returns: mlxconfigParams, dmsParams, error
-func getSpectrumXNVConfigParameters(desiredConfig *types.SpectrumXConfig, spcXSpec *v1alpha1.SpectrumXOptimizedSpec, device *v1alpha1.NicDevice) ([]types.ConfigurationParameter, []types.ConfigurationParameter, error) {
-	desiredParams := desiredConfig.NVConfig
-
+func getBreakoutParameters(desiredConfig *types.SpectrumXConfig, spcXSpec *v1alpha1.SpectrumXOptimizedSpec, device *v1alpha1.NicDevice) ([]types.ConfigurationParameter, []types.ConfigurationParameter, error) {
 	multiplaneMode, numberOfPlanes := spcXSpec.MultiplaneMode, spcXSpec.NumberOfPlanes
-	var multiplaneConfig []types.ConfigurationParameter
+	var breakoutConfig []types.ConfigurationParameter
 	switch multiplaneMode {
 	case consts.MultiplaneModeNone:
 		break
 	case consts.MultiplaneModeSwplb:
-		multiplaneConfig = desiredConfig.MultiplaneConfig.Swplb[numberOfPlanes]
+		breakoutConfig = desiredConfig.BreakoutConfig.Swplb[numberOfPlanes]
 	case consts.MultiplaneModeHwplb:
-		multiplaneConfig = desiredConfig.MultiplaneConfig.Hwplb[numberOfPlanes]
+		breakoutConfig = desiredConfig.BreakoutConfig.Hwplb[numberOfPlanes]
 	case consts.MultiplaneModeUniplane:
-		multiplaneConfig = desiredConfig.MultiplaneConfig.Uniplane[numberOfPlanes]
+		breakoutConfig = desiredConfig.BreakoutConfig.Uniplane[numberOfPlanes]
 	default:
 		return nil, nil, fmt.Errorf("invalid multiplane mode %s", multiplaneMode)
 	}
-	log.Log.V(2).Info("SpectrumXConfigManager.getSpectrumXNVConfigParameters(): multiplane config", "device", device.Name, "multiplaneConfig", multiplaneConfig)
+	log.Log.V(2).Info("SpectrumXConfigManager.getBreakoutParameters(): breakout config", "device", device.Name, "breakoutConfig", breakoutConfig)
 
-	desiredParams = append(desiredParams, multiplaneConfig...)
-	desiredParams = filterParameters(desiredParams, device.Status.Type, numberOfPlanes, multiplaneMode)
+	breakoutConfig = filterParameters(breakoutConfig, device.Status.Type, numberOfPlanes, multiplaneMode)
 
 	mlxconfigParams := []types.ConfigurationParameter{}
 	dmsParams := []types.ConfigurationParameter{}
 
-	for _, param := range desiredParams {
-		if param.MlxConfig != "" { // mlxconfig parameters are handled separately
+	for _, param := range breakoutConfig {
+		if param.MlxConfig != "" {
 			mlxconfigParams = append(mlxconfigParams, param)
 		} else if param.DMSPath != "" {
 			dmsParams = append(dmsParams, param)
 		} else {
 			err := fmt.Errorf("invalid parameter %+v", param)
-			log.Log.Error(err, "NvConfigApplied(): invalid parameter", "device", device.Name)
+			log.Log.Error(err, "getBreakoutParameters(): invalid parameter", "device", device.Name)
 			return nil, nil, err
 		}
 	}
@@ -140,97 +142,176 @@ func getSpectrumXNVConfigParameters(desiredConfig *types.SpectrumXConfig, spcXSp
 	return mlxconfigParams, dmsParams, nil
 }
 
-// NvConfigApplied checks if the desired Spectrum-X NV spec is applied to the device
-func (m *spectrumXConfigManager) NvConfigApplied(ctx context.Context, device *v1alpha1.NicDevice) (bool, error) {
-	log.Log.Info("SpectrumXConfigManager.NvConfigApplied()", "device", device.Name)
+// getNvConfigParameters retrieves nvConfig parameters (DMS and mlxconfig) from the desired config.
+// NvConfig parameters come from the nvConfig section of the config file and are filtered by multiplane mode.
+// returns: mlxconfigParams, dmsParams, error
+func getNvConfigParameters(desiredConfig *types.SpectrumXConfig, spcXSpec *v1alpha1.SpectrumXOptimizedSpec, device *v1alpha1.NicDevice) ([]types.ConfigurationParameter, []types.ConfigurationParameter, error) {
+	multiplaneMode, numberOfPlanes := spcXSpec.MultiplaneMode, spcXSpec.NumberOfPlanes
+	desiredParams := filterParameters(desiredConfig.NVConfig, device.Status.Type, numberOfPlanes, multiplaneMode)
 
-	spcXSpec := device.Spec.Configuration.Template.SpectrumXOptimized
+	mlxconfigParams := []types.ConfigurationParameter{}
+	dmsParams := []types.ConfigurationParameter{}
 
-	desiredConfig, found := m.spectrumXConfigs[spcXSpec.Version]
-	if !found {
-		return false, fmt.Errorf("spectrumx config not found for version %s", spcXSpec.Version)
+	for _, param := range desiredParams {
+		if param.MlxConfig != "" {
+			mlxconfigParams = append(mlxconfigParams, param)
+		} else if param.DMSPath != "" {
+			dmsParams = append(dmsParams, param)
+		} else {
+			err := fmt.Errorf("invalid parameter %+v", param)
+			log.Log.Error(err, "getNvConfigParameters(): invalid parameter", "device", device.Name)
+			return nil, nil, err
+		}
 	}
 
-	mlxconfigParams, dmsParams, err := getSpectrumXNVConfigParameters(desiredConfig, spcXSpec, device)
-	if err != nil {
-		log.Log.Error(err, "NvConfigApplied(): failed to get Spectrum-X parameters", "device", device.Name)
-		return false, err
-	}
+	return mlxconfigParams, dmsParams, nil
+}
 
+// checkParamsApplied checks if the given mlxconfig and DMS parameters are applied to the device.
+func (m *spectrumXConfigManager) checkParamsApplied(ctx context.Context, mlxconfigParams, dmsParams []types.ConfigurationParameter, device *v1alpha1.NicDevice) (bool, error) {
+	// Check mlxconfig params
 	for _, param := range mlxconfigParams {
 		mlxConfig, err := m.nvConfigUtils.QueryNvConfig(ctx, device.Status.Ports[0].PCI, param.MlxConfig)
 		if err != nil {
-			log.Log.Error(err, "NvConfigApplied(): failed to get mlxconfig", "device", device.Name)
+			log.Log.Error(err, "checkParamsApplied(): failed to get mlxconfig", "device", device.Name)
 			return false, err
 		}
 		if !slices.Contains(mlxConfig.CurrentConfig[param.MlxConfig], param.Value) {
-			log.Log.V(2).Info("SpectrumXConfigManager.NvConfigApplied(): mlxconfig parameter not applied", "device", device.Name, "param", param, "observedValues", mlxConfig.CurrentConfig[param.MlxConfig])
+			log.Log.V(2).Info("checkParamsApplied(): mlxconfig parameter not applied", "device", device.Name, "param", param, "observedValues", mlxConfig.CurrentConfig[param.MlxConfig])
 			return false, nil
 		}
 	}
 
-	dmsClient, err := m.dmsManager.GetDMSClientBySerialNumber(device.Status.SerialNumber)
-	if err != nil {
-		log.Log.Error(err, "NvConfigApplied(): failed to get DMS client", "device", device.Name)
-		return false, err
-	}
+	// Check DMS params
+	if len(dmsParams) > 0 {
+		dmsClient, err := m.dmsManager.GetDMSClientBySerialNumber(device.Status.SerialNumber)
+		if err != nil {
+			log.Log.Error(err, "checkParamsApplied(): failed to get DMS client", "device", device.Name)
+			return false, err
+		}
 
-	values, err := dmsClient.GetParameters(dmsParams)
-	if err != nil {
-		log.Log.Error(err, "NvConfigApplied(): failed to get Spectrum-X NV config", "device", device.Name)
-		return false, err
-	}
+		values, err := dmsClient.GetParameters(dmsParams)
+		if err != nil {
+			log.Log.Error(err, "checkParamsApplied(): failed to get DMS config", "device", device.Name)
+			return false, err
+		}
 
-	for _, param := range dmsParams {
-		if values[param.DMSPath] != param.Value && values[param.DMSPath] != param.AlternativeValue {
-			log.Log.V(2).Info("SpectrumXConfigManager.NvConfigApplied(): parameter not applied", "device", device.Name, "param", param)
-			return false, nil
+		for _, param := range dmsParams {
+			if values[param.DMSPath] != param.Value && values[param.DMSPath] != param.AlternativeValue {
+				log.Log.V(2).Info("checkParamsApplied(): DMS parameter not applied", "device", device.Name, "param", param)
+				return false, nil
+			}
 		}
 	}
 
 	return true, nil
 }
 
-// ApplyNvConfig applies the desired Spectrum-X NV spec to the device
-func (m *spectrumXConfigManager) ApplyNvConfig(ctx context.Context, device *v1alpha1.NicDevice) (bool, error) {
-	log.Log.Info("SpectrumXConfigManager.ApplyNvConfig()", "device", device.Name)
+// applyParams applies the given mlxconfig and DMS parameters to the device.
+func (m *spectrumXConfigManager) applyParams(mlxconfigParams, dmsParams []types.ConfigurationParameter, device *v1alpha1.NicDevice) error {
+	// Apply mlxconfig params
+	for _, param := range mlxconfigParams {
+		log.Log.V(2).Info("applyParams(): setting mlxconfig param", "device", device.Name, "param", param.MlxConfig, "value", param.Value)
+		err := m.nvConfigUtils.SetNvConfigParameter(device.Status.Ports[0].PCI, param.MlxConfig, param.Value)
+		if err != nil {
+			log.Log.Error(err, "applyParams(): failed to set mlxconfig parameter", "device", device.Name, "param", param)
+			return err
+		}
+	}
+
+	// Apply DMS params
+	if len(dmsParams) > 0 {
+		dmsClient, err := m.dmsManager.GetDMSClientBySerialNumber(device.Status.SerialNumber)
+		if err != nil {
+			log.Log.Error(err, "applyParams(): failed to get DMS client", "device", device.Name)
+			return err
+		}
+
+		log.Log.V(2).Info("applyParams(): setting DMS params", "device", device.Name, "config", dmsParams)
+		err = dmsClient.SetParameters(dmsParams)
+		if err != nil {
+			log.Log.Error(err, "applyParams(): failed to set DMS config", "device", device.Name)
+			return err
+		}
+	}
+
+	return nil
+}
+
+// BreakoutConfigApplied checks if the desired Spectrum-X breakout config is applied to the device.
+func (m *spectrumXConfigManager) BreakoutConfigApplied(ctx context.Context, device *v1alpha1.NicDevice) (bool, error) {
+	log.Log.Info("SpectrumXConfigManager.BreakoutConfigApplied()", "device", device.Name)
 
 	spcXSpec := device.Spec.Configuration.Template.SpectrumXOptimized
-
 	desiredConfig, found := m.spectrumXConfigs[spcXSpec.Version]
 	if !found {
 		return false, fmt.Errorf("spectrumx config not found for version %s", spcXSpec.Version)
 	}
 
-	mlxconfigParams, dmsParams, err := getSpectrumXNVConfigParameters(desiredConfig, spcXSpec, device)
+	mlxconfigParams, dmsParams, err := getBreakoutParameters(desiredConfig, spcXSpec, device)
 	if err != nil {
-		log.Log.Error(err, "NvConfigApplied(): failed to get Spectrum-X parameters", "device", device.Name)
+		log.Log.Error(err, "BreakoutConfigApplied(): failed to get breakout parameters", "device", device.Name)
 		return false, err
 	}
 
-	log.Log.V(2).Info("SpectrumXConfigManager.ApplyNvConfig(): setting Spectrum-X NV MLXconfig params", "device", device.Name, "config", mlxconfigParams)
-	for _, param := range mlxconfigParams {
-		err := m.nvConfigUtils.SetNvConfigParameter(device.Status.Ports[0].PCI, param.MlxConfig, param.Value)
-		if err != nil {
-			log.Log.Error(err, "ApplyNvConfig(): failed to set mlxconfig parameter", "device", device.Name, "param", param)
-			return false, err
-		}
+	return m.checkParamsApplied(ctx, mlxconfigParams, dmsParams, device)
+}
+
+// ApplyBreakoutConfig applies the desired Spectrum-X breakout config to the device.
+func (m *spectrumXConfigManager) ApplyBreakoutConfig(ctx context.Context, device *v1alpha1.NicDevice) error {
+	log.Log.Info("SpectrumXConfigManager.ApplyBreakoutConfig()", "device", device.Name)
+
+	spcXSpec := device.Spec.Configuration.Template.SpectrumXOptimized
+	desiredConfig, found := m.spectrumXConfigs[spcXSpec.Version]
+	if !found {
+		return fmt.Errorf("spectrumx config not found for version %s", spcXSpec.Version)
 	}
 
-	dmsClient, err := m.dmsManager.GetDMSClientBySerialNumber(device.Status.SerialNumber)
+	mlxconfigParams, dmsParams, err := getBreakoutParameters(desiredConfig, spcXSpec, device)
 	if err != nil {
-		log.Log.Error(err, "ApplyNvConfig(): failed to get DMS client", "device", device.Name)
+		log.Log.Error(err, "ApplyBreakoutConfig(): failed to get breakout parameters", "device", device.Name)
+		return err
+	}
+
+	return m.applyParams(mlxconfigParams, dmsParams, device)
+}
+
+// NvConfigApplied checks if the desired Spectrum-X NV config is applied to the device.
+func (m *spectrumXConfigManager) NvConfigApplied(ctx context.Context, device *v1alpha1.NicDevice) (bool, error) {
+	log.Log.Info("SpectrumXConfigManager.NvConfigApplied()", "device", device.Name)
+
+	spcXSpec := device.Spec.Configuration.Template.SpectrumXOptimized
+	desiredConfig, found := m.spectrumXConfigs[spcXSpec.Version]
+	if !found {
+		return false, fmt.Errorf("spectrumx config not found for version %s", spcXSpec.Version)
+	}
+
+	mlxconfigParams, dmsParams, err := getNvConfigParameters(desiredConfig, spcXSpec, device)
+	if err != nil {
+		log.Log.Error(err, "NvConfigApplied(): failed to get NV config parameters", "device", device.Name)
 		return false, err
 	}
 
-	log.Log.V(2).Info("SpectrumXConfigManager.ApplyNvConfig(): setting Spectrum-X NV DMS config", "device", device.Name, "config", dmsParams)
-	err = dmsClient.SetParameters(dmsParams)
-	if err != nil {
-		log.Log.Error(err, "ApplyNvConfig(): failed to set Spectrum-X NV config", "device", device.Name)
-		return false, err
+	return m.checkParamsApplied(ctx, mlxconfigParams, dmsParams, device)
+}
+
+// ApplyNvConfig applies the desired Spectrum-X NV config to the device.
+func (m *spectrumXConfigManager) ApplyNvConfig(ctx context.Context, device *v1alpha1.NicDevice) error {
+	log.Log.Info("SpectrumXConfigManager.ApplyNvConfig()", "device", device.Name)
+
+	spcXSpec := device.Spec.Configuration.Template.SpectrumXOptimized
+	desiredConfig, found := m.spectrumXConfigs[spcXSpec.Version]
+	if !found {
+		return fmt.Errorf("spectrumx config not found for version %s", spcXSpec.Version)
 	}
 
-	return false, nil
+	mlxconfigParams, dmsParams, err := getNvConfigParameters(desiredConfig, spcXSpec, device)
+	if err != nil {
+		log.Log.Error(err, "ApplyNvConfig(): failed to get NV config parameters", "device", device.Name)
+		return err
+	}
+
+	return m.applyParams(mlxconfigParams, dmsParams, device)
 }
 
 // getCnpDscpPath returns the sysfs path for CNP DSCP for a given interface
@@ -515,6 +596,33 @@ func (m *spectrumXConfigManager) ApplyRuntimeConfig(device *v1alpha1.NicDevice) 
 		return err
 	}
 
+	// Wait for 1 second to apply the IPG settings
+	time.Sleep(1 * time.Second)
+	err = dmsClient.SetParameters([]types.ConfigurationParameter{
+		{
+			Name:      "Shut down interface",
+			Value:     "false",
+			DMSPath:   "/interfaces/interface/config/enabled",
+			ValueType: "bool",
+		},
+	})
+	if err != nil {
+		log.Log.Error(err, "ApplyRuntimeConfig(): failed to shut down interface", "device", device.Name)
+		return err
+	}
+
+	err = dmsClient.SetParameters([]types.ConfigurationParameter{
+		{
+			Name:      "Bring up interface to apply IPG settings",
+			Value:     "true",
+			DMSPath:   "/interfaces/interface/config/enabled",
+			ValueType: "bool",
+		},
+	})
+	if err != nil {
+		log.Log.Error(err, "ApplyRuntimeConfig(): failed to bring up interface", "device", device.Name)
+		return err
+	}
 	return nil
 }
 
