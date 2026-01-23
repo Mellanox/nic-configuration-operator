@@ -24,14 +24,14 @@ import (
 )
 
 type SpectrumXConfig struct {
-	MultiplaneConfig       SpectrumXMultiplaneConfig `yaml:"multiplane"`
-	NVConfig               []ConfigurationParameter  `yaml:"nvConfig"`
-	RuntimeConfig          SpectrumXRuntimeConfig    `yaml:"runtimeConfig"`
-	UseSoftwareCCAlgorithm bool                      `yaml:"useSoftwareCCAlgorithm"`
-	DocaCCVersion          string                    `yaml:"docaCCVersion"`
+	BreakoutConfig         SpectrumXBreakoutConfig  `yaml:"breakout"`
+	NVConfig               []ConfigurationParameter `yaml:"nvConfig"`
+	RuntimeConfig          SpectrumXRuntimeConfig   `yaml:"runtimeConfig"`
+	UseSoftwareCCAlgorithm bool                     `yaml:"useSoftwareCCAlgorithm"`
+	DocaCCVersion          string                   `yaml:"docaCCVersion"`
 }
 
-type SpectrumXMultiplaneConfig struct {
+type SpectrumXBreakoutConfig struct {
 	Swplb    map[int][]ConfigurationParameter `yaml:"swplb"`
 	Hwplb    map[int][]ConfigurationParameter `yaml:"hwplb"`
 	Uniplane map[int][]ConfigurationParameter `yaml:"uniplane"`

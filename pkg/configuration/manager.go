@@ -70,6 +70,34 @@ type configurationManager struct {
 func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *v1alpha1.NicDevice) (bool, bool, error) {
 	log.Log.Info("configurationManager.ValidateDeviceNvSpec", "device", device.Name)
 
+	if device.Spec.Configuration.Template != nil && device.Spec.Configuration.Template.SpectrumXOptimized != nil && device.Spec.Configuration.Template.SpectrumXOptimized.Enabled {
+		// First check breakout config (from breakout section) - requires reboot to apply
+		breakoutConfigApplied, err := h.spectrumXConfigManager.BreakoutConfigApplied(ctx, device)
+		if err != nil {
+			log.Log.Error(err, "failed to check spectrumx breakout config", "device", device.Name)
+			return false, false, err
+		}
+
+		if !breakoutConfigApplied {
+			log.Log.V(2).Info("breakout config not applied, update and reboot required", "device", device.Name)
+			return true, true, nil
+		}
+
+		// Then check nvconfig (from nvConfig section) - may require reboot
+		nvConfigApplied, err := h.spectrumXConfigManager.NvConfigApplied(ctx, device)
+		if err != nil {
+			log.Log.Error(err, "failed to check spectrumx nvconfig", "device", device.Name)
+			return false, false, err
+		}
+
+		if !nvConfigApplied {
+			log.Log.V(2).Info("nvconfig not applied, update and reboot required", "device", device.Name)
+			return true, true, nil
+		}
+
+		return false, false, nil
+	}
+
 	nvConfigsForPorts, err := h.queryNvConfigs(ctx, device)
 	if err != nil {
 		log.Log.Error(err, "failed to query nv configs", "device", device.Name)
@@ -128,19 +156,6 @@ func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *
 		}
 	}
 
-	if device.Spec.Configuration.Template != nil && device.Spec.Configuration.Template.SpectrumXOptimized != nil && device.Spec.Configuration.Template.SpectrumXOptimized.Enabled {
-		spectrumXConfigApplied, err := h.spectrumXConfigManager.NvConfigApplied(ctx, device)
-		if err != nil {
-			log.Log.Error(err, "failed to get spectrumx config", "device", device.Name)
-			return false, false, err
-		}
-
-		if !spectrumXConfigApplied {
-			configUpdateNeeded = true
-			rebootNeeded = true
-		}
-	}
-
 	return configUpdateNeeded, rebootNeeded, nil
 }
 
@@ -149,6 +164,49 @@ func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *
 // returns error - there were errors while applying nv configuration
 func (h configurationManager) ApplyDeviceNvSpec(ctx context.Context, device *v1alpha1.NicDevice) (bool, error) {
 	log.Log.Info("configurationManager.ApplyDeviceNvSpec", "device", device.Name)
+
+	if device.Spec.Configuration.Template != nil && device.Spec.Configuration.Template.SpectrumXOptimized != nil && device.Spec.Configuration.Template.SpectrumXOptimized.Enabled {
+		// First check and apply breakout config (from breakout section)
+		// Breakout config must be applied first and requires a reboot before nvconfig can be applied
+		breakoutConfigApplied, err := h.spectrumXConfigManager.BreakoutConfigApplied(ctx, device)
+		if err != nil {
+			log.Log.Error(err, "failed to check spectrumx breakout config", "device", device.Name)
+			return false, err
+		}
+
+		if !breakoutConfigApplied {
+			log.Log.Info("applying breakout config", "device", device.Name)
+			err := h.spectrumXConfigManager.ApplyBreakoutConfig(ctx, device)
+			if err != nil {
+				log.Log.Error(err, "failed to apply spectrumx breakout config", "device", device.Name)
+				return false, err
+			}
+			// Always require reboot after applying breakout config to ensure the device is in correct state
+			// before applying nvconfig
+			log.Log.Info("breakout config applied, reboot required", "device", device.Name)
+			return true, nil
+		}
+
+		// Then check and apply nvconfig (from nvConfig section)
+		nvConfigApplied, err := h.spectrumXConfigManager.NvConfigApplied(ctx, device)
+		if err != nil {
+			log.Log.Error(err, "failed to check spectrumx nvconfig", "device", device.Name)
+			return false, err
+		}
+
+		if !nvConfigApplied {
+			log.Log.Info("applying nvconfig", "device", device.Name)
+			err := h.spectrumXConfigManager.ApplyNvConfig(ctx, device)
+			if err != nil {
+				log.Log.Error(err, "failed to apply spectrumx nvconfig", "device", device.Name)
+				return false, err
+			}
+			log.Log.Info("nvconfig applied, reboot required", "device", device.Name)
+			return true, nil
+		}
+
+		return false, nil
+	}
 
 	nvConfigsForPorts, err := h.queryNvConfigs(ctx, device)
 	if err != nil {
@@ -252,18 +310,6 @@ func (h configurationManager) ApplyDeviceNvSpec(ctx context.Context, device *v1a
 				log.Log.Error(err, "Failed to apply nv config parameter", "device", device.Name, "param", param, "value", value)
 				return false, err
 			}
-		}
-	}
-
-	if device.Spec.Configuration.Template != nil && device.Spec.Configuration.Template.SpectrumXOptimized != nil && device.Spec.Configuration.Template.SpectrumXOptimized.Enabled {
-		rebootNeeded, err := h.spectrumXConfigManager.ApplyNvConfig(ctx, device)
-		if err != nil {
-			log.Log.Error(err, "failed to update spectrumx config", "device", device.Name)
-			return false, err
-		}
-
-		if rebootNeeded {
-			return true, nil
 		}
 	}
 

@@ -13,7 +13,7 @@
 # limitations under the License.
 #
 # SPDX-License-Identifier: Apache-2.0
-multiplane:
+breakout:
   swplb:
     2:
       - name: Number of PFs
@@ -26,20 +26,6 @@ multiplane:
       - name: LAG Resource Allocation
         value: 0
         mlxconfig: "LAG_RESOURCE_ALLOCATION"
-      - name: CNP DSCP
-        value: 0
-        dmsPath: /interfaces/interface/nvidia/roce/config/rtt-resp-dscp
-        valueType: int
-      - name: CNP DSCP mode
-        value: RTT_RESP_DSCP_DEFAULT
-        dmsPath: /interfaces/interface/nvidia/roce/config/rtt-resp-dscp-mode
-        valueType: string
-      - name: RoCE Multipath DSCP
-        value: MULTIPATH_DSCP_DEFAULT
-        dmsPath: /nvidia/roce/config/multipath-dscp
-        valueType: string
-        alternativeValue: "unknown"
-        ignoreError: true
       # CX8-specific parameters  
       - name: Lanes for Module 0 and Port 1
         value: "0..3"
@@ -89,20 +75,6 @@ multiplane:
       - name: LAG Resource Allocation
         value: 0
         mlxconfig: "LAG_RESOURCE_ALLOCATION"
-      - name: CNP DSCP
-        value: 0
-        dmsPath: /interfaces/interface/nvidia/roce/config/rtt-resp-dscp
-        valueType: int
-      - name: CNP DSCP mode
-        value: RTT_RESP_DSCP_DEFAULT
-        dmsPath: /interfaces/interface/nvidia/roce/config/rtt-resp-dscp-mode
-        valueType: string
-      - name: RoCE Multipath DSCP
-        value: MULTIPATH_DSCP_DEFAULT
-        dmsPath: /nvidia/roce/config/multipath-dscp
-        valueType: string
-        alternativeValue: "unknown"
-        ignoreError: true
       # CX8-specific parameters  
       - name: Lanes for Module 0 and Port 1
         value: "0..1"
@@ -176,19 +148,7 @@ multiplane:
         mlxconfig: "NUM_OF_PLANES_P1"
       - name: LAG Resource Allocation
         value: 1
-        mlxconfig: "LAG_RESOURCE_ALLOCATION"   
-      - name: CNP DSCP
-        value: 48
-        mlxconfig: "ROCE_RTT_RESP_DSCP_P1"
-      - name: CNP DSCP mode
-        value: 1
-        mlxconfig: "ROCE_RTT_RESP_DSCP_MODE_P1"
-      - name: Flex Parser Profile
-        value: 10
-        mlxconfig: "FLEX_PARSER_PROFILE_ENABLE"
-      - name: Disable RDE
-        value: 1
-        mlxconfig: "RDE_DISABLE"
+        mlxconfig: "LAG_RESOURCE_ALLOCATION"
       # CX8-specific parameters  
       - name: Lanes for Module 0 and Port 1
         value: "0..7"
@@ -212,16 +172,7 @@ multiplane:
         mlxconfig: "NUM_OF_PLANES_P1"
       - name: LAG Resource Allocation
         value: 1
-        mlxconfig: "LAG_RESOURCE_ALLOCATION"     
-      - name: CNP DSCP
-        value: 48
-        mlxconfig: "ROCE_RTT_RESP_DSCP_P1"
-      - name: CNP DSCP mode
-        value: 1
-        mlxconfig: "ROCE_RTT_RESP_DSCP_MODE_P1"
-      - name: Flex Parser Profile
-        value: 10
-        mlxconfig: "FLEX_PARSER_PROFILE_ENABLE"
+        mlxconfig: "LAG_RESOURCE_ALLOCATION"
       # CX8-specific parameters  
       - name: Lanes for Module 0 and Port 1
         value: "0..7"
@@ -250,20 +201,6 @@ multiplane:
       - name: LAG Resource Allocation
         value: 0
         mlxconfig: "LAG_RESOURCE_ALLOCATION"
-      - name: CNP DSCP
-        value: 0
-        dmsPath: /interfaces/interface/nvidia/roce/config/rtt-resp-dscp
-        valueType: int
-      - name: CNP DSCP mode
-        value: RTT_RESP_DSCP_DEFAULT
-        dmsPath: /interfaces/interface/nvidia/roce/config/rtt-resp-dscp-mode
-        valueType: string
-      - name: RoCE Multipath DSCP
-        value: MULTIPATH_DSCP_DEFAULT
-        dmsPath: /nvidia/roce/config/multipath-dscp
-        valueType: string
-        alternativeValue: "unknown"
-        ignoreError: true
       # CX8-specific parameters  
       - name: Lanes for Module 0 and Port 1
         value: "0..3"
@@ -324,6 +261,58 @@ nvConfig:
     value: ENABLED
     dmsPath: /nvidia/roce/config/cc-steering-ext
     valueType: string
+  # swplb/uniplane-specific settings (via DMS)
+  - name: CNP DSCP
+    value: 0
+    dmsPath: /interfaces/interface/nvidia/roce/config/rtt-resp-dscp
+    valueType: int
+    multiplane: swplb
+  - name: CNP DSCP
+    value: 0
+    dmsPath: /interfaces/interface/nvidia/roce/config/rtt-resp-dscp
+    valueType: int
+    multiplane: uniplane
+  - name: CNP DSCP mode
+    value: RTT_RESP_DSCP_DEFAULT
+    dmsPath: /interfaces/interface/nvidia/roce/config/rtt-resp-dscp-mode
+    valueType: string
+    multiplane: swplb
+  - name: CNP DSCP mode
+    value: RTT_RESP_DSCP_DEFAULT
+    dmsPath: /interfaces/interface/nvidia/roce/config/rtt-resp-dscp-mode
+    valueType: string
+    multiplane: uniplane
+  - name: RoCE Multipath DSCP
+    value: MULTIPATH_DSCP_DEFAULT
+    dmsPath: /nvidia/roce/config/multipath-dscp
+    valueType: string
+    alternativeValue: "unknown"
+    ignoreError: true
+    multiplane: swplb
+  - name: RoCE Multipath DSCP
+    value: MULTIPATH_DSCP_DEFAULT
+    dmsPath: /nvidia/roce/config/multipath-dscp
+    valueType: string
+    alternativeValue: "unknown"
+    ignoreError: true
+    multiplane: uniplane
+  # hwplb-specific settings (via mlxconfig)
+  - name: CNP DSCP
+    value: 48
+    mlxconfig: "ROCE_RTT_RESP_DSCP_P1"
+    multiplane: hwplb
+  - name: CNP DSCP mode
+    value: 1
+    mlxconfig: "ROCE_RTT_RESP_DSCP_MODE_P1"
+    multiplane: hwplb
+  - name: Flex Parser Profile
+    value: 10
+    mlxconfig: "FLEX_PARSER_PROFILE_ENABLE"
+    multiplane: hwplb
+  - name: Disable RDE
+    value: 1
+    mlxconfig: "RDE_DISABLE"
+    multiplane: hwplb
 runtimeConfig:
   roce:
     - name: Trust
@@ -341,20 +330,10 @@ runtimeConfig:
       valueType: int
   adaptiveRouting:
     - name: Enable CC per plane
-      value: true # False in swplb/uniplane, True in hwplb
+      value: true
       dmsPath: /interfaces/interface/nvidia/roce/config/cc-per-plane
       valueType: bool
       multiplane: hwplb
-    - name: Enable CC per plane
-      value: false # False in swplb/uniplane, True in hwplb
-      dmsPath: /interfaces/interface/nvidia/roce/config/cc-per-plane
-      valueType: bool
-      multiplane: swplb
-    - name: Enable CC per plane
-      value: false # False in swplb/uniplane, True in hwplb
-      dmsPath: /interfaces/interface/nvidia/roce/config/cc-per-plane
-      valueType: bool
-      multiplane: uniplane
     - name: Adaptive Retransmission
       value: true
       dmsPath: /interfaces/interface/nvidia/roce/config/adaptive-retransmission
@@ -371,11 +350,12 @@ runtimeConfig:
       value: false
       dmsPath: /interfaces/interface/nvidia/roce/config/slow-restart-idle
       valueType: bool
-    - name: CC Probe MP mode
-      value: true
-      dmsPath: /interfaces/interface/nvidia/roce/config/cc-probe-mp-mode
-      valueType: bool
-      multiplane: hwplb
+    # TODO: Uncomment when DMS is fixed in DOCA 3.3.0
+    # - name: CC Probe MP mode
+    #   value: true
+    #   dmsPath: /interfaces/interface/nvidia/roce/config/cc-probe-mp-mode
+    #   valueType: bool
+    #   multiplane: hwplb
     - name: Adaptive Routing Force
       value: true
       dmsPath: /interfaces/interface/nvidia/roce/config/adaptive-routing-force
@@ -502,15 +482,15 @@ runtimeConfig:
       valueType: int
     - name: Enable CC Plane Failure Detection
       value: 1
-      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[19]/config/value
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=19]/config/value
       valueType: int
     - name: CC Plane Failure Threshold
       value: 3
-      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[20]/config/value
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=20]/config/value
       valueType: int
     - name: CC Plane Recovery Threshold
       value: 1
-      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[21]/config/value
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=21]/config/value
       valueType: int
   interPacketGap:
     pureL3:
@@ -518,26 +498,11 @@ runtimeConfig:
         value: 25
         dmsPath: /interfaces/interface/ethernet/nvidia/config/inter-packet-gap
         valueType: int
-      - name: Shut down interface 
-        value: false
-        dmsPath: /interfaces/interface/config/enabled
-        valueType: bool
-      - name: Bring up interface to apply IPG settings 
-        value: false
-        dmsPath: /interfaces/interface/config/enabled
-        valueType: bool
     l3EVPN:
       - name: Inter Packet Gap for L3 EVPN overlay
         value: 33
         dmsPath: /interfaces/interface/ethernet/nvidia/config/inter-packet-gap
         valueType: int
-      - name: Shut down interface 
-        value: false
-        dmsPath: /interfaces/interface/config/enabled
-        valueType: bool
-      - name: Bring up interface to apply IPG settings 
-        value: false
-        dmsPath: /interfaces/interface/config/enabled
-        valueType: bool
-docaCCVersion: 3.2.0118-1
+#docaCCVersion: 3.3.0090-1
+docaCCVersion: 3.2.1025-1
 useSoftwareCCAlgorithm: true
