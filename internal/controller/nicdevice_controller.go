@@ -281,13 +281,12 @@ func (r *NicDeviceReconciler) reconcileInterfaceNameTemplates(ctx context.Contex
 	for _, device := range devicesWithTemplates {
 		var mismatchedPorts []string
 
-		for portIdx := range device.Status.Ports {
-			port := &device.Status.Ports[portIdx]
-
+		for i := range device.Status.Ports {
+			port := &device.Status.Ports[i]
 			expected, exists := expectedNames[port.PCI]
 			if !exists {
-				log.Log.Error(nil, "expected interface names not found for port", "device", device.Name, "port", port.PCI)
-				return fmt.Errorf("expected interface names not found for port %s", port.PCI)
+				log.Log.V(2).Info("expected interface names not found for port, skipping the check", "device", device.Name, "port", port.PCI)
+				continue
 			}
 
 			// Get actual interface names from sysfs

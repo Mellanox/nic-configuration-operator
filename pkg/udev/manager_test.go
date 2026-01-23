@@ -197,20 +197,22 @@ var _ = Describe("UdevManager", func() {
 		})
 
 		It("should handle multiple devices", func() {
+			// Note: With numPFs derived from PlaneIndices, this generates rules for all PFs
+			// even if not all PFs are currently in device.Status.Ports
 			devices := []*v1alpha1.NicDevice{
 				{
 					Spec: v1alpha1.NicDeviceSpec{
 						InterfaceNameTemplate: &v1alpha1.NicDeviceInterfaceNameSpec{
 							NicIndex:         1,
 							RailIndex:        1,
-							PlaneIndices:     []int{1, 2},
-							RdmaDevicePrefix: "rdma_r%rail_id%_n%nic_id%",
-							NetDevicePrefix:  "net_r%rail_id%_n%nic_id%",
+							PlaneIndices:     []int{1, 2}, // 2 PFs -> generates rules for .0 and .1
+							RdmaDevicePrefix: "rdma_r%rail_id%_n%nic_id%_p%plane_id%",
+							NetDevicePrefix:  "net_r%rail_id%_n%nic_id%_p%plane_id%",
 						},
 					},
 					Status: v1alpha1.NicDeviceStatus{
 						Ports: []v1alpha1.NicDevicePortSpec{
-							{PCI: "0000:1a:00.0"},
+							{PCI: "0000:1a:00.0"}, // Only 1 port in status, but 2 rules generated
 						},
 					},
 				},
@@ -219,14 +221,14 @@ var _ = Describe("UdevManager", func() {
 						InterfaceNameTemplate: &v1alpha1.NicDeviceInterfaceNameSpec{
 							NicIndex:         2,
 							RailIndex:        1,
-							PlaneIndices:     []int{3, 4},
-							RdmaDevicePrefix: "rdma_r%rail_id%_n%nic_id%",
-							NetDevicePrefix:  "net_r%rail_id%_n%nic_id%",
+							PlaneIndices:     []int{3, 4}, // 2 PFs -> generates rules for .0 and .1
+							RdmaDevicePrefix: "rdma_r%rail_id%_n%nic_id%_p%plane_id%",
+							NetDevicePrefix:  "net_r%rail_id%_n%nic_id%_p%plane_id%",
 						},
 					},
 					Status: v1alpha1.NicDeviceStatus{
 						Ports: []v1alpha1.NicDevicePortSpec{
-							{PCI: "0000:2a:00.0"},
+							{PCI: "0000:2a:00.0"}, // Only 1 port in status, but 2 rules generated
 						},
 					},
 				},
@@ -236,10 +238,12 @@ var _ = Describe("UdevManager", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(updated).To(BeTrue())
 
-			// Verify expected names from both devices
-			Expect(expectedNames).To(HaveLen(2))
-			Expect(expectedNames["0000:1a:00.0"]).To(Equal(ExpectedInterfaceNames{NetDevice: "net_r1_n1", RdmaDevice: "rdma_r1_n1"}))
-			Expect(expectedNames["0000:2a:00.0"]).To(Equal(ExpectedInterfaceNames{NetDevice: "net_r1_n2", RdmaDevice: "rdma_r1_n2"}))
+			// Verify expected names from both devices - 2 PFs each = 4 total
+			Expect(expectedNames).To(HaveLen(4))
+			Expect(expectedNames["0000:1a:00.0"]).To(Equal(ExpectedInterfaceNames{NetDevice: "net_r1_n1_p1", RdmaDevice: "rdma_r1_n1_p1"}))
+			Expect(expectedNames["0000:1a:00.1"]).To(Equal(ExpectedInterfaceNames{NetDevice: "net_r1_n1_p2", RdmaDevice: "rdma_r1_n1_p2"}))
+			Expect(expectedNames["0000:2a:00.0"]).To(Equal(ExpectedInterfaceNames{NetDevice: "net_r1_n2_p3", RdmaDevice: "rdma_r1_n2_p3"}))
+			Expect(expectedNames["0000:2a:00.1"]).To(Equal(ExpectedInterfaceNames{NetDevice: "net_r1_n2_p4", RdmaDevice: "rdma_r1_n2_p4"}))
 
 			// Check net rules file
 			netRulesPath := filepath.Join(tempDir, UdevNetRulesFile)
@@ -247,8 +251,10 @@ var _ = Describe("UdevManager", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			netContentStr := string(netContent)
-			Expect(netContentStr).To(ContainSubstring(`KERNELS=="0000:1a:00.0", NAME="net_r1_n1"`))
-			Expect(netContentStr).To(ContainSubstring(`KERNELS=="0000:2a:00.0", NAME="net_r1_n2"`))
+			Expect(netContentStr).To(ContainSubstring(`KERNELS=="0000:1a:00.0", NAME="net_r1_n1_p1"`))
+			Expect(netContentStr).To(ContainSubstring(`KERNELS=="0000:1a:00.1", NAME="net_r1_n1_p2"`))
+			Expect(netContentStr).To(ContainSubstring(`KERNELS=="0000:2a:00.0", NAME="net_r1_n2_p3"`))
+			Expect(netContentStr).To(ContainSubstring(`KERNELS=="0000:2a:00.1", NAME="net_r1_n2_p4"`))
 
 			// Check RDMA rules file
 			rdmaRulesPath := filepath.Join(tempDir, UdevRdmaRulesFile)
@@ -257,9 +263,13 @@ var _ = Describe("UdevManager", func() {
 
 			rdmaContentStr := string(rdmaContent)
 			Expect(rdmaContentStr).To(ContainSubstring(`KERNELS=="0000:1a:00.0"`))
-			Expect(rdmaContentStr).To(ContainSubstring(`rdma_r1_n1`))
+			Expect(rdmaContentStr).To(ContainSubstring(`rdma_r1_n1_p1`))
+			Expect(rdmaContentStr).To(ContainSubstring(`KERNELS=="0000:1a:00.1"`))
+			Expect(rdmaContentStr).To(ContainSubstring(`rdma_r1_n1_p2`))
 			Expect(rdmaContentStr).To(ContainSubstring(`KERNELS=="0000:2a:00.0"`))
-			Expect(rdmaContentStr).To(ContainSubstring(`rdma_r1_n2`))
+			Expect(rdmaContentStr).To(ContainSubstring(`rdma_r1_n2_p3`))
+			Expect(rdmaContentStr).To(ContainSubstring(`KERNELS=="0000:2a:00.1"`))
+			Expect(rdmaContentStr).To(ContainSubstring(`rdma_r1_n2_p4`))
 		})
 
 		It("should skip devices without InterfaceNameTemplate", func() {
@@ -514,6 +524,68 @@ var _ = Describe("UdevManager", func() {
 		It("should generate correct rdma device rule", func() {
 			rule := generateRdmaDeviceRule("0000:1a:00.0", "rdma_nic1")
 			Expect(rule).To(Equal(`ACTION=="add", KERNELS=="0000:1a:00.0", SUBSYSTEM=="infiniband", RUN+="/usr/bin/rdma dev set %k name rdma_nic1"`))
+		})
+	})
+
+	Describe("CalculatePCIAddressForPF", func() {
+		It("should return same address for pfIndex 0", func() {
+			pciAddr, err := CalculatePCIAddressForPF("0000:1a:00.0", 0)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pciAddr).To(Equal("0000:1a:00.0"))
+		})
+
+		It("should increment function number for pfIndex 1", func() {
+			pciAddr, err := CalculatePCIAddressForPF("0000:1a:00.0", 1)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pciAddr).To(Equal("0000:1a:00.1"))
+		})
+
+		It("should increment function number for multiple PFs", func() {
+			pciAddr, err := CalculatePCIAddressForPF("0000:1a:00.0", 3)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pciAddr).To(Equal("0000:1a:00.3"))
+		})
+
+		It("should handle base address with non-zero function", func() {
+			pciAddr, err := CalculatePCIAddressForPF("0000:1a:00.2", 1)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pciAddr).To(Equal("0000:1a:00.3"))
+		})
+
+		It("should handle maximum function number (7)", func() {
+			pciAddr, err := CalculatePCIAddressForPF("0000:1a:00.0", 7)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pciAddr).To(Equal("0000:1a:00.7"))
+		})
+
+		It("should return error when function number exceeds 7", func() {
+			_, err := CalculatePCIAddressForPF("0000:1a:00.0", 8)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("exceeds maximum"))
+		})
+
+		It("should return error when base + pfIndex exceeds 7", func() {
+			_, err := CalculatePCIAddressForPF("0000:1a:00.5", 3)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("exceeds maximum"))
+		})
+
+		It("should return error for invalid PCI address format", func() {
+			_, err := CalculatePCIAddressForPF("invalid", 0)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("failed to parse PCI address"))
+		})
+
+		It("should handle different domains and buses", func() {
+			pciAddr, err := CalculatePCIAddressForPF("0001:3b:02.0", 2)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pciAddr).To(Equal("0001:3b:02.2"))
+		})
+
+		It("should preserve leading zeros in formatted output", func() {
+			pciAddr, err := CalculatePCIAddressForPF("0000:01:00.0", 1)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pciAddr).To(Equal("0000:01:00.1"))
 		})
 	})
 })
