@@ -59,6 +59,10 @@ RUN apt-get update -y && \
     rm -f doca-host_${DOCA_FULL_VERSION}-ubuntu2404_amd64.deb && \
     rm -rf /var/lib/apt/lists/*
 
+# Remove DOCA-Host unneeded collectx packages from base image
+RUN dpkg --purge collectx || apt-get remove --purge -y collectx || true && \
+    rm -f /usr/share/doca-host-*/repo/pool/collectx*.deb
+
 WORKDIR /
 COPY --from=builder /workspace/build/manager .
 
