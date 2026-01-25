@@ -64,6 +64,11 @@ type fakeExec struct {
 	pos  int
 }
 
+const (
+	shutdownInterfaceParamName = "Shut down interface"
+	bringUpInterfaceParamName  = "Bring up interface to apply IPG settings"
+)
+
 var (
 	nextCmd *fakeCmd
 )
@@ -277,10 +282,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
 			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(nil)
 			dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
-				return len(params) == 1 && params[0].Name == "Shut down interface"
+				return len(params) == 1 && params[0].Name == shutdownInterfaceParamName
 			})).Return(nil)
 			dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
-				return len(params) == 1 && params[0].Name == "Bring up interface to apply IPG settings"
+				return len(params) == 1 && params[0].Name == bringUpInterfaceParamName
 			})).Return(nil)
 
 			nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
@@ -300,10 +305,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
 			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.L3EVPN).Return(nil)
 			dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
-				return len(params) == 1 && params[0].Name == "Shut down interface"
+				return len(params) == 1 && params[0].Name == shutdownInterfaceParamName
 			})).Return(nil)
 			dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
-				return len(params) == 1 && params[0].Name == "Bring up interface to apply IPG settings"
+				return len(params) == 1 && params[0].Name == bringUpInterfaceParamName
 			})).Return(nil)
 
 			nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
@@ -1508,10 +1513,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(nil)
 				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
-					return len(params) == 1 && params[0].Name == "Shut down interface"
+					return len(params) == 1 && params[0].Name == shutdownInterfaceParamName
 				})).Return(nil)
 				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
-					return len(params) == 1 && params[0].Name == "Bring up interface to apply IPG settings"
+					return len(params) == 1 && params[0].Name == bringUpInterfaceParamName
 				})).Return(nil)
 
 				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
@@ -1538,10 +1543,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(nil)
 				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
-					return len(params) == 1 && params[0].Name == "Shut down interface"
+					return len(params) == 1 && params[0].Name == shutdownInterfaceParamName
 				})).Return(nil)
 				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
-					return len(params) == 1 && params[0].Name == "Bring up interface to apply IPG settings"
+					return len(params) == 1 && params[0].Name == bringUpInterfaceParamName
 				})).Return(nil)
 
 				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
@@ -1571,10 +1576,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(nil)
 				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
-					return len(params) == 1 && params[0].Name == "Shut down interface"
+					return len(params) == 1 && params[0].Name == shutdownInterfaceParamName
 				})).Return(nil)
 				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
-					return len(params) == 1 && params[0].Name == "Bring up interface to apply IPG settings"
+					return len(params) == 1 && params[0].Name == bringUpInterfaceParamName
 				})).Return(nil)
 
 				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
@@ -1603,10 +1608,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(nil)
 				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
-					return len(params) == 1 && params[0].Name == "Shut down interface"
+					return len(params) == 1 && params[0].Name == shutdownInterfaceParamName
 				})).Return(nil)
 				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
-					return len(params) == 1 && params[0].Name == "Bring up interface to apply IPG settings"
+					return len(params) == 1 && params[0].Name == bringUpInterfaceParamName
 				})).Return(nil)
 
 				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
@@ -1792,10 +1797,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(nil)
 				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
-					return len(params) == 1 && params[0].Name == "Shut down interface"
+					return len(params) == 1 && params[0].Name == shutdownInterfaceParamName
 				})).Return(nil)
 				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
-					return len(params) == 1 && params[0].Name == "Bring up interface to apply IPG settings"
+					return len(params) == 1 && params[0].Name == bringUpInterfaceParamName
 				})).Return(nil)
 
 				err := manager.ApplyRuntimeConfig(device)
@@ -1834,10 +1839,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				dmsCli.On("SetParameters", expectedCC).Return(nil)
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(nil)
 				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
-					return len(params) == 1 && params[0].Name == "Shut down interface"
+					return len(params) == 1 && params[0].Name == shutdownInterfaceParamName
 				})).Return(nil)
 				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
-					return len(params) == 1 && params[0].Name == "Bring up interface to apply IPG settings"
+					return len(params) == 1 && params[0].Name == bringUpInterfaceParamName
 				})).Return(nil)
 
 				err := manager.ApplyRuntimeConfig(device)
@@ -1874,10 +1879,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
 				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(nil)
 				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
-					return len(params) == 1 && params[0].Name == "Shut down interface"
+					return len(params) == 1 && params[0].Name == shutdownInterfaceParamName
 				})).Return(nil)
 				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
-					return len(params) == 1 && params[0].Name == "Bring up interface to apply IPG settings"
+					return len(params) == 1 && params[0].Name == bringUpInterfaceParamName
 				})).Return(nil)
 
 				err := manager.ApplyRuntimeConfig(device)
@@ -1910,10 +1915,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				dmsCli.On("SetParameters", []types.ConfigurationParameter{}).Return(nil).Times(3)
 				dmsCli.On("SetParameters", expectedIPG).Return(nil)
 				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
-					return len(params) == 1 && params[0].Name == "Shut down interface"
+					return len(params) == 1 && params[0].Name == shutdownInterfaceParamName
 				})).Return(nil)
 				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
-					return len(params) == 1 && params[0].Name == "Bring up interface to apply IPG settings"
+					return len(params) == 1 && params[0].Name == bringUpInterfaceParamName
 				})).Return(nil)
 
 				err := manager.ApplyRuntimeConfig(device)
