@@ -196,14 +196,14 @@ func calculateNicRailAndPlaneIndices(device *v1alpha1.NicDevice, railPciAddresse
 			// Check if any of the device's ports match this PCI address
 			for _, port := range device.Status.Ports {
 				if port.PCI == pciAddr {
-					// Indices start with 1
+					// Indices start with 0
 					// Calculate plane indices based on position within the rail
 					planeIndices := make([]int, pfsPerNic)
-					firstPlaneIndex := nicPositionInRail*pfsPerNic + 1
+					firstPlaneIndex := nicPositionInRail * pfsPerNic
 					for i := 0; i < pfsPerNic; i++ {
 						planeIndices[i] = firstPlaneIndex + i
 					}
-					return nicIndex + 1, railIndex + 1, planeIndices, true
+					return nicIndex, railIndex, planeIndices, true
 				}
 			}
 			nicIndex++
