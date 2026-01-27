@@ -42,26 +42,16 @@ RUN --mount=type=cache,target=/go/pkg/mod/ GO_GCFLAGS=${GCFLAGS} make build-mana
 
 FROM $UBUNTU_STIG_BASE_IMAGE
 
-ARG DOCA_VERSION=3.2.1
-ARG DOCA_FULL_VERSION=3.2.1-044000-25.10
-ENV DEBIAN_FRONTEND=noninteractive
+ENV MFT_VERSION=4.33.0-169
 
-# Install DOCA packages without DKMS builds
-# Note: Containers use host kernel modules at runtime, so DKMS builds during image build are not needed
-# We configure DKMS to skip automatic builds during package installation
+# Install MFT (Mellanox Firmware Tools) - amd64/x86_64 only for STIG
 RUN apt-get update -y && \
-    apt-get install -y --no-install-recommends wget dkms && \
-    echo 'exit 0' > /usr/sbin/dkms && chmod +x /usr/sbin/dkms && \
-    wget https://www.mellanox.com/downloads/DOCA/DOCA_v${DOCA_VERSION}/host/doca-host_${DOCA_FULL_VERSION}-ubuntu2404_amd64.deb && \
-    dpkg -i doca-host_${DOCA_FULL_VERSION}-ubuntu2404_amd64.deb && \
-    apt-get update -y && \
-    apt-get install -y doca-all && \
-    rm -f doca-host_${DOCA_FULL_VERSION}-ubuntu2404_amd64.deb && \
+    apt-get install -y --no-install-recommends curl && \
+    curl -fsSL https://www.mellanox.com/downloads/MFT/mft-${MFT_VERSION}-x86_64-deb.tgz | tar -xz --no-same-owner -C /tmp && \
+    cd /tmp/mft-${MFT_VERSION}-x86_64-deb && \
+    ./install.sh --without-kernel && \
+    rm -rf /tmp/mft-${MFT_VERSION}-x86_64-deb && \
     rm -rf /var/lib/apt/lists/*
-
-# Remove DOCA-Host unneeded collectx packages from base image
-RUN dpkg --purge collectx || apt-get remove --purge -y collectx || true && \
-    rm -f /usr/share/doca-host-*/repo/pool/collectx*.deb
 
 WORKDIR /
 COPY --from=builder /workspace/build/manager .
