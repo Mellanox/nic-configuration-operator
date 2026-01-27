@@ -30,25 +30,30 @@ var _ = Describe("HostUtils", func() {
 	//nolint:dupl
 	Describe("GetVPD", func() {
 		It("should return part, serial and model name", func() {
-			partNumber := "partNumber"
-			serialNumber := "serialNumber"
-			modelName := "ConnectX-6 LX"
+			partNumber := "MCX623106AE-CDAT"
+			serialNumber := "MT2235J01129"
+			modelName := "ConnectX-6 Dx EN adapter card, 100GbE, Dual-port QSFP56, PCIe 4.0 x16, Crypto, No Secure Boot"
 
 			fakeExec := &execTesting.FakeExec{}
 
 			fakeCmd := &execTesting.FakeCmd{}
 			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
-				return []byte("irrelevant line\n" +
-						"PN: partNumber\n" +
-						"SN: serialNumber\n" +
-						"ID: ConnectX-6 LX\n" +
-						"another irrelevant line"),
+				return []byte("  VPD-KEYWORD    DESCRIPTION             VALUE\n" +
+						"  -----------    -----------             -----\n" +
+						"Read Only Section:\n" +
+						"\n" +
+						"  PN             Part Number             MCX623106AE-CDAT\n" +
+						"  EC             Revision                AB\n" +
+						"  SN             Serial Number           MT2235J01129\n" +
+						"  V3             N/A                     3869145f5722ed118000b83fd2193152\n" +
+						"  IDTAG          Board Id                ConnectX-6 Dx EN adapter card, 100GbE, Dual-port QSFP56, PCIe 4.0 x16, Crypto, No Secure Boot\n"),
 					nil, nil
 			})
 
 			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
-				Expect(cmd).To(Equal("mstvpd"))
-				Expect(args[0]).To(Equal(pciAddress))
+				Expect(cmd).To(Equal("mlxvpd"))
+				Expect(args[0]).To(Equal("-d"))
+				Expect(args[1]).To(Equal(pciAddress))
 				return fakeCmd
 			})
 
@@ -68,12 +73,13 @@ var _ = Describe("HostUtils", func() {
 
 			fakeCmd := &execTesting.FakeCmd{}
 			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
-				return []byte("SN: serialNumber"), nil, nil
+				return []byte("  SN             Serial Number           MT2235J01129\n"), nil, nil
 			})
 
 			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
-				Expect(cmd).To(Equal("mstvpd"))
-				Expect(args[0]).To(Equal(pciAddress))
+				Expect(cmd).To(Equal("mlxvpd"))
+				Expect(args[0]).To(Equal("-d"))
+				Expect(args[1]).To(Equal(pciAddress))
 				return fakeCmd
 			})
 
@@ -88,12 +94,13 @@ var _ = Describe("HostUtils", func() {
 
 			fakeCmd = &execTesting.FakeCmd{}
 			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
-				return []byte("PN: partsNumber"), nil, nil
+				return []byte("  PN             Part Number             MCX623106AE-CDAT\n"), nil, nil
 			})
 
 			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
-				Expect(cmd).To(Equal("mstvpd"))
-				Expect(args[0]).To(Equal(pciAddress))
+				Expect(cmd).To(Equal("mlxvpd"))
+				Expect(args[0]).To(Equal("-d"))
+				Expect(args[1]).To(Equal(pciAddress))
 				return fakeCmd
 			})
 
@@ -102,24 +109,28 @@ var _ = Describe("HostUtils", func() {
 			Expect(err).To(HaveOccurred())
 			Expect(vpd).To(BeNil())
 		})
-		It("should set empty model name when ID is absent", func() {
-			partNumber := "PN123"
-			serialNumber := "SN456"
+		It("should set empty model name when IDTAG is absent", func() {
+			partNumber := "MCX623106AE-CDAT"
+			serialNumber := "MT2235J01129"
 
 			fakeExec := &execTesting.FakeExec{}
 
 			fakeCmd := &execTesting.FakeCmd{}
 			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
-				return []byte("irrelevant line\n" +
-						"PN: " + partNumber + "\n" +
-						"SN: " + serialNumber + "\n" +
-						"another irrelevant line"),
+				return []byte("  VPD-KEYWORD    DESCRIPTION             VALUE\n" +
+						"  -----------    -----------             -----\n" +
+						"Read Only Section:\n" +
+						"\n" +
+						"  PN             Part Number             " + partNumber + "\n" +
+						"  SN             Serial Number           " + serialNumber + "\n" +
+						"  V3             N/A                     3869145f5722ed118000b83fd2193152\n"),
 					nil, nil
 			})
 
 			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
-				Expect(cmd).To(Equal("mstvpd"))
-				Expect(args[0]).To(Equal(pciAddress))
+				Expect(cmd).To(Equal("mlxvpd"))
+				Expect(args[0]).To(Equal("-d"))
+				Expect(args[1]).To(Equal(pciAddress))
 				return fakeCmd
 			})
 

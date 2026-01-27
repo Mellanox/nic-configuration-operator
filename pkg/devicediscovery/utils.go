@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/Mellanox/rdmamap"
@@ -39,7 +40,7 @@ type DeviceDiscoveryUtils interface {
 	// GetPCIDevices returns a list of PCI devices on the host
 	GetPCIDevices() ([]*pci.Device, error)
 
-	// GetVPD uses mstvpd util to retrieve Part Number, Serial Number, Model Name of the PCI device
+	// GetVPD uses mlxvpd util to retrieve Part Number, Serial Number, Model Name of the PCI device
 	GetVPD(pciAddr string) (*types.VPD, error)
 
 	// GetFirmwareVersionAndPSID uses flint tool to retrieve FW version and PSID of the device
@@ -73,36 +74,42 @@ func (d *deviceDiscoveryUtils) GetPCIDevices() ([]*pci.Device, error) {
 	return pciRegistry.Devices, nil
 }
 
-// GetVPD uses mstvpd util to retrieve Part Number, Serial Number, Model Name of the PCI device
+// GetVPD uses mlxvpd util to retrieve Part Number, Serial Number, Model Name of the PCI device
 func (d *deviceDiscoveryUtils) GetVPD(pciAddr string) (*types.VPD, error) {
 	log.Log.Info("HostUtils.GetPartAndSerialNumber()", "pciAddr", pciAddr)
-	cmd := d.execInterface.Command("mstvpd", pciAddr)
+	cmd := d.execInterface.Command("mlxvpd", "-d", pciAddr)
 	output, err := utils.RunCommand(cmd)
 	if err != nil {
-		log.Log.Error(err, "GetPartAndSerialNumber(): Failed to run mstvpd")
+		log.Log.Error(err, "GetPartAndSerialNumber(): Failed to run mlxvpd")
 		return nil, err
 	}
 
-	// Parse the output for PN and SN
+	// Parse the output for PN, SN and IDTAG
+	// The output format is tabular with columns: VPD-KEYWORD, DESCRIPTION, VALUE
+	// Example line: "  PN             Part Number             MCX623106AE-CDAT"
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 	var partNumber, serialNumber, modelName string
+
+	// Compile regex patterns for each VPD field we care about
+	// Pattern: keyword + whitespace + description + whitespace + value (capture group)
+	pnRegex := regexp.MustCompile(`^\s*` + consts.PartNumberPrefix + `\s+` + consts.PartNumberDescription + `\s+(.+)$`)
+	snRegex := regexp.MustCompile(`^\s*` + consts.SerialNumberPrefix + `\s+` + consts.SerialNumberDescription + `\s+(.+)$`)
+	modelRegex := regexp.MustCompile(`^\s*` + consts.ModelNamePrefix + `\s+` + consts.ModelNameDescription + `\s+(.+)$`)
 
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		if strings.HasPrefix(line, consts.PartNumberPrefix) {
-			partNumber = strings.TrimSpace(strings.TrimPrefix(line, consts.PartNumberPrefix))
-		}
-		if strings.HasPrefix(line, consts.SerialNumberPrefix) {
-			serialNumber = strings.TrimSpace(strings.TrimPrefix(line, consts.SerialNumberPrefix))
-		}
-		if strings.HasPrefix(line, consts.ModelNamePrefix) {
-			modelName = strings.TrimSpace(strings.TrimPrefix(line, consts.ModelNamePrefix))
+		if matches := pnRegex.FindStringSubmatch(line); len(matches) > 1 {
+			partNumber = strings.TrimSpace(matches[1])
+		} else if matches := snRegex.FindStringSubmatch(line); len(matches) > 1 {
+			serialNumber = strings.TrimSpace(matches[1])
+		} else if matches := modelRegex.FindStringSubmatch(line); len(matches) > 1 {
+			modelName = strings.TrimSpace(matches[1])
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		log.Log.Error(err, "GetPartAndSerialNumber(): Error reading mstvpd output")
+		log.Log.Error(err, "GetPartAndSerialNumber(): Error reading mlxvpd output")
 		return nil, err
 	}
 
