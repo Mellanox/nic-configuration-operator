@@ -145,20 +145,20 @@ var _ = Describe("NicInterfaceNameTemplate Controller", func() {
 		}
 		Expect(k8sClient.Create(ctx, template)).To(Succeed())
 
-		// Verify device1 gets nicIndex=1, railIndex=1, planeIndices=[1,2] (first NIC in rail 1)
+		// Verify device1 gets nicIndex=0, railIndex=0, planeIndices=[0,1] (first NIC in rail 0)
 		Eventually(getDeviceInterfaceNameSpec(ctx, device1.Name, namespaceName, k8sClient)).WithTimeout(1 * time.Minute).Should(Equal(&v1alpha1.NicDeviceInterfaceNameSpec{
-			NicIndex:         1,
-			RailIndex:        1,
-			PlaneIndices:     []int{1, 2},
+			NicIndex:         0,
+			RailIndex:        0,
+			PlaneIndices:     []int{0, 1},
 			RdmaDevicePrefix: template.Spec.RdmaDevicePrefix,
 			NetDevicePrefix:  template.Spec.NetDevicePrefix,
 		}))
 
-		// Verify device2 gets nicIndex=3, railIndex=2, planeIndices=[1,2] (first NIC in rail 2)
+		// Verify device2 gets nicIndex=2, railIndex=1, planeIndices=[0,1] (first NIC in rail 1)
 		Eventually(getDeviceInterfaceNameSpec(ctx, device2.Name, namespaceName, k8sClient)).Should(Equal(&v1alpha1.NicDeviceInterfaceNameSpec{
-			NicIndex:         3,
-			RailIndex:        2,
-			PlaneIndices:     []int{1, 2},
+			NicIndex:         2,
+			RailIndex:        1,
+			PlaneIndices:     []int{0, 1},
 			RdmaDevicePrefix: template.Spec.RdmaDevicePrefix,
 			NetDevicePrefix:  template.Spec.NetDevicePrefix,
 		}))
@@ -370,9 +370,9 @@ var _ = Describe("NicInterfaceNameTemplate Controller", func() {
 
 		// Device should get the spec since empty selector matches all nodes
 		Eventually(getDeviceInterfaceNameSpec(ctx, device.Name, namespaceName, k8sClient)).WithTimeout(1 * time.Minute).Should(Equal(&v1alpha1.NicDeviceInterfaceNameSpec{
-			NicIndex:         1,
-			RailIndex:        1,
-			PlaneIndices:     []int{1, 2},
+			NicIndex:         0,
+			RailIndex:        0,
+			PlaneIndices:     []int{0, 1},
 			RdmaDevicePrefix: template.Spec.RdmaDevicePrefix,
 			NetDevicePrefix:  template.Spec.NetDevicePrefix,
 		}))
@@ -382,7 +382,7 @@ var _ = Describe("NicInterfaceNameTemplate Controller", func() {
 var _ = Describe("calculateNicRailAndPlaneIndices", func() {
 	pfsPerNic := 2
 
-	It("should return correct indices for first PCI address (first NIC in rail 1)", func() {
+	It("should return correct indices for first PCI address (first NIC in rail 0)", func() {
 		device := &v1alpha1.NicDevice{
 			Status: v1alpha1.NicDeviceStatus{
 				Ports: []v1alpha1.NicDevicePortSpec{{PCI: "0000:1a:00.0"}},
@@ -395,12 +395,12 @@ var _ = Describe("calculateNicRailAndPlaneIndices", func() {
 
 		nicIndex, railIndex, planeIndices, found := calculateNicRailAndPlaneIndices(device, railPciAddresses, pfsPerNic)
 		Expect(found).To(BeTrue())
-		Expect(nicIndex).To(Equal(1))
-		Expect(railIndex).To(Equal(1))
-		Expect(planeIndices).To(Equal([]int{1, 2}))
+		Expect(nicIndex).To(Equal(0))
+		Expect(railIndex).To(Equal(0))
+		Expect(planeIndices).To(Equal([]int{0, 1}))
 	})
 
-	It("should return correct indices for second PCI address in first rail (second NIC in rail 1)", func() {
+	It("should return correct indices for second PCI address in first rail (second NIC in rail 0)", func() {
 		device := &v1alpha1.NicDevice{
 			Status: v1alpha1.NicDeviceStatus{
 				Ports: []v1alpha1.NicDevicePortSpec{{PCI: "0000:2a:00.0"}},
@@ -413,12 +413,12 @@ var _ = Describe("calculateNicRailAndPlaneIndices", func() {
 
 		nicIndex, railIndex, planeIndices, found := calculateNicRailAndPlaneIndices(device, railPciAddresses, pfsPerNic)
 		Expect(found).To(BeTrue())
-		Expect(nicIndex).To(Equal(2))
-		Expect(railIndex).To(Equal(1))
-		Expect(planeIndices).To(Equal([]int{3, 4})) // Second NIC in rail gets planes 3,4
+		Expect(nicIndex).To(Equal(1))
+		Expect(railIndex).To(Equal(0))
+		Expect(planeIndices).To(Equal([]int{2, 3})) // Second NIC in rail gets planes 2,3
 	})
 
-	It("should return correct indices for first PCI address in second rail (first NIC in rail 2)", func() {
+	It("should return correct indices for first PCI address in second rail (first NIC in rail 1)", func() {
 		device := &v1alpha1.NicDevice{
 			Status: v1alpha1.NicDeviceStatus{
 				Ports: []v1alpha1.NicDevicePortSpec{{PCI: "0000:3a:00.0"}},
@@ -431,12 +431,12 @@ var _ = Describe("calculateNicRailAndPlaneIndices", func() {
 
 		nicIndex, railIndex, planeIndices, found := calculateNicRailAndPlaneIndices(device, railPciAddresses, pfsPerNic)
 		Expect(found).To(BeTrue())
-		Expect(nicIndex).To(Equal(3))
-		Expect(railIndex).To(Equal(2))
-		Expect(planeIndices).To(Equal([]int{1, 2})) // First NIC in rail 2 gets planes 1,2 (reset per rail)
+		Expect(nicIndex).To(Equal(2))
+		Expect(railIndex).To(Equal(1))
+		Expect(planeIndices).To(Equal([]int{0, 1})) // First NIC in rail 1 gets planes 0,1 (reset per rail)
 	})
 
-	It("should return correct indices for last PCI address (second NIC in rail 2)", func() {
+	It("should return correct indices for last PCI address (second NIC in rail 1)", func() {
 		device := &v1alpha1.NicDevice{
 			Status: v1alpha1.NicDeviceStatus{
 				Ports: []v1alpha1.NicDevicePortSpec{{PCI: "0000:4a:00.0"}},
@@ -449,9 +449,9 @@ var _ = Describe("calculateNicRailAndPlaneIndices", func() {
 
 		nicIndex, railIndex, planeIndices, found := calculateNicRailAndPlaneIndices(device, railPciAddresses, pfsPerNic)
 		Expect(found).To(BeTrue())
-		Expect(nicIndex).To(Equal(4))
-		Expect(railIndex).To(Equal(2))
-		Expect(planeIndices).To(Equal([]int{3, 4})) // Second NIC in rail 2 gets planes 3,4
+		Expect(nicIndex).To(Equal(3))
+		Expect(railIndex).To(Equal(1))
+		Expect(planeIndices).To(Equal([]int{2, 3})) // Second NIC in rail 1 gets planes 2,3
 	})
 
 	It("should return not found for non-matching PCI address", func() {
@@ -485,9 +485,9 @@ var _ = Describe("calculateNicRailAndPlaneIndices", func() {
 
 		nicIndex, railIndex, planeIndices, found := calculateNicRailAndPlaneIndices(device, railPciAddresses, pfsPerNic)
 		Expect(found).To(BeTrue())
-		Expect(nicIndex).To(Equal(3))
-		Expect(railIndex).To(Equal(2))
-		Expect(planeIndices).To(Equal([]int{1, 2}))
+		Expect(nicIndex).To(Equal(2))
+		Expect(railIndex).To(Equal(1))
+		Expect(planeIndices).To(Equal([]int{0, 1}))
 	})
 
 	It("should return not found for empty rail addresses", func() {
@@ -512,11 +512,11 @@ var _ = Describe("calculateNicRailAndPlaneIndices", func() {
 			{"0000:1a:00.0", "0000:2a:00.0"},
 		}
 
-		// With pfsPerNic=4, second NIC should have planes [5,6,7,8]
+		// With pfsPerNic=4, second NIC should have planes [4,5,6,7]
 		nicIndex, railIndex, planeIndices, found := calculateNicRailAndPlaneIndices(device, railPciAddresses, 4)
 		Expect(found).To(BeTrue())
-		Expect(nicIndex).To(Equal(2))
-		Expect(railIndex).To(Equal(1))
-		Expect(planeIndices).To(Equal([]int{5, 6, 7, 8}))
+		Expect(nicIndex).To(Equal(1))
+		Expect(railIndex).To(Equal(0))
+		Expect(planeIndices).To(Equal([]int{4, 5, 6, 7}))
 	})
 })
