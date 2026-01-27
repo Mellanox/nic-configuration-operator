@@ -59,8 +59,6 @@ COPY --from=builder /workspace/build/manager .
 # Copy sources to the container
 COPY . /workspace
 
-RUN --mount=type=secret,id=stig_script,target=/tmp/stig-fixer.sh bash /tmp/stig-fixer.sh
-
 USER 65532:65532
 
 ENTRYPOINT ["/manager"]

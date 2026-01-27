@@ -160,7 +160,6 @@ build-operator-stig-image-rhel:
     # build operator image
     - |
       docker build \
-        --secret    id=stig_script,src=/tmp/stig-scripts/stig-fixer.sh \
         --build-arg GOPROXY=$GOPROXY \
         --build-arg RHEL_STIG_BASE_IMAGE=$RHEL_STIG_BASE_IMAGE \
         --file      Dockerfile.operator.stig-rhel \
@@ -181,7 +180,6 @@ build-daemon-stig-image-rhel:
     # build daemon image
     - |
       docker build \
-        --secret    id=stig_script,src=/tmp/stig-scripts/stig-fixer.sh \
         --build-arg GOPROXY=$GOPROXY \
         --build-arg RHEL_STIG_BASE_IMAGE=$RHEL_STIG_BASE_IMAGE \
         --file      Dockerfile.daemon.stig-rhel \
