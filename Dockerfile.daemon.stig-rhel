@@ -80,8 +80,6 @@ COPY bindata /bindata
 # Copy sources to the container
 COPY . /workspace
 
-RUN --mount=type=secret,id=stig_script,target=/tmp/stig-fixer.sh bash /tmp/stig-fixer.sh
-
 ENTRYPOINT ["/entrypoint.sh"]
 
 LABEL org.opencontainers.image.source=https://nvcr.io/nvidia/cloud-native/nic-configuration-daemon
