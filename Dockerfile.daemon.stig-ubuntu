@@ -52,20 +52,17 @@ RUN apt-get update -y && \
     apt-get install -y --no-install-recommends ${PACKAGES} && \
     rm -rf /var/lib/apt/lists/*
 
-# Install DOCA packages without DKMS builds
-# Note: Containers use host kernel modules at runtime, so DKMS builds during image build are not needed
-# We configure DKMS to skip automatic builds during package installation
+# Install DOCA packages (only doca-dms, doca-spcx-cc, and doca-pcc-counters are needed)
 ARG DOCA_VERSION=3.2.1
 ARG DOCA_FULL_VERSION=3.2.1-044000-25.10
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update -y && \
-    apt-get install -y --no-install-recommends wget dkms && \
-    echo 'exit 0' > /usr/sbin/dkms && chmod +x /usr/sbin/dkms && \
+    apt-get install -y --no-install-recommends wget && \
     wget https://www.mellanox.com/downloads/DOCA/DOCA_v${DOCA_VERSION}/host/doca-host_${DOCA_FULL_VERSION}-ubuntu2404_amd64.deb && \
     dpkg -i doca-host_${DOCA_FULL_VERSION}-ubuntu2404_amd64.deb && \
     apt-get update -y && \
-    apt-get install -y doca-all && \
+    apt-get install -y doca-dms doca-spcx-cc doca-pcc-counters && \
     rm -f doca-host_${DOCA_FULL_VERSION}-ubuntu2404_amd64.deb && \
     rm -rf /var/lib/apt/lists/*
 

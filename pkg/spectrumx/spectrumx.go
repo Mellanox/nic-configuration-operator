@@ -190,17 +190,14 @@ func (m *spectrumXConfigManager) checkParamsApplied(ctx context.Context, mlxconf
 			return false, err
 		}
 
-		values, err := dmsClient.GetParameters(dmsParams)
+		applied, err := checkDmsParamsApplied(device, dmsParams, dmsClient)
 		if err != nil {
-			log.Log.Error(err, "checkParamsApplied(): failed to get DMS config", "device", device.Name)
+			log.Log.Error(err, "checkParamsApplied(): failed to check DMS params", "device", device.Name)
 			return false, err
 		}
 
-		for _, param := range dmsParams {
-			if values[param.DMSPath] != param.Value && values[param.DMSPath] != param.AlternativeValue {
-				log.Log.V(2).Info("checkParamsApplied(): DMS parameter not applied", "device", device.Name, "param", param)
-				return false, nil
-			}
+		if !applied {
+			return false, nil
 		}
 	}
 
@@ -385,20 +382,24 @@ func writeCnpDscp(device *v1alpha1.NicDevice, multiplaneMode string) error {
 	return nil
 }
 
-// parametersApplied checks if the given parameters are applied to the device
-func parametersApplied(device *v1alpha1.NicDevice, params []types.ConfigurationParameter, dmsClient dms.DMSClient) (bool, error) {
-	log.Log.Info("SpectrumXConfigManager.parametersApplied()", "device", device.Name)
+// checkDmsParamsApplied checks if the given DMS parameters are applied to the device
+func checkDmsParamsApplied(device *v1alpha1.NicDevice, params []types.ConfigurationParameter, dmsClient dms.DMSClient) (bool, error) {
+	log.Log.Info("SpectrumXConfigManager.checkDmsParamsApplied()", "device", device.Name)
 
 	values, err := dmsClient.GetParameters(params)
 	if err != nil {
-		log.Log.Error(err, "checkIfSectionApplied(): failed to get Spectrum-X config", "device", device.Name)
+		if types.IsValuesDoNotMatchError(err) {
+			log.Log.V(2).Info("checkDmsParamsApplied(): values do not match across ports/priorities", "device", device.Name, "error", err.Error())
+			return false, nil
+		}
+		log.Log.Error(err, "checkDmsParamsApplied(): failed to get DMS config", "device", device.Name)
 		return false, err
 	}
-	log.Log.V(2).Info("SpectrumXConfigManager.parametersApplied(): got the following values", "device", device.Name, "values", values)
+	log.Log.V(2).Info("SpectrumXConfigManager.checkDmsParamsApplied(): got the following values", "device", device.Name, "values", values)
 
 	for _, param := range params {
 		if values[param.DMSPath] != param.Value && values[param.DMSPath] != param.AlternativeValue {
-			log.Log.V(2).Info("SpectrumXConfigManager.parametersApplied(): parameter not applied", "device", device.Name, "param", param)
+			log.Log.V(2).Info("SpectrumXConfigManager.checkDmsParamsApplied(): parameter not applied", "device", device.Name, "param", param)
 			return false, nil
 		}
 	}
@@ -429,7 +430,7 @@ func (m *spectrumXConfigManager) RuntimeConfigApplied(device *v1alpha1.NicDevice
 
 	roceParams := filterParameters(desiredConfig.RuntimeConfig.Roce, deviceType, numberOfPlanes, multiplaneMode)
 	log.Log.V(2).Info("SpectrumXConfigManager.RuntimeConfigApplied(): checking RoCE config", "device", device.Name)
-	roceApplied, err := parametersApplied(device, roceParams, dmsClient)
+	roceApplied, err := checkDmsParamsApplied(device, roceParams, dmsClient)
 	if err != nil {
 		log.Log.Error(err, "RuntimeConfigApplied(): failed to check if RoCE config is applied", "device", device.Name)
 		return false, err
@@ -453,7 +454,7 @@ func (m *spectrumXConfigManager) RuntimeConfigApplied(device *v1alpha1.NicDevice
 
 	adaptiveRoutingParams := filterParameters(desiredConfig.RuntimeConfig.AdaptiveRouting, deviceType, numberOfPlanes, multiplaneMode)
 	log.Log.V(2).Info("SpectrumXConfigManager.RuntimeConfigApplied(): checking Adaptive Routing config", "device", device.Name)
-	adaptiveRoutingApplied, err := parametersApplied(device, adaptiveRoutingParams, dmsClient)
+	adaptiveRoutingApplied, err := checkDmsParamsApplied(device, adaptiveRoutingParams, dmsClient)
 	if err != nil {
 		log.Log.Error(err, "RuntimeConfigApplied(): failed to check if Adaptive Routing config is applied", "device", device.Name)
 		return false, err
@@ -478,7 +479,7 @@ func (m *spectrumXConfigManager) RuntimeConfigApplied(device *v1alpha1.NicDevice
 
 	congestionControlParams := filterParameters(desiredConfig.RuntimeConfig.CongestionControl, deviceType, numberOfPlanes, multiplaneMode)
 	log.Log.V(2).Info("SpectrumXConfigManager.RuntimeConfigApplied(): checking Congestion Control config", "device", device.Name)
-	congestionControlApplied, err := parametersApplied(device, congestionControlParams, dmsClient)
+	congestionControlApplied, err := checkDmsParamsApplied(device, congestionControlParams, dmsClient)
 	if err != nil {
 		log.Log.Error(err, "RuntimeConfigApplied(): failed to check if Congestion Control config is applied", "device", device.Name)
 		return false, err
@@ -500,7 +501,7 @@ func (m *spectrumXConfigManager) RuntimeConfigApplied(device *v1alpha1.NicDevice
 	}
 	interPacketGapParams = filterParameters(interPacketGapParams, deviceType, numberOfPlanes, multiplaneMode)
 
-	overlayParamsApplied, err := parametersApplied(device, interPacketGapParams, dmsClient)
+	overlayParamsApplied, err := checkDmsParamsApplied(device, interPacketGapParams, dmsClient)
 	if err != nil {
 		log.Log.Error(err, "ApplyRuntimeConfig(): failed to set Spectrum-X InterPacketGap config", "device", device.Name)
 		return false, err
