@@ -45,8 +45,9 @@ FROM $RHEL_STIG_BASE_IMAGE
 ENV MFT_VERSION=4.33.0-169
 
 # Install MFT (Mellanox Firmware Tools) - amd64/x86_64 only for STIG
-RUN dnf makecache && \
-    dnf install -y curl && \
+# Note: curl-minimal is already in UBI base image, sufficient for downloads
+# Note: kmod is required by MFT
+RUN dnf install -y kmod && \
     curl -fsSL https://www.mellanox.com/downloads/MFT/mft-${MFT_VERSION}-x86_64-rpm.tgz | tar -xz --no-same-owner -C /tmp && \
     cd /tmp/mft-${MFT_VERSION}-x86_64-rpm && \
     ./install.sh --without-kernel && \
