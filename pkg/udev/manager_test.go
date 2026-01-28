@@ -109,9 +109,9 @@ var _ = Describe("UdevManager", func() {
 				{
 					Spec: v1alpha1.NicDeviceSpec{
 						InterfaceNameTemplate: &v1alpha1.NicDeviceInterfaceNameSpec{
-							NicIndex:         1,
-							RailIndex:        1,
-							PlaneIndices:     []int{1, 2},
+							NicIndex:         0,
+							RailIndex:        0,
+							PlaneIndices:     []int{0, 1},
 							RdmaDevicePrefix: "rdma%nic_id%p%plane_id%",
 							NetDevicePrefix:  "net%nic_id%p%plane_id%",
 						},
@@ -131,8 +131,8 @@ var _ = Describe("UdevManager", func() {
 
 			// Verify expected names are returned
 			Expect(expectedNames).To(HaveLen(2))
-			Expect(expectedNames["0000:1a:00.0"]).To(Equal(ExpectedInterfaceNames{NetDevice: "net1p1", RdmaDevice: "rdma1p1"}))
-			Expect(expectedNames["0000:1a:00.1"]).To(Equal(ExpectedInterfaceNames{NetDevice: "net1p2", RdmaDevice: "rdma1p2"}))
+			Expect(expectedNames["0000:1a:00.0"]).To(Equal(ExpectedInterfaceNames{NetDevice: "net0p0", RdmaDevice: "rdma0p0"}))
+			Expect(expectedNames["0000:1a:00.1"]).To(Equal(ExpectedInterfaceNames{NetDevice: "net0p1", RdmaDevice: "rdma0p1"}))
 
 			// Verify net rules file was created
 			netRulesPath := filepath.Join(tempDir, UdevNetRulesFile)
@@ -140,8 +140,8 @@ var _ = Describe("UdevManager", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			netContentStr := string(netContent)
-			Expect(netContentStr).To(ContainSubstring(`SUBSYSTEM=="net", ACTION=="add", KERNELS=="0000:1a:00.0", NAME="net1p1"`))
-			Expect(netContentStr).To(ContainSubstring(`SUBSYSTEM=="net", ACTION=="add", KERNELS=="0000:1a:00.1", NAME="net1p2"`))
+			Expect(netContentStr).To(ContainSubstring(`SUBSYSTEM=="net", ACTION=="add", KERNELS=="0000:1a:00.0", NAME="net0p0"`))
+			Expect(netContentStr).To(ContainSubstring(`SUBSYSTEM=="net", ACTION=="add", KERNELS=="0000:1a:00.1", NAME="net0p1"`))
 			Expect(netContentStr).NotTo(ContainSubstring(`infiniband`))
 
 			// Verify RDMA rules file was created
@@ -150,8 +150,8 @@ var _ = Describe("UdevManager", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			rdmaContentStr := string(rdmaContent)
-			Expect(rdmaContentStr).To(ContainSubstring(`ACTION=="add", KERNELS=="0000:1a:00.0", SUBSYSTEM=="infiniband", RUN+="/usr/bin/rdma dev set %k name rdma1p1"`))
-			Expect(rdmaContentStr).To(ContainSubstring(`ACTION=="add", KERNELS=="0000:1a:00.1", SUBSYSTEM=="infiniband", RUN+="/usr/bin/rdma dev set %k name rdma1p2"`))
+			Expect(rdmaContentStr).To(ContainSubstring(`ACTION=="add", KERNELS=="0000:1a:00.0", SUBSYSTEM=="infiniband", RUN+="/usr/bin/rdma dev set %k name rdma0p0"`))
+			Expect(rdmaContentStr).To(ContainSubstring(`ACTION=="add", KERNELS=="0000:1a:00.1", SUBSYSTEM=="infiniband", RUN+="/usr/bin/rdma dev set %k name rdma0p1"`))
 			Expect(rdmaContentStr).NotTo(ContainSubstring(`SUBSYSTEM=="net"`))
 
 			// Verify udevadm commands were called (4 commands: reload, trigger infiniband, trigger net, settle)
@@ -203,9 +203,9 @@ var _ = Describe("UdevManager", func() {
 				{
 					Spec: v1alpha1.NicDeviceSpec{
 						InterfaceNameTemplate: &v1alpha1.NicDeviceInterfaceNameSpec{
-							NicIndex:         1,
-							RailIndex:        1,
-							PlaneIndices:     []int{1, 2}, // 2 PFs -> generates rules for .0 and .1
+							NicIndex:         0,
+							RailIndex:        0,
+							PlaneIndices:     []int{0, 1}, // 2 PFs -> generates rules for .0 and .1
 							RdmaDevicePrefix: "rdma_r%rail_id%_n%nic_id%_p%plane_id%",
 							NetDevicePrefix:  "net_r%rail_id%_n%nic_id%_p%plane_id%",
 						},
@@ -219,9 +219,9 @@ var _ = Describe("UdevManager", func() {
 				{
 					Spec: v1alpha1.NicDeviceSpec{
 						InterfaceNameTemplate: &v1alpha1.NicDeviceInterfaceNameSpec{
-							NicIndex:         2,
-							RailIndex:        1,
-							PlaneIndices:     []int{3, 4}, // 2 PFs -> generates rules for .0 and .1
+							NicIndex:         1,
+							RailIndex:        0,
+							PlaneIndices:     []int{2, 3}, // 2 PFs -> generates rules for .0 and .1
 							RdmaDevicePrefix: "rdma_r%rail_id%_n%nic_id%_p%plane_id%",
 							NetDevicePrefix:  "net_r%rail_id%_n%nic_id%_p%plane_id%",
 						},
@@ -240,10 +240,10 @@ var _ = Describe("UdevManager", func() {
 
 			// Verify expected names from both devices - 2 PFs each = 4 total
 			Expect(expectedNames).To(HaveLen(4))
-			Expect(expectedNames["0000:1a:00.0"]).To(Equal(ExpectedInterfaceNames{NetDevice: "net_r1_n1_p1", RdmaDevice: "rdma_r1_n1_p1"}))
-			Expect(expectedNames["0000:1a:00.1"]).To(Equal(ExpectedInterfaceNames{NetDevice: "net_r1_n1_p2", RdmaDevice: "rdma_r1_n1_p2"}))
-			Expect(expectedNames["0000:2a:00.0"]).To(Equal(ExpectedInterfaceNames{NetDevice: "net_r1_n2_p3", RdmaDevice: "rdma_r1_n2_p3"}))
-			Expect(expectedNames["0000:2a:00.1"]).To(Equal(ExpectedInterfaceNames{NetDevice: "net_r1_n2_p4", RdmaDevice: "rdma_r1_n2_p4"}))
+			Expect(expectedNames["0000:1a:00.0"]).To(Equal(ExpectedInterfaceNames{NetDevice: "net_r0_n0_p0", RdmaDevice: "rdma_r0_n0_p0"}))
+			Expect(expectedNames["0000:1a:00.1"]).To(Equal(ExpectedInterfaceNames{NetDevice: "net_r0_n0_p1", RdmaDevice: "rdma_r0_n0_p1"}))
+			Expect(expectedNames["0000:2a:00.0"]).To(Equal(ExpectedInterfaceNames{NetDevice: "net_r0_n1_p2", RdmaDevice: "rdma_r0_n1_p2"}))
+			Expect(expectedNames["0000:2a:00.1"]).To(Equal(ExpectedInterfaceNames{NetDevice: "net_r0_n1_p3", RdmaDevice: "rdma_r0_n1_p3"}))
 
 			// Check net rules file
 			netRulesPath := filepath.Join(tempDir, UdevNetRulesFile)
@@ -251,10 +251,10 @@ var _ = Describe("UdevManager", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			netContentStr := string(netContent)
-			Expect(netContentStr).To(ContainSubstring(`KERNELS=="0000:1a:00.0", NAME="net_r1_n1_p1"`))
-			Expect(netContentStr).To(ContainSubstring(`KERNELS=="0000:1a:00.1", NAME="net_r1_n1_p2"`))
-			Expect(netContentStr).To(ContainSubstring(`KERNELS=="0000:2a:00.0", NAME="net_r1_n2_p3"`))
-			Expect(netContentStr).To(ContainSubstring(`KERNELS=="0000:2a:00.1", NAME="net_r1_n2_p4"`))
+			Expect(netContentStr).To(ContainSubstring(`KERNELS=="0000:1a:00.0", NAME="net_r0_n0_p0"`))
+			Expect(netContentStr).To(ContainSubstring(`KERNELS=="0000:1a:00.1", NAME="net_r0_n0_p1"`))
+			Expect(netContentStr).To(ContainSubstring(`KERNELS=="0000:2a:00.0", NAME="net_r0_n1_p2"`))
+			Expect(netContentStr).To(ContainSubstring(`KERNELS=="0000:2a:00.1", NAME="net_r0_n1_p3"`))
 
 			// Check RDMA rules file
 			rdmaRulesPath := filepath.Join(tempDir, UdevRdmaRulesFile)
@@ -263,13 +263,13 @@ var _ = Describe("UdevManager", func() {
 
 			rdmaContentStr := string(rdmaContent)
 			Expect(rdmaContentStr).To(ContainSubstring(`KERNELS=="0000:1a:00.0"`))
-			Expect(rdmaContentStr).To(ContainSubstring(`rdma_r1_n1_p1`))
+			Expect(rdmaContentStr).To(ContainSubstring(`rdma_r0_n0_p0`))
 			Expect(rdmaContentStr).To(ContainSubstring(`KERNELS=="0000:1a:00.1"`))
-			Expect(rdmaContentStr).To(ContainSubstring(`rdma_r1_n1_p2`))
+			Expect(rdmaContentStr).To(ContainSubstring(`rdma_r0_n0_p1`))
 			Expect(rdmaContentStr).To(ContainSubstring(`KERNELS=="0000:2a:00.0"`))
-			Expect(rdmaContentStr).To(ContainSubstring(`rdma_r1_n2_p3`))
+			Expect(rdmaContentStr).To(ContainSubstring(`rdma_r0_n1_p2`))
 			Expect(rdmaContentStr).To(ContainSubstring(`KERNELS=="0000:2a:00.1"`))
-			Expect(rdmaContentStr).To(ContainSubstring(`rdma_r1_n2_p4`))
+			Expect(rdmaContentStr).To(ContainSubstring(`rdma_r0_n1_p3`))
 		})
 
 		It("should skip devices without InterfaceNameTemplate", func() {
@@ -493,23 +493,23 @@ var _ = Describe("UdevManager", func() {
 
 	Describe("substituteTemplatePlaceholders", func() {
 		It("should replace all placeholders", func() {
-			result := substituteTemplatePlaceholders("net%nic_id%p%plane_id%r%rail_id%", 1, 2, 3)
-			Expect(result).To(Equal("net1p2r3"))
+			result := substituteTemplatePlaceholders("net%nic_id%p%plane_id%r%rail_id%", 0, 1, 2)
+			Expect(result).To(Equal("net0p1r2"))
 		})
 
 		It("should handle template without placeholders", func() {
-			result := substituteTemplatePlaceholders("static_name", 1, 2, 3)
+			result := substituteTemplatePlaceholders("static_name", 0, 1, 2)
 			Expect(result).To(Equal("static_name"))
 		})
 
 		It("should handle empty template", func() {
-			result := substituteTemplatePlaceholders("", 1, 2, 3)
+			result := substituteTemplatePlaceholders("", 0, 1, 2)
 			Expect(result).To(Equal(""))
 		})
 
 		It("should handle multiple occurrences of same placeholder", func() {
-			result := substituteTemplatePlaceholders("nic%nic_id%_nic%nic_id%", 5, 1, 1)
-			Expect(result).To(Equal("nic5_nic5"))
+			result := substituteTemplatePlaceholders("nic%nic_id%_nic%nic_id%", 4, 0, 0)
+			Expect(result).To(Equal("nic4_nic4"))
 		})
 	})
 

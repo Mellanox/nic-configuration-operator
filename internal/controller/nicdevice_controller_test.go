@@ -1246,9 +1246,9 @@ var _ = Describe("NicDeviceReconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: deviceName, Namespace: namespaceName},
 				Spec: v1alpha1.NicDeviceSpec{
 					InterfaceNameTemplate: &v1alpha1.NicDeviceInterfaceNameSpec{
-						NicIndex:         1,
-						RailIndex:        1,
-						PlaneIndices:     []int{1, 2},
+						NicIndex:         0,
+						RailIndex:        0,
+						PlaneIndices:     []int{0, 1},
 						RdmaDevicePrefix: "rdma%nic_id%p%plane_id%",
 						NetDevicePrefix:  "net%nic_id%p%plane_id%",
 					},

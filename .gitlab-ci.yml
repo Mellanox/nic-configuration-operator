@@ -62,6 +62,7 @@ variables:  # additional variables are defined at the gitlab group scope
         GITHUB_TOKEN \
         STIG_SCRIPTS_REPO \
         UBUNTU_STIG_BASE_IMAGE \
+        RHEL_STIG_BASE_IMAGE \
         NSPECT_ID \
         SSA_CLIENT_ID_PULSE_OSS \
         SSA_CLIENT_SECRET_PULSE_OSS \
@@ -111,7 +112,7 @@ variables:  # additional variables are defined at the gitlab group scope
         touch $GOV_READY_POLICY_FILE_PATH  # dummy file, to prevent pipeline log warning that expects to upload an artifact from this path
       fi
 
-build-operator-stig-image:
+build-operator-stig-image-ubuntu:
   extends: .build-stig-image
   script:
     # build operator image
@@ -120,32 +121,73 @@ build-operator-stig-image:
         --secret    id=stig_script,src=/tmp/stig-scripts/stig-fixer.sh \
         --build-arg GOPROXY=$GOPROXY \
         --build-arg UBUNTU_STIG_BASE_IMAGE=$UBUNTU_STIG_BASE_IMAGE \
-        --file      Dockerfile.stig \
-        --tag       $DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG \
+        --file      Dockerfile.operator.stig-ubuntu \
+        --tag       $DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG-ubuntu \
         .
     # push
-    - docker push $DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG
-    - echo "OPERATOR_IMAGE=$DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG" | tee -a build.env
+    - docker push $DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG-ubuntu
+    - echo "OPERATOR_IMAGE_UBUNTU=$DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG-ubuntu" | tee -a build.env
   artifacts:
     reports:
       dotenv: build.env
     paths:
       - $GOV_READY_POLICY_FILE_PATH
 
-build-daemon-stig-image:
+build-daemon-stig-image-ubuntu:
   extends: .build-stig-image
   script:
     # build daemon image
     - |
       docker build \
         --secret    id=stig_script,src=/tmp/stig-scripts/stig-fixer.sh \
+        --build-arg GOPROXY=$GOPROXY \
         --build-arg UBUNTU_STIG_BASE_IMAGE=$UBUNTU_STIG_BASE_IMAGE \
-        --file      Dockerfile.nic-configuration-daemon.stig \
-        --tag       $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG \
+        --file      Dockerfile.daemon.stig-ubuntu \
+        --tag       $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG-ubuntu \
         .
     # push
-    - docker push $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG
-    - echo "DAEMON_IMAGE=$DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG" | tee -a build.env
+    - docker push $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG-ubuntu
+    - echo "DAEMON_IMAGE_UBUNTU=$DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG-ubuntu" | tee -a build.env
+  artifacts:
+    reports:
+      dotenv: build.env
+    paths:
+      - $GOV_READY_POLICY_FILE_PATH
+
+build-operator-stig-image-rhel:
+  extends: .build-stig-image
+  script:
+    # build operator image
+    - |
+      docker build \
+        --build-arg GOPROXY=$GOPROXY \
+        --build-arg RHEL_STIG_BASE_IMAGE=$RHEL_STIG_BASE_IMAGE \
+        --file      Dockerfile.operator.stig-rhel \
+        --tag       $DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG-rhel \
+        .
+    # push
+    - docker push $DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG-rhel
+    - echo "OPERATOR_IMAGE_RHEL=$DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG-rhel" | tee -a build.env
+  artifacts:
+    reports:
+      dotenv: build.env
+    paths:
+      - $GOV_READY_POLICY_FILE_PATH
+
+build-daemon-stig-image-rhel:
+  extends: .build-stig-image
+  script:
+    # build daemon image
+    - |
+      docker build \
+        --build-arg GOPROXY=$GOPROXY \
+        --build-arg RHEL_STIG_BASE_IMAGE=$RHEL_STIG_BASE_IMAGE \
+        --file      Dockerfile.daemon.stig-rhel \
+        --tag       $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG-rhel \
+        .
+    # push
+    - docker push $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG-rhel
+    - echo "DAEMON_IMAGE_RHEL=$DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG-rhel" | tee -a build.env
   artifacts:
     reports:
       dotenv: build.env
@@ -155,9 +197,13 @@ build-daemon-stig-image:
 update-component-version-in-network-operator:
   stage: deploy
   needs:
-    - job: build-operator-stig-image
+    - job: build-operator-stig-image-ubuntu
       artifacts: true
-    - job: build-daemon-stig-image
+    - job: build-operator-stig-image-rhel
+      artifacts: true
+    - job: build-daemon-stig-image-ubuntu
+      artifacts: true
+    - job: build-daemon-stig-image-rhel
       artifacts: true
   tags:
     - os/linux
@@ -167,8 +213,10 @@ update-component-version-in-network-operator:
   image: golang:1-alpine
   variables:  # additional variables defined at the gitlab group scope
     GITHUB_EMAIL: svc-cloud-orch-gh@nvidia.com
-    OPERATOR_COMPONENT_NAME: nicConfigurationOperatorStigFips
-    DAEMON_COMPONENT_NAME: nicConfigurationConfigDaemonStigFips
+    OPERATOR_COMPONENT_NAME_UBUNTU: nicConfigurationOperatorStigFipsUbuntu
+    OPERATOR_COMPONENT_NAME_RHEL: nicConfigurationOperatorStigFipsRhel
+    DAEMON_COMPONENT_NAME_UBUNTU: nicConfigurationConfigDaemonStigFipsUbuntu
+    DAEMON_COMPONENT_NAME_RHEL: nicConfigurationConfigDaemonStigFipsRhel
     DRY_RUN: false
   before_script:
     # install packages
@@ -182,10 +230,14 @@ update-component-version-in-network-operator:
     - cd network-operator
   script:
     # update versions in hack/release.yaml and examples
-    - echo "Updating version for $OPERATOR_COMPONENT_NAME to $DOCKER_TAG"
-    - yq -i ".$OPERATOR_COMPONENT_NAME.version = \"$DOCKER_TAG\"" hack/release.yaml
-    - echo "Updating version for $DAEMON_COMPONENT_NAME to $DOCKER_TAG"
-    - yq -i ".$DAEMON_COMPONENT_NAME.version = \"$DOCKER_TAG\"" hack/release.yaml
+    - echo "Updating version for $OPERATOR_COMPONENT_NAME_UBUNTU to $DOCKER_TAG-ubuntu"
+    - yq -i ".$OPERATOR_COMPONENT_NAME_UBUNTU.version = \"$DOCKER_TAG-ubuntu\"" hack/release.yaml
+    - echo "Updating version for $OPERATOR_COMPONENT_NAME_RHEL to $DOCKER_TAG-rhel"
+    - yq -i ".$OPERATOR_COMPONENT_NAME_RHEL.version = \"$DOCKER_TAG-rhel\"" hack/release.yaml
+    - echo "Updating version for $DAEMON_COMPONENT_NAME_UBUNTU to $DOCKER_TAG-ubuntu"
+    - yq -i ".$DAEMON_COMPONENT_NAME_UBUNTU.version = \"$DOCKER_TAG-ubuntu\"" hack/release.yaml
+    - echo "Updating version for $DAEMON_COMPONENT_NAME_RHEL to $DOCKER_TAG-rhel"
+    - yq -i ".$DAEMON_COMPONENT_NAME_RHEL.version = \"$DOCKER_TAG-rhel\"" hack/release.yaml
     - make release-build
     # create CI branch if needed
     - |
@@ -223,11 +275,11 @@ update-component-version-in-network-operator:
       fi
 
 # Pulse scan for operator image
-pulse-scan-oss-operator:
+pulse-scan-oss-operator-ubuntu:
   stage: pulse-scan-oss
   extends: .scan-image-no-policy
   needs:
-    - job: build-operator-stig-image
+    - job: build-operator-stig-image-ubuntu
       artifacts: true
   tags:
     - os/linux
@@ -238,17 +290,17 @@ pulse-scan-oss-operator:
     SSA_CLIENT_ID: $SSA_CLIENT_ID_PULSE_OSS
     SSA_CLIENT_SECRET: $SSA_CLIENT_SECRET_PULSE_OSS
     PULSE_REGISTRY_NGC_PASSWORD: $NVCR_TOKEN
-    CONTAINER_IMAGE: $DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG
+    CONTAINER_IMAGE: $DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG-ubuntu
     NSPECT_ID: $NSPECT_ID
     PROGRAM_VERSION: $NSPECT_RELEASE_VERSION
   allow_failure: true  # non gating (pipeline stages will display warnings instead of failures)
 
-pulse-scan-stig-operator:
+pulse-scan-stig-operator-ubuntu:
   stage: pulse-scan-stig
   extends: .stig-scan-image
   needs:
-    - job: pulse-scan-oss-operator
-    - job: build-operator-stig-image
+    - job: pulse-scan-oss-operator-ubuntu
+    - job: build-operator-stig-image-ubuntu
       artifacts: true
   tags:
     - os/linux
@@ -261,17 +313,17 @@ pulse-scan-stig-operator:
     SSA_CLIENT_ID: $SSA_CLIENT_ID_PULSE_STIG
     SSA_CLIENT_SECRET: $SSA_CLIENT_SECRET_PULSE_STIG
     PULSE_REGISTRY_NGC_PASSWORD: $NVCR_TOKEN
-    CONTAINER_IMAGE: $DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG
+    CONTAINER_IMAGE: $DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG-ubuntu
     NSPECT_ID: $NSPECT_ID
     PROGRAM_VERSION: $NSPECT_RELEASE_VERSION
   allow_failure: true  # non gating (pipeline stages will display warnings instead of failures)
 
 # Pulse scan for daemon image
-pulse-scan-oss-daemon:
+pulse-scan-oss-daemon-ubuntu:
   stage: pulse-scan-oss
   extends: .scan-image-no-policy
   needs:
-    - job: build-daemon-stig-image
+    - job: build-daemon-stig-image-ubuntu
       artifacts: true
   tags:
     - os/linux
@@ -282,17 +334,17 @@ pulse-scan-oss-daemon:
     SSA_CLIENT_ID: $SSA_CLIENT_ID_PULSE_OSS
     SSA_CLIENT_SECRET: $SSA_CLIENT_SECRET_PULSE_OSS
     PULSE_REGISTRY_NGC_PASSWORD: $NVCR_TOKEN
-    CONTAINER_IMAGE: $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG
+    CONTAINER_IMAGE: $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG-ubuntu
     NSPECT_ID: $NSPECT_ID
     PROGRAM_VERSION: $NSPECT_RELEASE_VERSION
   allow_failure: true  # non gating (pipeline stages will display warnings instead of failures)
 
-pulse-scan-stig-daemon:
+pulse-scan-stig-daemon-ubuntu:
   stage: pulse-scan-stig
   extends: .stig-scan-image
   needs:
-    - job: pulse-scan-oss-daemon
-    - job: build-daemon-stig-image
+    - job: pulse-scan-oss-daemon-ubuntu
+    - job: build-daemon-stig-image-ubuntu
       artifacts: true
   tags:
     - os/linux
@@ -305,7 +357,95 @@ pulse-scan-stig-daemon:
     SSA_CLIENT_ID: $SSA_CLIENT_ID_PULSE_STIG
     SSA_CLIENT_SECRET: $SSA_CLIENT_SECRET_PULSE_STIG
     PULSE_REGISTRY_NGC_PASSWORD: $NVCR_TOKEN
-    CONTAINER_IMAGE: $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG
+    CONTAINER_IMAGE: $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG-ubuntu
+    NSPECT_ID: $NSPECT_ID
+    PROGRAM_VERSION: $NSPECT_RELEASE_VERSION
+  allow_failure: true  # non gating (pipeline stages will display warnings instead of failures)
+
+# Pulse scan for RHEL operator image
+pulse-scan-oss-operator-rhel:
+  stage: pulse-scan-oss
+  extends: .scan-image-no-policy
+  needs:
+    - job: build-operator-stig-image-rhel
+      artifacts: true
+  tags:
+    - os/linux
+    - type/docker
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^network-operator-.*$/'
+  variables:
+    SSA_CLIENT_ID: $SSA_CLIENT_ID_PULSE_OSS
+    SSA_CLIENT_SECRET: $SSA_CLIENT_SECRET_PULSE_OSS
+    PULSE_REGISTRY_NGC_PASSWORD: $NVCR_TOKEN
+    CONTAINER_IMAGE: $DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG-rhel
+    NSPECT_ID: $NSPECT_ID
+    PROGRAM_VERSION: $NSPECT_RELEASE_VERSION
+  allow_failure: true  # non gating (pipeline stages will display warnings instead of failures)
+
+pulse-scan-stig-operator-rhel:
+  stage: pulse-scan-stig
+  extends: .stig-scan-image
+  needs:
+    - job: pulse-scan-oss-operator-rhel
+    - job: build-operator-stig-image-rhel
+      artifacts: true
+  tags:
+    - os/linux
+    - type/docker
+  services:
+    - docker:24-dind
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^network-operator-.*$/'
+  variables:
+    SSA_CLIENT_ID: $SSA_CLIENT_ID_PULSE_STIG
+    SSA_CLIENT_SECRET: $SSA_CLIENT_SECRET_PULSE_STIG
+    PULSE_REGISTRY_NGC_PASSWORD: $NVCR_TOKEN
+    CONTAINER_IMAGE: $DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG-rhel
+    NSPECT_ID: $NSPECT_ID
+    PROGRAM_VERSION: $NSPECT_RELEASE_VERSION
+  allow_failure: true  # non gating (pipeline stages will display warnings instead of failures)
+
+# Pulse scan for RHEL daemon image
+pulse-scan-oss-daemon-rhel:
+  stage: pulse-scan-oss
+  extends: .scan-image-no-policy
+  needs:
+    - job: build-daemon-stig-image-rhel
+      artifacts: true
+  tags:
+    - os/linux
+    - type/docker
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^network-operator-.*$/'
+  variables:
+    SSA_CLIENT_ID: $SSA_CLIENT_ID_PULSE_OSS
+    SSA_CLIENT_SECRET: $SSA_CLIENT_SECRET_PULSE_OSS
+    PULSE_REGISTRY_NGC_PASSWORD: $NVCR_TOKEN
+    CONTAINER_IMAGE: $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG-rhel
+    NSPECT_ID: $NSPECT_ID
+    PROGRAM_VERSION: $NSPECT_RELEASE_VERSION
+  allow_failure: true  # non gating (pipeline stages will display warnings instead of failures)
+
+pulse-scan-stig-daemon-rhel:
+  stage: pulse-scan-stig
+  extends: .stig-scan-image
+  needs:
+    - job: pulse-scan-oss-daemon-rhel
+    - job: build-daemon-stig-image-rhel
+      artifacts: true
+  tags:
+    - os/linux
+    - type/docker
+  services:
+    - docker:24-dind
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^network-operator-.*$/'
+  variables:
+    SSA_CLIENT_ID: $SSA_CLIENT_ID_PULSE_STIG
+    SSA_CLIENT_SECRET: $SSA_CLIENT_SECRET_PULSE_STIG
+    PULSE_REGISTRY_NGC_PASSWORD: $NVCR_TOKEN
+    CONTAINER_IMAGE: $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG-rhel
     NSPECT_ID: $NSPECT_ID
     PROGRAM_VERSION: $NSPECT_RELEASE_VERSION
   allow_failure: true  # non gating (pipeline stages will display warnings instead of failures)

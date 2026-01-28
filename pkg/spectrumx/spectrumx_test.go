@@ -217,6 +217,15 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(applied).To(BeTrue())
 		})
+
+		It("returns false when NvConfig has ValuesDoNotMatchError", func() {
+			valuesDoNotMatchErr := types.ValuesDoNotMatchError(types.ConfigurationParameter{Name: "nv_param"}, "mismatch_value")
+			dmsCli.On("GetParameters", cfgs["v1"].NVConfig).Return(nil, valuesDoNotMatchErr)
+
+			applied, err := manager.NvConfigApplied(ctx, device)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(applied).To(BeFalse())
+		})
 	})
 
 	Describe("ApplyNvConfig", func() {
@@ -266,6 +275,15 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			_, err := manager.RuntimeConfigApplied(device)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("exec fail"))
+		})
+
+		It("returns false when RoCE config has ValuesDoNotMatchError", func() {
+			valuesDoNotMatchErr := types.ValuesDoNotMatchError(types.ConfigurationParameter{Name: "test_param"}, "mismatch_value")
+			dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(nil, valuesDoNotMatchErr)
+
+			applied, err := manager.RuntimeConfigApplied(device)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(applied).To(BeFalse())
 		})
 	})
 
@@ -614,6 +632,21 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				applied, err := manager.BreakoutConfigApplied(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(applied).To(BeTrue())
+			})
+		})
+
+		Context("ValuesDoNotMatchError handling", func() {
+			It("returns false when breakout config has ValuesDoNotMatchError", func() {
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
+
+				valuesDoNotMatchErr := types.ValuesDoNotMatchError(types.ConfigurationParameter{Name: "breakout_param"}, "mismatch_value")
+				expectedParams := cfgs["v1"].BreakoutConfig.Swplb[2]
+				dmsCli.On("GetParameters", expectedParams).Return(nil, valuesDoNotMatchErr)
+
+				applied, err := manager.BreakoutConfigApplied(ctx, device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeFalse())
 			})
 		})
 	})

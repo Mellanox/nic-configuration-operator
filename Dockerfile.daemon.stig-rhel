@@ -1,0 +1,85 @@
+# Copyright 2026 NVIDIA CORPORATION & AFFILIATES
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+
+ARG RHEL_STIG_BASE_IMAGE
+
+
+# Build the daemon binary
+FROM golang:1.24 AS builder
+ARG TARGETOS
+ARG TARGETARCH
+ARG GCFLAGS
+ARG GOPROXY
+ENV GOPROXY=$GOPROXY
+
+WORKDIR /workspace
+# Copy sources
+COPY go.mod go.mod
+COPY go.sum go.sum
+# cache deps before building and copying source so that we don't need to re-download as much
+# and so that source changes don't invalidate our downloaded layer
+RUN --mount=type=cache,target=/go/pkg/mod/ go mod download
+
+# Copy the go source
+COPY ./ ./
+
+# Build daemon binary
+RUN --mount=type=cache,target=/go/pkg/mod/ GO_GCFLAGS=${GCFLAGS} make build-daemon
+
+FROM $RHEL_STIG_BASE_IMAGE
+
+ENV MFT_VERSION=4.33.0-169
+
+ARG DOCA_VERSION=3.2.1
+ARG DOCA_FULL_VERSION=3.2.1-044000-25.10
+
+RUN dnf makecache && \
+    dnf install -y wget kmod && \
+    DOCA_PKG_VERSION=$(echo ${DOCA_FULL_VERSION} | sed 's/-\([0-9][0-9]*\.[0-9][0-9]*\)$/_\1/') && \
+    wget https://www.mellanox.com/downloads/DOCA/DOCA_v${DOCA_VERSION}/host/doca-host-${DOCA_PKG_VERSION}_rhel9.x86_64.rpm && \
+    rpm -ivh doca-host-${DOCA_PKG_VERSION}_rhel9.x86_64.rpm && \
+    dnf install -y doca-dms doca-spcx-cc doca-pcc-counters && \
+    rm -f doca-host-${DOCA_PKG_VERSION}_rhel9.x86_64.rpm && \
+    dnf clean all
+
+
+RUN dnf install -y rpm-build libusbx systemd pciutils-libs fuse-libs hwdata && \
+    dnf download rshim && \
+    rpm -ivh --nodeps rshim*.rpm && \
+    rm -f rshim*.rpm && \
+    dnf clean all
+
+RUN curl -fsSL https://www.mellanox.com/downloads/MFT/mft-${MFT_VERSION}-x86_64-rpm.tgz | tar -xz --no-same-owner -C /tmp && \
+    cd /tmp/mft-${MFT_VERSION}-x86_64-rpm && \
+    ./install.sh --without-kernel && \
+    rm -rf /tmp/mft-${MFT_VERSION}-x86_64-rpm && \
+    dnf clean all
+
+WORKDIR /
+COPY --from=builder /workspace/build/nic-configuration-daemon .
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+COPY bindata /bindata
+
+# Copy sources to the container
+COPY . /workspace
+
+ENTRYPOINT ["/entrypoint.sh"]
+
+LABEL org.opencontainers.image.source=https://nvcr.io/nvidia/cloud-native/nic-configuration-daemon
