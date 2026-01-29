@@ -36,6 +36,7 @@ RUN --mount=type=cache,target=/go/pkg/mod/ go mod download
 
 # Copy the go source
 COPY ./ ./
+RUN rm -rf pulse-scan-policies .git
 
 # Build manager binary
 RUN --mount=type=cache,target=/go/pkg/mod/ GO_GCFLAGS=${GCFLAGS} make build-manager
