@@ -240,6 +240,16 @@ breakout:
         dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=255]/lanes
         deviceId: "a2dc"
 nvConfig:
+  - name: Ethernet mode
+    dmsPath: /interfaces/interface/config/type
+    valueType: string
+    value: ethernetCsmacd
+  - name: Enable SR-IOV
+    value: 1
+    mlxconfig: "SRIOV_EN"
+  - name: Set NUM_OF_VFS
+    value: 1
+    mlxconfig: "NUM_OF_VFS"
   - name: NIC mode
     value: NIC
     dmsPath: /nvidia/mode/config/mode
@@ -313,6 +323,10 @@ nvConfig:
     value: 1
     mlxconfig: "RDE_DISABLE"
     multiplane: hwplb
+  - name: VF LOG BAR size
+    value: 5
+    mlxconfig: "VF_LOG_BAR_SIZE"
+    multiplane: hwplb
 runtimeConfig:
   roce:
     - name: Trust
@@ -351,11 +365,11 @@ runtimeConfig:
       dmsPath: /interfaces/interface/nvidia/roce/config/slow-restart-idle
       valueType: bool
     # TODO: Uncomment when DMS is fixed in DOCA 3.3.0
-    # - name: CC Probe MP mode
-    #   value: true
-    #   dmsPath: /interfaces/interface/nvidia/roce/config/cc-probe-mp-mode
-    #   valueType: bool
-    #   multiplane: hwplb
+    - name: CC Probe MP mode
+      value: true
+      dmsPath: /interfaces/interface/nvidia/roce/config/cc-probe-mp-mode
+      valueType: bool
+      multiplane: hwplb
     - name: Adaptive Routing Force
       value: true
       dmsPath: /interfaces/interface/nvidia/roce/config/adaptive-routing-force
@@ -504,5 +518,5 @@ runtimeConfig:
         dmsPath: /interfaces/interface/ethernet/nvidia/config/inter-packet-gap
         valueType: int
 #docaCCVersion: 3.3.0090-1
-docaCCVersion: 3.2.1025-1
+docaCCVersion: 3.3.0
 useSoftwareCCAlgorithm: true
