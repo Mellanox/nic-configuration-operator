@@ -35,9 +35,9 @@ import (
 
 const (
 	// UdevNetRulesFile is the path to the udev rules file for network interface naming
-	UdevNetRulesFile = "/etc/udev/rules.d/70-nic-net-interface-naming.rules"
+	UdevNetRulesFile = "/etc/udev/rules.d/10-nic-net-interface-naming.rules"
 	// UdevRdmaRulesFile is the path to the udev rules file for RDMA interface naming
-	UdevRdmaRulesFile = "/etc/udev/rules.d/60-nic-rdma-interface-naming.rules"
+	UdevRdmaRulesFile = "/etc/udev/rules.d/10-nic-rdma-interface-naming.rules"
 
 	// Placeholder tokens in the prefix templates
 	NicIDPlaceholder   = "%nic_id%"

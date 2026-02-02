@@ -134,7 +134,7 @@ func (f firmwareManager) InstallDocaSpcXCC(ctx context.Context, device *v1alpha1
 	log.Log.Info("FirmwareManager.InstallDocaSpcXCC()", "device", device.Name, "targetVersion", targetVersion)
 
 	installedVersion := f.utils.GetInstalledDebPackageVersion("doca-spcx-cc")
-	if installedVersion == targetVersion {
+	if strings.HasPrefix(installedVersion, targetVersion) {
 		log.Log.Info("DOCA SPC-X CC is already installed", "installedVersion", installedVersion, "targetVersion", targetVersion)
 		return nil
 	}
