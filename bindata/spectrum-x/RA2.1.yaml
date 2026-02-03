@@ -338,10 +338,11 @@ runtimeConfig:
       value: "00010000"
       dmsPath: /interfaces/interface/nvidia/qos/config/pfc
       valueType: string
-    - name: Type of Service
-      value: 96
-      dmsPath: /interfaces/interface/nvidia/roce/config/tos
-      valueType: int
+    # TODO: figure out if NIC operator or RDMA cni needs to set the tos
+    # - name: Type of Service
+    #   value: 96
+    #   dmsPath: /interfaces/interface/nvidia/roce/config/tos
+    #   valueType: int
   adaptiveRouting:
     - name: Enable CC per plane
       value: true
@@ -364,7 +365,6 @@ runtimeConfig:
       value: false
       dmsPath: /interfaces/interface/nvidia/roce/config/slow-restart-idle
       valueType: bool
-    # TODO: Uncomment when DMS is fixed in DOCA 3.3.0
     - name: CC Probe MP mode
       value: true
       dmsPath: /interfaces/interface/nvidia/roce/config/cc-probe-mp-mode
@@ -517,6 +517,5 @@ runtimeConfig:
         value: 33
         dmsPath: /interfaces/interface/ethernet/nvidia/config/inter-packet-gap
         valueType: int
-#docaCCVersion: 3.3.0090-1
 docaCCVersion: 3.3.0
 useSoftwareCCAlgorithm: true

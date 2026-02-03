@@ -48,7 +48,7 @@ FROM ${BASE_IMAGE_DOCA_FULL_RT_HOST:-nvcr.io/nvstaging/doca/doca:3.3.0099-full-r
 ARG TARGETARCH
 ENV MFT_VERSION=4.33.0-169
 
-ARG PACKAGES="dpkg-dev=1.21.1ubuntu2.6"
+ARG PACKAGES="dpkg-dev=1.22.6ubuntu6.5"
 
 # enable deb-src repos
 RUN sed -i 's/^# deb-src/deb-src/g' /etc/apt/sources.list /etc/apt/sources.list.d/*
