@@ -18,7 +18,6 @@ package spectrumx
 import (
 	"context"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,8 +53,8 @@ func (c *fakeCmd) Output() ([]byte, error) {
 	return c.output, c.err
 }
 
-func (f *fakeCmd) SetStderr(out io.Writer) {
-
+func (c *fakeCmd) CombinedOutput() ([]byte, error) {
+	return c.Output()
 }
 
 type fakeExec struct {
@@ -260,21 +259,21 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
 			dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(map[string]string{"/ar": "y"}, nil)
 			dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(map[string]string{"/cc": "z"}, nil)
-
+			manager.ccProcesses[device.Status.Ports[0].RdmaInterface] = &ccProcess{port: device.Status.Ports[0]}
+			manager.ccProcesses[device.Status.Ports[0].RdmaInterface].running.Store(true)
 			nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
 			applied, err := manager.RuntimeConfigApplied(device)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(applied).To(BeTrue())
 		})
 
-		It("returns error if CC fails to start", func() {
+		It("returns false if DOCA SPC-X CC algorithm is not running", func() {
 			dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
 			dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(map[string]string{"/ar": "y"}, nil)
 
-			nextCmd = &fakeCmd{output: []byte(""), err: errors.New("exec fail")}
-			_, err := manager.RuntimeConfigApplied(device)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("exec fail"))
+			applied, err := manager.RuntimeConfigApplied(device)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(applied).To(BeFalse())
 		})
 
 		It("returns false when RoCE config has ValuesDoNotMatchError", func() {
@@ -1435,6 +1434,9 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(map[string]string{"/cc": "z"}, nil)
 				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(map[string]string{"/ipg": "25"}, nil)
 
+				manager.ccProcesses[device.Status.Ports[0].RdmaInterface] = &ccProcess{port: device.Status.Ports[0]}
+				manager.ccProcesses[device.Status.Ports[0].RdmaInterface].running.Store(true)
+
 				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
 				applied, err := manager.RuntimeConfigApplied(device)
 				Expect(err).NotTo(HaveOccurred())
@@ -1448,7 +1450,8 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					{PCI: "0000:00:00.0", NetworkInterface: "eth0", RdmaInterface: "mlx5_0"},
 				}
 				createCnpDscpFile("eth0", "48") // hwplb expects 48
-
+				manager.ccProcesses[device.Status.Ports[0].RdmaInterface] = &ccProcess{port: device.Status.Ports[0]}
+				manager.ccProcesses[device.Status.Ports[0].RdmaInterface].running.Store(true)
 				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
 				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(map[string]string{"/ar": "y"}, nil)
 				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(map[string]string{"/cc": "z"}, nil)
@@ -1468,6 +1471,8 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				}
 				createCnpDscpFile("eth0", "48") // wrong value for swplb (expects 24)
 
+				manager.ccProcesses[device.Status.Ports[0].RdmaInterface] = &ccProcess{port: device.Status.Ports[0]}
+				manager.ccProcesses[device.Status.Ports[0].RdmaInterface].running.Store(true)
 				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
 
 				applied, err := manager.RuntimeConfigApplied(device)
@@ -1502,6 +1507,9 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(map[string]string{"/cc": "z"}, nil)
 				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(map[string]string{"/ipg": "25"}, nil)
 
+				manager.ccProcesses[device.Status.Ports[0].RdmaInterface] = &ccProcess{port: device.Status.Ports[0]}
+				manager.ccProcesses[device.Status.Ports[0].RdmaInterface].running.Store(true)
+
 				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
 				applied, err := manager.RuntimeConfigApplied(device)
 				Expect(err).NotTo(HaveOccurred())
@@ -1522,6 +1530,11 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(map[string]string{"/ar": "y"}, nil)
 				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(map[string]string{"/cc": "z"}, nil)
 				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(map[string]string{"/ipg": "25"}, nil)
+
+				manager.ccProcesses[device.Status.Ports[0].RdmaInterface] = &ccProcess{port: device.Status.Ports[0]}
+				manager.ccProcesses[device.Status.Ports[0].RdmaInterface].running.Store(true)
+				manager.ccProcesses[device.Status.Ports[1].RdmaInterface] = &ccProcess{port: device.Status.Ports[1]}
+				manager.ccProcesses[device.Status.Ports[1].RdmaInterface].running.Store(true)
 
 				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
 				applied, err := manager.RuntimeConfigApplied(device)

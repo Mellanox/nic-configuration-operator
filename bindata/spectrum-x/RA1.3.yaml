@@ -14,6 +14,16 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 nvConfig:
+  - name: Ethernet mode
+    dmsPath: /interfaces/interface/config/type
+    valueType: string
+    value: ethernetCsmacd
+  - name: Enable SR-IOV
+    value: 1
+    mlxconfig: "SRIOV_EN"
+  - name: Set NUM_OF_VFS
+    value: 1
+    mlxconfig: "NUM_OF_VFS"
   - name: NIC mode
     value: NIC
     dmsPath: /nvidia/mode/config/mode
@@ -42,10 +52,11 @@ runtimeConfig:
       value: "00010000"
       dmsPath: /interfaces/interface/nvidia/qos/config/pfc
       valueType: string
-    - name: Type of Service
-      value: 96
-      dmsPath: /interfaces/interface/nvidia/roce/config/tos
-      valueType: int
+    # TODO: figure out if NIC operator or RDMA cni needs to set the tos
+    # - name: Type of Service
+    #   value: 96
+    #   dmsPath: /interfaces/interface/nvidia/roce/config/tos
+    #   valueType: int
   adaptiveRouting:
     - name: Adaptive Retransmission
       value: true
@@ -141,5 +152,5 @@ runtimeConfig:
         value: false
         dmsPath: /interfaces/interface/config/enabled
         valueType: bool
-docaCCVersion: 2.10.0-0.5.3
+docaCCVersion: 2.10.0
 useSoftwareCCAlgorithm: true
