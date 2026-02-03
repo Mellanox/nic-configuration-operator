@@ -465,12 +465,18 @@ func (m *spectrumXConfigManager) RuntimeConfigApplied(device *v1alpha1.NicDevice
 	}
 
 	if desiredConfig.UseSoftwareCCAlgorithm {
-		log.Log.V(2).Info("SpectrumXConfigManager.RuntimeConfigApplied(): running DOCA SPC-X CC algorithm", "device", device.Name)
-		for _, port := range device.Status.Ports {
-			err = m.RunDocaSpcXCC(port)
-			if err != nil {
-				log.Log.Error(err, "ApplyRuntimeConfig(): failed to run DOCA SPC-X CC", "device", device.Name)
-				return false, err
+		log.Log.V(2).Info("SpectrumXConfigManager.RuntimeConfigApplied(): check if DOCA SPC-X CC algorithm is running", "device", device.Name)
+		if multiplaneMode == consts.MultiplaneModeHwplb {
+			if len(device.Status.Ports) == 0 || !m.IsDocaSpcXCCRunning(device.Status.Ports[0].RdmaInterface) {
+				log.Log.Info("RuntimeConfigApplied(): DOCA SPC-X CC algorithm is not running", "device", device.Name)
+				return false, nil
+			}
+		} else {
+			for _, port := range device.Status.Ports {
+				if !m.IsDocaSpcXCCRunning(port.RdmaInterface) {
+					log.Log.Info("RuntimeConfigApplied(): DOCA SPC-X CC algorithm is not running", "device", device.Name)
+					return false, nil
+				}
 			}
 		}
 	} else {
@@ -560,11 +566,22 @@ func (m *spectrumXConfigManager) ApplyRuntimeConfig(device *v1alpha1.NicDevice) 
 
 	if desiredConfig.UseSoftwareCCAlgorithm {
 		log.Log.V(2).Info("SpectrumXConfigManager.ApplyRuntimeConfig(): running DOCA SPC-X CC algorithm", "device", device.Name)
-		for _, port := range device.Status.Ports {
-			err = m.RunDocaSpcXCC(port)
+		if multiplaneMode == consts.MultiplaneModeHwplb {
+			if len(device.Status.Ports) == 0 {
+				return fmt.Errorf("no ports available for device %s", device.Name)
+			}
+			err = m.RunDocaSpcXCC(device.Status.Ports[0])
 			if err != nil {
 				log.Log.Error(err, "ApplyRuntimeConfig(): failed to run DOCA SPC-X CC", "device", device.Name)
 				return err
+			}
+		} else {
+			for _, port := range device.Status.Ports {
+				err = m.RunDocaSpcXCC(port)
+				if err != nil {
+					log.Log.Error(err, "ApplyRuntimeConfig(): failed to run DOCA SPC-X CC", "device", device.Name)
+					return err
+				}
 			}
 		}
 	} else {
@@ -648,14 +665,21 @@ func (m *spectrumXConfigManager) GetDocaCCTargetVersion(device *v1alpha1.NicDevi
 	return "", nil
 }
 
+func (m *spectrumXConfigManager) IsDocaSpcXCCRunning(rdmaInterface string) bool {
+	runningCCProcess, found := m.ccProcesses[rdmaInterface]
+	if found && runningCCProcess.running.Load() {
+		return true
+	}
+	return false
+}
+
 // RunDocaSpcXCC launches and keeps track of the DOCA SPC-X CC process for the given port
 func (m *spectrumXConfigManager) RunDocaSpcXCC(port v1alpha1.NicDevicePortSpec) error {
 	log.Log.Info("SpectrumXConfigManager.RunDocaSpcXCC()", "rdma", port.RdmaInterface)
 
 	// use rdma interface name as key for ccProcesses map
 	// because with HW PLB different ports of the same NIC share the same RDMA device
-	runningCCProcess, found := m.ccProcesses[port.RdmaInterface]
-	if found && runningCCProcess.running.Load() {
+	if m.IsDocaSpcXCCRunning(port.RdmaInterface) {
 		log.Log.V(2).Info("SpectrumXConfigManager.RunDocaSpcXCC(): CC process already running", "rdma", port.RdmaInterface)
 		return nil
 	}
@@ -670,7 +694,7 @@ func (m *spectrumXConfigManager) RunDocaSpcXCC(port v1alpha1.NicDevicePortSpec) 
 	process.running.Store(true)
 
 	go func() {
-		output, err := process.cmd.Output()
+		output, err := process.cmd.CombinedOutput()
 		if err != nil {
 			process.errMutex.Lock()
 			process.cmdErr = err
