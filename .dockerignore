@@ -2,4 +2,4 @@
 # Ignore build and test binaries.
 bin/
 
-.git/
+**/.git
