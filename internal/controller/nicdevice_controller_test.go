@@ -443,6 +443,9 @@ var _ = Describe("NicDeviceReconciler", func() {
 			_, err := json.Marshal(device.Spec)
 			Expect(err).NotTo(HaveOccurred())
 
+			// Note: Removed flaky assertion for UpdateStartedReason condition. The controller transitions
+			// through UpdateStarted very quickly before reaching PendingReboot, causing timing-dependent
+			// test failures. We only verify the final expected state (PendingRebootReason).
 			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:   consts.ConfigUpdateInProgressCondition,
 				Status: metav1.ConditionTrue,
@@ -465,6 +468,9 @@ var _ = Describe("NicDeviceReconciler", func() {
 			_, err := json.Marshal(device.Spec)
 			Expect(err).NotTo(HaveOccurred())
 
+			// Note: Removed flaky assertion for UpdateStartedReason condition. The controller transitions
+			// through UpdateStarted very quickly before reaching PendingReboot, causing timing-dependent
+			// test failures. We only verify the final expected state (PendingRebootReason).
 			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:   consts.ConfigUpdateInProgressCondition,
 				Status: metav1.ConditionTrue,
