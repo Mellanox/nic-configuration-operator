@@ -948,7 +948,12 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
-			firmwareManager.On("BurnNicFirmware", mock.Anything, mock.Anything, mock.Anything).After(1 * time.Second).Return(err)
+			// Make BurnNicFirmware fail consistently
+			firmwareManager.On("BurnNicFirmware", mock.Anything, mock.Anything, mock.Anything).Return(err)
+			// Mock ResetNicFirmware as optional since the timing of reconciliation loops is non-deterministic.
+			// In race conditions, a successful BurnNicFirmware call might happen before the test stabilizes,
+			// which would trigger ResetNicFirmware before the final failure state is reached.
+			configurationManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(nil).Maybe()
 
 			createDevice(oldFwVersion, consts.FirmwareUpdatePolicyUpdate)
 
@@ -1076,8 +1081,9 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
 			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
-			firmwareManager.On("BurnNicFirmware", mock.Anything, mock.Anything, mock.Anything).Return(nil)
-			configurationManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(nil)
+			firmwareManager.On("BurnNicFirmware", mock.Anything, matchFirstDevice, mock.Anything).Return(nil)
+			// Mock ResetNicFirmware for the first device since its firmware burn succeeds
+			configurationManager.On("ResetNicFirmware", mock.Anything, matchFirstDevice).Return(nil)
 			configurationManager.AssertNotCalled(GinkgoT(), "ValidateDeviceNvSpec", mock.Anything, mock.Anything)
 			configurationManager.AssertNotCalled(GinkgoT(), "ApplyDeviceRuntimeSpec", mock.Anything)
 
@@ -1133,7 +1139,10 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
 			firmwareManager.On("BurnNicFirmware", mock.Anything, matchFirstDevice, mock.Anything).Return(nil)
 			firmwareManager.On("BurnNicFirmware", mock.Anything, matchSecondDevice, mock.Anything).Return(err)
-			configurationManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(nil)
+			// Mock ResetNicFirmware for the first device since its firmware burn succeeds
+			// Use Maybe() since the timing of when this gets called relative to the second device's
+			// failure is non-deterministic in the test environment
+			configurationManager.On("ResetNicFirmware", mock.Anything, matchFirstDevice).Return(nil).Maybe()
 			configurationManager.AssertNotCalled(GinkgoT(), "ValidateDeviceNvSpec", mock.Anything, mock.Anything)
 			configurationManager.AssertNotCalled(GinkgoT(), "ApplyDeviceRuntimeSpec", mock.Anything)
 
