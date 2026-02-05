@@ -46,8 +46,9 @@ FROM $UBUNTU_STIG_BASE_IMAGE
 ENV MFT_VERSION=4.33.0-169
 
 # Install MFT (Mellanox Firmware Tools) - amd64/x86_64 only for STIG
+# Note: kmod is required by MFT
 RUN apt-get update -y && \
-    apt-get install -y --no-install-recommends curl && \
+    apt-get install -y --no-install-recommends curl kmod && \
     curl -fsSL https://www.mellanox.com/downloads/MFT/mft-${MFT_VERSION}-x86_64-deb.tgz | tar -xz --no-same-owner -C /tmp && \
     cd /tmp/mft-${MFT_VERSION}-x86_64-deb && \
     ./install.sh --without-kernel && \
