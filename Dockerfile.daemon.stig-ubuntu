@@ -45,7 +45,7 @@ FROM $UBUNTU_STIG_BASE_IMAGE
 
 ENV MFT_VERSION=4.33.0-169
 
-ARG PACKAGES="dpkg-dev libusb-1.0-0 ipmitool rshim curl systemd-sysv mstflint pciutils "
+ARG PACKAGES="dpkg-dev libusb-1.0-0 ipmitool rshim curl systemd-sysv mstflint pciutils kmod "
 
 # Install required packages
 # Note: apt-get source skipped for STIG base as deb-src repos may not be available
