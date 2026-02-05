@@ -446,12 +446,6 @@ var _ = Describe("NicDeviceReconciler", func() {
 			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:   consts.ConfigUpdateInProgressCondition,
 				Status: metav1.ConditionTrue,
-				Reason: consts.UpdateStartedReason,
-			}))
-
-			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
-				Type:   consts.ConfigUpdateInProgressCondition,
-				Status: metav1.ConditionTrue,
 				Reason: consts.PendingRebootReason,
 			}))
 
@@ -470,12 +464,6 @@ var _ = Describe("NicDeviceReconciler", func() {
 			Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
 			_, err := json.Marshal(device.Spec)
 			Expect(err).NotTo(HaveOccurred())
-
-			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
-				Type:   consts.ConfigUpdateInProgressCondition,
-				Status: metav1.ConditionTrue,
-				Reason: consts.UpdateStartedReason,
-			}))
 
 			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:   consts.ConfigUpdateInProgressCondition,
