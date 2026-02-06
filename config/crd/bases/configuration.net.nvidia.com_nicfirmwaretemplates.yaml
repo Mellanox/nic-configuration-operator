@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.14.0
+    controller-gen.kubebuilder.io/version: v0.20.0
   name: nicfirmwaretemplates.configuration.net.nvidia.com
 spec:
   group: configuration.net.nvidia.com
@@ -51,6 +51,7 @@ spec:
                   pciAddresses:
                     description: Array of PCI addresses to be selected, e.g. "0000:03:00.0"
                     items:
+                      pattern: ^0000:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]$
                       type: string
                     type: array
                   serialNumbers:

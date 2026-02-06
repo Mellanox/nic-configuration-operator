@@ -42,109 +42,9 @@ rules:
   - configuration.net.nvidia.com
   resources:
   - nicconfigurationtemplates
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - configuration.net.nvidia.com
-  resources:
-  - nicconfigurationtemplates/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - configuration.net.nvidia.com
-  resources:
-  - nicconfigurationtemplates/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - configuration.net.nvidia.com
-  resources:
   - nicdevices
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - configuration.net.nvidia.com
-  resources:
-  - nicdevices/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - configuration.net.nvidia.com
-  resources:
-  - nicdevices/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - configuration.net.nvidia.com
-  resources:
   - nicfirmwaresources
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - configuration.net.nvidia.com
-  resources:
-  - nicfirmwaresources/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - configuration.net.nvidia.com
-  resources:
-  - nicfirmwaresources/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - configuration.net.nvidia.com
-  resources:
   - nicfirmwaretemplates
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - configuration.net.nvidia.com
-  resources:
-  - nicfirmwaretemplates/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - configuration.net.nvidia.com
-  resources:
-  - nicfirmwaretemplates/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - configuration.net.nvidia.com
-  resources:
   - nicinterfacenametemplates
   verbs:
   - create
@@ -157,6 +57,19 @@ rules:
 - apiGroups:
   - configuration.net.nvidia.com
   resources:
+  - nicconfigurationtemplates/finalizers
+  - nicdevices/finalizers
+  - nicfirmwaresources/finalizers
+  - nicfirmwaretemplates/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - configuration.net.nvidia.com
+  resources:
+  - nicconfigurationtemplates/status
+  - nicdevices/status
+  - nicfirmwaresources/status
+  - nicfirmwaretemplates/status
   - nicinterfacenametemplates/status
   verbs:
   - get
