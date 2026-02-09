@@ -157,6 +157,12 @@ var _ = Describe("SpectrumXConfigManager", func() {
 							{Name: "uniplane_4_param2", Value: "uni4val2", DMSPath: "/uniplane/4/p2"},
 						},
 					},
+					None: map[int][]types.ConfigurationParameter{
+						1: {
+							{Name: "none_num_pfs", Value: "1", DMSPath: "/none/num-pf"},
+							{Name: "none_num_planes", Value: "0", MlxConfig: "NUM_OF_PLANES_P1"},
+						},
+					},
 				},
 				RuntimeConfig: types.SpectrumXRuntimeConfig{
 					Roce:              []types.ConfigurationParameter{{Name: "r", Value: "x", DMSPath: "/r"}},
@@ -411,11 +417,47 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 	Describe("BreakoutConfigApplied", func() {
 		Context("MultiplaneMode none", func() {
-			It("returns true when MultiplaneMode is none (no breakout params)", func() {
+			It("returns true when None[1] is specified and all params match", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeNone
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 1
 
-				// No breakout params to check when mode is none
+				expectedDmsParams := []types.ConfigurationParameter{
+					{Name: "none_num_pfs", Value: "1", DMSPath: "/none/num-pf"},
+				}
+				dmsCli.On("GetParameters", expectedDmsParams).Return(map[string]string{
+					"/none/num-pf": "1",
+				}, nil)
+
+				nvConfigQuery := types.NvConfigQuery{
+					CurrentConfig: map[string][]string{"NUM_OF_PLANES_P1": {"0"}},
+				}
+				nvConfigMgr.On("QueryNvConfig", ctx, "0000:00:00.0", "NUM_OF_PLANES_P1").Return(nvConfigQuery, nil)
+
+				applied, err := manager.BreakoutConfigApplied(ctx, device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
+			})
+
+			It("returns false when None[1] is specified but params do not match", func() {
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeNone
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 1
+
+				nvConfigQuery := types.NvConfigQuery{
+					CurrentConfig: map[string][]string{"NUM_OF_PLANES_P1": {"4"}},
+				}
+				nvConfigMgr.On("QueryNvConfig", ctx, "0000:00:00.0", "NUM_OF_PLANES_P1").Return(nvConfigQuery, nil)
+
+				applied, err := manager.BreakoutConfigApplied(ctx, device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeFalse())
+			})
+
+			It("returns true as noop when breakout None is not specified", func() {
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeNone
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 1
+
+				cfgs["v1"].BreakoutConfig.None = nil
+
 				applied, err := manager.BreakoutConfigApplied(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(applied).To(BeTrue())
@@ -652,11 +694,26 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 	Describe("ApplyBreakoutConfig", func() {
 		Context("MultiplaneMode none", func() {
-			It("succeeds when MultiplaneMode is none", func() {
+			It("applies None[1] params when specified", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeNone
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 1
 
-				// No breakout params to set when mode is none
+				expectedDmsParams := []types.ConfigurationParameter{
+					{Name: "none_num_pfs", Value: "1", DMSPath: "/none/num-pf"},
+				}
+				dmsCli.On("SetParameters", expectedDmsParams).Return(nil)
+				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "NUM_OF_PLANES_P1", "0").Return(nil)
+
+				err := manager.ApplyBreakoutConfig(ctx, device)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("succeeds as noop when breakout None is not specified", func() {
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeNone
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 1
+
+				cfgs["v1"].BreakoutConfig.None = nil
+
 				err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
