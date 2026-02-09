@@ -110,7 +110,7 @@ func getBreakoutParameters(desiredConfig *types.SpectrumXConfig, spcXSpec *v1alp
 	var breakoutConfig []types.ConfigurationParameter
 	switch multiplaneMode {
 	case consts.MultiplaneModeNone:
-		break
+		breakoutConfig = desiredConfig.BreakoutConfig.None[1]
 	case consts.MultiplaneModeSwplb:
 		breakoutConfig = desiredConfig.BreakoutConfig.Swplb[numberOfPlanes]
 	case consts.MultiplaneModeHwplb:

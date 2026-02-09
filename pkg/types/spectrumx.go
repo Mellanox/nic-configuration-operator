@@ -35,6 +35,7 @@ type SpectrumXBreakoutConfig struct {
 	Swplb    map[int][]ConfigurationParameter `yaml:"swplb"`
 	Hwplb    map[int][]ConfigurationParameter `yaml:"hwplb"`
 	Uniplane map[int][]ConfigurationParameter `yaml:"uniplane"`
+	None     map[int][]ConfigurationParameter `yaml:"none"`
 }
 
 type SpectrumXRuntimeConfig struct {
