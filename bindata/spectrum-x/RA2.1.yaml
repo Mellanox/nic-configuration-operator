@@ -279,9 +279,8 @@ breakout:
         deviceId: "a2dc"
 nvConfig:
   - name: Ethernet mode
-    dmsPath: /interfaces/interface/config/type
-    valueType: string
-    value: ethernetCsmacd
+    value: 2
+    mlxconfig: "LINK_TYPE_P1"
   - name: Enable SR-IOV
     value: 1
     mlxconfig: "SRIOV_EN"
