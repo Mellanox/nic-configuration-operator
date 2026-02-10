@@ -51,7 +51,11 @@ ENV MFT_VERSION=4.33.0-169
 ARG PACKAGES="dpkg-dev=1.22.6ubuntu6.5"
 
 # enable deb-src repos
-RUN sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources
+RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
+    sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources; \
+    elif [ -f /etc/apt/sources.list ]; then \
+    sed -i 's/^#\s*deb-src/deb-src/' /etc/apt/sources.list; \
+    fi
 
 # DOCA repositories have a GPG issue, so we need to allow insecure repositories.
 # GPG error: https://linux.mellanox.com/public/repo/doca/3.2.1/ubuntu22.04/x86_64 ./ Release: The following signatures couldn't be verified because the public key is not available: NO_PUBKEY A024F6F0E0E6D6A281
