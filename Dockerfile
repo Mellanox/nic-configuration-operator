@@ -51,7 +51,11 @@ ENV MFT_VERSION=4.33.0-169
 ARG PACKAGES="dpkg-dev=1.22.6ubuntu6.5"
 
 # enable deb-src repos
-RUN sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources
+RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
+    sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources; \
+    elif [ -f /etc/apt/sources.list ]; then \
+    sed -i 's/^#\s*deb-src/deb-src/' /etc/apt/sources.list; \
+    fi
 
 RUN apt-get update -y
 RUN apt-get install -y --no-install-recommends ${PACKAGES}
