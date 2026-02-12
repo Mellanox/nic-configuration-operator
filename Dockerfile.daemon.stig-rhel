@@ -48,20 +48,21 @@ ENV MFT_VERSION=4.33.0-169
 ARG DOCA_VERSION=3.2.1
 ARG DOCA_FULL_VERSION=3.2.1-044000-25.10
 
-RUN dnf makecache && \
-    dnf install -y wget kmod && \
+RUN dnf makecache && dnf install -y rpm-build libusbx systemd pciutils-libs fuse-libs hwdata && \
+    dnf clean all
+
+RUN dnf install -y wget kmod && \
     DOCA_PKG_VERSION=$(echo ${DOCA_FULL_VERSION} | sed 's/-\([0-9][0-9]*\.[0-9][0-9]*\)$/_\1/') && \
     wget https://www.mellanox.com/downloads/DOCA/DOCA_v${DOCA_VERSION}/host/doca-host-${DOCA_PKG_VERSION}_rhel9.x86_64.rpm && \
     rpm -ivh doca-host-${DOCA_PKG_VERSION}_rhel9.x86_64.rpm && \
-    dnf install -y doca-dms doca-spcx-cc doca-pcc-counters && \
-    rm -f doca-host-${DOCA_PKG_VERSION}_rhel9.x86_64.rpm && \
-    dnf clean all
-
-
-RUN dnf install -y rpm-build libusbx systemd pciutils-libs fuse-libs hwdata && \
+    dnf makecache && \
+    dnf download --arch x86_64 rdma-core-devel && \
+    rpm -ivh --nodeps --force rdma-core-devel*.rpm && \
+    rm -f rdma-core-devel*.rpm && \
+    dnf install -y doca-dms doca-spcx-cc doca-pcc-counters doca-roce-userspace --allowerasing --best && \
     dnf download rshim && \
     rpm -ivh --nodeps rshim*.rpm && \
-    rm -f rshim*.rpm && \
+    rm -f rshim*.rpm doca-host-${DOCA_PKG_VERSION}_rhel9.x86_64.rpm && \
     dnf clean all
 
 RUN curl -fsSL https://www.mellanox.com/downloads/MFT/mft-${MFT_VERSION}-x86_64-rpm.tgz | tar -xz --no-same-owner -C /tmp && \
