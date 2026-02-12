@@ -63,7 +63,7 @@ RUN apt-get update -y && \
     wget https://www.mellanox.com/downloads/DOCA/DOCA_v${DOCA_VERSION}/host/doca-host_${DOCA_FULL_VERSION}-ubuntu2404_amd64.deb && \
     dpkg -i doca-host_${DOCA_FULL_VERSION}-ubuntu2404_amd64.deb && \
     apt-get update -y && \
-    apt-get install -y doca-dms doca-spcx-cc doca-pcc-counters && \
+    apt-get install -y doca-dms doca-spcx-cc doca-pcc-counters doca-roce-userspace && \
     rm -f doca-host_${DOCA_FULL_VERSION}-ubuntu2404_amd64.deb && \
     # Remove DOCA-Host unneeded collectx packages from base image
     (dpkg --purge collectx || apt-get remove --purge -y collectx || true) && \
