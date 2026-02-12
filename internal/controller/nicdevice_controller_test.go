@@ -61,6 +61,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 		spectrumXManager     *spectrumxMocks.SpectrumXManager
 		udevManager          *udevMocks.UdevManager
 		deviceDiscoveryUtils *devicediscoveryMocks.DeviceDiscoveryUtils
+		ccTerminationChan    chan string
 		deviceName           = "test-device"
 		ctx                  context.Context
 		cancel               context.CancelFunc
@@ -96,6 +97,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 		maintenanceManager = &maintenanceMocks.MaintenanceManager{}
 		hostUtils = &hostMocks.HostUtils{}
 		spectrumXManager = &spectrumxMocks.SpectrumXManager{}
+		ccTerminationChan = make(chan string, 10)
+		spectrumXManager.On("GetCCTerminationChannel").Return((<-chan string)(ccTerminationChan))
 		spectrumXManager.On("GetDocaCCTargetVersion", mock.Anything).Return("", nil)
 		udevManager = &udevMocks.UdevManager{}
 		udevManager.On("ApplyUdevRules", mock.Anything, mock.Anything).Return(nil, false, nil)
@@ -1402,6 +1405,50 @@ var _ = Describe("NicDeviceReconciler", func() {
 				}
 				return false
 			}, time.Second*2).Should(BeFalse())
+		})
+	})
+
+	Describe("reconcile triggered by CC process termination", func() {
+		It("Should re-reconcile when CC termination channel fires", func() {
+			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil)
+			configurationManager.On("ApplyDeviceRuntimeSpec", mock.Anything).Return(nil)
+			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
+
+			device := &v1alpha1.NicDevice{
+				ObjectMeta: metav1.ObjectMeta{Name: deviceName, Namespace: namespaceName},
+				Spec: v1alpha1.NicDeviceSpec{
+					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
+						ResetToDefault: false,
+						Template: &v1alpha1.ConfigurationTemplateSpec{
+							NumVfs:   4,
+							LinkType: consts.Ethernet,
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, device))
+			device.Status = v1alpha1.NicDeviceStatus{
+				Node:  nodeName,
+				Ports: []v1alpha1.NicDevicePortSpec{{PCI: "0000:3b:00.0"}},
+			}
+			Expect(k8sClient.Status().Update(ctx, device)).To(Succeed())
+
+			// Wait for initial reconcile to complete successfully
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
+				Type:   consts.ConfigUpdateInProgressCondition,
+				Status: metav1.ConditionFalse,
+				Reason: consts.UpdateSuccessfulReason,
+			}))
+
+			initialCallCount := countCalls(configurationManager.Calls, "ApplyDeviceRuntimeSpec")
+
+			// Simulate CC process termination
+			ccTerminationChan <- "mlx5_0"
+
+			// Verify reconcile ran again
+			Eventually(func() int {
+				return countCalls(configurationManager.Calls, "ApplyDeviceRuntimeSpec")
+			}, timeout).Should(BeNumerically(">", initialCallCount))
 		})
 	})
 })
