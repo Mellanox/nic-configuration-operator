@@ -62,6 +62,9 @@ type SpectrumXManager interface {
 	GetDocaCCTargetVersion(device *v1alpha1.NicDevice) (string, error)
 	// RunDocaSpcXCC launches and keeps track of the DOCA SPC-X CC process for the given port
 	RunDocaSpcXCC(port v1alpha1.NicDevicePortSpec) error
+	// GetCCTerminationChannel returns a read-only channel that receives the RDMA interface name
+	// when a DOCA SPC-X CC process terminates unexpectedly after startup
+	GetCCTerminationChannel() <-chan string
 }
 
 type spectrumXConfigManager struct {
@@ -70,14 +73,16 @@ type spectrumXConfigManager struct {
 	execInterface    execUtils.Interface
 	nvConfigUtils    nvconfig.NVConfigUtils
 
-	ccProcesses map[string]*ccProcess
+	ccProcesses       map[string]*ccProcess
+	ccTerminationChan chan string // buffered; carries RDMA iface name on unexpected exit
 }
 
 type ccProcess struct {
 	port v1alpha1.NicDevicePortSpec
 	cmd  execUtils.Cmd
 
-	running atomic.Bool
+	running            atomic.Bool
+	startupCheckPassed atomic.Bool // set after the 3s startup window; distinguishes startup failures from runtime crashes
 
 	// Error handling with mutex protection
 	errMutex sync.RWMutex
@@ -704,6 +709,16 @@ func (m *spectrumXConfigManager) RunDocaSpcXCC(port v1alpha1.NicDevicePortSpec) 
 
 		log.Log.V(2).Info("SpectrumXConfigManager.RunDocaSpcXCC(): CC process output", "rdma", port.RdmaInterface, "output", string(output))
 		process.running.Store(false)
+
+		// Notify controller only for runtime crashes (after startup check passed)
+		if process.startupCheckPassed.Load() {
+			log.Log.Info("SpectrumXConfigManager.RunDocaSpcXCC(): CC process terminated unexpectedly, sending notification", "rdma", port.RdmaInterface)
+			select {
+			case m.ccTerminationChan <- port.RdmaInterface:
+			default:
+				log.Log.V(2).Info("SpectrumXConfigManager.RunDocaSpcXCC(): termination channel full, notification dropped", "rdma", port.RdmaInterface)
+			}
+		}
 	}()
 
 	log.Log.V(2).Info("Waiting 3s for DOCA SPC-X CC to start", "rdma", port.RdmaInterface)
@@ -723,6 +738,7 @@ func (m *spectrumXConfigManager) RunDocaSpcXCC(port v1alpha1.NicDevicePortSpec) 
 
 	log.Log.V(2).Info("DOCA SPC-X CC process started", "rdma", port.RdmaInterface)
 
+	process.startupCheckPassed.Store(true)
 	m.ccProcesses[port.RdmaInterface] = process
 
 	log.Log.Info("Started DOCA SPC-X CC process", "rdma", port.RdmaInterface)
@@ -730,12 +746,19 @@ func (m *spectrumXConfigManager) RunDocaSpcXCC(port v1alpha1.NicDevicePortSpec) 
 	return nil
 }
 
+// GetCCTerminationChannel returns a read-only channel for CC process termination notifications.
+// The channel carries the RDMA interface name of the terminated CC process.
+func (m *spectrumXConfigManager) GetCCTerminationChannel() <-chan string {
+	return m.ccTerminationChan
+}
+
 func NewSpectrumXConfigManager(dmsManager dms.DMSManager, spectrumXConfigs map[string]*types.SpectrumXConfig) SpectrumXManager {
 	return &spectrumXConfigManager{
-		dmsManager:       dmsManager,
-		spectrumXConfigs: spectrumXConfigs,
-		execInterface:    execUtils.New(),
-		nvConfigUtils:    nvconfig.NewNVConfigUtils(),
-		ccProcesses:      make(map[string]*ccProcess),
+		dmsManager:        dmsManager,
+		spectrumXConfigs:  spectrumXConfigs,
+		execInterface:     execUtils.New(),
+		nvConfigUtils:     nvconfig.NewNVConfigUtils(),
+		ccProcesses:       make(map[string]*ccProcess),
+		ccTerminationChan: make(chan string, 10),
 	}
 }
