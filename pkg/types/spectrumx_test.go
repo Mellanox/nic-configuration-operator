@@ -41,8 +41,7 @@ var _ = Describe("LoadSpectrumXConfig", func() {
 
 		first := cfg.NVConfig[0]
 		Expect(first.Name).ToNot(BeEmpty())
-		Expect(first.DMSPath).ToNot(BeEmpty())
-		Expect(first.ValueType).ToNot(BeEmpty())
+		Expect(first.MlxConfig).ToNot(BeEmpty())
 
 		Expect(cfg.UseSoftwareCCAlgorithm).To(BeTrue())
 		Expect(cfg.RuntimeConfig.AdaptiveRouting).ToNot(BeEmpty())

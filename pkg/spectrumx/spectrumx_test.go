@@ -178,11 +178,12 @@ var _ = Describe("SpectrumXConfigManager", func() {
 		}
 
 		manager = &spectrumXConfigManager{
-			dmsManager:       &dmsMgr,
-			spectrumXConfigs: cfgs,
-			execInterface:    execFake,
-			nvConfigUtils:    &nvConfigMgr,
-			ccProcesses:      map[string]*ccProcess{},
+			dmsManager:        &dmsMgr,
+			spectrumXConfigs:  cfgs,
+			execInterface:     execFake,
+			nvConfigUtils:     &nvConfigMgr,
+			ccProcesses:       map[string]*ccProcess{},
+			ccTerminationChan: make(chan string, 10),
 		}
 
 		beforeDevice()
@@ -412,6 +413,34 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			err := manager.RunDocaSpcXCC(port)
 			Expect(err).To(HaveOccurred())
 			Expect(strings.ToLower(err.Error())).To(ContainSubstring("failed to start"))
+		})
+
+		It("sends notification on channel when process dies after startup", func() {
+			// fakeCmd with 4s delay survives the 3s startup check, then fails
+			nextCmd = &fakeCmd{output: []byte(""), err: errors.New("runtime crash"), delay: 4 * time.Second}
+			port := device.Status.Ports[0]
+			err := manager.RunDocaSpcXCC(port)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(manager.ccProcesses).To(HaveKey(port.RdmaInterface))
+
+			// Wait for process to die and notification to fire
+			Eventually(manager.GetCCTerminationChannel(), 5*time.Second).Should(Receive(Equal(port.RdmaInterface)))
+		})
+
+		It("does NOT send notification when process fails during startup", func() {
+			nextCmd = &fakeCmd{output: []byte(""), err: errors.New("startup failure")}
+			port := device.Status.Ports[0]
+			err := manager.RunDocaSpcXCC(port)
+			Expect(err).To(HaveOccurred())
+
+			Consistently(manager.GetCCTerminationChannel(), 1*time.Second).ShouldNot(Receive())
+		})
+	})
+
+	Describe("GetCCTerminationChannel", func() {
+		It("returns the termination channel", func() {
+			ch := manager.GetCCTerminationChannel()
+			Expect(ch).NotTo(BeNil())
 		})
 	})
 
