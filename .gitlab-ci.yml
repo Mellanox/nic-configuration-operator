@@ -32,6 +32,7 @@ variables:  # additional variables are defined at the gitlab group scope
   OPERATOR_IMAGE_NAME: nic-configuration-operator-stig-fips
   DAEMON_IMAGE_NAME: nic-configuration-operator-daemon-stig-fips
   GOV_READY_POLICY_FILE_PATH: pulse-scan-policies/prodsec_approved_govready_release_policy.json
+  CVE_UPDATES_RHEL: "openssl python3-urllib3"
 
 # Common job template for building STIG images
 .build-stig-image:
@@ -162,6 +163,7 @@ build-operator-stig-image-rhel:
       docker build \
         --build-arg GOPROXY=$GOPROXY \
         --build-arg RHEL_STIG_BASE_IMAGE=$RHEL_STIG_BASE_IMAGE \
+        --build-arg CVE_UPDATES_RHEL="$CVE_UPDATES_RHEL" \
         --file      Dockerfile.operator.stig-rhel \
         --tag       $DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG-rhel \
         .
@@ -182,6 +184,7 @@ build-daemon-stig-image-rhel:
       docker build \
         --build-arg GOPROXY=$GOPROXY \
         --build-arg RHEL_STIG_BASE_IMAGE=$RHEL_STIG_BASE_IMAGE \
+        --build-arg CVE_UPDATES_RHEL="$CVE_UPDATES_RHEL" \
         --file      Dockerfile.daemon.stig-rhel \
         --tag       $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG-rhel \
         .
