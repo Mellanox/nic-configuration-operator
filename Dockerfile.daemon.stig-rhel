@@ -44,6 +44,7 @@ RUN --mount=type=cache,target=/go/pkg/mod/ GO_GCFLAGS=${GCFLAGS} make build-daem
 FROM $RHEL_STIG_BASE_IMAGE
 
 ENV MFT_VERSION=4.33.0-169
+ARG CVE_UPDATES_RHEL
 
 ARG DOCA_VERSION=3.2.1
 ARG DOCA_FULL_VERSION=3.2.1-044000-25.10
@@ -70,6 +71,11 @@ RUN curl -fsSL https://www.mellanox.com/downloads/MFT/mft-${MFT_VERSION}-x86_64-
     ./install.sh --without-kernel && \
     rm -rf /tmp/mft-${MFT_VERSION}-x86_64-rpm && \
     dnf clean all
+
+RUN if [ -n "${CVE_UPDATES_RHEL}" ]; then \
+        dnf update -y ${CVE_UPDATES_RHEL} && \
+        dnf clean all; \
+    fi
 
 WORKDIR /
 COPY --from=builder /workspace/build/nic-configuration-daemon .
