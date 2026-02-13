@@ -20,6 +20,7 @@ const (
 	BlueField3DeviceID   = "a2dc"
 	BlueField3LxDeviceID = "a2d9"
 	BlueField2DeviceID   = "a2d6"
+	BlueField4DeviceID   = "a2df"
 
 	Ethernet   = "Ethernet"
 	Infiniband = "Infiniband"

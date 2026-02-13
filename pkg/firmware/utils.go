@@ -282,32 +282,35 @@ func (u *utils) GetFWVersionsFromBFB(bfbPath string) (map[string]string, error) 
 
 	versions := make(map[string]string)
 
+	bfVersions := []struct {
+		name     string
+		deviceID string
+	}{
+		{name: "BF2_NIC_FW", deviceID: consts.BlueField2DeviceID},
+		{name: "BF3_NIC_FW", deviceID: consts.BlueField3DeviceID},
+		{name: "BF4_NIC_FW", deviceID: consts.BlueField4DeviceID},
+	}
+
 	log.Log.V(2).Info("Extracting versions from info-v0 file", "bfbPath", bfbPath)
-	cmd = u.execInterface.Command("/bin/sh", "-c", `awk '/"Name": "BF3_NIC_FW"/ {getline; print $2}' `+infoFile+` | tr -d '",'`)
-	bf3NicFwVersion, err := cmd.Output()
-	if err != nil {
-		log.Log.Error(err, "GetFWVersionsFromBFB(): Failed to extract BF3 NIC FW version")
-		return nil, err
+	for _, bfv := range bfVersions {
+		cmd = u.execInterface.Command("/bin/sh", "-c", `awk '/"Name": "`+bfv.name+`"/ {getline; print $2}' `+infoFile+` | tr -d '",'`)
+		output, err := cmd.Output()
+		if err != nil {
+			log.Log.V(2).Info("GetFWVersionsFromBFB(): Failed to extract version, skipping", "name", bfv.name, "error", err)
+			continue
+		}
+
+		version := strings.TrimSpace(string(output))
+		if version == "" {
+			log.Log.V(2).Info("GetFWVersionsFromBFB(): Version is empty or not found, skipping", "name", bfv.name)
+			continue
+		}
+		versions[bfv.deviceID] = version
 	}
 
-	bf3Version := strings.TrimSpace(string(bf3NicFwVersion))
-	if bf3Version == "" {
-		return nil, fmt.Errorf("GetFWVersionsFromBFB(): BF3 NIC FW version is empty or not found in BFB file")
+	if len(versions) == 0 {
+		return nil, fmt.Errorf("GetFWVersionsFromBFB(): no firmware versions found in BFB file")
 	}
-	versions[consts.BlueField3DeviceID] = bf3Version
-
-	cmd = u.execInterface.Command("/bin/sh", "-c", `awk '/"Name": "BF2_NIC_FW"/ {getline; print $2}' `+infoFile+` | tr -d '",'`)
-	bf2NicFwVersion, err := cmd.Output()
-	if err != nil {
-		log.Log.Error(err, "GetFWVersionsFromBFB(): Failed to extract BF2 NIC FW version")
-		return nil, err
-	}
-
-	bf2Version := strings.TrimSpace(string(bf2NicFwVersion))
-	if bf2Version == "" {
-		return nil, fmt.Errorf("GetFWVersionsFromBFB(): BF2 NIC FW version is empty or not found in BFB file")
-	}
-	versions[consts.BlueField2DeviceID] = bf2Version
 
 	return versions, nil
 }
