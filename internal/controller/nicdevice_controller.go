@@ -40,6 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	v1alpha1 "github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/configuration"
@@ -923,9 +924,25 @@ func (r *NicDeviceReconciler) SetupWithManager(mgr ctrl.Manager, watchForMainten
 		},
 	}
 
+	// Bridge CC termination channel (plain Go channel from k8s-free package) into controller events
+	ccTermChan := r.SpectrumXManager.GetCCTerminationChannel()
+	ccEventChan := make(chan event.TypedGenericEvent[*v1alpha1.NicDevice], 10)
+	go func() {
+		for rdmaIface := range ccTermChan {
+			log.Log.Info("CC process terminated, triggering reconcile", "rdma", rdmaIface)
+			ccEventChan <- event.TypedGenericEvent[*v1alpha1.NicDevice]{}
+		}
+	}()
+
 	controller := ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.NicDevice{}).
-		Watches(&v1alpha1.NicDevice{}, nicDeviceEventHandler)
+		Watches(&v1alpha1.NicDevice{}, nicDeviceEventHandler).
+		WatchesRawSource(source.Channel(ccEventChan, handler.TypedFuncs[*v1alpha1.NicDevice, reconcile.Request]{
+			GenericFunc: func(ctx context.Context, e event.TypedGenericEvent[*v1alpha1.NicDevice], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+				log.Log.Info("Enqueuing sync for CC termination event")
+				qHandler(q)
+			},
+		}))
 
 	if watchForMaintenance {
 		controller.Watches(&maintenanceoperator.NodeMaintenance{}, maintenance.GetMaintenanceRequestEventHandler(r.NodeName, qHandler))

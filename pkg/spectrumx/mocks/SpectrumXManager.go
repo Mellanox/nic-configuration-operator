@@ -171,6 +171,26 @@ func (_m *SpectrumXManager) RunDocaSpcXCC(port v1alpha1.NicDevicePortSpec) error
 	return r0
 }
 
+// GetCCTerminationChannel provides a mock function with no given fields
+func (_m *SpectrumXManager) GetCCTerminationChannel() <-chan string {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCCTerminationChannel")
+	}
+
+	var r0 <-chan string
+	if rf, ok := ret.Get(0).(func() <-chan string); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(<-chan string)
+		}
+	}
+
+	return r0
+}
+
 // RuntimeConfigApplied provides a mock function with given fields: device
 func (_m *SpectrumXManager) RuntimeConfigApplied(device *v1alpha1.NicDevice) (bool, error) {
 	ret := _m.Called(device)
