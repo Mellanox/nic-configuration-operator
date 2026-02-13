@@ -44,6 +44,7 @@ RUN --mount=type=cache,target=/go/pkg/mod/ GO_GCFLAGS=${GCFLAGS} make build-mana
 FROM $RHEL_STIG_BASE_IMAGE
 
 ENV MFT_VERSION=4.33.0-169
+ARG CVE_UPDATES_RHEL
 
 # Install MFT (Mellanox Firmware Tools) - amd64/x86_64 only for STIG
 # Note: curl-minimal is already in UBI base image, sufficient for downloads
@@ -54,6 +55,11 @@ RUN dnf install -y kmod && \
     ./install.sh --without-kernel && \
     rm -rf /tmp/mft-${MFT_VERSION}-x86_64-rpm && \
     dnf clean all
+
+RUN if [ -n "${CVE_UPDATES_RHEL}" ]; then \
+        dnf update -y ${CVE_UPDATES_RHEL} && \
+        dnf clean all; \
+    fi
 
 WORKDIR /
 COPY --from=builder /workspace/build/manager .
