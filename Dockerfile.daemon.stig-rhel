@@ -49,7 +49,7 @@ ARG CVE_UPDATES_RHEL
 ARG DOCA_VERSION=3.2.1
 ARG DOCA_FULL_VERSION=3.2.1-044000-25.10
 
-RUN dnf makecache && dnf install -y rpm-build libusbx systemd pciutils-libs fuse-libs hwdata procps-ng && \
+RUN dnf makecache && dnf install -y libusbx systemd pciutils-libs fuse-libs hwdata procps-ng && \
     dnf clean all
 
 RUN dnf install -y wget kmod && \
