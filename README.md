@@ -102,7 +102,59 @@ spec:
   * Can only be enabled when `pciPerformanceOptimized` is enabled
   * Both the numeric values and their string aliases, supported by NVConfig, are allowed (e.g. `REAL_TIME_CLOCK_ENABLE=False`, `REAL_TIME_CLOCK_ENABLE=0`).
   * For per port parameters (suffix `_P1`, `_P2`) parameters with `_P2` suffix are ignored if the device is single port.
+* `spectrumXOptimized`: enables Spectrum-X specific NIC optimizations. When enabled:
+  * Requires `linkType=Ethernet` and `numVfs=1`
+  * Cannot be combined with `roceOptimized` (RoCE settings are included automatically)
+  * Cannot be combined with `rawNvConfig`
+  * Only supported on ConnectX-8 (`nicType: 1023`) and BlueField-3 SuperNIC (`nicType: a2dc`)
+  * `version`: Required. Reference Architecture version (`RA1.3`, `RA2.0`, or `RA2.1`)
+  * `overlay`: Optional, default `none`. Set to `l3` for L3 EVPN overlay
+  * `multiplaneMode`: Optional, default `none`. Only available with RA2.1. Options: `none`, `swplb`, `hwplb`, `uniplane`
+  * `numberOfPlanes`: Optional, default `1`. Only available with RA2.1. Options: `1`, `2`, or `4`
 * If a configuration is not set in spec, its non-volatile configuration parameters (if any) should be set to device default.
+
+#### Spectrum-X Configuration
+
+The NIC Configuration Operator supports Spectrum-X-specific NIC configuration for different versions of the NVIDIA Spectrum-X Reference Architecture (RA1.3, RA2.0, and RA2.1).
+
+Supported NIC types for Spectrum-X:
+* ConnectX-8 (device ID `1023`) -- supports all multiplane modes
+* BlueField-3 SuperNIC (device ID `a2dc`) -- supports all multiplane modes except `hwplb`
+
+RA2.1 introduces multiplane mode support, allowing NICs to be configured with multiple data planes. Available modes:
+
+| Mode | Description | Supported NICs | Planes |
+|------|-------------|----------------|--------|
+| `none` | Single plane (default) | ConnectX-8, BF3 SuperNIC | 1 |
+| `swplb` | Software Packet Load Balancing | ConnectX-8, BF3 SuperNIC | 2, 4 |
+| `hwplb` | Hardware Packet Load Balancing | ConnectX-8 only | 2, 4 |
+| `uniplane` | Uniplane mode | ConnectX-8, BF3 SuperNIC | 2 |
+
+> **Note:** Multiplane modes are only available with RA2.1. For RA1.3 and RA2.0, `multiplaneMode` must be `none` and `numberOfPlanes` must be `1`.
+
+##### [Example Spectrum-X NicConfigurationTemplate with multiplane](docs/examples/spectrum-x/example-nicconfigurationtemplate-spectrum-x-multiplane.yaml):
+
+```yaml
+apiVersion: configuration.net.nvidia.com/v1alpha1
+kind: NicConfigurationTemplate
+metadata:
+  name: spectrum-x-multiplane-configuration
+  namespace: nvidia-network-operator
+spec:
+  nodeSelector:
+      feature.node.kubernetes.io/network-sriov.capable: "true"
+  nicSelector:
+      nicType: "1023" # ConnectX-8. Use "a2dc" for BlueField-3 SuperNIC (hwplb not supported on BF3)
+  template:
+      numVfs: 1
+      linkType: Ethernet
+      spectrumXOptimized:
+          enabled: true
+          version: "RA2.1"
+          overlay: "none"
+          multiplaneMode: "hwplb" # Hardware Packet Load Balancing, ConnectX-8 only
+          numberOfPlanes: 4
+```
 
 ### NicFirmwareSource
 
@@ -228,6 +280,64 @@ status:
 #### Implementation details:
 
 The NicDevice CRD is created and reconciled by the configuration daemon. The reconciliation logic scheme can be found [here](docs/nic-configuration-reconcile-diagram.png).
+
+### NicInterfaceNameTemplate
+
+The NicInterfaceNameTemplate CRD allows you to define custom naming patterns for RDMA and network device interfaces on Spectrum-X NICs. This is useful in multiplane and multi-rail deployments where predictable interface naming is required.
+
+The operator deploys udev rules to the host to rename network and RDMA interfaces according to the specified naming template.
+
+The template uses the following placeholders for device name construction:
+* `%nic_id%`: The index of the NIC in the flattened list of NICs
+* `%plane_id%`: The index of the plane of the specific NIC
+* `%rail_id%`: The index of the rail where the given NIC belongs to
+
+#### [Example NicInterfaceNameTemplate](docs/examples/spectrum-x/example-nicinterfacenametemplate-spectrum-x.yaml):
+
+```yaml
+apiVersion: configuration.net.nvidia.com/v1alpha1
+kind: NicInterfaceNameTemplate
+metadata:
+  name: spectrum-x-interface-names
+  namespace: nvidia-network-operator
+spec:
+  pfsPerNic: 2
+  rdmaDevicePrefix: "rdma_%nic_id%_%plane_id%_%rail_id%"
+  netDevicePrefix: "net_%nic_id%_%plane_id%_%rail_id%"
+  railPciAddresses:
+    - ["0000:1a:00.0", "0000:2a:00.0"]
+    - ["0000:3a:00.0", "0000:4a:00.0"]
+```
+
+The `railPciAddresses` field defines the PCI address to rail mapping. The first dimension is the rail index and the second dimension is the list of PCI addresses of the NICs in that rail.
+
+#### Generated udev rules
+
+The operator generates udev rules based on the template and writes them to the host. The rules are written to two separate files:
+
+Example generated udev rules for net devices (`/etc/udev/rules.d/10-nic-net-interface-naming.rules`):
+
+```text
+# Auto-generated by nic-configuration-operator
+# Do not edit manually
+
+SUBSYSTEM=="net", ACTION=="add", KERNELS=="0000:1a:00.0", NAME="net_0_0_0"
+SUBSYSTEM=="net", ACTION=="add", KERNELS=="0000:1a:00.1", NAME="net_0_1_0"
+SUBSYSTEM=="net", ACTION=="add", KERNELS=="0000:3a:00.0", NAME="net_1_0_1"
+SUBSYSTEM=="net", ACTION=="add", KERNELS=="0000:3a:00.1", NAME="net_1_1_1"
+```
+
+Example generated udev rules for RDMA devices (`/etc/udev/rules.d/10-nic-rdma-interface-naming.rules`):
+
+```text
+# Auto-generated by nic-configuration-operator
+# Do not edit manually
+
+ACTION=="add", KERNELS=="0000:1a:00.0", SUBSYSTEM=="infiniband", RUN+="/usr/bin/rdma dev set %k name rdma_0_0_0"
+ACTION=="add", KERNELS=="0000:1a:00.1", SUBSYSTEM=="infiniband", RUN+="/usr/bin/rdma dev set %k name rdma_0_1_0"
+ACTION=="add", KERNELS=="0000:3a:00.0", SUBSYSTEM=="infiniband", RUN+="/usr/bin/rdma dev set %k name rdma_1_0_1"
+ACTION=="add", KERNELS=="0000:3a:00.1", SUBSYSTEM=="infiniband", RUN+="/usr/bin/rdma dev set %k name rdma_1_1_1"
+```
 
 ## Order of operations
 
