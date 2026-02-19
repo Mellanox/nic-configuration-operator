@@ -45,6 +45,17 @@ const cnpDscpExpectedValueSwplb = "24"
 const cnpDscpExpectedValueUniplane = "24"
 const cnpDscpExpectedValueHwplb = "48"
 
+// mlxreg constants for CC Probe MP mode workaround.
+// Workaround: CC Probe MP mode is not configurable via DMS, so we use mlxreg instead.
+// Remove this workaround once the parameter is added to DMS.
+const ccProbeMPModeRegName = "ROCE_ACCL"
+const ccProbeMPModeFieldName = "cc_probe_mp_mode"
+const ccProbeMPModeFieldSet = "cc_probe_mp_mode=0x1"
+const ccProbeMPModeExpectedValue = "0x00000001"
+
+// mlxregBinary is the path to the mlxreg binary. This is a var to allow substitution in tests.
+var mlxregBinary = "/usr/bin/mlxreg"
+
 type SpectrumXManager interface {
 	// BreakoutConfigApplied checks if the desired Spectrum-X breakout config is applied to the device
 	BreakoutConfigApplied(ctx context.Context, device *v1alpha1.NicDevice) (bool, error)
@@ -387,6 +398,67 @@ func writeCnpDscp(device *v1alpha1.NicDevice, multiplaneMode string) error {
 	return nil
 }
 
+// checkCCProbeMPMode checks if CC Probe MP mode is set on all PFs via mlxreg.
+// Workaround: CC Probe MP mode is not configurable via DMS, so we use mlxreg instead.
+// Remove this workaround once the parameter is added to DMS.
+func (m *spectrumXConfigManager) checkCCProbeMPMode(device *v1alpha1.NicDevice) (bool, error) {
+	log.Log.V(2).Info("SpectrumXConfigManager.checkCCProbeMPMode()", "device", device.Name)
+
+	for _, port := range device.Status.Ports {
+		cmd := m.execInterface.Command(mlxregBinary, "-d", port.PCI,
+			"--reg_name", ccProbeMPModeRegName, "--get")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			log.Log.Error(err, "checkCCProbeMPMode(): failed to run mlxreg get", "device", device.Name, "pci", port.PCI)
+			return false, fmt.Errorf("failed to check CC Probe MP mode via mlxreg for PF %s: %w", port.PCI, err)
+		}
+		// Parse the mlxreg table output to find the cc_probe_mp_mode field and its value.
+		// Output format: "cc_probe_mp_mode                               | 0x00000001"
+		found := false
+		for _, line := range strings.Split(string(output), "\n") {
+			if strings.Contains(line, ccProbeMPModeFieldName) {
+				found = true
+				if !strings.Contains(line, ccProbeMPModeExpectedValue) {
+					log.Log.V(2).Info("checkCCProbeMPMode(): cc_probe_mp_mode not set on PF",
+						"device", device.Name, "pci", port.PCI, "line", strings.TrimSpace(line))
+					return false, nil
+				}
+				break
+			}
+		}
+		if !found {
+			log.Log.V(2).Info("checkCCProbeMPMode(): cc_probe_mp_mode field not found in mlxreg output",
+				"device", device.Name, "pci", port.PCI)
+			return false, nil
+		}
+	}
+
+	log.Log.V(2).Info("checkCCProbeMPMode(): cc_probe_mp_mode is set on all PFs", "device", device.Name)
+	return true, nil
+}
+
+// setCCProbeMPMode sets CC Probe MP mode on all PFs via mlxreg.
+// Workaround: CC Probe MP mode is not configurable via DMS, so we use mlxreg instead.
+// Remove this workaround once the parameter is added to DMS.
+func (m *spectrumXConfigManager) setCCProbeMPMode(device *v1alpha1.NicDevice) error {
+	log.Log.V(2).Info("SpectrumXConfigManager.setCCProbeMPMode()", "device", device.Name)
+
+	for _, port := range device.Status.Ports {
+		cmd := m.execInterface.Command(mlxregBinary, "-d", port.PCI,
+			"--reg_name", ccProbeMPModeRegName, "--set", ccProbeMPModeFieldSet, "--yes")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			log.Log.Error(err, "setCCProbeMPMode(): failed to run mlxreg set",
+				"device", device.Name, "pci", port.PCI, "output", string(output))
+			return fmt.Errorf("failed to set CC Probe MP mode via mlxreg for PF %s: %w", port.PCI, err)
+		}
+		log.Log.V(2).Info("setCCProbeMPMode(): successfully set cc_probe_mp_mode on PF",
+			"device", device.Name, "pci", port.PCI)
+	}
+
+	return nil
+}
+
 // checkDmsParamsApplied checks if the given DMS parameters are applied to the device
 func checkDmsParamsApplied(device *v1alpha1.NicDevice, params []types.ConfigurationParameter, dmsClient dms.DMSClient) (bool, error) {
 	log.Log.Info("SpectrumXConfigManager.checkDmsParamsApplied()", "device", device.Name)
@@ -458,15 +530,57 @@ func (m *spectrumXConfigManager) RuntimeConfigApplied(device *v1alpha1.NicDevice
 	}
 
 	adaptiveRoutingParams := filterParameters(desiredConfig.RuntimeConfig.AdaptiveRouting, deviceType, numberOfPlanes, multiplaneMode)
-	log.Log.V(2).Info("SpectrumXConfigManager.RuntimeConfigApplied(): checking Adaptive Routing config", "device", device.Name)
-	adaptiveRoutingApplied, err := checkDmsParamsApplied(device, adaptiveRoutingParams, dmsClient)
-	if err != nil {
-		log.Log.Error(err, "RuntimeConfigApplied(): failed to check if Adaptive Routing config is applied", "device", device.Name)
-		return false, err
-	}
 
-	if !adaptiveRoutingApplied {
-		return false, nil
+	if multiplaneMode == consts.MultiplaneModeHwplb && len(adaptiveRoutingParams) > 0 {
+		// Workaround: CC Probe MP mode must be checked BEFORE the last adaptive routing
+		// parameter is read. Split the params: all except last, then mlxreg, then last.
+		// Remove this workaround once the parameter is added to DMS.
+		lastIndex := len(adaptiveRoutingParams) - 1
+		beforeLastParams := adaptiveRoutingParams[:lastIndex]
+		lastParam := adaptiveRoutingParams[lastIndex:]
+
+		if len(beforeLastParams) > 0 {
+			log.Log.V(2).Info("SpectrumXConfigManager.RuntimeConfigApplied(): checking Adaptive Routing config (before CC Probe MP mode)", "device", device.Name)
+			applied, err := checkDmsParamsApplied(device, beforeLastParams, dmsClient)
+			if err != nil {
+				log.Log.Error(err, "RuntimeConfigApplied(): failed to check Adaptive Routing config (before CC Probe MP mode)", "device", device.Name)
+				return false, err
+			}
+			if !applied {
+				return false, nil
+			}
+		}
+
+		// Workaround: Check CC Probe MP mode via mlxreg on all PFs (not configurable via DMS)
+		log.Log.V(2).Info("SpectrumXConfigManager.RuntimeConfigApplied(): checking CC Probe MP mode via mlxreg", "device", device.Name)
+		ccProbeMPApplied, err := m.checkCCProbeMPMode(device)
+		if err != nil {
+			log.Log.Error(err, "RuntimeConfigApplied(): failed to check CC Probe MP mode", "device", device.Name)
+			return false, err
+		}
+		if !ccProbeMPApplied {
+			return false, nil
+		}
+
+		log.Log.V(2).Info("SpectrumXConfigManager.RuntimeConfigApplied(): checking Adaptive Routing config (after CC Probe MP mode)", "device", device.Name)
+		adaptiveRoutingApplied, err := checkDmsParamsApplied(device, lastParam, dmsClient)
+		if err != nil {
+			log.Log.Error(err, "RuntimeConfigApplied(): failed to check Adaptive Routing config (after CC Probe MP mode)", "device", device.Name)
+			return false, err
+		}
+		if !adaptiveRoutingApplied {
+			return false, nil
+		}
+	} else {
+		log.Log.V(2).Info("SpectrumXConfigManager.RuntimeConfigApplied(): checking Adaptive Routing config", "device", device.Name)
+		adaptiveRoutingApplied, err := checkDmsParamsApplied(device, adaptiveRoutingParams, dmsClient)
+		if err != nil {
+			log.Log.Error(err, "RuntimeConfigApplied(): failed to check if Adaptive Routing config is applied", "device", device.Name)
+			return false, err
+		}
+		if !adaptiveRoutingApplied {
+			return false, nil
+		}
 	}
 
 	if desiredConfig.UseSoftwareCCAlgorithm {
@@ -562,11 +676,45 @@ func (m *spectrumXConfigManager) ApplyRuntimeConfig(device *v1alpha1.NicDevice) 
 	}
 
 	adaptiveRoutingParams := filterParameters(desiredConfig.RuntimeConfig.AdaptiveRouting, deviceType, numberOfPlanes, multiplaneMode)
-	log.Log.V(2).Info("SpectrumXConfigManager.ApplyRuntimeConfig(): setting Adaptive Routing config", "device", device.Name)
-	err = dmsClient.SetParameters(adaptiveRoutingParams)
-	if err != nil {
-		log.Log.Error(err, "ApplyRuntimeConfig(): failed to set Spectrum-X Adaptive Routing config", "device", device.Name)
-		return err
+
+	if multiplaneMode == consts.MultiplaneModeHwplb && len(adaptiveRoutingParams) > 0 {
+		// Workaround: CC Probe MP mode must be set BEFORE the last adaptive routing
+		// parameter is applied. Split the params: all except last, then mlxreg, then last.
+		// Remove this workaround once the parameter is added to DMS.
+		lastIndex := len(adaptiveRoutingParams) - 1
+		beforeLastParams := adaptiveRoutingParams[:lastIndex]
+		lastParam := adaptiveRoutingParams[lastIndex:]
+
+		if len(beforeLastParams) > 0 {
+			log.Log.V(2).Info("SpectrumXConfigManager.ApplyRuntimeConfig(): setting Adaptive Routing config (before CC Probe MP mode)", "device", device.Name)
+			err = dmsClient.SetParameters(beforeLastParams)
+			if err != nil {
+				log.Log.Error(err, "ApplyRuntimeConfig(): failed to set Adaptive Routing config (before CC Probe MP mode)", "device", device.Name)
+				return err
+			}
+		}
+
+		// Workaround: Set CC Probe MP mode via mlxreg on all PFs (not configurable via DMS)
+		log.Log.V(2).Info("SpectrumXConfigManager.ApplyRuntimeConfig(): setting CC Probe MP mode via mlxreg", "device", device.Name)
+		err = m.setCCProbeMPMode(device)
+		if err != nil {
+			log.Log.Error(err, "ApplyRuntimeConfig(): failed to set CC Probe MP mode", "device", device.Name)
+			return err
+		}
+
+		log.Log.V(2).Info("SpectrumXConfigManager.ApplyRuntimeConfig(): setting Adaptive Routing config (after CC Probe MP mode)", "device", device.Name)
+		err = dmsClient.SetParameters(lastParam)
+		if err != nil {
+			log.Log.Error(err, "ApplyRuntimeConfig(): failed to set Adaptive Routing config (after CC Probe MP mode)", "device", device.Name)
+			return err
+		}
+	} else {
+		log.Log.V(2).Info("SpectrumXConfigManager.ApplyRuntimeConfig(): setting Adaptive Routing config", "device", device.Name)
+		err = dmsClient.SetParameters(adaptiveRoutingParams)
+		if err != nil {
+			log.Log.Error(err, "ApplyRuntimeConfig(): failed to set Spectrum-X Adaptive Routing config", "device", device.Name)
+			return err
+		}
 	}
 
 	if desiredConfig.UseSoftwareCCAlgorithm {

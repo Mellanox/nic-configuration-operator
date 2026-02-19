@@ -66,6 +66,28 @@ type fakeExec struct {
 const (
 	shutdownInterfaceParamName = "Shut down interface"
 	bringUpInterfaceParamName  = "Bring up interface to apply IPG settings"
+
+	// Realistic mlxreg ROCE_ACCL --get output snippets for CC Probe MP mode tests.
+	// Includes other fields with 0x00000001 to verify parsing targets the correct field.
+	mlxregGetCCProbeMPSet = `Sending access register...
+
+Field Name                                     | Data
+============================================================
+roce_adp_retrans_en                            | 0x00000001
+roce_tx_window_en                              | 0x00000001
+adaptive_routing_forced_en                     | 0x00000001
+cc_probe_mp_mode                               | 0x00000001
+============================================================`
+
+	mlxregGetCCProbeMPUnset = `Sending access register...
+
+Field Name                                     | Data
+============================================================
+roce_adp_retrans_en                            | 0x00000001
+roce_tx_window_en                              | 0x00000001
+adaptive_routing_forced_en                     | 0x00000001
+cc_probe_mp_mode                               | 0x00000000
+============================================================`
 )
 
 var (
@@ -1543,7 +1565,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(map[string]string{"/cc": "z"}, nil)
 				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(map[string]string{"/ipg": "25"}, nil)
 
-				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
+				// Stage mlxreg get for cc_probe_mp_mode check (1 PF)
+				execFake.cmds = []*fakeCmd{
+					{output: []byte(mlxregGetCCProbeMPSet), err: nil},
+				}
 				applied, err := manager.RuntimeConfigApplied(device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(applied).To(BeTrue())
@@ -1681,6 +1706,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					return len(params) == 1 && params[0].Name == bringUpInterfaceParamName
 				})).Return(nil)
 
+				// Stage mlxreg set for cc_probe_mp_mode (1 PF), then doca_spcx_cc
+				execFake.cmds = []*fakeCmd{
+					{output: []byte("ok"), err: nil}, // mlxreg set
+				}
 				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
 				err := manager.ApplyRuntimeConfig(device)
 				Expect(err).NotTo(HaveOccurred())
@@ -1826,6 +1855,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				dmsCli.On("GetParameters", expectedCC).Return(map[string]string{"/cc/match": "val4"}, nil)
 				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(map[string]string{"/ipg/match": "val6"}, nil)
 
+				// Stage mlxreg get for cc_probe_mp_mode check (1 PF)
+				execFake.cmds = []*fakeCmd{
+					{output: []byte(mlxregGetCCProbeMPSet), err: nil},
+				}
 				applied, err := manager.RuntimeConfigApplied(device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(applied).To(BeTrue())
@@ -1861,6 +1894,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(map[string]string{"/cc/match": "val5"}, nil)
 				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(map[string]string{"/ipg/match": "val6"}, nil)
 
+				// Stage mlxreg get for cc_probe_mp_mode check (1 PF)
+				execFake.cmds = []*fakeCmd{
+					{output: []byte(mlxregGetCCProbeMPSet), err: nil},
+				}
 				applied, err := manager.RuntimeConfigApplied(device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(applied).To(BeTrue())
@@ -2055,6 +2092,265 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 				err := manager.ApplyRuntimeConfig(device)
 				Expect(err).NotTo(HaveOccurred())
+			})
+		})
+	})
+
+	Describe("CC Probe MP Mode (mlxreg workaround)", func() {
+		Describe("checkCCProbeMPMode", func() {
+			It("returns true when mlxreg output contains 0x00000001 for all PFs", func() {
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", RdmaInterface: "mlx5_0"},
+					{PCI: "0000:00:00.1", RdmaInterface: "mlx5_1"},
+				}
+				execFake.cmds = []*fakeCmd{
+					{output: []byte(mlxregGetCCProbeMPSet), err: nil},
+					{output: []byte(mlxregGetCCProbeMPSet), err: nil},
+				}
+				applied, err := manager.checkCCProbeMPMode(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
+			})
+
+			It("returns false when any PF has 0x00000000", func() {
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", RdmaInterface: "mlx5_0"},
+					{PCI: "0000:00:00.1", RdmaInterface: "mlx5_1"},
+				}
+				execFake.cmds = []*fakeCmd{
+					{output: []byte(mlxregGetCCProbeMPSet), err: nil},
+					{output: []byte(mlxregGetCCProbeMPUnset), err: nil},
+				}
+				applied, err := manager.checkCCProbeMPMode(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeFalse())
+			})
+
+			It("returns error when mlxreg command fails", func() {
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", RdmaInterface: "mlx5_0"},
+				}
+				execFake.cmds = []*fakeCmd{
+					{output: []byte(""), err: errors.New("mlxreg failed")},
+				}
+				_, err := manager.checkCCProbeMPMode(device)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("mlxreg"))
+			})
+
+			It("returns true for empty ports (no PFs to check)", func() {
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{}
+				applied, err := manager.checkCCProbeMPMode(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
+			})
+		})
+
+		Describe("setCCProbeMPMode", func() {
+			It("succeeds when mlxreg set works on all PFs", func() {
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", RdmaInterface: "mlx5_0"},
+					{PCI: "0000:00:00.1", RdmaInterface: "mlx5_1"},
+				}
+				execFake.cmds = []*fakeCmd{
+					{output: []byte("ok"), err: nil},
+					{output: []byte("ok"), err: nil},
+				}
+				err := manager.setCCProbeMPMode(device)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("returns error when mlxreg set fails on a PF", func() {
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", RdmaInterface: "mlx5_0"},
+					{PCI: "0000:00:00.1", RdmaInterface: "mlx5_1"},
+				}
+				execFake.cmds = []*fakeCmd{
+					{output: []byte("ok"), err: nil},
+					{output: []byte(""), err: errors.New("mlxreg set error")},
+				}
+				err := manager.setCCProbeMPMode(device)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("mlxreg"))
+			})
+		})
+
+		Describe("RuntimeConfigApplied with hwplb CC Probe MP mode", func() {
+			BeforeEach(func() {
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeHwplb
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", RdmaInterface: "mlx5_0"},
+				}
+				cfgs["v1"].RuntimeConfig.AdaptiveRouting = []types.ConfigurationParameter{
+					{Name: "ar_before", Value: "y", DMSPath: "/ar/before"},
+					{Name: "ar_force", Value: "y", DMSPath: "/ar/force"},
+				}
+				cfgs["v1"].UseSoftwareCCAlgorithm = false
+			})
+
+			It("returns true when all params including cc_probe_mp_mode are applied", func() {
+				dmsCli.On("GetParameters", []types.ConfigurationParameter{
+					{Name: "ar_before", Value: "y", DMSPath: "/ar/before"},
+				}).Return(map[string]string{"/ar/before": "y"}, nil)
+				dmsCli.On("GetParameters", []types.ConfigurationParameter{
+					{Name: "ar_force", Value: "y", DMSPath: "/ar/force"},
+				}).Return(map[string]string{"/ar/force": "y"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(map[string]string{"/cc": "z"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(map[string]string{"/ipg": "25"}, nil)
+
+				execFake.cmds = []*fakeCmd{
+					{output: []byte(mlxregGetCCProbeMPSet), err: nil},
+				}
+				applied, err := manager.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
+			})
+
+			It("returns false when cc_probe_mp_mode is not set", func() {
+				dmsCli.On("GetParameters", []types.ConfigurationParameter{
+					{Name: "ar_before", Value: "y", DMSPath: "/ar/before"},
+				}).Return(map[string]string{"/ar/before": "y"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
+
+				execFake.cmds = []*fakeCmd{
+					{output: []byte(mlxregGetCCProbeMPUnset), err: nil},
+				}
+				applied, err := manager.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeFalse())
+			})
+
+			It("returns error when mlxreg check fails", func() {
+				dmsCli.On("GetParameters", []types.ConfigurationParameter{
+					{Name: "ar_before", Value: "y", DMSPath: "/ar/before"},
+				}).Return(map[string]string{"/ar/before": "y"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
+
+				execFake.cmds = []*fakeCmd{
+					{output: []byte(""), err: errors.New("mlxreg failed")},
+				}
+				_, err := manager.RuntimeConfigApplied(device)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("CC Probe MP mode"))
+			})
+
+			It("returns false when before-last AR params not applied", func() {
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
+				dmsCli.On("GetParameters", []types.ConfigurationParameter{
+					{Name: "ar_before", Value: "y", DMSPath: "/ar/before"},
+				}).Return(map[string]string{"/ar/before": "wrong"}, nil)
+
+				applied, err := manager.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeFalse())
+			})
+
+			It("returns false when last AR param (AR Force) not applied", func() {
+				dmsCli.On("GetParameters", []types.ConfigurationParameter{
+					{Name: "ar_before", Value: "y", DMSPath: "/ar/before"},
+				}).Return(map[string]string{"/ar/before": "y"}, nil)
+				dmsCli.On("GetParameters", []types.ConfigurationParameter{
+					{Name: "ar_force", Value: "y", DMSPath: "/ar/force"},
+				}).Return(map[string]string{"/ar/force": "wrong"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
+
+				execFake.cmds = []*fakeCmd{
+					{output: []byte(mlxregGetCCProbeMPSet), err: nil},
+				}
+				applied, err := manager.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeFalse())
+			})
+		})
+
+		Describe("ApplyRuntimeConfig with hwplb CC Probe MP mode", func() {
+			BeforeEach(func() {
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeHwplb
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", RdmaInterface: "mlx5_0"},
+				}
+				cfgs["v1"].RuntimeConfig.AdaptiveRouting = []types.ConfigurationParameter{
+					{Name: "ar_before", Value: "y", DMSPath: "/ar/before"},
+					{Name: "ar_force", Value: "y", DMSPath: "/ar/force"},
+				}
+				cfgs["v1"].UseSoftwareCCAlgorithm = false
+			})
+
+			It("applies all params with mlxreg between AR groups", func() {
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(nil)
+				dmsCli.On("SetParameters", []types.ConfigurationParameter{
+					{Name: "ar_before", Value: "y", DMSPath: "/ar/before"},
+				}).Return(nil)
+				dmsCli.On("SetParameters", []types.ConfigurationParameter{
+					{Name: "ar_force", Value: "y", DMSPath: "/ar/force"},
+				}).Return(nil)
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(nil)
+				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
+					return len(params) == 1 && params[0].Name == shutdownInterfaceParamName
+				})).Return(nil)
+				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
+					return len(params) == 1 && params[0].Name == bringUpInterfaceParamName
+				})).Return(nil)
+
+				execFake.cmds = []*fakeCmd{
+					{output: []byte("ok"), err: nil}, // mlxreg set
+				}
+				err := manager.ApplyRuntimeConfig(device)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("returns error when mlxreg set fails", func() {
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(nil)
+				dmsCli.On("SetParameters", []types.ConfigurationParameter{
+					{Name: "ar_before", Value: "y", DMSPath: "/ar/before"},
+				}).Return(nil)
+
+				execFake.cmds = []*fakeCmd{
+					{output: []byte(""), err: errors.New("mlxreg set error")},
+				}
+				err := manager.ApplyRuntimeConfig(device)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("CC Probe MP mode"))
+			})
+
+			It("returns error when before-last AR set fails", func() {
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(nil)
+				dmsCli.On("SetParameters", []types.ConfigurationParameter{
+					{Name: "ar_before", Value: "y", DMSPath: "/ar/before"},
+				}).Return(errors.New("dms set error"))
+
+				err := manager.ApplyRuntimeConfig(device)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("dms set error"))
+			})
+
+			It("checks cc_probe_mp_mode on multiple PFs", func() {
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", RdmaInterface: "mlx5_0"},
+					{PCI: "0000:00:00.1", RdmaInterface: "mlx5_1"},
+				}
+				dmsCli.On("GetParameters", []types.ConfigurationParameter{
+					{Name: "ar_before", Value: "y", DMSPath: "/ar/before"},
+				}).Return(map[string]string{"/ar/before": "y"}, nil)
+				dmsCli.On("GetParameters", []types.ConfigurationParameter{
+					{Name: "ar_force", Value: "y", DMSPath: "/ar/force"},
+				}).Return(map[string]string{"/ar/force": "y"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(map[string]string{"/cc": "z"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(map[string]string{"/ipg": "25"}, nil)
+
+				// 2 PFs → 2 mlxreg get commands
+				execFake.cmds = []*fakeCmd{
+					{output: []byte(mlxregGetCCProbeMPSet), err: nil},
+					{output: []byte(mlxregGetCCProbeMPSet), err: nil},
+				}
+				applied, err := manager.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
 			})
 		})
 	})
