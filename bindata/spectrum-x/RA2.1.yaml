@@ -14,44 +14,6 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 breakout:
-  none:
-    1:
-    - name: Number of PFs
-      value: 1
-      dmsPath: /nvidia/physical-functions/config/num-of-pf
-      valueType: int
-    - name: Number of Planes
-      value: 0
-      mlxconfig: "NUM_OF_PLANES_P1"
-    - name: LAG Resource Allocation
-      value: 0
-      mlxconfig: "LAG_RESOURCE_ALLOCATION"
-    # CX8-specific parameters  
-    - name: Lanes for Module 0 and Port 1
-      value: "0..3"
-      alternativeValue: "[0,1,2,3]"
-      valueType: string
-      dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=1]/lanes
-      deviceId: "1023"
-    - name: Lanes for Module 0 and Port 255
-      value: "4..15"
-      alternativeValue: "[4,5,6,7,8,9,10,11,12,13,14,15]"
-      valueType: string
-      dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=255]/lanes
-      deviceId: "1023"
-    # BF3-specific parameters  
-    - name: Lanes for Module 0 and Port 1
-      value: "0..1"
-      alternativeValue: "[0,1]"
-      valueType: string
-      dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=1]/lanes
-      deviceId: "a2dc"
-    - name: Lanes for Module 0 and Port 255
-      value: "2..7"
-      alternativeValue: "[2,3,4,5,6,7]"
-      valueType: string
-      dmsPath: /nvidia/device/config/module[module-id=0]/port[port-id=255]/lanes
-      deviceId: "a2dc"
   swplb:
     2:
       - name: Number of PFs
