@@ -95,24 +95,6 @@ func (_m *DMSClient) InstallBFB(ctx context.Context, version string, bfbPath str
 	return r0
 }
 
-// IsRunning provides a mock function with no fields
-func (_m *DMSClient) IsRunning() bool {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for IsRunning")
-	}
-
-	var r0 bool
-	if rf, ok := ret.Get(0).(func() bool); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-
-	return r0
-}
-
 // SetParameters provides a mock function with given fields: params
 func (_m *DMSClient) SetParameters(params []types.ConfigurationParameter) error {
 	ret := _m.Called(params)

@@ -114,22 +114,22 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Start DMS instances for all discovered devices
+	// Start DMS server for all discovered devices
 	devices, err := deviceDiscovery.DiscoverNicDevices()
 	if err != nil {
 		log.Log.Error(err, "failed to discover NIC devices")
 		os.Exit(1)
 	}
 
-	if err := dmsManager.StartDMSInstances(slices.Collect(maps.Values(devices))); err != nil {
-		log.Log.Error(err, "failed to start DMS instances")
+	if err := dmsManager.StartDMSServer(slices.Collect(maps.Values(devices))); err != nil {
+		log.Log.Error(err, "failed to start DMS server")
 		os.Exit(1)
 	}
 
-	// Ensure DMS instances are stopped when the program exits
+	// Ensure DMS server is stopped when the program exits
 	defer func() {
-		if err := dmsManager.StopAllDMSInstances(); err != nil {
-			log.Log.Error(err, "failed to stop DMS instances")
+		if err := dmsManager.StopDMSServer(); err != nil {
+			log.Log.Error(err, "failed to stop DMS server")
 		}
 	}()
 
