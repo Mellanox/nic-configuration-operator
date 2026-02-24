@@ -602,10 +602,10 @@ func (r *NicDeviceReconciler) applyNvConfig(ctx context.Context, status *nicDevi
 		log.Log.Info("Feature gate FW_RESET_AFTER_CONFIG_UPDATE is enabled, resetting NIC firmware before reboot", "device", status.device.Name)
 		err = r.ConfigurationManager.ResetNicFirmware(ctx, status.device)
 		if err != nil {
-			log.Log.Error(err, "failed to reset NIC firmware before reboot", "device", status.device.Name)
-			return err
+			log.Log.Error(err, "failed to reset NIC firmware before reboot, will proceed with reboot", "device", status.device.Name)
+		} else {
+			log.Log.Info("NIC firmware reset successful", "device", status.device.Name)
 		}
-		log.Log.Info("NIC firmware reset successful", "device", status.device.Name)
 	}
 
 	status.rebootRequired = result != nil && result.RebootRequired
