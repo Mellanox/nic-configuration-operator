@@ -47,9 +47,10 @@ type FirmwareManager interface {
 	// Source exists and ready but doesn't contain an image for this device's PSID
 	ValidateRequestedFirmwareSource(ctx context.Context, device *v1alpha1.NicDevice) (string, error)
 
-	// BurnNicFirmware will update the device's FW to the requested version
+	// InstallFirmware will update the device's FW to the requested version
+	// returns bool - reboot required (when fw reset fails or is skipped)
 	// returns error - there were errors while updating firmware
-	BurnNicFirmware(ctx context.Context, device *v1alpha1.NicDevice, version string) error
+	InstallFirmware(ctx context.Context, device *v1alpha1.NicDevice, options *types.FirmwareInstallOptions) (bool, error)
 
 	// InstallDocaSpcXCC will validate and install the DOCA SPC-X CC package if provided in the FirmwareSource
 	// If already installed, results in no-op. If package version doesn't match targetVersion, returns an error.
@@ -196,54 +197,95 @@ func (f firmwareManager) InstallDocaSpcXCC(ctx context.Context, device *v1alpha1
 	return nil
 }
 
-// BurnNicFirmware will update the device's FW to the requested version
+// InstallFirmware will update the device's FW to the requested version
+// returns bool - reboot required (when fw reset fails or is skipped)
 // returns error - there were errors while updating firmware
-func (f firmwareManager) BurnNicFirmware(ctx context.Context, device *v1alpha1.NicDevice, version string) error {
-	log.Log.Info("FirmwareManager.BurnNicFirmware()", "device", device.Name, "version", version)
+func (f firmwareManager) InstallFirmware(ctx context.Context, device *v1alpha1.NicDevice, options *types.FirmwareInstallOptions) (bool, error) {
+	log.Log.Info("FirmwareManager.InstallFirmware()", "device", device.Name, "options", options)
 
-	if device.Spec.Firmware == nil {
-		return errors.New("device's firmware spec is empty")
+	if len(device.Status.Ports) == 0 {
+		return false, errors.New("device has no ports")
 	}
 
 	pci := device.Status.Ports[0].PCI
+	version := options.Version
+	var err error
 
-	// Check current firmware versions before proceeding with burn
-	burnedVersion, _, err := f.utils.GetFirmwareVersionsFromDevice(pci)
-	if err != nil {
-		log.Log.V(2).Info("Could not retrieve current firmware version, proceeding with burn", "device", device.Name, "error", err.Error())
-	} else if burnedVersion == version {
-		// If burned version matches requested version, no burn needed
-		log.Log.Info("Burned firmware version already matches requested version, skipping burn", "device", device.Name, "version", version)
-		return nil
+	// In library mode with no version specified, extract version from the firmware file
+	if version == "" && options.FwFilePath != "" {
+		version, err = f.getVersionFromFirmwareFile(device, options.FwFilePath)
+		if err != nil {
+			return false, fmt.Errorf("failed to determine firmware version from file: %w", err)
+		}
 	}
 
-	log.Log.Info("Burned firmware version does not match requested version, proceeding with burn", "device", device.Name, "burned", burnedVersion, "requested", version)
+	// Check current firmware versions before proceeding with burn (idempotency)
+	if version != "" {
+		burnedVersion, _, err := f.utils.GetFirmwareVersionsFromDevice(pci)
+		if err != nil {
+			log.Log.V(2).Info("Could not retrieve current firmware version, proceeding with burn", "device", device.Name, "error", err.Error())
+		} else if burnedVersion == version {
+			log.Log.Info("Burned firmware version already matches requested version, skipping burn", "device", device.Name, "version", version)
+			return false, nil
+		}
+		log.Log.Info("Burned firmware version does not match requested version, proceeding with burn", "device", device.Name, "burned", burnedVersion, "requested", version)
+	}
+
+	// Resolve firmware file path from cache if not provided directly
+	fwFilePath := options.FwFilePath
+	if fwFilePath == "" {
+		fwFilePath, err = f.resolveFirmwareFilePath(device, version)
+		if err != nil {
+			return false, err
+		}
+	}
+
+	// Install firmware using the resolved path
+	if utilsPkg.IsBlueFieldDevice(device.Status.Type) {
+		err = f.installBlueFieldFirmware(ctx, device, version, fwFilePath)
+	} else {
+		err = f.installConnectXFirmware(ctx, device, version, pci, fwFilePath)
+	}
+	if err != nil {
+		return false, err
+	}
+
+	if !options.SkipReset {
+		err = f.utils.ResetNicFirmware(ctx, pci)
+		if err != nil {
+			log.Log.Error(err, "failed to reset NIC firmware after install, reboot required", "device", device.Name)
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// resolveFirmwareFilePath resolves the firmware file path from the K8s cache.
+// For BlueField devices: finds .bfb file in {cacheDir}/bfb/
+// For regular NICs: finds .bin file in {cacheDir}/binaries/{version}/{PSID}/, copies to tmpDir
+func (f firmwareManager) resolveFirmwareFilePath(device *v1alpha1.NicDevice, version string) (string, error) {
+	if device.Spec.Firmware == nil {
+		return "", errors.New("device's firmware spec is empty")
+	}
 
 	fwSourceName := device.Spec.Firmware.NicFirmwareSourceRef
 	cacheDir := path.Join(f.cacheRootDir, fwSourceName)
 
 	if utilsPkg.IsBlueFieldDevice(device.Status.Type) {
-		return f.burnBlueFieldFirmware(ctx, device, version, cacheDir)
+		return f.resolveBFBFilePathFromCache(cacheDir, version)
 	}
 
-	return f.burnDefaultFirmware(ctx, device, version, cacheDir)
+	return f.resolveFirmwareBinaryFilePathFromCache(cacheDir, version, device.Status.PSID)
 }
 
-// burnBlueFieldFirmware handles firmware updates for BlueField devices using BFB files
-func (f firmwareManager) burnBlueFieldFirmware(ctx context.Context, device *v1alpha1.NicDevice, version string, cacheDir string) error {
-	log.Log.Info("FirmwareManager.burnBlueFieldFirmware()", "device", device.Name, "version", version)
-
-	dmsClient, err := f.dmsManager.GetDMSClientBySerialNumber(device.Status.SerialNumber)
-	if err != nil {
-		log.Log.Error(err, "failed to get DMS client", "device", device.Name)
-		return err
-	}
-
+// resolveBFBFilePathFromCache finds a .bfb file in the cache directory
+func (f firmwareManager) resolveBFBFilePathFromCache(cacheDir string, version string) (string, error) {
 	bfbFolderPath := filepath.Join(cacheDir, consts.BFBFolder)
 	log.Log.V(2).Info("Searching for BFB file in the cache", "bfbFolderPath", bfbFolderPath)
 
 	var bfbPath string
-	err = filepath.WalkDir(bfbFolderPath, func(path string, d os.DirEntry, err error) error {
+	err := filepath.WalkDir(bfbFolderPath, func(path string, d os.DirEntry, err error) error {
 		if err == nil && strings.EqualFold(filepath.Ext(d.Name()), ".bfb") {
 			log.Log.V(2).Info("Found BFB file", "path", path)
 			bfbPath = path
@@ -253,30 +295,18 @@ func (f firmwareManager) burnBlueFieldFirmware(ctx context.Context, device *v1al
 	})
 	if err != nil {
 		log.Log.Error(err, "failed to search for BFB file", "bfbFolderPath", bfbFolderPath)
-		return err
+		return "", err
 	}
 
 	if bfbPath == "" {
-		err := fmt.Errorf("couldn't find BFB file for version %s", version)
-		log.Log.Error(err, "failed to upgrade FW on BlueField device", "device", device.Name)
-		return err
+		return "", fmt.Errorf("couldn't find BFB file for version %s", version)
 	}
 
-	err = dmsClient.InstallBFB(ctx, version, bfbPath)
-	if err != nil {
-		log.Log.Error(err, "failed to install BFB", "device", device.Name)
-		return err
-	}
-
-	return nil
+	return bfbPath, nil
 }
 
-// burnDefaultFirmware handles firmware updates for regular NIC devices using binary files
-func (f firmwareManager) burnDefaultFirmware(ctx context.Context, device *v1alpha1.NicDevice, version string, cacheDir string) error {
-	log.Log.Info("FirmwareManager.burnDefaultFirmware()", "device", device.Name, "version", version)
-
-	devicePSID := device.Status.PSID
-
+// resolveFirmwareBinaryFilePathFromCache finds a .bin file in the cache directory and copies it to tmpDir
+func (f firmwareManager) resolveFirmwareBinaryFilePathFromCache(cacheDir string, version string, devicePSID string) (string, error) {
 	log.Log.V(2).Info("Searching for FW binary in the cache", "cacheDir", cacheDir, "PSID", devicePSID)
 
 	fwFolderPath := filepath.Join(cacheDir, consts.NicFirmwareBinariesFolder, version, devicePSID)
@@ -301,25 +331,17 @@ func (f firmwareManager) burnDefaultFirmware(ctx context.Context, device *v1alph
 
 	if err != nil {
 		log.Log.Error(err, "error occurred while searching for FW binary file", "cacheDir", cacheDir, "version", version, "PSID", devicePSID)
-		return err
+		return "", err
 	}
 
 	if fwPath == "" {
-		return fmt.Errorf("couldn't find FW binary file for the %s version and %s PSID", version, devicePSID)
+		return "", fmt.Errorf("couldn't find FW binary file for the %s version and %s PSID", version, devicePSID)
 	}
 
-	versionInFile, psidInFile, err := f.utils.GetFirmwareVersionAndPSIDFromFWBinary(fwPath)
-	if err != nil {
-		log.Log.Error(err, "couldn't get FW version and PSID from FW binary file", "path", fwPath)
-		return err
-	}
-	if versionInFile != version || psidInFile != devicePSID {
-		return fmt.Errorf("found FW binary file doesn't match expected version or PSID. Requested %s, %s, found %s, %s", version, devicePSID, versionInFile, psidInFile)
-	}
-
+	// Copy to tmpDir — cache may be a shared/read-only volume mount
 	if err := os.MkdirAll(f.tmpDir, 0755); err != nil {
 		log.Log.Error(err, "failed to create tmp directory")
-		return err
+		return "", err
 	}
 
 	log.Log.V(2).Info("copying fw binary file to a local folder", "path", fwPath)
@@ -327,21 +349,73 @@ func (f firmwareManager) burnDefaultFirmware(ctx context.Context, device *v1alph
 	err = copyFile(fwPath, copiedFilePath)
 	if err != nil {
 		log.Log.Error(err, "failed to copy fw binary file to a local folder", "path", fwPath)
+		return "", err
+	}
+
+	return copiedFilePath, nil
+}
+
+// getVersionFromFirmwareFile extracts the firmware version from a firmware file.
+// For ConnectX .bin files: uses flint to read version and PSID.
+// For BlueField .bfb files: uses mlx-mkbfb to extract version map, then looks up device type.
+func (f firmwareManager) getVersionFromFirmwareFile(device *v1alpha1.NicDevice, fwFilePath string) (string, error) {
+	if utilsPkg.IsBlueFieldDevice(device.Status.Type) {
+		versions, err := f.utils.GetFWVersionsFromBFB(fwFilePath)
+		if err != nil {
+			return "", err
+		}
+		version, found := versions[device.Status.Type]
+		if !found {
+			return "", fmt.Errorf("BFB file does not contain firmware for device type %s", device.Status.Type)
+		}
+		return version, nil
+	}
+
+	version, _, err := f.utils.GetFirmwareVersionAndPSIDFromFWBinary(fwFilePath)
+	if err != nil {
+		return "", err
+	}
+	return version, nil
+}
+
+// installBlueFieldFirmware installs firmware on a BlueField device via DMS
+func (f firmwareManager) installBlueFieldFirmware(ctx context.Context, device *v1alpha1.NicDevice, version string, fwFilePath string) error {
+	dmsClient, err := f.dmsManager.GetDMSClientBySerialNumber(device.Status.SerialNumber)
+	if err != nil {
+		log.Log.Error(err, "failed to get DMS client", "device", device.Name)
 		return err
 	}
 
-	err = f.utils.VerifyImageBootable(copiedFilePath)
+	err = dmsClient.InstallBFB(ctx, version, fwFilePath)
 	if err != nil {
-		log.Log.Error(err, "copied fw image file is not bootable", "path", copiedFilePath)
+		log.Log.Error(err, "failed to install BFB", "device", device.Name)
 		return err
 	}
 
-	pci := device.Status.Ports[0].PCI
-	log.Log.Info("Starting firmware image burning. The process might take a long time", "path", fwPath, "pci", pci)
+	return nil
+}
 
-	err = f.utils.BurnNicFirmware(ctx, pci, copiedFilePath)
+// installConnectXFirmware validates and burns firmware for a ConnectX NIC
+func (f firmwareManager) installConnectXFirmware(ctx context.Context, device *v1alpha1.NicDevice, version string, pci string, fwFilePath string) error {
+	versionInFile, psidInFile, err := f.utils.GetFirmwareVersionAndPSIDFromFWBinary(fwFilePath)
 	if err != nil {
-		log.Log.Error(err, "failed to burn FW on device", "path", fwPath, "pci", pci)
+		log.Log.Error(err, "couldn't get FW version and PSID from FW binary file", "path", fwFilePath)
+		return err
+	}
+	if versionInFile != version || psidInFile != device.Status.PSID {
+		return fmt.Errorf("found FW binary file doesn't match expected version or PSID. Requested %s, %s, found %s, %s", version, device.Status.PSID, versionInFile, psidInFile)
+	}
+
+	err = f.utils.VerifyImageBootable(fwFilePath)
+	if err != nil {
+		log.Log.Error(err, "fw image file is not bootable", "path", fwFilePath)
+		return err
+	}
+
+	log.Log.Info("Starting firmware image burning. The process might take a long time", "path", fwFilePath, "pci", pci)
+	err = f.utils.BurnNicFirmware(ctx, pci, fwFilePath)
+	if err != nil {
+		log.Log.Error(err, "failed to burn FW on device", "path", fwFilePath, "pci", pci)
 		return err
 	}
 

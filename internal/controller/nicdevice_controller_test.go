@@ -99,7 +99,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 		spectrumXManager = &spectrumxMocks.SpectrumXManager{}
 		ccTerminationChan = make(chan string, 10)
 		spectrumXManager.On("GetCCTerminationChannel").Return((<-chan string)(ccTerminationChan))
-		spectrumXManager.On("GetDocaCCTargetVersion", mock.Anything).Return("", nil)
+		spectrumXManager.On("GetDocaCCTargetVersion", mock.Anything).Return("", nil).Maybe()
 		udevManager = &udevMocks.UdevManager{}
 		udevManager.On("ApplyUdevRules", mock.Anything, mock.Anything).Return(nil, false, nil)
 		deviceDiscoveryUtils = &devicediscoveryMocks.DeviceDiscoveryUtils{}
@@ -406,7 +406,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 		})
 		It("Should result in UpdateSuccessful status if nv config updates or reboot are not required", func() {
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil)
-			configurationManager.On("ApplyDeviceRuntimeSpec", mock.Anything).Return(nil)
+			configurationManager.On("ApplyRuntimeConfiguration", mock.Anything, mock.Anything).Return(&types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusSuccess}, nil)
 			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
 
 			createDevice(false, nil)
@@ -434,7 +434,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			defer os.Unsetenv(consts.FEATURE_GATE_FW_RESET_AFTER_CONFIG_UPDATE)
 
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(true, true, nil)
-			configurationManager.On("ApplyDeviceNvSpec", mock.Anything, mock.Anything).Return(true, nil)
+			configurationManager.On("ApplyNVConfiguration", mock.Anything, mock.Anything, mock.Anything).Return(&types.ConfigurationApplyResult{Status: types.ApplyStatusSuccess, RebootRequired: true}, nil)
 			configurationManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(nil)
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
@@ -458,7 +458,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 		})
 		It("Should NOT reset FW after nv config update if feature gate FW_RESET_AFTER_CONFIG_UPDATE is NOT enabled", func() {
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(true, true, nil)
-			configurationManager.On("ApplyDeviceNvSpec", mock.Anything, mock.Anything).Return(true, nil)
+			configurationManager.On("ApplyNVConfiguration", mock.Anything, mock.Anything, mock.Anything).Return(&types.ConfigurationApplyResult{Status: types.ApplyStatusSuccess, RebootRequired: true}, nil)
 			configurationManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(nil)
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
@@ -528,7 +528,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(true, false, nil)
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
-			configurationManager.On("ApplyDeviceNvSpec", mock.Anything, mock.Anything).Return(false, errors.New(errorText))
+			configurationManager.On("ApplyNVConfiguration", mock.Anything, mock.Anything, mock.Anything).Return((*types.ConfigurationApplyResult)(nil), errors.New(errorText))
 
 			createDevice(false, nil)
 
@@ -544,7 +544,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(true, true, nil)
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
-			configurationManager.On("ApplyDeviceNvSpec", mock.Anything, mock.Anything).Return(true, nil)
+			configurationManager.On("ApplyNVConfiguration", mock.Anything, mock.Anything, mock.Anything).Return(&types.ConfigurationApplyResult{Status: types.ApplyStatusSuccess, RebootRequired: true}, nil)
 			maintenanceManager.On("Reboot").Return(errors.New(errorText))
 
 			// Fix for flaky test: Don't pre-set annotation to avoid optimistic concurrency conflicts
@@ -559,13 +559,13 @@ var _ = Describe("NicDeviceReconciler", func() {
 			// Should reset last applied state annotation if tried to reboot but failed
 			Eventually(lastAppliedStateAnnotationExists).Should(BeFalse())
 
-			configurationManager.AssertNotCalled(GinkgoT(), "ApplyDeviceRuntimeSpec", mock.Anything)
+			configurationManager.AssertNotCalled(GinkgoT(), "ApplyRuntimeConfiguration", mock.Anything, mock.Anything)
 			maintenanceManager.AssertExpectations(GinkgoT())
 		})
 		It("Should not release maintenance if runtime config failed to apply", func() {
 			errorText := "runtime config update failed"
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil)
-			configurationManager.On("ApplyDeviceRuntimeSpec", mock.Anything).Return(errors.New(errorText))
+			configurationManager.On("ApplyRuntimeConfiguration", mock.Anything, mock.Anything).Return((*types.RuntimeConfigurationApplyResult)(nil), errors.New(errorText))
 
 			createDevice(false, nil)
 
@@ -578,7 +578,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ScheduleMaintenance", mock.Anything)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "MaintenanceAllowed", mock.Anything)
-			configurationManager.AssertNotCalled(GinkgoT(), "ApplyDeviceNvSpec", mock.Anything, mock.Anything)
+			configurationManager.AssertNotCalled(GinkgoT(), "ApplyNVConfiguration", mock.Anything, mock.Anything, mock.Anything)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "Reboot")
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
 			configurationManager.AssertExpectations(GinkgoT())
@@ -597,7 +597,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Reason: consts.PendingRebootReason,
 			}))
 
-			configurationManager.AssertNotCalled(GinkgoT(), "ApplyDeviceNvSpec", mock.Anything, mock.Anything)
+			configurationManager.AssertNotCalled(GinkgoT(), "ApplyNVConfiguration", mock.Anything, mock.Anything, mock.Anything)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
 			configurationManager.AssertExpectations(GinkgoT())
 			maintenanceManager.AssertExpectations(GinkgoT())
@@ -620,10 +620,10 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Message: consts.FwConfigNotAppliedAfterRebootErrorMsg,
 			}))
 
-			configurationManager.AssertNotCalled(GinkgoT(), "ApplyDeviceRuntimeSpec", mock.Anything)
+			configurationManager.AssertNotCalled(GinkgoT(), "ApplyRuntimeConfiguration", mock.Anything, mock.Anything)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ScheduleMaintenance", mock.Anything)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "MaintenanceAllowed", mock.Anything)
-			configurationManager.AssertNotCalled(GinkgoT(), "ApplyDeviceNvSpec", mock.Anything, mock.Anything)
+			configurationManager.AssertNotCalled(GinkgoT(), "ApplyNVConfiguration", mock.Anything, mock.Anything, mock.Anything)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "Reboot")
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
 			configurationManager.AssertExpectations(GinkgoT())
@@ -648,8 +648,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Message: consts.FwConfigNotAppliedAfterRebootErrorMsg,
 			}))
 
-			configurationManager.AssertNotCalled(GinkgoT(), "ApplyDeviceRuntimeSpec", mock.Anything)
-			configurationManager.AssertNotCalled(GinkgoT(), "ApplyDeviceNvSpec", mock.Anything, mock.Anything)
+			configurationManager.AssertNotCalled(GinkgoT(), "ApplyRuntimeConfiguration", mock.Anything, mock.Anything)
+			configurationManager.AssertNotCalled(GinkgoT(), "ApplyNVConfiguration", mock.Anything, mock.Anything, mock.Anything)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
 			configurationManager.AssertExpectations(GinkgoT())
 			maintenanceManager.AssertExpectations(GinkgoT())
@@ -736,7 +736,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 				return device.Status.Conditions
 			}).ShouldNot(testutils.MatchCondition(metav1.Condition{Type: consts.ConfigUpdateInProgressCondition})) // No operation are performed on this device, no reason to change status
 
-			configurationManager.AssertNotCalled(GinkgoT(), "ApplyDeviceRuntimeSpec", mock.Anything)
+			configurationManager.AssertNotCalled(GinkgoT(), "ApplyRuntimeConfiguration", mock.Anything, mock.Anything)
 			maintenanceManager.AssertExpectations(GinkgoT())
 		})
 
@@ -745,7 +745,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, matchFirstDevice).Return(true, true, nil)
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
-			configurationManager.On("ApplyDeviceNvSpec", mock.Anything, matchFirstDevice).Return(true, nil)
+			configurationManager.On("ApplyNVConfiguration", mock.Anything, matchFirstDevice, mock.Anything).Return(&types.ConfigurationApplyResult{Status: types.ApplyStatusSuccess, RebootRequired: true}, nil)
 			maintenanceManager.On("Reboot").Return(nil)
 
 			createDevices()
@@ -762,7 +762,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 				return device.Status.Conditions
 			}).ShouldNot(testutils.MatchCondition(metav1.Condition{Type: consts.ConfigUpdateInProgressCondition})) // No operation are performed on this device, no reason to change status
 
-			configurationManager.AssertNotCalled(GinkgoT(), "ApplyDeviceRuntimeSpec", mock.Anything)
+			configurationManager.AssertNotCalled(GinkgoT(), "ApplyRuntimeConfiguration", mock.Anything, mock.Anything)
 			maintenanceManager.AssertExpectations(GinkgoT())
 		})
 	})
@@ -846,7 +846,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ScheduleMaintenance", mock.Anything)
 			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil)
-			configurationManager.On("ApplyDeviceRuntimeSpec", mock.Anything).Return(nil)
+			configurationManager.On("ApplyRuntimeConfiguration", mock.Anything, mock.Anything).Return(&types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusSuccess}, nil)
 
 			createDevice(newFwVersion, consts.FirmwareUpdatePolicyUpdate)
 
@@ -868,7 +868,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ScheduleMaintenance", mock.Anything)
 			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil)
-			configurationManager.On("ApplyDeviceRuntimeSpec", mock.Anything).Return(nil)
+			configurationManager.On("ApplyRuntimeConfiguration", mock.Anything, mock.Anything).Return(&types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusSuccess}, nil)
 
 			createDevice(oldFwVersion, consts.FirmwareUpdatePolicyUpdate)
 
@@ -895,7 +895,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			firmwareManager.On("GetFirmwareVersionsFromDevice", mock.Anything).Return(oldFwVersion, oldFwVersion, nil)
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(err)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
-			firmwareManager.AssertNotCalled(GinkgoT(), "BurnNicFirmware", mock.Anything, mock.Anything, mock.Anything)
+			firmwareManager.AssertNotCalled(GinkgoT(), "InstallFirmware", mock.Anything, mock.Anything, mock.Anything)
 
 			createDevice(oldFwVersion, consts.FirmwareUpdatePolicyUpdate)
 
@@ -921,7 +921,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			firmwareManager.On("GetFirmwareVersionsFromDevice", mock.Anything).Return(oldFwVersion, oldFwVersion, nil)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ScheduleMaintenance", mock.Anything)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
-			firmwareManager.AssertNotCalled(GinkgoT(), "BurnNicFirmware", mock.Anything, mock.Anything, mock.Anything)
+			firmwareManager.AssertNotCalled(GinkgoT(), "InstallFirmware", mock.Anything, mock.Anything, mock.Anything)
 
 			createDevice(oldFwVersion, consts.FirmwareUpdatePolicyValidate)
 
@@ -950,7 +950,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
-			firmwareManager.On("BurnNicFirmware", mock.Anything, mock.Anything, mock.Anything).After(1 * time.Second).Return(err)
+			firmwareManager.On("InstallFirmware", mock.Anything, mock.Anything, mock.Anything).After(1*time.Second).Return(false, err)
 
 			createDevice(oldFwVersion, consts.FirmwareUpdatePolicyUpdate)
 
@@ -980,9 +980,9 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
 			maintenanceManager.On("ReleaseMaintenance", mock.Anything)
-			firmwareManager.On("BurnNicFirmware", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+			firmwareManager.On("InstallFirmware", mock.Anything, mock.Anything, mock.Anything).Return(false, nil)
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil)
-			configurationManager.On("ApplyDeviceRuntimeSpec", mock.Anything).Return(nil)
+			configurationManager.On("ApplyRuntimeConfiguration", mock.Anything, mock.Anything).Return(&types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusSuccess}, nil)
 			configurationManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(nil)
 
 			createDevice(oldFwVersion, consts.FirmwareUpdatePolicyUpdate)
@@ -1074,10 +1074,10 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
 			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
-			firmwareManager.On("BurnNicFirmware", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+			firmwareManager.On("InstallFirmware", mock.Anything, mock.Anything, mock.Anything).Return(false, nil)
 			configurationManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(nil)
 			configurationManager.AssertNotCalled(GinkgoT(), "ValidateDeviceNvSpec", mock.Anything, mock.Anything)
-			configurationManager.AssertNotCalled(GinkgoT(), "ApplyDeviceRuntimeSpec", mock.Anything)
+			configurationManager.AssertNotCalled(GinkgoT(), "ApplyRuntimeConfiguration", mock.Anything, mock.Anything)
 
 			createDevices(consts.FirmwareUpdatePolicyValidate)
 
@@ -1146,11 +1146,11 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
-			firmwareManager.On("BurnNicFirmware", mock.Anything, matchFirstDevice, mock.Anything).Return(nil)
-			firmwareManager.On("BurnNicFirmware", mock.Anything, matchSecondDevice, mock.Anything).Return(err)
+			firmwareManager.On("InstallFirmware", mock.Anything, matchFirstDevice, mock.Anything).Return(false, nil)
+			firmwareManager.On("InstallFirmware", mock.Anything, matchSecondDevice, mock.Anything).Return(false, err)
 			configurationManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(nil)
 			configurationManager.AssertNotCalled(GinkgoT(), "ValidateDeviceNvSpec", mock.Anything, mock.Anything)
-			configurationManager.AssertNotCalled(GinkgoT(), "ApplyDeviceRuntimeSpec", mock.Anything)
+			configurationManager.AssertNotCalled(GinkgoT(), "ApplyRuntimeConfiguration", mock.Anything, mock.Anything)
 
 			createDevices(consts.FirmwareUpdatePolicyUpdate)
 
@@ -1216,10 +1216,10 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
 			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
-			firmwareManager.On("BurnNicFirmware", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+			firmwareManager.On("InstallFirmware", mock.Anything, mock.Anything, mock.Anything).Return(false, nil)
 			configurationManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(nil)
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil)
-			configurationManager.On("ApplyDeviceRuntimeSpec", mock.Anything).Return(nil)
+			configurationManager.On("ApplyRuntimeConfiguration", mock.Anything, mock.Anything).Return(&types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusSuccess}, nil)
 
 			createDevices(consts.FirmwareUpdatePolicyUpdate)
 
@@ -1411,7 +1411,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 	Describe("reconcile triggered by CC process termination", func() {
 		It("Should re-reconcile when CC termination channel fires", func() {
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil)
-			configurationManager.On("ApplyDeviceRuntimeSpec", mock.Anything).Return(nil)
+			configurationManager.On("ApplyRuntimeConfiguration", mock.Anything, mock.Anything).Return(&types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusSuccess}, nil)
 			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
 
 			device := &v1alpha1.NicDevice{
@@ -1440,14 +1440,14 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Reason: consts.UpdateSuccessfulReason,
 			}))
 
-			initialCallCount := countCalls(configurationManager.Calls, "ApplyDeviceRuntimeSpec")
+			initialCallCount := countCalls(configurationManager.Calls, "ApplyRuntimeConfiguration")
 
 			// Simulate CC process termination
 			ccTerminationChan <- "mlx5_0"
 
 			// Verify reconcile ran again
 			Eventually(func() int {
-				return countCalls(configurationManager.Calls, "ApplyDeviceRuntimeSpec")
+				return countCalls(configurationManager.Calls, "ApplyRuntimeConfiguration")
 			}, timeout).Should(BeNumerically(">", initialCallCount))
 		})
 	})

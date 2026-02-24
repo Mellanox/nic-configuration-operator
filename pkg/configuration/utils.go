@@ -30,7 +30,6 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	"github.com/Mellanox/nic-configuration-operator/pkg/dms"
-	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
 
 // ConfigurationUtils is an interface that contains util functions related to NIC Configuration
@@ -75,7 +74,8 @@ func (d *configurationUtils) GetLinkType(name string) string {
 func (h *configurationUtils) GetPCILinkSpeed(pciAddr string) (int, error) {
 	log.Log.Info("ConfigurationUtils.GetPCILinkSpeed()", "pciAddr", pciAddr)
 	cmd := h.execInterface.Command("lspci", "-vv", "-s", pciAddr)
-	output, err := utils.RunCommand(cmd)
+	output, err := cmd.CombinedOutput()
+	log.Log.V(2).Info("GetPCILinkSpeed(): command output", "output", string(output))
 	if err != nil {
 		log.Log.Error(err, "GetPCILinkSpeed(): Failed to run lspci")
 		return -1, err
@@ -117,7 +117,8 @@ func (h *configurationUtils) GetPCILinkSpeed(pciAddr string) (int, error) {
 func (h *configurationUtils) GetMaxReadRequestSize(pciAddr string) (int, error) {
 	log.Log.Info("ConfigurationUtils.GetMaxReadRequestSize()", "pciAddr", pciAddr)
 	cmd := h.execInterface.Command("lspci", "-vv", "-s", pciAddr)
-	output, err := utils.RunCommand(cmd)
+	output, err := cmd.CombinedOutput()
+	log.Log.V(2).Info("GetMaxReadRequestSize(): command output", "output", string(output))
 	if err != nil && len(output) == 0 {
 		log.Log.Error(err, "GetMaxReadRequestSize(): Failed to run lspci")
 		return -1, err
@@ -181,7 +182,8 @@ func (h *configurationUtils) ResetNicFirmware(ctx context.Context, pciAddr strin
 	log.Log.Info("ConfigurationUtils.ResetNicFirmware()", "pciAddr", pciAddr)
 
 	cmd := h.execInterface.CommandContext(ctx, "mlxfwreset", "--device", pciAddr, "reset", "--yes")
-	_, err := utils.RunCommand(cmd)
+	output, err := cmd.CombinedOutput()
+	log.Log.V(2).Info("ResetNicFirmware(): command output", "output", string(output))
 	if err != nil {
 		log.Log.Error(err, "ResetNicFirmware(): Failed to run mlxfwreset")
 		return err
@@ -212,7 +214,8 @@ func (h *configurationUtils) SetMaxReadRequestSize(pciAddr string, maxReadReques
 	}
 
 	cmd := h.execInterface.Command("setpci", "-s", pciAddr, fmt.Sprintf("CAP_EXP+08.w=%d000:F000", valueToApply))
-	_, err := utils.RunCommand(cmd)
+	output, err := cmd.CombinedOutput()
+	log.Log.V(2).Info("SetMaxReadRequestSize(): command output", "output", string(output))
 	if err != nil {
 		log.Log.Error(err, "SetMaxReadRequestSize(): Failed to run setpci")
 		return err

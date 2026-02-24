@@ -154,9 +154,9 @@ func (_m *ConfigValidation) ValidateResetToDefault(nvConfig types.NvConfigQuery)
 	return r0, r1, r2
 }
 
-// newConfigValidation creates a new instance of configValidation. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
+// NewConfigValidation creates a new instance of ConfigValidation. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
-func newConfigValidation(t interface {
+func NewConfigValidation(t interface {
 	mock.TestingT
 	Cleanup(func())
 }) *ConfigValidation {

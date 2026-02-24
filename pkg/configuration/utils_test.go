@@ -53,7 +53,7 @@ var _ = Describe("ConfigurationUtils", func() {
 `
 
 			fakeCmd := &execTesting.FakeCmd{}
-			fakeCmd.OutputScript = append(fakeCmd.OutputScript,
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript,
 				func() ([]byte, []byte, error) {
 					return []byte(lspciOutput), nil, nil
 				},
@@ -81,7 +81,7 @@ var _ = Describe("ConfigurationUtils", func() {
 `
 
 			fakeCmd := &execTesting.FakeCmd{}
-			fakeCmd.OutputScript = append(fakeCmd.OutputScript,
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript,
 				func() ([]byte, []byte, error) {
 					return []byte(lspciOutput), nil, nil
 				},
@@ -108,7 +108,7 @@ var _ = Describe("ConfigurationUtils", func() {
 `
 
 			fakeCmd := &execTesting.FakeCmd{}
-			fakeCmd.OutputScript = append(fakeCmd.OutputScript,
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript,
 				func() ([]byte, []byte, error) {
 					return []byte(lspciOutput), nil, nil
 				},
@@ -130,7 +130,7 @@ var _ = Describe("ConfigurationUtils", func() {
 		It("should return an error when lspci command fails", func() {
 			// Mock the command to fail
 			fakeCmd := &execTesting.FakeCmd{}
-			fakeCmd.OutputScript = append(fakeCmd.OutputScript,
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript,
 				func() ([]byte, []byte, error) {
 					return nil, nil, fmt.Errorf("lspci command failed")
 				},
@@ -176,7 +176,7 @@ var _ = Describe("ConfigurationUtils", func() {
 `
 
 			fakeCmd := &execTesting.FakeCmd{}
-			fakeCmd.OutputScript = append(fakeCmd.OutputScript,
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript,
 				func() ([]byte, []byte, error) {
 					return []byte(lspciOutput), nil, nil
 				},
@@ -203,7 +203,7 @@ var _ = Describe("ConfigurationUtils", func() {
 `
 
 			fakeCmd := &execTesting.FakeCmd{}
-			fakeCmd.OutputScript = append(fakeCmd.OutputScript,
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript,
 				func() ([]byte, []byte, error) {
 					return []byte(lspciOutput), nil, nil
 				},
@@ -225,7 +225,7 @@ var _ = Describe("ConfigurationUtils", func() {
 		It("should return an error when lspci command fails", func() {
 			// Mock the command to fail
 			fakeCmd := &execTesting.FakeCmd{}
-			fakeCmd.OutputScript = append(fakeCmd.OutputScript,
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript,
 				func() ([]byte, []byte, error) {
 					return nil, nil, fmt.Errorf("lspci command failed")
 				},
@@ -317,7 +317,7 @@ var _ = Describe("ConfigurationUtils", func() {
 				valueToApply := 1
 
 				fakeCmd := &execTesting.FakeCmd{}
-				fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+				fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 					return nil, nil, nil
 				})
 
@@ -353,7 +353,7 @@ var _ = Describe("ConfigurationUtils", func() {
 				valueToApply := 5
 
 				fakeCmd := &execTesting.FakeCmd{}
-				fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+				fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 					return nil, nil, errors.New("some error")
 				})
 
