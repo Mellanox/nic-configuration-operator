@@ -44,12 +44,30 @@ func (_m *DMSManager) GetDMSClientBySerialNumber(serialNumber string) (dms.DMSCl
 	return r0, r1
 }
 
-// StartDMSInstances provides a mock function with given fields: devices
-func (_m *DMSManager) StartDMSInstances(devices []v1alpha1.NicDeviceStatus) error {
+// IsRunning provides a mock function with no fields
+func (_m *DMSManager) IsRunning() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsRunning")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// StartDMSServer provides a mock function with given fields: devices
+func (_m *DMSManager) StartDMSServer(devices []v1alpha1.NicDeviceStatus) error {
 	ret := _m.Called(devices)
 
 	if len(ret) == 0 {
-		panic("no return value specified for StartDMSInstances")
+		panic("no return value specified for StartDMSServer")
 	}
 
 	var r0 error
@@ -62,12 +80,12 @@ func (_m *DMSManager) StartDMSInstances(devices []v1alpha1.NicDeviceStatus) erro
 	return r0
 }
 
-// StopAllDMSInstances provides a mock function with no fields
-func (_m *DMSManager) StopAllDMSInstances() error {
+// StopDMSServer provides a mock function with no fields
+func (_m *DMSManager) StopDMSServer() error {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
-		panic("no return value specified for StopAllDMSInstances")
+		panic("no return value specified for StopDMSServer")
 	}
 
 	var r0 error
