@@ -145,7 +145,7 @@ var _ = Describe("utils", func() {
 			fakeExec := &execTesting.FakeExec{}
 
 			fakeCmd := &execTesting.FakeCmd{}
-			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte("Querying Mellanox devices firmware ...\n\n" +
 						"Device #1:\n" +
 						"----------\n\n" +
@@ -185,7 +185,7 @@ var _ = Describe("utils", func() {
 			fakeExec := &execTesting.FakeExec{}
 
 			fakeCmd := &execTesting.FakeCmd{}
-			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte("Querying Mellanox devices firmware ...\n\n" +
 						"Device #1:\n" +
 						"----------\n\n" +
@@ -222,7 +222,7 @@ var _ = Describe("utils", func() {
 			fakeExec := &execTesting.FakeExec{}
 
 			fakeCmd := &execTesting.FakeCmd{}
-			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte("Querying Mellanox devices firmware ...\n\n" +
 						"Device #1:\n" +
 						"----------\n\n" +
@@ -251,7 +251,7 @@ var _ = Describe("utils", func() {
 			fakeExec := &execTesting.FakeExec{}
 
 			fakeCmd := &execTesting.FakeCmd{}
-			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return nil, []byte("device not found"), fmt.Errorf("command failed")
 			})
 
@@ -281,7 +281,7 @@ var _ = Describe("utils", func() {
 			fakeExec := &execTesting.FakeExec{}
 
 			fakeCmd := &execTesting.FakeCmd{}
-			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte("irrelevant line\n" +
 						"FW Version: VeRsIoN\n" +
 						"PSID: PSID\n" +
@@ -308,7 +308,7 @@ var _ = Describe("utils", func() {
 			fakeExec := &execTesting.FakeExec{}
 
 			fakeCmd := &execTesting.FakeCmd{}
-			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte("FW Version: VeRsIoN"), nil, nil
 			})
 
@@ -327,7 +327,7 @@ var _ = Describe("utils", func() {
 			Expect(serial).To(Equal(""))
 
 			fakeCmd = &execTesting.FakeCmd{}
-			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte("PSID: PSID"), nil, nil
 			})
 
@@ -363,19 +363,19 @@ var _ = Describe("utils", func() {
 
 			// BF2 awk command
 			bf2AwkCmd := &execTesting.FakeCmd{}
-			bf2AwkCmd.OutputScript = append(bf2AwkCmd.OutputScript, func() ([]byte, []byte, error) {
+			bf2AwkCmd.CombinedOutputScript = append(bf2AwkCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte("24.35.1000"), nil, nil
 			})
 
 			// BF3 awk command
 			bf3AwkCmd := &execTesting.FakeCmd{}
-			bf3AwkCmd.OutputScript = append(bf3AwkCmd.OutputScript, func() ([]byte, []byte, error) {
+			bf3AwkCmd.CombinedOutputScript = append(bf3AwkCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte("28.39.1002"), nil, nil
 			})
 
 			// BF4 awk command
 			bf4AwkCmd := &execTesting.FakeCmd{}
-			bf4AwkCmd.OutputScript = append(bf4AwkCmd.OutputScript, func() ([]byte, []byte, error) {
+			bf4AwkCmd.CombinedOutputScript = append(bf4AwkCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte("32.42.1000"), nil, nil
 			})
 
@@ -449,15 +449,15 @@ var _ = Describe("utils", func() {
 
 			// All awk commands return empty
 			bf2AwkCmd := &execTesting.FakeCmd{}
-			bf2AwkCmd.OutputScript = append(bf2AwkCmd.OutputScript, func() ([]byte, []byte, error) {
+			bf2AwkCmd.CombinedOutputScript = append(bf2AwkCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte(""), nil, nil
 			})
 			bf3AwkCmd := &execTesting.FakeCmd{}
-			bf3AwkCmd.OutputScript = append(bf3AwkCmd.OutputScript, func() ([]byte, []byte, error) {
+			bf3AwkCmd.CombinedOutputScript = append(bf3AwkCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte(""), nil, nil
 			})
 			bf4AwkCmd := &execTesting.FakeCmd{}
-			bf4AwkCmd.OutputScript = append(bf4AwkCmd.OutputScript, func() ([]byte, []byte, error) {
+			bf4AwkCmd.CombinedOutputScript = append(bf4AwkCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte(""), nil, nil
 			})
 
@@ -495,19 +495,19 @@ var _ = Describe("utils", func() {
 
 			// BF2 awk fails
 			bf2AwkCmd := &execTesting.FakeCmd{}
-			bf2AwkCmd.OutputScript = append(bf2AwkCmd.OutputScript, func() ([]byte, []byte, error) {
+			bf2AwkCmd.CombinedOutputScript = append(bf2AwkCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return nil, []byte("awk failed"), fmt.Errorf("awk command failed")
 			})
 
 			// BF3 awk succeeds
 			bf3AwkCmd := &execTesting.FakeCmd{}
-			bf3AwkCmd.OutputScript = append(bf3AwkCmd.OutputScript, func() ([]byte, []byte, error) {
+			bf3AwkCmd.CombinedOutputScript = append(bf3AwkCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte("28.39.1002"), nil, nil
 			})
 
 			// BF4 awk succeeds
 			bf4AwkCmd := &execTesting.FakeCmd{}
-			bf4AwkCmd.OutputScript = append(bf4AwkCmd.OutputScript, func() ([]byte, []byte, error) {
+			bf4AwkCmd.CombinedOutputScript = append(bf4AwkCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte("32.42.1000"), nil, nil
 			})
 
@@ -551,19 +551,19 @@ var _ = Describe("utils", func() {
 
 			// BF2 awk returns empty
 			bf2AwkCmd := &execTesting.FakeCmd{}
-			bf2AwkCmd.OutputScript = append(bf2AwkCmd.OutputScript, func() ([]byte, []byte, error) {
+			bf2AwkCmd.CombinedOutputScript = append(bf2AwkCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte(""), nil, nil
 			})
 
 			// BF3 awk succeeds
 			bf3AwkCmd := &execTesting.FakeCmd{}
-			bf3AwkCmd.OutputScript = append(bf3AwkCmd.OutputScript, func() ([]byte, []byte, error) {
+			bf3AwkCmd.CombinedOutputScript = append(bf3AwkCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte("28.39.1002"), nil, nil
 			})
 
 			// BF4 awk returns whitespace only
 			bf4AwkCmd := &execTesting.FakeCmd{}
-			bf4AwkCmd.OutputScript = append(bf4AwkCmd.OutputScript, func() ([]byte, []byte, error) {
+			bf4AwkCmd.CombinedOutputScript = append(bf4AwkCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte("   \n  "), nil, nil
 			})
 
@@ -605,19 +605,19 @@ var _ = Describe("utils", func() {
 
 			// BF2 awk returns empty
 			bf2AwkCmd := &execTesting.FakeCmd{}
-			bf2AwkCmd.OutputScript = append(bf2AwkCmd.OutputScript, func() ([]byte, []byte, error) {
+			bf2AwkCmd.CombinedOutputScript = append(bf2AwkCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte(""), nil, nil
 			})
 
 			// BF3 awk returns empty
 			bf3AwkCmd := &execTesting.FakeCmd{}
-			bf3AwkCmd.OutputScript = append(bf3AwkCmd.OutputScript, func() ([]byte, []byte, error) {
+			bf3AwkCmd.CombinedOutputScript = append(bf3AwkCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte(""), nil, nil
 			})
 
 			// BF4 awk succeeds
 			bf4AwkCmd := &execTesting.FakeCmd{}
-			bf4AwkCmd.OutputScript = append(bf4AwkCmd.OutputScript, func() ([]byte, []byte, error) {
+			bf4AwkCmd.CombinedOutputScript = append(bf4AwkCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte("32.42.1000"), nil, nil
 			})
 
@@ -702,7 +702,7 @@ var _ = Describe("utils", func() {
 			fakeExec := &execTesting.FakeExec{}
 
 			fakeCmd := &execTesting.FakeCmd{}
-			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte(expectedVersion), nil, nil
 			})
 
@@ -724,7 +724,7 @@ var _ = Describe("utils", func() {
 			fakeExec := &execTesting.FakeExec{}
 
 			fakeCmd := &execTesting.FakeCmd{}
-			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte("'" + expectedVersion + "'"), nil, nil
 			})
 
@@ -746,7 +746,7 @@ var _ = Describe("utils", func() {
 			fakeExec := &execTesting.FakeExec{}
 
 			fakeCmd := &execTesting.FakeCmd{}
-			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte("\"" + expectedVersion + "\""), nil, nil
 			})
 
@@ -768,7 +768,7 @@ var _ = Describe("utils", func() {
 			fakeExec := &execTesting.FakeExec{}
 
 			fakeCmd := &execTesting.FakeCmd{}
-			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte(expectedVersion + "\n"), nil, nil
 			})
 
@@ -790,7 +790,7 @@ var _ = Describe("utils", func() {
 			fakeExec := &execTesting.FakeExec{}
 
 			fakeCmd := &execTesting.FakeCmd{}
-			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte("'" + expectedVersion + "'\n"), nil, nil
 			})
 
@@ -812,7 +812,7 @@ var _ = Describe("utils", func() {
 			fakeExec := &execTesting.FakeExec{}
 
 			fakeCmd := &execTesting.FakeCmd{}
-			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte("\"'" + expectedVersion + "'\"\n\n"), nil, nil
 			})
 
@@ -833,7 +833,7 @@ var _ = Describe("utils", func() {
 			fakeExec := &execTesting.FakeExec{}
 
 			fakeCmd := &execTesting.FakeCmd{}
-			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return nil, []byte("dpkg-query: no packages found matching " + packageName), fmt.Errorf("exit status 1")
 			})
 
@@ -854,7 +854,7 @@ var _ = Describe("utils", func() {
 			fakeExec := &execTesting.FakeExec{}
 
 			fakeCmd := &execTesting.FakeCmd{}
-			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return nil, []byte("command error"), fmt.Errorf("command failed")
 			})
 

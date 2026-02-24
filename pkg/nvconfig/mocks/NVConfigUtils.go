@@ -79,6 +79,24 @@ func (_m *NVConfigUtils) SetNvConfigParameter(pciAddr string, paramName string, 
 	return r0
 }
 
+// SetNvConfigParametersBatch provides a mock function with given fields: pciAddr, params, withDefault
+func (_m *NVConfigUtils) SetNvConfigParametersBatch(pciAddr string, params map[string]string, withDefault bool) error {
+	ret := _m.Called(pciAddr, params, withDefault)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetNvConfigParametersBatch")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, map[string]string, bool) error); ok {
+		r0 = rf(pciAddr, params, withDefault)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // NewNVConfigUtils creates a new instance of NVConfigUtils. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewNVConfigUtils(t interface {

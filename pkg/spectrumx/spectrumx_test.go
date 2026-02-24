@@ -237,13 +237,13 @@ var _ = Describe("SpectrumXConfigManager", func() {
 	Describe("ApplyNvConfig", func() {
 		It("sets parameters via DMS", func() {
 			dmsCli.On("SetParameters", cfgs["v1"].NVConfig).Return(nil)
-			err := manager.ApplyNvConfig(ctx, device)
+			_, err := manager.ApplyNvConfig(ctx, device)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
 		It("returns error if DMS set fails", func() {
 			dmsCli.On("SetParameters", cfgs["v1"].NVConfig).Return(errors.New("set error"))
-			err := manager.ApplyNvConfig(ctx, device)
+			_, err := manager.ApplyNvConfig(ctx, device)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -255,7 +255,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			device.Status.Type = "1023"
 			expected := []types.ConfigurationParameter{{Name: "match", Value: "ok", DMSPath: "/m", DeviceId: "1023"}}
 			dmsCli.On("SetParameters", expected).Return(nil)
-			err := manager.ApplyNvConfig(ctx, device)
+			_, err := manager.ApplyNvConfig(ctx, device)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
@@ -313,7 +313,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			})).Return(nil)
 
 			nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
-			err := manager.ApplyRuntimeConfig(device)
+			_, err := manager.ApplyRuntimeConfig(device)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -336,7 +336,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			})).Return(nil)
 
 			nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
-			err := manager.ApplyRuntimeConfig(device)
+			_, err := manager.ApplyRuntimeConfig(device)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -352,14 +352,14 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
 
 			nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
-			err := manager.ApplyRuntimeConfig(device)
+			_, err := manager.ApplyRuntimeConfig(device)
 			Expect(err).To(HaveOccurred())
 			Expect(strings.ToLower(err.Error())).To(ContainSubstring("invalid overlay"))
 		})
 
 		It("bubbles up DMS errors", func() {
 			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(errors.New("roce set error"))
-			err := manager.ApplyRuntimeConfig(device)
+			_, err := manager.ApplyRuntimeConfig(device)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("roce set error"))
 		})
@@ -731,9 +731,9 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					{Name: "none_num_pfs", Value: "1", DMSPath: "/none/num-pf"},
 				}
 				dmsCli.On("SetParameters", expectedDmsParams).Return(nil)
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "NUM_OF_PLANES_P1", "0").Return(nil)
+				nvConfigMgr.On("SetNvConfigParametersBatch", "0000:00:00.0", map[string]string{"NUM_OF_PLANES_P1": "0"}, false).Return(nil)
 
-				err := manager.ApplyBreakoutConfig(ctx, device)
+				_, err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -743,7 +743,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 				cfgs["v1"].BreakoutConfig.None = nil
 
-				err := manager.ApplyBreakoutConfig(ctx, device)
+				_, err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -756,7 +756,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				expectedParams := cfgs["v1"].BreakoutConfig.Swplb[2]
 				dmsCli.On("SetParameters", expectedParams).Return(nil)
 
-				err := manager.ApplyBreakoutConfig(ctx, device)
+				_, err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -767,7 +767,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				expectedParams := cfgs["v1"].BreakoutConfig.Swplb[4]
 				dmsCli.On("SetParameters", expectedParams).Return(nil)
 
-				err := manager.ApplyBreakoutConfig(ctx, device)
+				_, err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -780,7 +780,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				expectedParams := cfgs["v1"].BreakoutConfig.Hwplb[2]
 				dmsCli.On("SetParameters", expectedParams).Return(nil)
 
-				err := manager.ApplyBreakoutConfig(ctx, device)
+				_, err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -791,7 +791,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				expectedParams := cfgs["v1"].BreakoutConfig.Hwplb[4]
 				dmsCli.On("SetParameters", expectedParams).Return(nil)
 
-				err := manager.ApplyBreakoutConfig(ctx, device)
+				_, err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -804,7 +804,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				expectedParams := cfgs["v1"].BreakoutConfig.Uniplane[2]
 				dmsCli.On("SetParameters", expectedParams).Return(nil)
 
-				err := manager.ApplyBreakoutConfig(ctx, device)
+				_, err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -815,7 +815,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				expectedParams := cfgs["v1"].BreakoutConfig.Uniplane[4]
 				dmsCli.On("SetParameters", expectedParams).Return(nil)
 
-				err := manager.ApplyBreakoutConfig(ctx, device)
+				_, err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -825,7 +825,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = "invalid-mode"
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
 
-				err := manager.ApplyBreakoutConfig(ctx, device)
+				_, err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).To(HaveOccurred())
 				Expect(strings.ToLower(err.Error())).To(ContainSubstring("invalid multiplane mode"))
 			})
@@ -837,7 +837,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				expectedParams := cfgs["v1"].BreakoutConfig.Swplb[2]
 				dmsCli.On("SetParameters", expectedParams).Return(errors.New("dms set error"))
 
-				err := manager.ApplyBreakoutConfig(ctx, device)
+				_, err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("dms set error"))
 			})
@@ -862,7 +862,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 				dmsCli.On("SetParameters", expectedParams).Return(nil)
 
-				err := manager.ApplyBreakoutConfig(ctx, device)
+				_, err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -876,7 +876,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			cfgs["v1"].BreakoutConfig.Swplb[2] = []types.ConfigurationParameter{}
 
 			// No DMS call should be made when breakout config is empty
-			err := manager.ApplyBreakoutConfig(ctx, device)
+			_, err := manager.ApplyBreakoutConfig(ctx, device)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -1155,17 +1155,16 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 	Describe("ApplyNvConfig with MLXConfig", func() {
 		Context("Basic MLXConfig setting", func() {
-			It("sets mlxconfig params via SetNvConfigParameter", func() {
+			It("sets mlxconfig params via SetNvConfigParametersBatch", func() {
 				cfgs["v1"].NVConfig = []types.ConfigurationParameter{
 					{Name: "mlx_param1", MlxConfig: "NUM_OF_PLANES_P1", Value: "2"},
 					{Name: "mlx_param2", MlxConfig: "ADVANCED_PCI_SETTINGS", Value: "1"},
 				}
 
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "NUM_OF_PLANES_P1", "2").Return(nil)
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "ADVANCED_PCI_SETTINGS", "1").Return(nil)
+				nvConfigMgr.On("SetNvConfigParametersBatch", "0000:00:00.0", map[string]string{"NUM_OF_PLANES_P1": "2", "ADVANCED_PCI_SETTINGS": "1"}, false).Return(nil)
 				dmsCli.On("SetParameters", []types.ConfigurationParameter{}).Return(nil)
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -1176,11 +1175,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					{Name: "mlx_param2", MlxConfig: "ADVANCED_PCI_SETTINGS", Value: "1"},
 				}
 
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "NUM_OF_PLANES_P1", "2").Return(nil)
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "ADVANCED_PCI_SETTINGS", "1").Return(nil)
+				nvConfigMgr.On("SetNvConfigParametersBatch", "0000:00:00.0", map[string]string{"NUM_OF_PLANES_P1": "2", "ADVANCED_PCI_SETTINGS": "1"}, false).Return(nil)
 				dmsCli.On("SetParameters", []types.ConfigurationParameter{{Name: "dms_param", DMSPath: "/dms/path", Value: "val1"}}).Return(nil)
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -1191,9 +1189,9 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 				dmsCli.On("SetParameters", cfgs["v1"].NVConfig).Return(nil)
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
-				// SetNvConfigParameter should not be called
+				// SetNvConfigParametersBatch should not be called
 			})
 		})
 
@@ -1209,10 +1207,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
 
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "PARAM1", "val1").Return(nil)
+				nvConfigMgr.On("SetNvConfigParametersBatch", "0000:00:00.0", map[string]string{"PARAM1": "val1"}, false).Return(nil)
 				dmsCli.On("SetParameters", []types.ConfigurationParameter{{Name: "dms_param", DMSPath: "/swplb/param", Value: "val2"}}).Return(nil)
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -1225,10 +1223,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeHwplb
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 4
 
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "NUM_OF_PLANES_P1", "4").Return(nil)
+				nvConfigMgr.On("SetNvConfigParametersBatch", "0000:00:00.0", map[string]string{"NUM_OF_PLANES_P1": "4"}, false).Return(nil)
 				dmsCli.On("SetParameters", []types.ConfigurationParameter{}).Return(nil)
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -1243,54 +1241,52 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeUniplane
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
 
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "BASE_PARAM", "base_val").Return(nil)
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "MULTIPLANE_PARAM", "mp_val").Return(nil)
+				nvConfigMgr.On("SetNvConfigParametersBatch", "0000:00:00.0", map[string]string{"BASE_PARAM": "base_val"}, false).Return(nil)
 				dmsCli.On("SetParameters", []types.ConfigurationParameter{}).Return(nil)
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
 
 		Context("Error handling", func() {
-			It("returns error when SetNvConfigParameter fails", func() {
+			It("returns error when SetNvConfigParametersBatch fails", func() {
 				cfgs["v1"].NVConfig = []types.ConfigurationParameter{
 					{Name: "mlx_param", MlxConfig: "NUM_OF_PLANES_P1", Value: "2"},
 				}
 
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "NUM_OF_PLANES_P1", "2").
+				nvConfigMgr.On("SetNvConfigParametersBatch", "0000:00:00.0", map[string]string{"NUM_OF_PLANES_P1": "2"}, false).
 					Return(errors.New("set failed"))
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("set failed"))
 			})
 
-			It("returns error when SetNvConfigParameter fails before DMS set", func() {
+			It("returns error when SetNvConfigParametersBatch fails before DMS set", func() {
 				cfgs["v1"].NVConfig = []types.ConfigurationParameter{
 					{Name: "mlx_param", MlxConfig: "NUM_OF_PLANES_P1", Value: "2"},
 					{Name: "dms_param", DMSPath: "/dms/path", Value: "val1"},
 				}
 
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "NUM_OF_PLANES_P1", "2").
+				nvConfigMgr.On("SetNvConfigParametersBatch", "0000:00:00.0", map[string]string{"NUM_OF_PLANES_P1": "2"}, false).
 					Return(errors.New("mlxconfig set error"))
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("mlxconfig set error"))
 			})
 
-			It("returns error when SetNvConfigParameter fails on second param", func() {
+			It("returns error when SetNvConfigParametersBatch fails with multiple params", func() {
 				cfgs["v1"].NVConfig = []types.ConfigurationParameter{
 					{Name: "mlx_param1", MlxConfig: "PARAM1", Value: "val1"},
 					{Name: "mlx_param2", MlxConfig: "PARAM2", Value: "val2"},
 				}
 
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "PARAM1", "val1").Return(nil)
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "PARAM2", "val2").
+				nvConfigMgr.On("SetNvConfigParametersBatch", "0000:00:00.0", map[string]string{"PARAM1": "val1", "PARAM2": "val2"}, false).
 					Return(errors.New("second param failed"))
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("second param failed"))
 			})
@@ -1306,11 +1302,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					{Name: "mlx_match2", MlxConfig: "PARAM3", Value: "val3", DeviceId: consts.BlueField3DeviceID},
 				}
 
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "PARAM1", "val1").Return(nil).Times(1)
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "PARAM3", "val3").Return(nil).Times(1)
+				nvConfigMgr.On("SetNvConfigParametersBatch", "0000:00:00.0", map[string]string{"PARAM1": "val1", "PARAM3": "val3"}, false).Return(nil).Times(1)
 				dmsCli.On("SetParameters", []types.ConfigurationParameter{}).Return(nil)
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -1324,10 +1319,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					{Name: "dms_skip", DMSPath: "/path2", Value: "dms2", DeviceId: consts.BlueField3DeviceID},
 				}
 
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "PARAM1", "val1").Return(nil)
+				nvConfigMgr.On("SetNvConfigParametersBatch", "0000:00:00.0", map[string]string{"PARAM1": "val1"}, false).Return(nil)
 				dmsCli.On("SetParameters", []types.ConfigurationParameter{{Name: "dms_match", DMSPath: "/path1", Value: "dms1", DeviceId: "1023"}}).Return(nil)
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -1344,10 +1339,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				}
 
 				// Should use first port's PCI
-				nvConfigMgr.On("SetNvConfigParameter", "0000:03:00.0", "NUM_OF_PLANES_P1", "2").Return(nil)
+				nvConfigMgr.On("SetNvConfigParametersBatch", "0000:03:00.0", map[string]string{"NUM_OF_PLANES_P1": "2"}, false).Return(nil)
 				dmsCli.On("SetParameters", []types.ConfigurationParameter{}).Return(nil)
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -1397,7 +1392,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 				dmsCli.On("SetParameters", expectedParams).Return(nil)
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -1445,7 +1440,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 				dmsCli.On("SetParameters", expectedParams).Return(nil)
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -1652,7 +1647,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				})).Return(nil)
 
 				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
-				err := manager.ApplyRuntimeConfig(device)
+				_, err := manager.ApplyRuntimeConfig(device)
 				Expect(err).NotTo(HaveOccurred())
 
 				// Verify the file was written with swplb value
@@ -1682,7 +1677,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				})).Return(nil)
 
 				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
-				err := manager.ApplyRuntimeConfig(device)
+				_, err := manager.ApplyRuntimeConfig(device)
 				Expect(err).NotTo(HaveOccurred())
 
 				// Verify the file was written with hwplb value
@@ -1715,7 +1710,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				})).Return(nil)
 
 				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
-				err := manager.ApplyRuntimeConfig(device)
+				_, err := manager.ApplyRuntimeConfig(device)
 				Expect(err).NotTo(HaveOccurred())
 
 				// uniplane expects 24
@@ -1747,7 +1742,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				})).Return(nil)
 
 				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
-				err := manager.ApplyRuntimeConfig(device)
+				_, err := manager.ApplyRuntimeConfig(device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -1935,7 +1930,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					return len(params) == 1 && params[0].Name == bringUpInterfaceParamName
 				})).Return(nil)
 
-				err := manager.ApplyRuntimeConfig(device)
+				_, err := manager.ApplyRuntimeConfig(device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -1977,7 +1972,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					return len(params) == 1 && params[0].Name == bringUpInterfaceParamName
 				})).Return(nil)
 
-				err := manager.ApplyRuntimeConfig(device)
+				_, err := manager.ApplyRuntimeConfig(device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -2017,7 +2012,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					return len(params) == 1 && params[0].Name == bringUpInterfaceParamName
 				})).Return(nil)
 
-				err := manager.ApplyRuntimeConfig(device)
+				_, err := manager.ApplyRuntimeConfig(device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -2053,7 +2048,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					return len(params) == 1 && params[0].Name == bringUpInterfaceParamName
 				})).Return(nil)
 
-				err := manager.ApplyRuntimeConfig(device)
+				_, err := manager.ApplyRuntimeConfig(device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
