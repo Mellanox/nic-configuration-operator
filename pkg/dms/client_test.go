@@ -130,6 +130,7 @@ var _ = Describe("DMSClient", func() {
 			device:        device,
 			targetPCI:     testPCI,
 			bindAddress:   ":9339",
+			authParams:    []string{"--insecure"},
 			execInterface: fakeExec,
 		}
 	})

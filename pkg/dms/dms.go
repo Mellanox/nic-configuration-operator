@@ -36,19 +36,24 @@ const (
 	imagesDir     = "/tmp/images"
 )
 
-// DMSManager interface defines methods for managing the DOCA Management Service server and its clients
+// DMSManager provides per-device DMS client lookup (used by all consumers)
 type DMSManager interface {
+	// GetDMSClientBySerialNumber returns the DMS client for a specific device identified by its serial number
+	GetDMSClientBySerialNumber(serialNumber string) (DMSClient, error)
+}
+
+// DMSServer extends DMSManager with server lifecycle management
+type DMSServer interface {
+	DMSManager
 	// StartDMSServer starts a single DMS server for all given NIC devices
 	StartDMSServer(devices []v1alpha1.NicDeviceStatus) error
 	// StopDMSServer stops the running DMS server
 	StopDMSServer() error
-	// GetDMSClientBySerialNumber returns the DMS client for a specific device identified by its serial number
-	GetDMSClientBySerialNumber(serialNumber string) (DMSClient, error)
 	// IsRunning returns whether the DMS server is running
 	IsRunning() bool
 }
 
-type dmsManager struct {
+type dmsServer struct {
 	clients       map[string]*dmsClient
 	mutex         sync.RWMutex
 	serverPort    int
@@ -61,18 +66,56 @@ type dmsManager struct {
 	cmdErr   error
 }
 
-// NewDMSManager creates a new instance of DMSManager
-func NewDMSManager() DMSManager {
-	log.Log.V(2).Info("Creating new DMS Manager")
-	return &dmsManager{
+// NewDMSServer creates a new instance of DMSServer that manages a local DMS server process
+func NewDMSServer() DMSServer {
+	log.Log.V(2).Info("Creating new DMS Server")
+	return &dmsServer{
 		clients:       make(map[string]*dmsClient),
 		serverPort:    basePort,
 		execInterface: execUtils.New(),
 	}
 }
 
+// externalDMSManager implements DMSManager for an already-running external DMS server
+type externalDMSManager struct {
+	clients map[string]*dmsClient
+}
+
+// NewExternalDMSManager creates a DMSManager that connects to an external DMS server.
+// devices: NIC devices to create clients for
+// address: bind address of the external DMS server (e.g. "remotehost:9339")
+// authParams: authentication/security flags passed to dmsc (e.g. []string{"--insecure"} or
+// []string{"--tls-ca", "/path/ca.pem", "--tls-cert", "/path/cert.pem", "--tls-key", "/path/key.pem"})
+func NewExternalDMSManager(devices []v1alpha1.NicDeviceStatus, address string, authParams []string) DMSManager {
+	log.Log.V(2).Info("Creating new External DMS Manager", "address", address, "deviceCount", len(devices))
+	clients := make(map[string]*dmsClient)
+	for _, device := range devices {
+		client := &dmsClient{
+			device:        device,
+			targetPCI:     device.Ports[0].PCI,
+			bindAddress:   address,
+			authParams:    authParams,
+			execInterface: execUtils.New(),
+		}
+		clients[device.SerialNumber] = client
+	}
+	return &externalDMSManager{clients: clients}
+}
+
+// GetDMSClientBySerialNumber returns the DMS client for a specific device identified by its serial number
+func (m *externalDMSManager) GetDMSClientBySerialNumber(serialNumber string) (DMSClient, error) {
+	log.Log.V(2).Info("GetDMSClientBySerialNumber", "serialNumber", serialNumber)
+	client, ok := m.clients[serialNumber]
+	if !ok {
+		log.Log.V(2).Info("No DMS client found", "serialNumber", serialNumber)
+		return nil, fmt.Errorf("no DMS client found for device with serial number %s", serialNumber)
+	}
+	log.Log.V(2).Info("Found DMS client", "serialNumber", serialNumber)
+	return client, nil
+}
+
 // StartDMSServer starts a single DMS server for all given NIC devices
-func (m *dmsManager) StartDMSServer(devices []v1alpha1.NicDeviceStatus) error {
+func (m *dmsServer) StartDMSServer(devices []v1alpha1.NicDeviceStatus) error {
 	log.Log.V(2).Info("StartDMSServer", "deviceCount", len(devices))
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
@@ -158,6 +201,7 @@ func (m *dmsManager) StartDMSServer(devices []v1alpha1.NicDeviceStatus) error {
 			device:        device,
 			targetPCI:     device.Ports[0].PCI,
 			bindAddress:   bindAddress,
+			authParams:    []string{"--insecure"},
 			execInterface: m.execInterface,
 		}
 		m.clients[device.SerialNumber] = client
@@ -168,7 +212,7 @@ func (m *dmsManager) StartDMSServer(devices []v1alpha1.NicDeviceStatus) error {
 }
 
 // StopDMSServer sends SIGTERM to the running DMS server
-func (m *dmsManager) StopDMSServer() error {
+func (m *dmsServer) StopDMSServer() error {
 	log.Log.V(2).Info("StopDMSServer")
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
@@ -187,12 +231,12 @@ func (m *dmsManager) StopDMSServer() error {
 }
 
 // IsRunning returns whether the DMS server is running
-func (m *dmsManager) IsRunning() bool {
+func (m *dmsServer) IsRunning() bool {
 	return m.running.Load()
 }
 
 // GetDMSClientBySerialNumber returns the DMS client for a specific device identified by its serial number
-func (m *dmsManager) GetDMSClientBySerialNumber(serialNumber string) (DMSClient, error) {
+func (m *dmsServer) GetDMSClientBySerialNumber(serialNumber string) (DMSClient, error) {
 	log.Log.V(2).Info("GetDMSClientBySerialNumber", "serialNumber", serialNumber)
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()

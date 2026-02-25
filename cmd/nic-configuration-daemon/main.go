@@ -105,8 +105,8 @@ func main() {
 
 	deviceDiscovery := devicediscovery.NewDeviceDiscovery(nodeName, nvConfigUtils)
 
-	// Initialize DMS manager
-	dmsManager := dms.NewDMSManager()
+	// Initialize DMS server
+	dmsServer := dms.NewDMSServer()
 
 	spectrumXConfigs, err := initSpectrumXConfigs()
 	if err != nil {
@@ -121,23 +121,23 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := dmsManager.StartDMSServer(slices.Collect(maps.Values(devices))); err != nil {
+	if err := dmsServer.StartDMSServer(slices.Collect(maps.Values(devices))); err != nil {
 		log.Log.Error(err, "failed to start DMS server")
 		os.Exit(1)
 	}
 
 	// Ensure DMS server is stopped when the program exits
 	defer func() {
-		if err := dmsManager.StopDMSServer(); err != nil {
+		if err := dmsServer.StopDMSServer(); err != nil {
 			log.Log.Error(err, "failed to stop DMS server")
 		}
 	}()
 
-	spectrumXConfigManager := spectrumx.NewSpectrumXConfigManager(dmsManager, spectrumXConfigs)
+	spectrumXConfigManager := spectrumx.NewSpectrumXConfigManager(dmsServer, spectrumXConfigs)
 	configurationManager := configuration.NewConfigurationManager(
-		eventRecorder, dmsManager, nvConfigUtils, spectrumXConfigManager)
+		eventRecorder, dmsServer, nvConfigUtils, spectrumXConfigManager)
 	maintenanceManager := maintenance.New(mgr.GetClient(), hostUtils, nodeName, namespace)
-	firmwareManager := firmware.NewFirmwareManager(mgr.GetClient(), dmsManager, namespace)
+	firmwareManager := firmware.NewFirmwareManager(mgr.GetClient(), dmsServer, namespace)
 
 	if err := initNicFwMap(namespace); err != nil {
 		log.Log.Error(err, "unable to init NicFwMap")
