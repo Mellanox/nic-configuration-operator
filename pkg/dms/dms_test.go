@@ -28,16 +28,16 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 )
 
-var _ = Describe("DMSManager", func() {
+var _ = Describe("DMSServer", func() {
 	var (
-		manager     *dmsManager
+		server      *dmsServer
 		fakeExec    *execTesting.FakeExec
 		testDevices []v1alpha1.NicDeviceStatus
 	)
 
 	BeforeEach(func() {
 		fakeExec = &execTesting.FakeExec{}
-		manager = &dmsManager{
+		server = &dmsServer{
 			clients:       make(map[string]*dmsClient),
 			serverPort:    basePort,
 			execInterface: fakeExec,
@@ -101,28 +101,28 @@ var _ = Describe("DMSManager", func() {
 			})
 
 			It("should start a single DMS server and create clients for all devices", func() {
-				err := manager.StartDMSServer(testDevices)
+				err := server.StartDMSServer(testDevices)
 				Expect(err).NotTo(HaveOccurred())
 
 				// Verify clients were created for both devices
-				Expect(manager.clients).To(HaveLen(2))
-				Expect(manager.clients).To(HaveKey("test-serial-1"))
-				Expect(manager.clients).To(HaveKey("test-serial-2"))
+				Expect(server.clients).To(HaveLen(2))
+				Expect(server.clients).To(HaveKey("test-serial-1"))
+				Expect(server.clients).To(HaveKey("test-serial-2"))
 
 				// Verify server is running
-				Expect(manager.running.Load()).To(BeTrue())
+				Expect(server.running.Load()).To(BeTrue())
 
 				// Verify clients have correct target PCI
-				Expect(manager.clients["test-serial-1"].targetPCI).To(Equal("0000:01:00.0"))
-				Expect(manager.clients["test-serial-2"].targetPCI).To(Equal("0000:02:00.0"))
+				Expect(server.clients["test-serial-1"].targetPCI).To(Equal("0000:01:00.0"))
+				Expect(server.clients["test-serial-2"].targetPCI).To(Equal("0000:02:00.0"))
 			})
 
 			It("should not start another server if already running", func() {
-				err := manager.StartDMSServer(testDevices)
+				err := server.StartDMSServer(testDevices)
 				Expect(err).NotTo(HaveOccurred())
 
 				// Try to start again — should be a no-op
-				err = manager.StartDMSServer(testDevices)
+				err = server.StartDMSServer(testDevices)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -143,23 +143,23 @@ var _ = Describe("DMSManager", func() {
 			})
 
 			It("should return an error", func() {
-				err := manager.StartDMSServer(testDevices)
+				err := server.StartDMSServer(testDevices)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("failed to start DMS server"))
 			})
 
 			It("should not have a running server after failure", func() {
-				err := manager.StartDMSServer(testDevices)
+				err := server.StartDMSServer(testDevices)
 				Expect(err).To(HaveOccurred())
-				Expect(manager.running.Load()).To(BeFalse())
+				Expect(server.running.Load()).To(BeFalse())
 			})
 		})
 
 		Context("when no devices are provided", func() {
 			It("should return nil without starting a server", func() {
-				err := manager.StartDMSServer([]v1alpha1.NicDeviceStatus{})
+				err := server.StartDMSServer([]v1alpha1.NicDeviceStatus{})
 				Expect(err).NotTo(HaveOccurred())
-				Expect(manager.running.Load()).To(BeFalse())
+				Expect(server.running.Load()).To(BeFalse())
 			})
 		})
 
@@ -197,11 +197,11 @@ var _ = Describe("DMSManager", func() {
 			})
 
 			It("should try next available port", func() {
-				err := manager.StartDMSServer(testDevices[:1])
+				err := server.StartDMSServer(testDevices[:1])
 				Expect(err).NotTo(HaveOccurred())
 
 				// Port should have been incremented past the in-use port
-				Expect(manager.serverPort).To(BeNumerically(">", basePort))
+				Expect(server.serverPort).To(BeNumerically(">", basePort))
 			})
 		})
 
@@ -232,7 +232,7 @@ var _ = Describe("DMSManager", func() {
 			})
 
 			It("should pass comma-separated PCI addresses", func() {
-				err := manager.StartDMSServer(testDevices)
+				err := server.StartDMSServer(testDevices)
 				Expect(err).NotTo(HaveOccurred())
 
 				// Find -target_pci value in captured args
@@ -253,19 +253,19 @@ var _ = Describe("DMSManager", func() {
 		Context("when server is running", func() {
 			BeforeEach(func() {
 				fakeCmd := &execTesting.FakeCmd{}
-				manager.cmd = fakeCmd
-				manager.running.Store(true)
+				server.cmd = fakeCmd
+				server.running.Store(true)
 			})
 
 			It("should stop the server", func() {
-				err := manager.StopDMSServer()
+				err := server.StopDMSServer()
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
 
 		Context("when server is not running", func() {
 			It("should not return an error", func() {
-				err := manager.StopDMSServer()
+				err := server.StopDMSServer()
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -273,12 +273,12 @@ var _ = Describe("DMSManager", func() {
 
 	Describe("IsRunning", func() {
 		It("should return false when server is not running", func() {
-			Expect(manager.IsRunning()).To(BeFalse())
+			Expect(server.IsRunning()).To(BeFalse())
 		})
 
 		It("should return true when server is running", func() {
-			manager.running.Store(true)
-			Expect(manager.IsRunning()).To(BeTrue())
+			server.running.Store(true)
+			Expect(server.IsRunning()).To(BeTrue())
 		})
 	})
 
@@ -289,26 +289,27 @@ var _ = Describe("DMSManager", func() {
 					device:        testDevices[0],
 					targetPCI:     testDevices[0].Ports[0].PCI,
 					bindAddress:   "localhost:9339",
+					authParams:    []string{"--insecure"},
 					execInterface: fakeExec,
 				}
-				manager.clients[testDevices[0].SerialNumber] = client
-				manager.running.Store(true)
+				server.clients[testDevices[0].SerialNumber] = client
+				server.running.Store(true)
 			})
 
 			It("should return the client for the device", func() {
-				client, err := manager.GetDMSClientBySerialNumber(testDevices[0].SerialNumber)
+				client, err := server.GetDMSClientBySerialNumber(testDevices[0].SerialNumber)
 				Expect(err).NotTo(HaveOccurred())
-				Expect(client).To(Equal(manager.clients[testDevices[0].SerialNumber]))
+				Expect(client).To(Equal(server.clients[testDevices[0].SerialNumber]))
 			})
 		})
 
 		Context("when server is running and the device does not exist", func() {
 			BeforeEach(func() {
-				manager.running.Store(true)
+				server.running.Store(true)
 			})
 
 			It("should return an error", func() {
-				client, err := manager.GetDMSClientBySerialNumber("non-existent-serial")
+				client, err := server.GetDMSClientBySerialNumber("non-existent-serial")
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("no DMS client found for device"))
 				Expect(client).To(BeNil())
@@ -317,12 +318,56 @@ var _ = Describe("DMSManager", func() {
 
 		Context("when server is not running", func() {
 			It("should return an error", func() {
-				client, err := manager.GetDMSClientBySerialNumber(testDevices[0].SerialNumber)
+				client, err := server.GetDMSClientBySerialNumber(testDevices[0].SerialNumber)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("DMS server is not running"))
 				Expect(client).To(BeNil())
 			})
 		})
+	})
+})
+
+var _ = Describe("ExternalDMSManager", func() {
+	var testDevices []v1alpha1.NicDeviceStatus
+
+	BeforeEach(func() {
+		testDevices = []v1alpha1.NicDeviceStatus{
+			{
+				SerialNumber: "test-serial-1",
+				Ports: []v1alpha1.NicDevicePortSpec{
+					{
+						PCI:              "0000:01:00.0",
+						NetworkInterface: "enp1s0f0np0",
+					},
+				},
+			},
+		}
+	})
+
+	It("should create clients for all devices", func() {
+		mgr := NewExternalDMSManager(testDevices, "remotehost:9339", []string{"--insecure"})
+		client, err := mgr.GetDMSClientBySerialNumber("test-serial-1")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(client).NotTo(BeNil())
+	})
+
+	It("should return error for unknown serial number", func() {
+		mgr := NewExternalDMSManager(testDevices, "remotehost:9339", []string{"--insecure"})
+		client, err := mgr.GetDMSClientBySerialNumber("unknown-serial")
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("no DMS client found for device"))
+		Expect(client).To(BeNil())
+	})
+
+	It("should pass custom auth params to clients", func() {
+		authParams := []string{"--tls-ca", "/path/ca.pem", "--tls-cert", "/path/cert.pem", "--tls-key", "/path/key.pem"}
+		mgr := NewExternalDMSManager(testDevices, "remotehost:9339", authParams)
+		client, err := mgr.GetDMSClientBySerialNumber("test-serial-1")
+		Expect(err).NotTo(HaveOccurred())
+		// Verify auth params are stored on the client
+		dmsC := client.(*dmsClient)
+		Expect(dmsC.authParams).To(Equal(authParams))
+		Expect(dmsC.bindAddress).To(Equal("remotehost:9339"))
 	})
 })
 

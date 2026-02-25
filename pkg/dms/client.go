@@ -71,6 +71,7 @@ type dmsClient struct {
 	device        v1alpha1.NicDeviceStatus
 	targetPCI     string
 	bindAddress   string
+	authParams    []string
 	execInterface execUtils.Interface
 }
 
@@ -146,7 +147,8 @@ func (i *dmsClient) RunGetPathCommand(path string, filterRules map[string]string
 
 	queryPath := injectFilterRules(path, filterRules)
 
-	args := []string{dmsClientPath, "-a", i.bindAddress, "--insecure", "--target", i.targetPCI, "get", "--path", queryPath}
+	args := append([]string{dmsClientPath, "-a", i.bindAddress}, i.authParams...)
+	args = append(args, "--target", i.targetPCI, "get", "--path", queryPath)
 	log.Log.V(2).Info("dmsClient.RunGetPathCommand()", "args", strings.Join(args, " "))
 
 	command := i.execInterface.Command(args[0], args[1:]...)
@@ -203,7 +205,8 @@ func formatSetUpdate(path, value, valueType string, filterRules map[string]strin
 func (i *dmsClient) RunSetPathCommand(path, value, valueType string, filterRules map[string]string) error {
 	log.Log.V(2).Info("dmsClient.RunSetPathCommand()", "path", path, "value", value, "valueType", valueType, "device", i.device.SerialNumber)
 
-	args := []string{dmsClientPath, "-a", i.bindAddress, "--insecure", "--target", i.targetPCI, "set", "--update", formatSetUpdate(path, value, valueType, filterRules)}
+	args := append([]string{dmsClientPath, "-a", i.bindAddress}, i.authParams...)
+	args = append(args, "--target", i.targetPCI, "set", "--update", formatSetUpdate(path, value, valueType, filterRules))
 	log.Log.V(2).Info("dmsClient.RunSetPathCommand()", "args", strings.Join(args, " "))
 
 	command := i.execInterface.Command(args[0], args[1:]...)
@@ -331,7 +334,8 @@ func (i *dmsClient) InstallBFB(ctx context.Context, version string, bfbPath stri
 		return err
 	}
 
-	args := []string{dmsClientPath, "-a", i.bindAddress, "--insecure", "--target", i.targetPCI, "os", "install", "--version", version, "--pkg", bfbPath}
+	args := append([]string{dmsClientPath, "-a", i.bindAddress}, i.authParams...)
+	args = append(args, "--target", i.targetPCI, "os", "install", "--version", version, "--pkg", bfbPath)
 	log.Log.V(2).Info("dmsClient.InstallBFB() install command", "args", strings.Join(args, " "))
 
 	command := i.execInterface.CommandContext(ctx, args[0], args[1:]...)
@@ -343,7 +347,8 @@ func (i *dmsClient) InstallBFB(ctx context.Context, version string, bfbPath stri
 
 	log.Log.V(2).Info("BFB installed successfully", "device", i.device.SerialNumber, "version", version, "output", string(output))
 
-	args = []string{dmsClientPath, "-a", i.bindAddress, "--insecure", "--target", i.targetPCI, "os", "activate", "--version", version}
+	args = append([]string{dmsClientPath, "-a", i.bindAddress}, i.authParams...)
+	args = append(args, "--target", i.targetPCI, "os", "activate", "--version", version)
 	log.Log.V(2).Info("dmsClient.InstallBFB() activate command", "args", strings.Join(args, " "))
 
 	command = i.execInterface.CommandContext(ctx, args[0], args[1:]...)
@@ -460,7 +465,8 @@ func (i *dmsClient) SetParameters(params []types.ConfigurationParameter) error {
 
 	log.Log.V(2).Info("Collected set updates", "device", i.device.SerialNumber, "updateCount", len(updates))
 
-	args := []string{dmsClientPath, "-a", i.bindAddress, "--insecure", "--target", i.targetPCI, "set", "--timeout", "5m"}
+	args := append([]string{dmsClientPath, "-a", i.bindAddress}, i.authParams...)
+	args = append(args, "--target", i.targetPCI, "set", "--timeout", "5m")
 	for _, update := range updates {
 		args = append(args, "--update", update)
 	}
