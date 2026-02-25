@@ -194,12 +194,16 @@ func (i *dmsClient) RunGetPathCommand(path string, filterRules map[string]string
 	return value, nil
 }
 
+// formatSetUpdate builds a "path:::type:::value" update entry, applying filter rules to the path.
+func formatSetUpdate(path, value, valueType string, filterRules map[string]string) string {
+	queryPath := injectFilterRules(path, filterRules)
+	return fmt.Sprintf("%s:::%s:::%s", queryPath, valueType, value)
+}
+
 func (i *dmsClient) RunSetPathCommand(path, value, valueType string, filterRules map[string]string) error {
 	log.Log.V(2).Info("dmsClient.RunSetPathCommand()", "path", path, "value", value, "valueType", valueType, "device", i.device.SerialNumber)
 
-	queryPath := injectFilterRules(path, filterRules)
-
-	args := []string{dmsClientPath, "-a", i.bindAddress, "--insecure", "--target", i.targetPCI, "set", "--update", fmt.Sprintf("%s:::%s:::%s", queryPath, valueType, value)}
+	args := []string{dmsClientPath, "-a", i.bindAddress, "--insecure", "--target", i.targetPCI, "set", "--update", formatSetUpdate(path, value, valueType, filterRules)}
 	log.Log.V(2).Info("dmsClient.RunSetPathCommand()", "args", strings.Join(args, " "))
 
 	command := i.execInterface.Command(args[0], args[1:]...)
@@ -416,8 +420,10 @@ func (i *dmsClient) GetParameters(params []types.ConfigurationParameter) (map[st
 	return values, nil
 }
 
-func (i *dmsClient) SetParameters(params []types.ConfigurationParameter) error {
-	log.Log.V(2).Info("dmsClient.SetParameters()", "params", params, "device", i.device.SerialNumber)
+// collectSetUpdates expands all parameters into individual "path:::type:::value" update entries,
+// applying interface and priority filter rules as needed.
+func (i *dmsClient) collectSetUpdates(params []types.ConfigurationParameter) []string {
+	var updates []string
 
 	for _, param := range params {
 		paramPathParts := strings.Split(param.DMSPath, "/")
@@ -428,42 +434,56 @@ func (i *dmsClient) SetParameters(params []types.ConfigurationParameter) error {
 
 				if slices.Contains(paramPathParts, Priority) {
 					for id := 0; id < 8; id++ {
-						filterRules := mergeFilterRules(filterRules, priorityIdFilter(id))
-
-						err := i.RunSetPathCommand(param.DMSPath, param.Value, param.ValueType, filterRules)
-
-						if err != nil {
-							if param.IgnoreError {
-								log.Log.V(2).Info("IgnoreError flag explicitly set for param, ignoring error", "device", i.device.SerialNumber, "param", param)
-								continue
-							}
-							return err
-						}
+						fr := mergeFilterRules(filterRules, priorityIdFilter(id))
+						updates = append(updates, formatSetUpdate(param.DMSPath, param.Value, param.ValueType, fr))
 					}
-
 				} else {
-					err := i.RunSetPathCommand(param.DMSPath, param.Value, param.ValueType, filterRules)
-
-					if err != nil {
-						if param.IgnoreError {
-							log.Log.V(2).Info("IgnoreError flag explicitly set for param, ignoring error", "device", i.device.SerialNumber, "param", param)
-							continue
-						}
-						return err
-					}
+					updates = append(updates, formatSetUpdate(param.DMSPath, param.Value, param.ValueType, filterRules))
 				}
 			}
 		} else {
-			err := i.RunSetPathCommand(param.DMSPath, param.Value, param.ValueType, nil)
-			if err != nil {
-				if param.IgnoreError {
-					log.Log.V(2).Info("IgnoreError flag explicitly set for param, ignoring error", "device", i.device.SerialNumber, "param", param)
-					continue
-				}
-				return err
-			}
+			updates = append(updates, formatSetUpdate(param.DMSPath, param.Value, param.ValueType, nil))
 		}
 	}
 
+	return updates
+}
+
+func (i *dmsClient) SetParameters(params []types.ConfigurationParameter) error {
+	log.Log.V(2).Info("dmsClient.SetParameters()", "params", params, "device", i.device.SerialNumber)
+
+	updates := i.collectSetUpdates(params)
+	if len(updates) == 0 {
+		log.Log.V(2).Info("No updates to set", "device", i.device.SerialNumber)
+		return nil
+	}
+
+	log.Log.V(2).Info("Collected set updates", "device", i.device.SerialNumber, "updateCount", len(updates))
+
+	args := []string{dmsClientPath, "-a", i.bindAddress, "--insecure", "--target", i.targetPCI, "set", "--timeout", "5m"}
+	for _, update := range updates {
+		args = append(args, "--update", update)
+	}
+	log.Log.V(2).Info("dmsClient.SetParameters() batch command", "args", strings.Join(args, " "))
+
+	command := i.execInterface.Command(args[0], args[1:]...)
+	output, err := command.Output()
+	if err != nil {
+		allIgnore := true
+		for _, param := range params {
+			if !param.IgnoreError {
+				allIgnore = false
+				break
+			}
+		}
+		if allIgnore {
+			log.Log.V(2).Info("All parameters have IgnoreError set, ignoring batch error", "device", i.device.SerialNumber, "err", err)
+			return nil
+		}
+		log.Log.V(2).Error(err, "Batch set command failed", "device", i.device.SerialNumber, "output", string(output))
+		return fmt.Errorf("failed to set parameters: %v, output: %s", err, string(output))
+	}
+
+	log.Log.V(2).Info("SetParameters batch command successful", "device", i.device.SerialNumber)
 	return nil
 }

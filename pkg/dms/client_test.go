@@ -438,11 +438,25 @@ var _ = Describe("DMSClient", func() {
 	})
 
 	Describe("SetParameters", func() {
-		It("sets value for simple path", func() {
+		// collectUpdatePayloads extracts all --update values from args
+		collectUpdatePayloads := func(args []string) []string {
+			var payloads []string
+			for i, arg := range args {
+				if arg == "--update" && i+1 < len(args) {
+					payloads = append(payloads, args[i+1])
+				}
+			}
+			return payloads
+		}
+
+		It("sets value for simple path in single command", func() {
 			param := types.ConfigurationParameter{DMSPath: "/nvidia/mode/config/mode", Value: "NIC", ValueType: ValueTypeString}
 			fakeExec.CommandScript = []execTesting.FakeCommandAction{
 				func(cmd string, args ...string) exec.Cmd {
 					verifyTargetFlag(args)
+					payloads := collectUpdatePayloads(args)
+					Expect(payloads).To(HaveLen(1))
+					Expect(payloads[0]).To(Equal("/nvidia/mode/config/mode:::string:::NIC"))
 					return createFakeCmd(nil, nil)
 				},
 			}
@@ -450,17 +464,14 @@ var _ = Describe("DMSClient", func() {
 			Expect(err).ToNot(HaveOccurred())
 		})
 
-		It("sets value per interface and unfiltered", func() {
+		It("sets value per interface in single command", func() {
 			param := types.ConfigurationParameter{DMSPath: "/interfaces/interface/nvidia/qos/config/trust-mode", Value: "dscp", ValueType: ValueTypeString}
 			fakeExec.CommandScript = []execTesting.FakeCommandAction{
-				// filtered set
 				func(cmd string, args ...string) exec.Cmd {
 					verifyTargetFlag(args)
-					return createFakeCmd(nil, nil)
-				},
-				// final unfiltered set
-				func(cmd string, args ...string) exec.Cmd {
-					verifyTargetFlag(args)
+					payloads := collectUpdatePayloads(args)
+					Expect(payloads).To(HaveLen(1))
+					Expect(payloads[0]).To(Equal(createTrustModeSetPath(testNetworkInterface, "dscp")))
 					return createFakeCmd(nil, nil)
 				},
 			}
@@ -468,38 +479,93 @@ var _ = Describe("DMSClient", func() {
 			Expect(err).ToNot(HaveOccurred())
 		})
 
-		It("sets value per interface+priority id across all IDs and unfiltered", func() {
+		It("sets value per interface+priority across all IDs in single command", func() {
 			param := types.ConfigurationParameter{DMSPath: "/interfaces/interface/nvidia/cc/config/priority/np_enabled", Value: "1", ValueType: ValueTypeBool}
-			expectedFiltered := make([]string, 0, 8)
+			expectedPayloads := make([]string, 0, 8)
 			for id := 0; id < 8; id++ {
-				expectedFiltered = append(expectedFiltered, fmt.Sprintf("/interfaces/interface[name=%s]/nvidia/cc/config/priority[id=%d]/np_enabled", testNetworkInterface, id))
+				expectedPayloads = append(expectedPayloads, fmt.Sprintf("/interfaces/interface[name=%s]/nvidia/cc/config/priority[id=%d]/np_enabled:::bool:::1", testNetworkInterface, id))
 			}
 
-			fakeExec.CommandScript = []execTesting.FakeCommandAction{}
-			// eight filtered sets
-			for i := 0; i < 8; i++ {
-				path := expectedFiltered[i]
-				fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(cmd string, args ...string) exec.Cmd {
 					verifyTargetFlag(args)
-					payload := args[len(args)-1]
-					Expect(payload).To(ContainSubstring(path))
-					Expect(payload).To(ContainSubstring(":::bool:::"))
-					Expect(payload).To(ContainSubstring(":::1"))
+					payloads := collectUpdatePayloads(args)
+					Expect(payloads).To(HaveLen(8))
+					for i, expected := range expectedPayloads {
+						Expect(payloads[i]).To(Equal(expected))
+					}
 					return createFakeCmd(nil, nil)
-				})
+				},
 			}
-			// final unfiltered set
-			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
-				verifyTargetFlag(args)
-				payload := args[len(args)-1]
-				Expect(payload).To(ContainSubstring(param.DMSPath))
-				Expect(payload).To(ContainSubstring(":::bool:::"))
-				Expect(payload).To(ContainSubstring(":::1"))
-				return createFakeCmd(nil, nil)
-			})
 
 			err := client.SetParameters([]types.ConfigurationParameter{param})
 			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("batches mixed params into single command", func() {
+			params := []types.ConfigurationParameter{
+				{DMSPath: "/nvidia/mode/config/mode", Value: "NIC", ValueType: ValueTypeString},
+				{DMSPath: "/interfaces/interface/nvidia/qos/config/trust-mode", Value: "dscp", ValueType: ValueTypeString},
+			}
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(cmd string, args ...string) exec.Cmd {
+					verifyTargetFlag(args)
+					payloads := collectUpdatePayloads(args)
+					Expect(payloads).To(HaveLen(2))
+					Expect(payloads[0]).To(Equal("/nvidia/mode/config/mode:::string:::NIC"))
+					Expect(payloads[1]).To(Equal(createTrustModeSetPath(testNetworkInterface, "dscp")))
+					return createFakeCmd(nil, nil)
+				},
+			}
+			err := client.SetParameters(params)
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("returns nil for empty params without executing command", func() {
+			err := client.SetParameters([]types.ConfigurationParameter{})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(fakeExec.CommandCalls).To(Equal(0))
+		})
+
+		It("returns error when batch command fails", func() {
+			param := types.ConfigurationParameter{DMSPath: "/nvidia/mode/config/mode", Value: "NIC", ValueType: ValueTypeString}
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(cmd string, args ...string) exec.Cmd {
+					return createFakeCmd(nil, errors.New("command failed"))
+				},
+			}
+			err := client.SetParameters([]types.ConfigurationParameter{param})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("failed to set parameters"))
+		})
+
+		It("ignores error when all params have IgnoreError set", func() {
+			params := []types.ConfigurationParameter{
+				{DMSPath: "/nvidia/mode/config/mode", Value: "NIC", ValueType: ValueTypeString, IgnoreError: true},
+				{DMSPath: "/interfaces/interface/nvidia/qos/config/trust-mode", Value: "dscp", ValueType: ValueTypeString, IgnoreError: true},
+			}
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(cmd string, args ...string) exec.Cmd {
+					return createFakeCmd(nil, errors.New("command failed"))
+				},
+			}
+			err := client.SetParameters(params)
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("returns error when command fails and some params do not have IgnoreError", func() {
+			params := []types.ConfigurationParameter{
+				{DMSPath: "/nvidia/mode/config/mode", Value: "NIC", ValueType: ValueTypeString, IgnoreError: true},
+				{DMSPath: "/interfaces/interface/nvidia/qos/config/trust-mode", Value: "dscp", ValueType: ValueTypeString, IgnoreError: false},
+			}
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(cmd string, args ...string) exec.Cmd {
+					return createFakeCmd(nil, errors.New("command failed"))
+				},
+			}
+			err := client.SetParameters(params)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("failed to set parameters"))
 		})
 	})
 
