@@ -803,9 +803,9 @@ func (r *NicDeviceReconciler) handleFirmwareUpdate(ctx context.Context, status *
 
 	err = r.ConfigurationManager.ResetNicFirmware(ctx, status.device)
 	if err != nil {
-		log.Log.Error(err, "failed to reset NIC firmware", "device", status.device.Name)
-		_ = r.updateFirmwareUpdateInProgressStatusCondition(ctx, status.device, consts.FirmwareUpdateFailedReason, metav1.ConditionFalse, err.Error())
-		return err
+		log.Log.Error(err, "failed to reset NIC firmware, falling back to reboot to activate new firmware", "device", status.device.Name)
+		status.rebootRequired = true
+		return nil
 	}
 
 	log.Log.Info("update fw version for device after update", "device", status.device.Name, "new version", status.requestedFirmwareVersion)

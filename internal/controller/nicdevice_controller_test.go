@@ -994,6 +994,30 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Message: consts.DeviceFwMatchMessage,
 			}))
 		})
+
+		It("Should fall back to reboot when fw reset fails after successful burn", func() {
+			resetErr := errors.New("mlxfwreset failed: exit status 1")
+			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return(newFwVersion, nil)
+			firmwareManager.On("GetFirmwareVersionsFromDevice", mock.Anything).Return(oldFwVersion, oldFwVersion, nil)
+			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
+			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
+			firmwareManager.On("BurnNicFirmware", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+			configurationManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(resetErr)
+			// Reboot returns an error so the reconciler retries and we can observe the state
+			maintenanceManager.On("Reboot").Return(errors.New("reboot failed"))
+
+			createDevice(oldFwVersion, consts.FirmwareUpdatePolicyUpdate)
+
+			// Should NOT get stuck in FirmwareUpdateFailed status — the reset error
+			// must be treated as non-fatal and trigger a reboot fallback instead
+			Consistently(getDeviceConditions, time.Second*3).ShouldNot(testutils.MatchCondition(metav1.Condition{
+				Type:   consts.FirmwareUpdateInProgressCondition,
+				Status: metav1.ConditionFalse,
+				Reason: consts.FirmwareUpdateFailedReason,
+			}))
+
+			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
+		})
 	})
 
 	Describe("reconcile two devices with both firmware and configuration spec", func() {
