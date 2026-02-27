@@ -5,7 +5,7 @@ go 1.24.11
 require (
 	github.com/Mellanox/maintenance-operator/api v0.2.3
 	github.com/Mellanox/rdmamap v1.1.0
-	github.com/jaypipes/ghw v0.21.2
+	github.com/jaypipes/ghw v0.23.0
 	github.com/jaypipes/pcidb v1.1.1
 	github.com/onsi/ginkgo/v2 v2.27.5
 	github.com/onsi/gomega v1.39.0
