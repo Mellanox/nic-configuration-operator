@@ -49,15 +49,15 @@ type SpectrumXManager interface {
 	// BreakoutConfigApplied checks if the desired Spectrum-X breakout config is applied to the device
 	BreakoutConfigApplied(ctx context.Context, device *v1alpha1.NicDevice) (bool, error)
 	// ApplyBreakoutConfig applies the desired Spectrum-X breakout config to the device
-	ApplyBreakoutConfig(ctx context.Context, device *v1alpha1.NicDevice) error
+	ApplyBreakoutConfig(ctx context.Context, device *v1alpha1.NicDevice) (*types.ConfigurationApplyResult, error)
 	// NvConfigApplied checks if the desired Spectrum-X NV config is applied to the device
 	NvConfigApplied(ctx context.Context, device *v1alpha1.NicDevice) (bool, error)
 	// ApplyNvConfig applies the desired Spectrum-X NV config to the device
-	ApplyNvConfig(ctx context.Context, device *v1alpha1.NicDevice) error
+	ApplyNvConfig(ctx context.Context, device *v1alpha1.NicDevice) (*types.ConfigurationApplyResult, error)
 	// RuntimeConfigApplied checks if the desired Spectrum-X runtime spec is applied to the device
 	RuntimeConfigApplied(device *v1alpha1.NicDevice) (bool, error)
 	// ApplyRuntimeConfig applies the desired Spectrum-X runtime spec to the device
-	ApplyRuntimeConfig(device *v1alpha1.NicDevice) error
+	ApplyRuntimeConfig(device *v1alpha1.NicDevice) (*types.RuntimeConfigurationApplyResult, error)
 	// GetDocaCCTargetVersion returns the target version of DOCA SPC-X CC for the device
 	GetDocaCCTargetVersion(device *v1alpha1.NicDevice) (string, error)
 	// RunDocaSpcXCC launches and keeps track of the DOCA SPC-X CC process for the given port
@@ -210,13 +210,18 @@ func (m *spectrumXConfigManager) checkParamsApplied(ctx context.Context, mlxconf
 }
 
 // applyParams applies the given mlxconfig and DMS parameters to the device.
+// mlxconfig params are applied as a single batch call.
 func (m *spectrumXConfigManager) applyParams(mlxconfigParams, dmsParams []types.ConfigurationParameter, device *v1alpha1.NicDevice) error {
-	// Apply mlxconfig params
-	for _, param := range mlxconfigParams {
-		log.Log.V(2).Info("applyParams(): setting mlxconfig param", "device", device.Name, "param", param.MlxConfig, "value", param.Value)
-		err := m.nvConfigUtils.SetNvConfigParameter(device.Status.Ports[0].PCI, param.MlxConfig, param.Value)
+	// Apply mlxconfig params as a single batch call
+	if len(mlxconfigParams) > 0 {
+		paramMap := make(map[string]string, len(mlxconfigParams))
+		for _, param := range mlxconfigParams {
+			paramMap[param.MlxConfig] = param.Value
+		}
+		log.Log.V(2).Info("applyParams(): setting mlxconfig params in batch", "device", device.Name, "params", paramMap)
+		err := m.nvConfigUtils.SetNvConfigParametersBatch(device.Status.Ports[0].PCI, paramMap, false)
 		if err != nil {
-			log.Log.Error(err, "applyParams(): failed to set mlxconfig parameter", "device", device.Name, "param", param)
+			log.Log.Error(err, "applyParams(): failed to set mlxconfig parameters", "device", device.Name)
 			return err
 		}
 	}
@@ -260,22 +265,27 @@ func (m *spectrumXConfigManager) BreakoutConfigApplied(ctx context.Context, devi
 }
 
 // ApplyBreakoutConfig applies the desired Spectrum-X breakout config to the device.
-func (m *spectrumXConfigManager) ApplyBreakoutConfig(ctx context.Context, device *v1alpha1.NicDevice) error {
+func (m *spectrumXConfigManager) ApplyBreakoutConfig(ctx context.Context, device *v1alpha1.NicDevice) (*types.ConfigurationApplyResult, error) {
 	log.Log.Info("SpectrumXConfigManager.ApplyBreakoutConfig()", "device", device.Name)
 
 	spcXSpec := device.Spec.Configuration.Template.SpectrumXOptimized
 	desiredConfig, found := m.spectrumXConfigs[spcXSpec.Version]
 	if !found {
-		return fmt.Errorf("spectrumx config not found for version %s", spcXSpec.Version)
+		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, fmt.Errorf("spectrumx config not found for version %s", spcXSpec.Version)
 	}
 
 	mlxconfigParams, dmsParams, err := getBreakoutParameters(desiredConfig, spcXSpec, device)
 	if err != nil {
 		log.Log.Error(err, "ApplyBreakoutConfig(): failed to get breakout parameters", "device", device.Name)
-		return err
+		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}
 
-	return m.applyParams(mlxconfigParams, dmsParams, device)
+	err = m.applyParams(mlxconfigParams, dmsParams, device)
+	if err != nil {
+		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+	}
+
+	return &types.ConfigurationApplyResult{Status: types.ApplyStatusSuccess, RebootRequired: true}, nil
 }
 
 // NvConfigApplied checks if the desired Spectrum-X NV config is applied to the device.
@@ -298,22 +308,27 @@ func (m *spectrumXConfigManager) NvConfigApplied(ctx context.Context, device *v1
 }
 
 // ApplyNvConfig applies the desired Spectrum-X NV config to the device.
-func (m *spectrumXConfigManager) ApplyNvConfig(ctx context.Context, device *v1alpha1.NicDevice) error {
+func (m *spectrumXConfigManager) ApplyNvConfig(ctx context.Context, device *v1alpha1.NicDevice) (*types.ConfigurationApplyResult, error) {
 	log.Log.Info("SpectrumXConfigManager.ApplyNvConfig()", "device", device.Name)
 
 	spcXSpec := device.Spec.Configuration.Template.SpectrumXOptimized
 	desiredConfig, found := m.spectrumXConfigs[spcXSpec.Version]
 	if !found {
-		return fmt.Errorf("spectrumx config not found for version %s", spcXSpec.Version)
+		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, fmt.Errorf("spectrumx config not found for version %s", spcXSpec.Version)
 	}
 
 	mlxconfigParams, dmsParams, err := getNvConfigParameters(desiredConfig, spcXSpec, device)
 	if err != nil {
 		log.Log.Error(err, "ApplyNvConfig(): failed to get NV config parameters", "device", device.Name)
-		return err
+		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}
 
-	return m.applyParams(mlxconfigParams, dmsParams, device)
+	err = m.applyParams(mlxconfigParams, dmsParams, device)
+	if err != nil {
+		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+	}
+
+	return &types.ConfigurationApplyResult{Status: types.ApplyStatusSuccess, RebootRequired: true}, nil
 }
 
 // getCnpDscpPath returns the sysfs path for CNP DSCP for a given interface
@@ -527,17 +542,17 @@ func (m *spectrumXConfigManager) RuntimeConfigApplied(device *v1alpha1.NicDevice
 }
 
 // ApplyRuntimeConfig applies the desired Spectrum-X runtime spec to the device
-func (m *spectrumXConfigManager) ApplyRuntimeConfig(device *v1alpha1.NicDevice) error {
+func (m *spectrumXConfigManager) ApplyRuntimeConfig(device *v1alpha1.NicDevice) (*types.RuntimeConfigurationApplyResult, error) {
 	spcXSpec := device.Spec.Configuration.Template.SpectrumXOptimized
 	desiredConfig, found := m.spectrumXConfigs[spcXSpec.Version]
 	if !found {
-		return fmt.Errorf("spectrumx config not found for version %s", spcXSpec.Version)
+		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, fmt.Errorf("spectrumx config not found for version %s", spcXSpec.Version)
 	}
 
 	dmsClient, err := m.dmsManager.GetDMSClientBySerialNumber(device.Status.SerialNumber)
 	if err != nil {
 		log.Log.Error(err, "ApplyRuntimeConfig(): failed to get DMS client", "device", device.Name)
-		return err
+		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}
 
 	// Filter parameters by device type, breakout (number of planes), and multiplane mode
@@ -550,7 +565,7 @@ func (m *spectrumXConfigManager) ApplyRuntimeConfig(device *v1alpha1.NicDevice) 
 	err = dmsClient.SetParameters(roceParams)
 	if err != nil {
 		log.Log.Error(err, "ApplyRuntimeConfig(): failed to set Spectrum-X RoCE config", "device", device.Name)
-		return err
+		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}
 
 	// Write CNP DSCP after RoCE config
@@ -558,7 +573,7 @@ func (m *spectrumXConfigManager) ApplyRuntimeConfig(device *v1alpha1.NicDevice) 
 	err = writeCnpDscp(device, multiplaneMode)
 	if err != nil {
 		log.Log.Error(err, "ApplyRuntimeConfig(): failed to set CNP DSCP config", "device", device.Name)
-		return err
+		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}
 
 	adaptiveRoutingParams := filterParameters(desiredConfig.RuntimeConfig.AdaptiveRouting, deviceType, numberOfPlanes, multiplaneMode)
@@ -566,26 +581,26 @@ func (m *spectrumXConfigManager) ApplyRuntimeConfig(device *v1alpha1.NicDevice) 
 	err = dmsClient.SetParameters(adaptiveRoutingParams)
 	if err != nil {
 		log.Log.Error(err, "ApplyRuntimeConfig(): failed to set Spectrum-X Adaptive Routing config", "device", device.Name)
-		return err
+		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}
 
 	if desiredConfig.UseSoftwareCCAlgorithm {
 		log.Log.V(2).Info("SpectrumXConfigManager.ApplyRuntimeConfig(): running DOCA SPC-X CC algorithm", "device", device.Name)
 		if multiplaneMode == consts.MultiplaneModeHwplb {
 			if len(device.Status.Ports) == 0 {
-				return fmt.Errorf("no ports available for device %s", device.Name)
+				return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, fmt.Errorf("no ports available for device %s", device.Name)
 			}
 			err = m.RunDocaSpcXCC(device.Status.Ports[0])
 			if err != nil {
 				log.Log.Error(err, "ApplyRuntimeConfig(): failed to run DOCA SPC-X CC", "device", device.Name)
-				return err
+				return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 			}
 		} else {
 			for _, port := range device.Status.Ports {
 				err = m.RunDocaSpcXCC(port)
 				if err != nil {
 					log.Log.Error(err, "ApplyRuntimeConfig(): failed to run DOCA SPC-X CC", "device", device.Name)
-					return err
+					return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 				}
 			}
 		}
@@ -598,7 +613,7 @@ func (m *spectrumXConfigManager) ApplyRuntimeConfig(device *v1alpha1.NicDevice) 
 	err = dmsClient.SetParameters(congestionControlParams)
 	if err != nil {
 		log.Log.Error(err, "ApplyRuntimeConfig(): failed to set Spectrum-X Congestion Control config", "device", device.Name)
-		return err
+		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}
 
 	overlay := spcXSpec.Overlay
@@ -609,14 +624,14 @@ func (m *spectrumXConfigManager) ApplyRuntimeConfig(device *v1alpha1.NicDevice) 
 	case consts.OverlayNone:
 		interPacketGapParams = desiredConfig.RuntimeConfig.InterPacketGap.PureL3
 	default:
-		return fmt.Errorf("invalid overlay %s", overlay)
+		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, fmt.Errorf("invalid overlay %s", overlay)
 	}
 	interPacketGapParams = filterParameters(interPacketGapParams, deviceType, numberOfPlanes, multiplaneMode)
 
 	err = dmsClient.SetParameters(interPacketGapParams)
 	if err != nil {
 		log.Log.Error(err, "ApplyRuntimeConfig(): failed to set Spectrum-X InterPacketGap config", "device", device.Name)
-		return err
+		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}
 
 	// Wait for 1 second to apply the IPG settings
@@ -631,7 +646,7 @@ func (m *spectrumXConfigManager) ApplyRuntimeConfig(device *v1alpha1.NicDevice) 
 	})
 	if err != nil {
 		log.Log.Error(err, "ApplyRuntimeConfig(): failed to shut down interface", "device", device.Name)
-		return err
+		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}
 
 	err = dmsClient.SetParameters([]types.ConfigurationParameter{
@@ -644,9 +659,9 @@ func (m *spectrumXConfigManager) ApplyRuntimeConfig(device *v1alpha1.NicDevice) 
 	})
 	if err != nil {
 		log.Log.Error(err, "ApplyRuntimeConfig(): failed to bring up interface", "device", device.Name)
-		return err
+		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}
-	return nil
+	return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusSuccess}, nil
 }
 
 // GetDocaCCTargetVersion returns the target version of DOCA SPC-X CC for the device

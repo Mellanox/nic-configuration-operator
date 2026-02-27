@@ -32,7 +32,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
-	commonUtils "github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
 
 type FirmwareUtils interface {
@@ -59,6 +58,9 @@ type FirmwareUtils interface {
 	// BurnNicFirmware burns the requested firmware on the requested device
 	// Operation can be long, require context to be able to terminate by timeout
 	BurnNicFirmware(ctx context.Context, pciAddress, fwPath string) error
+	// ResetNicFirmware resets NIC's firmware
+	// Operation can be long, requires context to be able to terminate by timeout
+	ResetNicFirmware(ctx context.Context, pciAddress string) error
 	// InstallDebPackage installs the .deb package
 	InstallDebPackage(debPath string) error
 	// GetInstalledDebPackageVersion retrieves the version from the installed .deb package
@@ -178,7 +180,8 @@ func (u *utils) GetFirmwareVersionsFromDevice(pciAddress string) (string, string
 	log.Log.V(2).Info("FirmwareUtils.GetFirmwareVersionsFromDevice()", "pciAddress", pciAddress)
 
 	cmd := u.execInterface.Command("mlxfwmanager", "-d", pciAddress)
-	output, err := cmd.Output()
+	output, err := cmd.CombinedOutput()
+	log.Log.V(2).Info("GetFirmwareVersionsFromDevice(): command output", "output", string(output))
 	if err != nil {
 		log.Log.Error(err, "GetFirmwareVersionsFromDevice(): Failed to run mlxfwmanager")
 		return "", "", err
@@ -225,7 +228,8 @@ func (u *utils) GetFirmwareVersionsFromDevice(pciAddress string) (string, string
 func (u *utils) GetFirmwareVersionAndPSIDFromFWBinary(firmwareBinaryPath string) (string, string, error) {
 	log.Log.V(2).Info("FirmwareUtils.GetFirmwareVersionAndPSIDFromFWBinary()", "firmwareBinaryPath", firmwareBinaryPath)
 	cmd := u.execInterface.Command("flint", "-i", firmwareBinaryPath, "q")
-	output, err := cmd.Output()
+	output, err := cmd.CombinedOutput()
+	log.Log.V(2).Info("GetFirmwareVersionAndPSIDFromFWBinary(): command output", "output", string(output))
 	if err != nil {
 		log.Log.Error(err, "GetFirmwareVersionAndPSIDFromFWBinary(): Failed to run flint")
 		return "", "", err
@@ -270,8 +274,9 @@ func (u *utils) GetFWVersionsFromBFB(bfbPath string) (map[string]string, error) 
 	cmd := u.execInterface.Command("/usr/sbin/mlx-mkbfb", "-x", "-n", "info-v0", bfbPath)
 	cmd.SetDir(dir)
 	output, err := cmd.CombinedOutput()
+	log.Log.V(2).Info("GetFWVersionsFromBFB(): mlx-mkbfb command output", "output", string(output))
 	if err != nil {
-		log.Log.Error(err, "GetFWVersionsFromBFB(): Failed to run mlx-mkbfb", "output", string(output))
+		log.Log.Error(err, "GetFWVersionsFromBFB(): Failed to run mlx-mkbfb")
 		return nil, err
 	}
 
@@ -294,7 +299,8 @@ func (u *utils) GetFWVersionsFromBFB(bfbPath string) (map[string]string, error) 
 	log.Log.V(2).Info("Extracting versions from info-v0 file", "bfbPath", bfbPath)
 	for _, bfv := range bfVersions {
 		cmd = u.execInterface.Command("/bin/sh", "-c", `awk '/"Name": "`+bfv.name+`"/ {getline; print $2}' `+infoFile+` | tr -d '",'`)
-		output, err := cmd.Output()
+		output, err := cmd.CombinedOutput()
+		log.Log.V(2).Info("GetFWVersionsFromBFB(): awk command output", "name", bfv.name, "output", string(output))
 		if err != nil {
 			log.Log.V(2).Info("GetFWVersionsFromBFB(): Failed to extract version, skipping", "name", bfv.name, "error", err)
 			continue
@@ -319,7 +325,8 @@ func (u *utils) GetFWVersionsFromBFB(bfbPath string) (map[string]string, error) 
 func (u utils) VerifyImageBootable(firmwareBinaryPath string) error {
 	log.Log.V(2).Info("FirmwareUtils.VerifyImageBootable()", "firmwareBinaryPath", firmwareBinaryPath)
 	cmd := u.execInterface.Command("flint", "-i", firmwareBinaryPath, "v")
-	_, err := commonUtils.RunCommand(cmd)
+	output, err := cmd.CombinedOutput()
+	log.Log.V(2).Info("VerifyImageBootable(): command output", "output", string(output))
 	if err != nil {
 		log.Log.Error(err, "VerifyImageBootable(): flint check failed")
 		return err
@@ -412,8 +419,24 @@ func (u *utils) BurnNicFirmware(ctx context.Context, pciAddress, fwPath string) 
 
 	cmd := u.execInterface.CommandContext(ctx, "flint", "--device", pciAddress, "--image", fwPath, "--yes", "burn")
 	output, err := cmd.CombinedOutput()
+	log.Log.V(2).Info("BurnNicFirmware(): command output", "output", string(output))
 	if err != nil {
-		log.Log.Error(err, "BurnNicFirmware(): Failed to run flint", "output", output)
+		log.Log.Error(err, "BurnNicFirmware(): Failed to run flint")
+		return err
+	}
+	return nil
+}
+
+// ResetNicFirmware resets NIC's firmware
+// Operation can be long, requires context to be able to terminate by timeout
+func (u *utils) ResetNicFirmware(ctx context.Context, pciAddress string) error {
+	log.Log.V(2).Info("FirmwareUtils.ResetNicFirmware()", "pciAddress", pciAddress)
+
+	cmd := u.execInterface.CommandContext(ctx, "mlxfwreset", "--device", pciAddress, "reset", "--yes")
+	output, err := cmd.CombinedOutput()
+	log.Log.V(2).Info("ResetNicFirmware(): command output", "output", string(output))
+	if err != nil {
+		log.Log.Error(err, "ResetNicFirmware(): Failed to run mlxfwreset")
 		return err
 	}
 	return nil
@@ -423,7 +446,8 @@ func (u *utils) BurnNicFirmware(ctx context.Context, pciAddress, fwPath string) 
 func (u *utils) GetDocaSpcXCCVersion(docaSpcXCCPath string) (string, error) {
 	log.Log.V(2).Info("FirmwareUtils.GetDocaSpcXCCVersion()", "docaSpcXCCPath", docaSpcXCCPath)
 	cmd := u.execInterface.Command("dpkg-deb", "-f", docaSpcXCCPath, "Version")
-	output, err := cmd.Output()
+	output, err := cmd.CombinedOutput()
+	log.Log.V(2).Info("GetDocaSpcXCCVersion(): command output", "output", string(output))
 	if err != nil {
 		log.Log.Error(err, "GetDocaSpcXCCVersion(): Failed to get version from DOCA SPC-X PCC deb package")
 		return "", err
@@ -435,7 +459,11 @@ func (u *utils) GetDocaSpcXCCVersion(docaSpcXCCPath string) (string, error) {
 func (u *utils) InstallDebPackage(debPath string) error {
 	log.Log.V(2).Info("FirmwareUtils.InstallDebPackage()", "debPath", debPath)
 	cmd := u.execInterface.Command("dpkg", "-i", debPath)
-	_, err := cmd.CombinedOutput()
+	output, err := cmd.CombinedOutput()
+	log.Log.V(2).Info("InstallDebPackage(): command output", "output", string(output))
+	if err != nil {
+		log.Log.Error(err, "InstallDebPackage(): Failed to install deb package")
+	}
 	return err
 }
 
@@ -444,15 +472,15 @@ func (u *utils) InstallDebPackage(debPath string) error {
 func (u *utils) GetInstalledDebPackageVersion(packageName string) string {
 	log.Log.V(2).Info("FirmwareUtils.GetInstalledDebPackageVersion()", "packageName", packageName)
 	cmd := u.execInterface.Command("dpkg-query", "-W", "-f='${Version}\n'", packageName)
-	output, err := commonUtils.RunCommand(cmd)
+	output, err := cmd.CombinedOutput()
+	log.Log.V(2).Info("GetInstalledDebPackageVersion(): command output", "package", packageName, "output", string(output))
 	if err != nil {
-		log.Log.Info("GetInstalledDebPackageVersion(): Failed to get installed version of package", "package", packageName, "output", string(output), "error", err)
+		log.Log.Info("GetInstalledDebPackageVersion(): Failed to get installed version of package", "package", packageName, "error", err)
 		return ""
-	} else {
-		installedVersion := strings.Trim(string(output), "'\"\n")
-		log.Log.V(2).Info("GetInstalledDebPackageVersion(): Installed version of package", "package", packageName, "version", installedVersion)
-		return installedVersion
 	}
+	installedVersion := strings.Trim(string(output), "'\"\n")
+	log.Log.V(2).Info("GetInstalledDebPackageVersion(): Installed version of package", "package", packageName, "version", installedVersion)
+	return installedVersion
 }
 
 func newFirmwareUtils() FirmwareUtils {

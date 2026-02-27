@@ -105,8 +105,8 @@ func main() {
 
 	deviceDiscovery := devicediscovery.NewDeviceDiscovery(nodeName, nvConfigUtils)
 
-	// Initialize DMS manager
-	dmsManager := dms.NewDMSManager()
+	// Initialize DMS server
+	dmsServer := dms.NewDMSServer()
 
 	spectrumXConfigs, err := initSpectrumXConfigs()
 	if err != nil {
@@ -114,30 +114,30 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Start DMS instances for all discovered devices
+	// Start DMS server for all discovered devices
 	devices, err := deviceDiscovery.DiscoverNicDevices()
 	if err != nil {
 		log.Log.Error(err, "failed to discover NIC devices")
 		os.Exit(1)
 	}
 
-	if err := dmsManager.StartDMSInstances(slices.Collect(maps.Values(devices))); err != nil {
-		log.Log.Error(err, "failed to start DMS instances")
+	if err := dmsServer.StartDMSServer(slices.Collect(maps.Values(devices))); err != nil {
+		log.Log.Error(err, "failed to start DMS server")
 		os.Exit(1)
 	}
 
-	// Ensure DMS instances are stopped when the program exits
+	// Ensure DMS server is stopped when the program exits
 	defer func() {
-		if err := dmsManager.StopAllDMSInstances(); err != nil {
-			log.Log.Error(err, "failed to stop DMS instances")
+		if err := dmsServer.StopDMSServer(); err != nil {
+			log.Log.Error(err, "failed to stop DMS server")
 		}
 	}()
 
-	spectrumXConfigManager := spectrumx.NewSpectrumXConfigManager(dmsManager, spectrumXConfigs)
+	spectrumXConfigManager := spectrumx.NewSpectrumXConfigManager(dmsServer, spectrumXConfigs)
 	configurationManager := configuration.NewConfigurationManager(
-		eventRecorder, dmsManager, nvConfigUtils, spectrumXConfigManager)
+		eventRecorder, dmsServer, nvConfigUtils, spectrumXConfigManager)
 	maintenanceManager := maintenance.New(mgr.GetClient(), hostUtils, nodeName, namespace)
-	firmwareManager := firmware.NewFirmwareManager(mgr.GetClient(), dmsManager, namespace)
+	firmwareManager := firmware.NewFirmwareManager(mgr.GetClient(), dmsServer, namespace)
 
 	if err := initNicFwMap(namespace); err != nil {
 		log.Log.Error(err, "unable to init NicFwMap")

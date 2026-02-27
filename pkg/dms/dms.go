@@ -19,8 +19,9 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	execUtils "k8s.io/utils/exec"
@@ -32,172 +33,226 @@ import (
 const (
 	basePort      = 9339
 	dmsServerPath = "/opt/mellanox/doca/services/dms/dmsd"
+	imagesDir     = "/tmp/images"
 )
 
-// DMSManager interface defines methods for managing DOCA Management Service instances
+// DMSManager provides per-device DMS client lookup (used by all consumers)
 type DMSManager interface {
-	// StartDMSInstances starts DMS instances for given NIC devices
-	StartDMSInstances(devices []v1alpha1.NicDeviceStatus) error
-	// StopAllDMSInstances stops all running DMS instances
-	StopAllDMSInstances() error
-	// GetDMSClientBySerialNumber returns the DMS client for a specific device identified by its PCI address
+	// GetDMSClientBySerialNumber returns the DMS client for a specific device identified by its serial number
 	GetDMSClientBySerialNumber(serialNumber string) (DMSClient, error)
 }
 
-type dmsManager struct {
-	instances     map[string]*dmsInstance
-	mutex         sync.RWMutex
-	nextPort      int
-	execInterface execUtils.Interface
+// DMSServer extends DMSManager with server lifecycle management
+type DMSServer interface {
+	DMSManager
+	// StartDMSServer starts a single DMS server for all given NIC devices
+	StartDMSServer(devices []v1alpha1.NicDeviceStatus) error
+	// StopDMSServer stops the running DMS server
+	StopDMSServer() error
+	// IsRunning returns whether the DMS server is running
+	IsRunning() bool
 }
 
-// NewDMSManager creates a new instance of DMSManager
-func NewDMSManager() DMSManager {
-	log.Log.V(2).Info("Creating new DMS Manager")
-	return &dmsManager{
-		instances:     make(map[string]*dmsInstance),
-		nextPort:      basePort,
+type dmsServer struct {
+	clients       map[string]*dmsClient
+	mutex         sync.RWMutex
+	serverPort    int
+	execInterface execUtils.Interface
+
+	// DMS server process state
+	cmd      execUtils.Cmd
+	running  atomic.Bool
+	errMutex sync.RWMutex
+	cmdErr   error
+}
+
+// NewDMSServer creates a new instance of DMSServer that manages a local DMS server process
+func NewDMSServer() DMSServer {
+	log.Log.V(2).Info("Creating new DMS Server")
+	return &dmsServer{
+		clients:       make(map[string]*dmsClient),
+		serverPort:    basePort,
 		execInterface: execUtils.New(),
 	}
 }
 
-// StartDMSInstances starts DMS instances for given NIC devices
-func (m *dmsManager) StartDMSInstances(devices []v1alpha1.NicDeviceStatus) error {
-	log.Log.V(2).Info("StartDMSInstances", "deviceCount", len(devices))
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	for _, device := range devices {
-		log.Log.V(2).Info("Processing device", "serialNumber", device.SerialNumber, "pci", device.Ports[0].PCI)
-
-		// Check if instance already exists
-		if instance, exists := m.instances[device.SerialNumber]; exists {
-			if instance.running.Load() {
-				log.Log.V(2).Info("DMS instance already running for device", "device", device.SerialNumber)
-				continue
-			}
-			log.Log.V(2).Info("Instance exists but not running, will restart", "device", device.SerialNumber)
-		}
-
-		// Find next available port
-		bindAddress := ""
-		log.Log.V(2).Info("Finding available port", "port", m.nextPort)
-		for {
-			bindAddress = fmt.Sprintf("localhost:%d", m.nextPort)
-			m.nextPort++
-
-			if !isPortInUse(bindAddress) {
-				log.Log.V(2).Info("Found available port", "address", bindAddress)
-				break
-			}
-			log.Log.V(2).Info("Port in use, trying next", "port", m.nextPort)
-		}
-
-		pciAddr := device.Ports[0].PCI
-
-		imagesDir := path.Join("/tmp", "images", device.SerialNumber)
-		err := os.MkdirAll(imagesDir, 0755)
-		if err != nil {
-			log.Log.Error(err, "failed to create images directory", "directory", imagesDir)
-			return fmt.Errorf("failed to create images directory: %v", err)
-		}
-
-		log.Log.V(2).Info("Starting DMS server", "path", dmsServerPath, "bindAddress", bindAddress, "targetPCI", pciAddr)
-		cmd := m.execInterface.Command(dmsServerPath,
-			"-bind_address", bindAddress,
-			"-target_pci", pciAddr,
-			"-auth", "credentials",
-			"-noauth", "-tls_enabled=false",
-			"--image_folder", imagesDir)
-
-		instance := &dmsInstance{
-			device:        device,
-			bindAddress:   bindAddress,
-			cmd:           cmd,
-			execInterface: m.execInterface,
-		}
-
-		instance.running.Store(true)
-
-		go func() {
-			output, err := instance.cmd.Output()
-			if err != nil {
-				instance.errMutex.Lock()
-				instance.cmdErr = err
-				instance.errMutex.Unlock()
-			}
-			log.Log.V(2).Info("DMS instance output", "device", instance.device.SerialNumber, "bind_address", instance.bindAddress, "output", string(output))
-			instance.running.Store(false)
-		}()
-
-		log.Log.V(2).Info("Waiting 500ms for DMS server to start", "device", device.SerialNumber)
-		time.Sleep(500 * time.Millisecond)
-
-		if !instance.running.Load() {
-			instance.errMutex.RLock()
-			cmdErr := instance.cmdErr
-			instance.errMutex.RUnlock()
-
-			if cmdErr != nil {
-				log.Log.Error(cmdErr, "Failed to start DMS server", "device", device.SerialNumber)
-				return fmt.Errorf("failed to start DMS for device %s: %v", device.SerialNumber, cmdErr)
-			}
-			return fmt.Errorf("failed to start DMS for device %s: unknown error", device.SerialNumber)
-		}
-
-		log.Log.V(2).Info("DMS server process started", "device", device.SerialNumber)
-
-		m.instances[device.SerialNumber] = instance
-
-		log.Log.Info("Started DMS instance", "device", device.SerialNumber, "bind_address", instance.bindAddress)
-	}
-
-	log.Log.V(2).Info("All DMS instances started", "instanceCount", len(m.instances))
-	return nil
+// externalDMSManager implements DMSManager for an already-running external DMS server
+type externalDMSManager struct {
+	clients map[string]*dmsClient
 }
 
-// StopAllDMSInstances sends SIGTERM to all running DMS instances
-func (m *dmsManager) StopAllDMSInstances() error {
-	log.Log.V(2).Info("StopAllDMSInstances")
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	var lastErr error
-	stoppedCount := 0
-
-	for serial, instance := range m.instances {
-		if !instance.running.Load() {
-			log.Log.V(2).Info("Instance not running, skipping", "device", serial)
-			continue
+// NewExternalDMSManager creates a DMSManager that connects to an external DMS server.
+// devices: NIC devices to create clients for
+// address: bind address of the external DMS server (e.g. "remotehost:9339")
+// authParams: authentication/security flags passed to dmsc (e.g. []string{"--insecure"} or
+// []string{"--tls-ca", "/path/ca.pem", "--tls-cert", "/path/cert.pem", "--tls-key", "/path/key.pem"})
+func NewExternalDMSManager(devices []v1alpha1.NicDeviceStatus, address string, authParams []string) DMSManager {
+	log.Log.V(2).Info("Creating new External DMS Manager", "address", address, "deviceCount", len(devices))
+	clients := make(map[string]*dmsClient)
+	for _, device := range devices {
+		client := &dmsClient{
+			device:        device,
+			targetPCI:     device.Ports[0].PCI,
+			bindAddress:   address,
+			authParams:    authParams,
+			execInterface: execUtils.New(),
 		}
-
-		log.Log.V(2).Info("Stopping DMS instance", "device", serial)
-		if instance.cmd != nil {
-			instance.cmd.Stop()
-		}
-
-		stoppedCount++
-		log.Log.Info("Stopped DMS instance", "device", serial)
+		clients[device.SerialNumber] = client
 	}
-
-	log.Log.V(2).Info("StopAllDMSInstances completed", "stoppedCount", stoppedCount)
-	return lastErr
+	return &externalDMSManager{clients: clients}
 }
 
 // GetDMSClientBySerialNumber returns the DMS client for a specific device identified by its serial number
-func (m *dmsManager) GetDMSClientBySerialNumber(serialNumber string) (DMSClient, error) {
+func (m *externalDMSManager) GetDMSClientBySerialNumber(serialNumber string) (DMSClient, error) {
+	log.Log.V(2).Info("GetDMSClientBySerialNumber", "serialNumber", serialNumber)
+	client, ok := m.clients[serialNumber]
+	if !ok {
+		log.Log.V(2).Info("No DMS client found", "serialNumber", serialNumber)
+		return nil, fmt.Errorf("no DMS client found for device with serial number %s", serialNumber)
+	}
+	log.Log.V(2).Info("Found DMS client", "serialNumber", serialNumber)
+	return client, nil
+}
+
+// StartDMSServer starts a single DMS server for all given NIC devices
+func (m *dmsServer) StartDMSServer(devices []v1alpha1.NicDeviceStatus) error {
+	log.Log.V(2).Info("StartDMSServer", "deviceCount", len(devices))
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	if m.running.Load() {
+		log.Log.V(2).Info("DMS server already running")
+		return nil
+	}
+
+	if len(devices) == 0 {
+		log.Log.V(2).Info("No devices to start DMS server for")
+		return nil
+	}
+
+	// Find available port
+	bindAddress := ""
+	log.Log.V(2).Info("Finding available port", "port", m.serverPort)
+	for {
+		bindAddress = fmt.Sprintf("localhost:%d", m.serverPort)
+		m.serverPort++
+
+		if !isPortInUse(bindAddress) {
+			log.Log.V(2).Info("Found available port", "address", bindAddress)
+			break
+		}
+		log.Log.V(2).Info("Port in use, trying next", "port", m.serverPort)
+	}
+
+	// Create shared images directory
+	err := os.MkdirAll(imagesDir, 0755)
+	if err != nil {
+		log.Log.Error(err, "failed to create images directory", "directory", imagesDir)
+		return fmt.Errorf("failed to create images directory: %v", err)
+	}
+
+	// Collect all first-port PCI addresses
+	pciAddresses := make([]string, 0, len(devices))
+	for _, device := range devices {
+		pciAddresses = append(pciAddresses, device.Ports[0].PCI)
+	}
+	targetPCI := strings.Join(pciAddresses, ",")
+
+	log.Log.V(2).Info("Starting DMS server", "path", dmsServerPath, "bindAddress", bindAddress, "targetPCI", targetPCI)
+	cmd := m.execInterface.Command(dmsServerPath,
+		"-bind_address", bindAddress,
+		"-target_pci", targetPCI,
+		"-auth", "credentials",
+		"-noauth", "-tls_enabled=false",
+		"--image_folder", imagesDir)
+
+	m.cmd = cmd
+	m.running.Store(true)
+
+	go func() {
+		output, err := m.cmd.Output()
+		if err != nil {
+			m.errMutex.Lock()
+			m.cmdErr = err
+			m.errMutex.Unlock()
+		}
+		log.Log.V(2).Info("DMS server output", "bind_address", bindAddress, "output", string(output))
+		m.running.Store(false)
+	}()
+
+	log.Log.V(2).Info("Waiting for DMS server to start")
+	time.Sleep(3 * time.Second)
+
+	if !m.running.Load() {
+		m.errMutex.RLock()
+		cmdErr := m.cmdErr
+		m.errMutex.RUnlock()
+
+		if cmdErr != nil {
+			log.Log.Error(cmdErr, "Failed to start DMS server")
+			return fmt.Errorf("failed to start DMS server: %v", cmdErr)
+		}
+		return fmt.Errorf("failed to start DMS server: unknown error")
+	}
+
+	// Create clients for each device
+	for _, device := range devices {
+		client := &dmsClient{
+			device:        device,
+			targetPCI:     device.Ports[0].PCI,
+			bindAddress:   bindAddress,
+			authParams:    []string{"--insecure"},
+			execInterface: m.execInterface,
+		}
+		m.clients[device.SerialNumber] = client
+	}
+
+	log.Log.Info("Started DMS server", "bind_address", bindAddress, "targetPCI", targetPCI, "clientCount", len(m.clients))
+	return nil
+}
+
+// StopDMSServer sends SIGTERM to the running DMS server
+func (m *dmsServer) StopDMSServer() error {
+	log.Log.V(2).Info("StopDMSServer")
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	if !m.running.Load() {
+		log.Log.V(2).Info("DMS server not running, nothing to stop")
+		return nil
+	}
+
+	if m.cmd != nil {
+		m.cmd.Stop()
+	}
+
+	log.Log.Info("Stopped DMS server")
+	return nil
+}
+
+// IsRunning returns whether the DMS server is running
+func (m *dmsServer) IsRunning() bool {
+	return m.running.Load()
+}
+
+// GetDMSClientBySerialNumber returns the DMS client for a specific device identified by its serial number
+func (m *dmsServer) GetDMSClientBySerialNumber(serialNumber string) (DMSClient, error) {
 	log.Log.V(2).Info("GetDMSClientBySerialNumber", "serialNumber", serialNumber)
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 
-	instance, ok := m.instances[serialNumber]
+	if !m.running.Load() {
+		return nil, fmt.Errorf("DMS server is not running")
+	}
+
+	client, ok := m.clients[serialNumber]
 	if !ok {
 		log.Log.V(2).Info("No DMS client found", "serialNumber", serialNumber)
 		return nil, fmt.Errorf("no DMS client found for device with serial number %s", serialNumber)
 	}
 
-	log.Log.V(2).Info("Found DMS client", "serialNumber", serialNumber, "running", instance.running.Load())
-	return instance, nil
+	log.Log.V(2).Info("Found DMS client", "serialNumber", serialNumber)
+	return client, nil
 }
 
 // isPortInUse checks if a port is already in use

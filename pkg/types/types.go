@@ -61,3 +61,39 @@ func FirmwareSourceNotReadyError(firmwareSourceName, msg string) error {
 func IsFirmwareSourceNotReadyError(err error) bool {
 	return strings.HasPrefix(err.Error(), FirmwareSourceNotReadyErrorPrefix)
 }
+
+// ApplyStatus represents the outcome of a configuration apply operation
+type ApplyStatus int
+
+const (
+	ApplyStatusNothingToDo ApplyStatus = iota
+	ApplyStatusSuccess
+	ApplyStatusFailed
+	ApplyStatusPartiallyApplied
+)
+
+// ConfigurationApplyResult represents the result of applying NV configuration
+type ConfigurationApplyResult struct {
+	Status         ApplyStatus
+	RebootRequired bool
+	Error          error
+}
+
+// RuntimeConfigurationApplyResult represents the result of applying runtime configuration
+type RuntimeConfigurationApplyResult struct {
+	Status ApplyStatus
+	Error  error
+}
+
+// FirmwareInstallOptions contains options for firmware installation
+type FirmwareInstallOptions struct {
+	Version    string // FW version (for K8s cache lookup in operator mode)
+	FwFilePath string // Direct path to .bin/.bfb file (library mode)
+	SkipReset  bool   // Skip mlxfwreset after burning
+}
+
+// ConfigurationOptions contains options for NV configuration apply
+type ConfigurationOptions struct {
+	SkipReset   bool // Skip mlxfwreset after NV config apply
+	WithDefault bool // Add --with_default flag to mlxconfig set
+}

@@ -7,6 +7,8 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
+	types "github.com/Mellanox/nic-configuration-operator/pkg/types"
+
 	v1alpha1 "github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 )
 
@@ -16,57 +18,93 @@ type SpectrumXManager struct {
 }
 
 // ApplyBreakoutConfig provides a mock function with given fields: ctx, device
-func (_m *SpectrumXManager) ApplyBreakoutConfig(ctx context.Context, device *v1alpha1.NicDevice) error {
+func (_m *SpectrumXManager) ApplyBreakoutConfig(ctx context.Context, device *v1alpha1.NicDevice) (*types.ConfigurationApplyResult, error) {
 	ret := _m.Called(ctx, device)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ApplyBreakoutConfig")
 	}
 
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *v1alpha1.NicDevice) error); ok {
+	var r0 *types.ConfigurationApplyResult
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *v1alpha1.NicDevice) (*types.ConfigurationApplyResult, error)); ok {
+		return rf(ctx, device)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *v1alpha1.NicDevice) *types.ConfigurationApplyResult); ok {
 		r0 = rf(ctx, device)
 	} else {
-		r0 = ret.Error(0)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*types.ConfigurationApplyResult)
+		}
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func(context.Context, *v1alpha1.NicDevice) error); ok {
+		r1 = rf(ctx, device)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // ApplyNvConfig provides a mock function with given fields: ctx, device
-func (_m *SpectrumXManager) ApplyNvConfig(ctx context.Context, device *v1alpha1.NicDevice) error {
+func (_m *SpectrumXManager) ApplyNvConfig(ctx context.Context, device *v1alpha1.NicDevice) (*types.ConfigurationApplyResult, error) {
 	ret := _m.Called(ctx, device)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ApplyNvConfig")
 	}
 
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *v1alpha1.NicDevice) error); ok {
+	var r0 *types.ConfigurationApplyResult
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *v1alpha1.NicDevice) (*types.ConfigurationApplyResult, error)); ok {
+		return rf(ctx, device)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *v1alpha1.NicDevice) *types.ConfigurationApplyResult); ok {
 		r0 = rf(ctx, device)
 	} else {
-		r0 = ret.Error(0)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*types.ConfigurationApplyResult)
+		}
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func(context.Context, *v1alpha1.NicDevice) error); ok {
+		r1 = rf(ctx, device)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // ApplyRuntimeConfig provides a mock function with given fields: device
-func (_m *SpectrumXManager) ApplyRuntimeConfig(device *v1alpha1.NicDevice) error {
+func (_m *SpectrumXManager) ApplyRuntimeConfig(device *v1alpha1.NicDevice) (*types.RuntimeConfigurationApplyResult, error) {
 	ret := _m.Called(device)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ApplyRuntimeConfig")
 	}
 
-	var r0 error
-	if rf, ok := ret.Get(0).(func(*v1alpha1.NicDevice) error); ok {
+	var r0 *types.RuntimeConfigurationApplyResult
+	var r1 error
+	if rf, ok := ret.Get(0).(func(*v1alpha1.NicDevice) (*types.RuntimeConfigurationApplyResult, error)); ok {
+		return rf(device)
+	}
+	if rf, ok := ret.Get(0).(func(*v1alpha1.NicDevice) *types.RuntimeConfigurationApplyResult); ok {
 		r0 = rf(device)
 	} else {
-		r0 = ret.Error(0)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*types.RuntimeConfigurationApplyResult)
+		}
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func(*v1alpha1.NicDevice) error); ok {
+		r1 = rf(device)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // GetDocaCCTargetVersion provides a mock function with given fields: device

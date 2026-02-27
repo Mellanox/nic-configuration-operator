@@ -495,7 +495,7 @@ func (r *NicDeviceReconciler) applyRuntimeConfig(ctx context.Context, status *ni
 		}
 	}
 
-	err = r.ConfigurationManager.ApplyDeviceRuntimeSpec(status.device)
+	_, err = r.ConfigurationManager.ApplyRuntimeConfiguration(ctx, status.device)
 	if err != nil {
 		updateErr := r.updateConfigInProgressStatusCondition(ctx, status.device, consts.RuntimeConfigUpdateFailedReason, metav1.ConditionFalse, err.Error())
 		if updateErr != nil {
@@ -576,7 +576,7 @@ func (r *NicDeviceReconciler) applyNvConfig(ctx context.Context, status *nicDevi
 		return nil
 	}
 
-	rebootRequired, err := r.ConfigurationManager.ApplyDeviceNvSpec(ctx, status.device)
+	result, err := r.ConfigurationManager.ApplyNVConfiguration(ctx, status.device, &types.ConfigurationOptions{SkipReset: true})
 	if err != nil {
 		if types.IsIncorrectSpecError(err) {
 			updateErr := r.updateConfigInProgressStatusCondition(ctx, status.device, consts.IncorrectSpecReason, metav1.ConditionFalse, err.Error())
@@ -602,13 +602,13 @@ func (r *NicDeviceReconciler) applyNvConfig(ctx context.Context, status *nicDevi
 		log.Log.Info("Feature gate FW_RESET_AFTER_CONFIG_UPDATE is enabled, resetting NIC firmware before reboot", "device", status.device.Name)
 		err = r.ConfigurationManager.ResetNicFirmware(ctx, status.device)
 		if err != nil {
-			log.Log.Error(err, "failed to reset NIC firmware before reboot", "device", status.device.Name)
-			return err
+			log.Log.Error(err, "failed to reset NIC firmware before reboot, will proceed with reboot", "device", status.device.Name)
+		} else {
+			log.Log.Info("NIC firmware reset successful", "device", status.device.Name)
 		}
-		log.Log.Info("NIC firmware reset successful", "device", status.device.Name)
 	}
 
-	status.rebootRequired = rebootRequired
+	status.rebootRequired = result != nil && result.RebootRequired
 
 	return nil
 }
@@ -786,7 +786,9 @@ func (r *NicDeviceReconciler) handleFirmwareUpdate(ctx context.Context, status *
 		return err
 	}
 
-	err = r.FirmwareManager.BurnNicFirmware(ctx, status.device, status.requestedFirmwareVersion)
+	_, err = r.FirmwareManager.InstallFirmware(ctx, status.device, &types.FirmwareInstallOptions{
+		Version: status.requestedFirmwareVersion, SkipReset: true,
+	})
 	if err != nil {
 		log.Log.Error(err, "failed to update device firmware", "device", status.device.Name)
 		_ = r.updateFirmwareUpdateInProgressStatusCondition(ctx, status.device, consts.FirmwareUpdateFailedReason, metav1.ConditionFalse, err.Error())

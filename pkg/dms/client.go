@@ -22,8 +22,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
 
 	execUtils "k8s.io/utils/exec"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -52,10 +50,8 @@ const (
 	dmsClientPath = "/opt/mellanox/doca/services/dms/dmsc"
 )
 
-// DMSClient interface defines methods for interacting with a DMS instance to manage NIC device configuration
+// DMSClient interface defines methods for interacting with a DMS server to manage NIC device configuration
 type DMSClient interface {
-	// IsRunning returns whether the DMS instance is running
-	IsRunning() bool
 	// GetQoSSettings returns the current QoS settings (trust mode and PFC configuration)
 	GetQoSSettings(interfaceName string) (*v1alpha1.QosSpec, error)
 	// SetQoSSettings sets the QoS settings for the device (trust mode and PFC configuration). Settings are applied to all ports of the device.
@@ -70,24 +66,13 @@ type DMSClient interface {
 	InstallBFB(ctx context.Context, version string, bfbPath string) error
 }
 
-// dmsInstance implements the DMSClient interface
-type dmsInstance struct {
+// dmsClient implements the DMSClient interface
+type dmsClient struct {
 	device        v1alpha1.NicDeviceStatus
-	cmd           execUtils.Cmd
+	targetPCI     string
 	bindAddress   string
+	authParams    []string
 	execInterface execUtils.Interface
-
-	running atomic.Bool
-
-	// Error handling with mutex protection
-	errMutex sync.RWMutex
-	cmdErr   error
-}
-
-// IsRunning returns whether the DMS instance is running
-func (i *dmsInstance) IsRunning() bool {
-	log.Log.V(2).Info("dmsInstance.IsRunning()", "device", i.device.SerialNumber, "running", i.running.Load())
-	return i.running.Load()
 }
 
 // injectFilterRules takes a DMS path and a map of filter rules, and injects the rules into the path
@@ -157,13 +142,14 @@ func stripSquareBracketClauses(s string) string {
 	return builder.String()
 }
 
-func (i *dmsInstance) RunGetPathCommand(path string, filterRules map[string]string) (string, error) {
-	log.Log.V(2).Info("dmsInstance.RunGetPathCommand()", "path", path, "filterRules", filterRules, "device", i.device.SerialNumber)
+func (i *dmsClient) RunGetPathCommand(path string, filterRules map[string]string) (string, error) {
+	log.Log.V(2).Info("dmsClient.RunGetPathCommand()", "path", path, "filterRules", filterRules, "device", i.device.SerialNumber)
 
 	queryPath := injectFilterRules(path, filterRules)
 
-	args := []string{dmsClientPath, "-a", i.bindAddress, "--insecure", "get", "--path", queryPath}
-	log.Log.V(2).Info("dmsInstance.RunGetPathCommand()", "args", strings.Join(args, " "))
+	args := append([]string{dmsClientPath, "-a", i.bindAddress}, i.authParams...)
+	args = append(args, "--target", i.targetPCI, "get", "--path", queryPath)
+	log.Log.V(2).Info("dmsClient.RunGetPathCommand()", "args", strings.Join(args, " "))
 
 	command := i.execInterface.Command(args[0], args[1:]...)
 
@@ -190,7 +176,7 @@ func (i *dmsInstance) RunGetPathCommand(path string, filterRules map[string]stri
 		return "", fmt.Errorf("failed to unmarshal command output: %v", err)
 	}
 
-	log.Log.V(2).Info("dmsInstance.RunGetPathCommand()", "json result", result)
+	log.Log.V(2).Info("dmsClient.RunGetPathCommand()", "json result", result)
 
 	if len(result) == 0 || len(result[0].Updates) == 0 {
 		log.Log.V(2).Info("No updates found in command output", "device", i.device.SerialNumber)
@@ -210,13 +196,18 @@ func (i *dmsInstance) RunGetPathCommand(path string, filterRules map[string]stri
 	return value, nil
 }
 
-func (i *dmsInstance) RunSetPathCommand(path, value, valueType string, filterRules map[string]string) error {
-	log.Log.V(2).Info("dmsInstance.RunSetPathCommand()", "path", path, "value", value, "valueType", valueType, "device", i.device.SerialNumber)
-
+// formatSetUpdate builds a "path:::type:::value" update entry, applying filter rules to the path.
+func formatSetUpdate(path, value, valueType string, filterRules map[string]string) string {
 	queryPath := injectFilterRules(path, filterRules)
+	return fmt.Sprintf("%s:::%s:::%s", queryPath, valueType, value)
+}
 
-	args := []string{dmsClientPath, "-a", i.bindAddress, "--insecure", "set", "--update", fmt.Sprintf("%s:::%s:::%s", queryPath, valueType, value)}
-	log.Log.V(2).Info("dmsInstance.RunSetPathCommand()", "args", strings.Join(args, " "))
+func (i *dmsClient) RunSetPathCommand(path, value, valueType string, filterRules map[string]string) error {
+	log.Log.V(2).Info("dmsClient.RunSetPathCommand()", "path", path, "value", value, "valueType", valueType, "device", i.device.SerialNumber)
+
+	args := append([]string{dmsClientPath, "-a", i.bindAddress}, i.authParams...)
+	args = append(args, "--target", i.targetPCI, "set", "--update", formatSetUpdate(path, value, valueType, filterRules))
+	log.Log.V(2).Info("dmsClient.RunSetPathCommand()", "args", strings.Join(args, " "))
 
 	command := i.execInterface.Command(args[0], args[1:]...)
 
@@ -232,13 +223,8 @@ func (i *dmsInstance) RunSetPathCommand(path, value, valueType string, filterRul
 }
 
 // GetQoSSettings returns the current QoS settings (trust mode and PFC configuration)
-func (i *dmsInstance) GetQoSSettings(interfaceName string) (*v1alpha1.QosSpec, error) {
-	log.Log.V(2).Info("dmsInstance.GetQoSSettings()", "interfaceName", interfaceName, "device", i.device.SerialNumber)
-
-	if !i.running.Load() {
-		log.Log.V(2).Info("DMS instance not running", "device", i.device.SerialNumber)
-		return nil, fmt.Errorf("DMS instance is not running")
-	}
+func (i *dmsClient) GetQoSSettings(interfaceName string) (*v1alpha1.QosSpec, error) {
+	log.Log.V(2).Info("dmsClient.GetQoSSettings()", "interfaceName", interfaceName, "device", i.device.SerialNumber)
 
 	log.Log.V(2).Info("Getting trust mode", "device", i.device.SerialNumber, "interface", interfaceName)
 	trust, err := i.RunGetPathCommand(QoSTrustModePath, interfaceNameFilter(interfaceName))
@@ -284,13 +270,8 @@ func (i *dmsInstance) GetQoSSettings(interfaceName string) (*v1alpha1.QosSpec, e
 }
 
 // SetQoSSettings sets the QoS settings for the device (trust and PFC configuration). Settings are applied to all ports of the device.
-func (i *dmsInstance) SetQoSSettings(spec *v1alpha1.QosSpec) error {
-	log.Log.V(2).Info("dmsInstance.SetQoSSettings()", "spec", spec, "device", i.device.SerialNumber)
-
-	if !i.running.Load() {
-		log.Log.V(2).Info("DMS instance not running", "device", i.device.SerialNumber)
-		return fmt.Errorf("DMS instance is not running")
-	}
+func (i *dmsClient) SetQoSSettings(spec *v1alpha1.QosSpec) error {
+	log.Log.V(2).Info("dmsClient.SetQoSSettings()", "spec", spec, "device", i.device.SerialNumber)
 
 	trust := ""
 	switch spec.Trust {
@@ -344,13 +325,8 @@ func (i *dmsInstance) SetQoSSettings(spec *v1alpha1.QosSpec) error {
 }
 
 // InstallBFB installs the BFB file with the new firmware version on a BlueField device
-func (i *dmsInstance) InstallBFB(ctx context.Context, version string, bfbPath string) error {
-	log.Log.V(2).Info("dmsInstance.InstallBFB()", "version", version, "bfbPath", bfbPath, "device", i.device.SerialNumber)
-
-	if !i.running.Load() {
-		log.Log.V(2).Info("DMS instance not running", "device", i.device.SerialNumber)
-		return fmt.Errorf("DMS instance is not running")
-	}
+func (i *dmsClient) InstallBFB(ctx context.Context, version string, bfbPath string) error {
+	log.Log.V(2).Info("dmsClient.InstallBFB()", "version", version, "bfbPath", bfbPath, "device", i.device.SerialNumber)
 
 	if !utils.IsBlueFieldDevice(i.device.Type) {
 		err := fmt.Errorf("cannot install BFB file on non-BlueField device")
@@ -358,8 +334,9 @@ func (i *dmsInstance) InstallBFB(ctx context.Context, version string, bfbPath st
 		return err
 	}
 
-	args := []string{dmsClientPath, "-a", i.bindAddress, "--insecure", "os", "install", "--version", version, "--pkg", bfbPath}
-	log.Log.V(2).Info("dmsInstance.InstallBFB() install command", "args", strings.Join(args, " "))
+	args := append([]string{dmsClientPath, "-a", i.bindAddress}, i.authParams...)
+	args = append(args, "--target", i.targetPCI, "os", "install", "--version", version, "--pkg", bfbPath)
+	log.Log.V(2).Info("dmsClient.InstallBFB() install command", "args", strings.Join(args, " "))
 
 	command := i.execInterface.CommandContext(ctx, args[0], args[1:]...)
 	output, err := utils.RunCommand(command)
@@ -370,8 +347,9 @@ func (i *dmsInstance) InstallBFB(ctx context.Context, version string, bfbPath st
 
 	log.Log.V(2).Info("BFB installed successfully", "device", i.device.SerialNumber, "version", version, "output", string(output))
 
-	args = []string{dmsClientPath, "-a", i.bindAddress, "--insecure", "os", "activate", "--version", version}
-	log.Log.V(2).Info("dmsInstance.InstallBFB() activate command", "args", strings.Join(args, " "))
+	args = append([]string{dmsClientPath, "-a", i.bindAddress}, i.authParams...)
+	args = append(args, "--target", i.targetPCI, "os", "activate", "--version", version)
+	log.Log.V(2).Info("dmsClient.InstallBFB() activate command", "args", strings.Join(args, " "))
 
 	command = i.execInterface.CommandContext(ctx, args[0], args[1:]...)
 	output, err = utils.RunCommand(command)
@@ -385,7 +363,7 @@ func (i *dmsInstance) InstallBFB(ctx context.Context, version string, bfbPath st
 	return nil
 }
 
-func (i *dmsInstance) getCompareReplaceValue(param *types.ConfigurationParameter, filterRules map[string]string, value *string) error {
+func (i *dmsClient) getCompareReplaceValue(param *types.ConfigurationParameter, filterRules map[string]string, value *string) error {
 	result, err := i.RunGetPathCommand(param.DMSPath, filterRules)
 	if err != nil {
 		log.Log.V(2).Error(err, "Failed to get parameter", "device", i.device.SerialNumber, "param", param)
@@ -403,8 +381,8 @@ func (i *dmsInstance) getCompareReplaceValue(param *types.ConfigurationParameter
 
 }
 
-func (i *dmsInstance) GetParameters(params []types.ConfigurationParameter) (map[string]string, error) {
-	log.Log.V(2).Info("dmsInstance.GetParameters()", "params", params, "device", i.device.SerialNumber)
+func (i *dmsClient) GetParameters(params []types.ConfigurationParameter) (map[string]string, error) {
+	log.Log.V(2).Info("dmsClient.GetParameters()", "params", params, "device", i.device.SerialNumber)
 
 	values := make(map[string]string)
 
@@ -447,8 +425,10 @@ func (i *dmsInstance) GetParameters(params []types.ConfigurationParameter) (map[
 	return values, nil
 }
 
-func (i *dmsInstance) SetParameters(params []types.ConfigurationParameter) error {
-	log.Log.V(2).Info("dmsInstance.SetParameters()", "params", params, "device", i.device.SerialNumber)
+// collectSetUpdates expands all parameters into individual "path:::type:::value" update entries,
+// applying interface and priority filter rules as needed.
+func (i *dmsClient) collectSetUpdates(params []types.ConfigurationParameter) []string {
+	var updates []string
 
 	for _, param := range params {
 		paramPathParts := strings.Split(param.DMSPath, "/")
@@ -459,42 +439,57 @@ func (i *dmsInstance) SetParameters(params []types.ConfigurationParameter) error
 
 				if slices.Contains(paramPathParts, Priority) {
 					for id := 0; id < 8; id++ {
-						filterRules := mergeFilterRules(filterRules, priorityIdFilter(id))
-
-						err := i.RunSetPathCommand(param.DMSPath, param.Value, param.ValueType, filterRules)
-
-						if err != nil {
-							if param.IgnoreError {
-								log.Log.V(2).Info("IgnoreError flag explicitly set for param, ignoring error", "device", i.device.SerialNumber, "param", param)
-								continue
-							}
-							return err
-						}
+						fr := mergeFilterRules(filterRules, priorityIdFilter(id))
+						updates = append(updates, formatSetUpdate(param.DMSPath, param.Value, param.ValueType, fr))
 					}
-
 				} else {
-					err := i.RunSetPathCommand(param.DMSPath, param.Value, param.ValueType, filterRules)
-
-					if err != nil {
-						if param.IgnoreError {
-							log.Log.V(2).Info("IgnoreError flag explicitly set for param, ignoring error", "device", i.device.SerialNumber, "param", param)
-							continue
-						}
-						return err
-					}
+					updates = append(updates, formatSetUpdate(param.DMSPath, param.Value, param.ValueType, filterRules))
 				}
 			}
 		} else {
-			err := i.RunSetPathCommand(param.DMSPath, param.Value, param.ValueType, nil)
-			if err != nil {
-				if param.IgnoreError {
-					log.Log.V(2).Info("IgnoreError flag explicitly set for param, ignoring error", "device", i.device.SerialNumber, "param", param)
-					continue
-				}
-				return err
-			}
+			updates = append(updates, formatSetUpdate(param.DMSPath, param.Value, param.ValueType, nil))
 		}
 	}
 
+	return updates
+}
+
+func (i *dmsClient) SetParameters(params []types.ConfigurationParameter) error {
+	log.Log.V(2).Info("dmsClient.SetParameters()", "params", params, "device", i.device.SerialNumber)
+
+	updates := i.collectSetUpdates(params)
+	if len(updates) == 0 {
+		log.Log.V(2).Info("No updates to set", "device", i.device.SerialNumber)
+		return nil
+	}
+
+	log.Log.V(2).Info("Collected set updates", "device", i.device.SerialNumber, "updateCount", len(updates))
+
+	args := append([]string{dmsClientPath, "-a", i.bindAddress}, i.authParams...)
+	args = append(args, "--target", i.targetPCI, "set", "--timeout", "5m")
+	for _, update := range updates {
+		args = append(args, "--update", update)
+	}
+	log.Log.V(2).Info("dmsClient.SetParameters() batch command", "args", strings.Join(args, " "))
+
+	command := i.execInterface.Command(args[0], args[1:]...)
+	output, err := command.Output()
+	if err != nil {
+		allIgnore := true
+		for _, param := range params {
+			if !param.IgnoreError {
+				allIgnore = false
+				break
+			}
+		}
+		if allIgnore {
+			log.Log.V(2).Info("All parameters have IgnoreError set, ignoring batch error", "device", i.device.SerialNumber, "err", err)
+			return nil
+		}
+		log.Log.V(2).Error(err, "Batch set command failed", "device", i.device.SerialNumber, "output", string(output))
+		return fmt.Errorf("failed to set parameters: %v, output: %s", err, string(output))
+	}
+
+	log.Log.V(2).Info("SetParameters batch command successful", "device", i.device.SerialNumber)
 	return nil
 }
