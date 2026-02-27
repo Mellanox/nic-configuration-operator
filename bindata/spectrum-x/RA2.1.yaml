@@ -381,11 +381,14 @@ runtimeConfig:
       value: false
       dmsPath: /interfaces/interface/nvidia/roce/config/slow-restart-idle
       valueType: bool
-    - name: CC Probe MP mode
-      value: true
-      dmsPath: /interfaces/interface/nvidia/roce/config/cc-probe-mp-mode
-      valueType: bool
-      multiplane: hwplb
+    # Workaround: CC Probe MP mode is not configurable via DMS.
+    # It is set via mlxreg in the nic-configuration-operator instead.
+    # Remove this workaround once the parameter is added to DMS.
+    # - name: CC Probe MP mode
+    #   value: true
+    #   dmsPath: /interfaces/interface/nvidia/roce/config/cc-probe-mp-mode
+    #   valueType: bool
+    #   multiplane: hwplb
     - name: Adaptive Routing Force
       value: true
       dmsPath: /interfaces/interface/nvidia/roce/config/adaptive-routing-force
