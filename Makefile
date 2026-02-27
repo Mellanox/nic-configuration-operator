@@ -128,13 +128,25 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
-docker-build: ## Build docker image with the manager.
+docker-build: docker-build-operator docker-build-daemon ## Build all docker images.
+
+.PHONY: docker-build-operator
+docker-build-operator: ## Build docker image for the operator.
 	$(CONTAINER_TOOL) build -f Dockerfile -t ${OPERATOR_IMAGE_TAG} --build-arg GOPROXY="$(GOPROXY)" ${CURPATH}
+
+.PHONY: docker-build-daemon
+docker-build-daemon: ## Build docker image for the nic-configuration-daemon.
 	$(CONTAINER_TOOL) build -f Dockerfile.nic-configuration-daemon -t ${CONFIG_DAEMON_IMAGE_TAG} --build-arg GOPROXY="$(GOPROXY)" ${CURPATH}
 
 .PHONY: docker-push
-docker-push: ## Push docker image with the manager.
+docker-push: docker-push-operator docker-push-daemon ## Push all docker images.
+
+.PHONY: docker-push-operator
+docker-push-operator: ## Push docker image for the operator.
 	$(CONTAINER_TOOL) push ${OPERATOR_IMAGE_TAG}
+
+.PHONY: docker-push-daemon
+docker-push-daemon: ## Push docker image for the nic-configuration-daemon.
 	$(CONTAINER_TOOL) push ${CONFIG_DAEMON_IMAGE_TAG}
 
 # PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
