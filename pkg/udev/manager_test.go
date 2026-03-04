@@ -272,6 +272,74 @@ var _ = Describe("UdevManager", func() {
 			Expect(rdmaContentStr).To(ContainSubstring(`rdma_r0_n1_p3`))
 		})
 
+		It("should use actual PCI addresses from ports instead of calculating by function number", func() {
+			// Simulates NICs where PFs are in different PCI domains (e.g. GB200 ConnectX-7)
+			// NIC 1: PF0 at 0000:03:00.0, PF1 at 0002:03:00.0 (different domain, not .1)
+			// NIC 2: PF0 at 0010:03:00.0, PF1 at 0012:03:00.0
+			devices := []*v1alpha1.NicDevice{
+				{
+					Spec: v1alpha1.NicDeviceSpec{
+						InterfaceNameTemplate: &v1alpha1.NicDeviceInterfaceNameSpec{
+							NicIndex:         0,
+							RailIndex:        0,
+							PlaneIndices:     []int{0, 1},
+							RdmaDevicePrefix: "ib%plane_id%",
+							NetDevicePrefix:  "ib%plane_id%",
+						},
+					},
+					Status: v1alpha1.NicDeviceStatus{
+						Ports: []v1alpha1.NicDevicePortSpec{
+							{PCI: "0000:03:00.0", NetworkInterface: "ibp3s0"},
+							{PCI: "0002:03:00.0", NetworkInterface: "ibP2p3s0"},
+						},
+					},
+				},
+				{
+					Spec: v1alpha1.NicDeviceSpec{
+						InterfaceNameTemplate: &v1alpha1.NicDeviceInterfaceNameSpec{
+							NicIndex:         1,
+							RailIndex:        1,
+							PlaneIndices:     []int{0, 1},
+							RdmaDevicePrefix: "ib%plane_id%",
+							NetDevicePrefix:  "ib%plane_id%",
+						},
+					},
+					Status: v1alpha1.NicDeviceStatus{
+						Ports: []v1alpha1.NicDevicePortSpec{
+							{PCI: "0010:03:00.0", NetworkInterface: "ibP16p3s0"},
+							{PCI: "0012:03:00.0", NetworkInterface: "ibP18p3s0"},
+						},
+					},
+				},
+			}
+
+			expectedNames, updated, err := manager.ApplyUdevRules(context.Background(), devices)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updated).To(BeTrue())
+
+			// Should use actual PCI addresses from ports, not calculated ones
+			Expect(expectedNames).To(HaveLen(4))
+			Expect(expectedNames["0000:03:00.0"]).To(Equal(ExpectedInterfaceNames{NetDevice: "ib0", RdmaDevice: "ib0"}))
+			Expect(expectedNames["0002:03:00.0"]).To(Equal(ExpectedInterfaceNames{NetDevice: "ib1", RdmaDevice: "ib1"}))
+			Expect(expectedNames["0010:03:00.0"]).To(Equal(ExpectedInterfaceNames{NetDevice: "ib0", RdmaDevice: "ib0"}))
+			Expect(expectedNames["0012:03:00.0"]).To(Equal(ExpectedInterfaceNames{NetDevice: "ib1", RdmaDevice: "ib1"}))
+
+			// Verify net rules use actual PCI addresses
+			netRulesPath := filepath.Join(tempDir, UdevNetRulesFile)
+			netContent, err := os.ReadFile(netRulesPath)
+			Expect(err).NotTo(HaveOccurred())
+
+			netContentStr := string(netContent)
+			Expect(netContentStr).To(ContainSubstring(`KERNELS=="0000:03:00.0", NAME="ib0"`))
+			Expect(netContentStr).To(ContainSubstring(`KERNELS=="0002:03:00.0", NAME="ib1"`))
+			Expect(netContentStr).To(ContainSubstring(`KERNELS=="0010:03:00.0", NAME="ib0"`))
+			Expect(netContentStr).To(ContainSubstring(`KERNELS=="0012:03:00.0", NAME="ib1"`))
+
+			// Should NOT contain calculated addresses like 0000:03:00.1 or 0010:03:00.1
+			Expect(netContentStr).NotTo(ContainSubstring(`0000:03:00.1`))
+			Expect(netContentStr).NotTo(ContainSubstring(`0010:03:00.1`))
+		})
+
 		It("should skip devices without InterfaceNameTemplate", func() {
 			devices := []*v1alpha1.NicDevice{
 				{
@@ -586,6 +654,92 @@ var _ = Describe("UdevManager", func() {
 			pciAddr, err := CalculatePCIAddressForPF("0000:01:00.0", 1)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(pciAddr).To(Equal("0000:01:00.1"))
+		})
+	})
+
+	Describe("Template assignment to udev rule generation", func() {
+		// simulateTemplateAssignment replicates calculateNicRailAndPlaneIndices
+		// from the controller package to test the full chain without envtest.
+		simulateTemplateAssignment := func(device *v1alpha1.NicDevice, railPciAddresses [][]string, pfsPerNic int) (int, int, []int, bool) {
+			nicIndex := 0
+			for railIndex, pciAddrs := range railPciAddresses {
+				for nicPositionInRail, pciAddr := range pciAddrs {
+					for _, port := range device.Status.Ports {
+						if port.PCI == pciAddr {
+							planeIndices := make([]int, pfsPerNic)
+							firstPlaneIndex := nicPositionInRail * pfsPerNic
+							for i := 0; i < pfsPerNic; i++ {
+								planeIndices[i] = firstPlaneIndex + i
+							}
+							return nicIndex, railIndex, planeIndices, true
+						}
+					}
+					nicIndex++
+				}
+			}
+			return 0, 0, nil, false
+		}
+
+		It("should produce correct udev rules for dual-port NICs with PFs in different PCI domains", func() {
+			// GB200 ConnectX-7 topology: PFs in different PCI domains, not function numbers
+			// NIC 1: PF0=0000:03:00.0, PF1=0002:03:00.0
+			// NIC 2: PF0=0010:03:00.0, PF1=0012:03:00.0
+			pfsPerNic := 2
+			railPciAddresses := [][]string{
+				{"0000:03:00.0", "0010:03:00.0"},
+			}
+			netDevicePrefix := "ib%plane_id%"
+			rdmaDevicePrefix := "ib%plane_id%"
+
+			nic1 := &v1alpha1.NicDevice{
+				Status: v1alpha1.NicDeviceStatus{
+					Ports: []v1alpha1.NicDevicePortSpec{
+						{PCI: "0000:03:00.0", NetworkInterface: "ibp3s0"},
+						{PCI: "0002:03:00.0", NetworkInterface: "ibP2p3s0"},
+					},
+				},
+			}
+			nic2 := &v1alpha1.NicDevice{
+				Status: v1alpha1.NicDeviceStatus{
+					Ports: []v1alpha1.NicDevicePortSpec{
+						{PCI: "0010:03:00.0", NetworkInterface: "ibP16p3s0"},
+						{PCI: "0012:03:00.0", NetworkInterface: "ibP18p3s0"},
+					},
+				},
+			}
+
+			// Step 1: Template controller assigns specs
+			nicIdx1, railIdx1, planes1, found1 := simulateTemplateAssignment(nic1, railPciAddresses, pfsPerNic)
+			Expect(found1).To(BeTrue())
+			Expect(planes1).To(Equal([]int{0, 1}))
+
+			nicIdx2, railIdx2, planes2, found2 := simulateTemplateAssignment(nic2, railPciAddresses, pfsPerNic)
+			Expect(found2).To(BeTrue())
+			Expect(planes2).To(Equal([]int{2, 3}))
+
+			nic1.Spec.InterfaceNameTemplate = &v1alpha1.NicDeviceInterfaceNameSpec{
+				NicIndex: nicIdx1, RailIndex: railIdx1, PlaneIndices: planes1,
+				NetDevicePrefix: netDevicePrefix, RdmaDevicePrefix: rdmaDevicePrefix,
+			}
+			nic2.Spec.InterfaceNameTemplate = &v1alpha1.NicDeviceInterfaceNameSpec{
+				NicIndex: nicIdx2, RailIndex: railIdx2, PlaneIndices: planes2,
+				NetDevicePrefix: netDevicePrefix, RdmaDevicePrefix: rdmaDevicePrefix,
+			}
+
+			// Step 2: Udev manager generates rules
+			mgr := &udevManager{}
+			_, _, expectedNames := mgr.generateUdevRules([]*v1alpha1.NicDevice{nic1, nic2})
+
+			// All 4 PFs should get rules with correct names
+			Expect(expectedNames).To(HaveLen(4))
+			Expect(expectedNames["0000:03:00.0"]).To(Equal(ExpectedInterfaceNames{NetDevice: "ib0", RdmaDevice: "ib0"}))
+			Expect(expectedNames["0002:03:00.0"]).To(Equal(ExpectedInterfaceNames{NetDevice: "ib1", RdmaDevice: "ib1"}))
+			Expect(expectedNames["0010:03:00.0"]).To(Equal(ExpectedInterfaceNames{NetDevice: "ib2", RdmaDevice: "ib2"}))
+			Expect(expectedNames["0012:03:00.0"]).To(Equal(ExpectedInterfaceNames{NetDevice: "ib3", RdmaDevice: "ib3"}))
+
+			// No rules for incorrectly calculated function-incremented addresses
+			Expect(expectedNames).NotTo(HaveKey("0000:03:00.1"))
+			Expect(expectedNames).NotTo(HaveKey("0010:03:00.1"))
 		})
 	})
 })
