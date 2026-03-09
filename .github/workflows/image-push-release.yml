@@ -37,7 +37,7 @@ jobs:
           password: ${{ secrets.NVCR_TOKEN }}
       - name: Docker operator image meta
         id: docker_meta_operator
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.REPO_OWNER }}/${{ env.OPERATOR_IMAGE_NAME }}
           tags: |
@@ -54,7 +54,7 @@ jobs:
           labels: ${{ steps.docker_meta_operator.outputs.labels }}
       - name: Docker daemon image meta
         id: docker_meta_daemon
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.REPO_OWNER }}/${{ env.DAEMON_IMAGE_NAME }}
           tags: |
