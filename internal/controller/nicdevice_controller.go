@@ -257,11 +257,6 @@ func (r *NicDeviceReconciler) reconcileInterfaceNameTemplates(ctx context.Contex
 		}
 	}
 
-	if len(devicesWithTemplates) == 0 {
-		log.Log.V(2).Info("No devices with InterfaceNameTemplate specs to reconcile")
-		return nil
-	}
-
 	log.Log.V(2).Info("Reconciling InterfaceNameTemplate specs", "deviceCount", len(devicesWithTemplates))
 
 	// Apply udev rules for all devices with templates and get expected interface names

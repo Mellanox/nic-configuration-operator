@@ -224,11 +224,18 @@ func (m *udevManager) generateUdevRules(devices []*v1alpha1.NicDevice) (netRules
 
 		// Generate rules for each PF based on PlaneIndices count
 		for pfIndex := 0; pfIndex < numPFs; pfIndex++ {
-			// Calculate PCI address for this PF based on the base PCI address
-			pciAddr, err := CalculatePCIAddressForPF(basePCI, pfIndex)
-			if err != nil {
-				log.Log.Error(err, "Failed to calculate PCI address for PF", "device", device.Name, "basePCI", basePCI, "pfIndex", pfIndex)
-				continue
+			// Use the actual PCI address from Status.Ports when available,
+			// falling back to calculation for PFs that don't exist yet (reconfiguration)
+			var pciAddr string
+			if pfIndex < len(device.Status.Ports) && device.Status.Ports[pfIndex].PCI != "" {
+				pciAddr = device.Status.Ports[pfIndex].PCI
+			} else {
+				var err error
+				pciAddr, err = CalculatePCIAddressForPF(basePCI, pfIndex)
+				if err != nil {
+					log.Log.Error(err, "Failed to calculate PCI address for PF", "device", device.Name, "basePCI", basePCI, "pfIndex", pfIndex)
+					continue
+				}
 			}
 
 			// Get the plane index for this PF
