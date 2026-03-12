@@ -48,6 +48,11 @@ spec:
                     description: Type of the NIC to be selected, e.g. 101d,1015,a2d6
                       etc.
                     type: string
+                  partNumbers:
+                    description: Part numbers of the NICs to be selected, e.g. MCX713106AEHEA_QP1
+                    items:
+                      type: string
+                    type: array
                   pciAddresses:
                     description: Array of PCI addresses to be selected, e.g. "0000:03:00.0"
                     items:

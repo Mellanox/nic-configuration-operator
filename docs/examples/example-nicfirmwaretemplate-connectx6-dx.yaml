@@ -25,6 +25,10 @@ spec:
     kubernetes.io/hostname: cloud-dev-41
   nicSelector:
     nicType: "101d"
+    # serialNumbers:
+    #   - "MT2116X09299"
+    # partNumbers:
+    #   - "MCX713106AEHEA_QP1"
   template:
     nicFirmwareSourceRef: connectx6dx-firmware-22-44-1036
     updatePolicy: Update

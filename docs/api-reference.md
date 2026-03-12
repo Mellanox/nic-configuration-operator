@@ -929,6 +929,11 @@ NicSelectorSpec is a desired configuration for NICs
 <em>[]string</em></td>
 <td><p>Serial numbers of the NICs to be selected, e.g. MT2116X09299</p></td>
 </tr>
+<tr>
+<td><code>partNumbers</code><br />
+<em>[]string</em></td>
+<td><p>Part numbers of the NICs to be selected, e.g. MCX713106AEHEA_QP1</p></td>
+</tr>
 </tbody>
 </table>
 
