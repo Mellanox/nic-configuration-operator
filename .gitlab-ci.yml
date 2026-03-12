@@ -32,7 +32,7 @@ variables:  # additional variables are defined at the gitlab group scope
   OPERATOR_IMAGE_NAME: nic-configuration-operator-stig-fips
   DAEMON_IMAGE_NAME: nic-configuration-operator-daemon-stig-fips
   GOV_READY_POLICY_FILE_PATH: pulse-scan-policies/prodsec_approved_govready_release_policy.json
-  CVE_UPDATES_RHEL: "openssl python3-urllib3"
+  CVE_UPDATES_RHEL: "openssl python3-urllib3 glib2 util-linux"
 
 # Common job template for building STIG images
 .build-stig-image:
