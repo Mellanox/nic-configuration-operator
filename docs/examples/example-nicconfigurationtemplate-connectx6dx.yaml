@@ -31,6 +31,8 @@ spec:
       - “0000:04:00.0”
     serialNumbers:
       - "MT2116X09299"
+    # partNumbers:
+    #   - "MCX713106AEHEA_QP1"
   resetToDefault: false # if set, template is ignored, device configuration should reset
   template:
     numVfs: 2

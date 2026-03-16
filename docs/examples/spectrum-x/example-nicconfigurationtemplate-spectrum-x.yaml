@@ -25,6 +25,8 @@ spec:
       feature.node.kubernetes.io/network-sriov.capable: "true"
   nicSelector:
       nicType: a2dc # BlueField-3 SuperNIC, Can also be "1023" for ConnectX-8
+      # partNumbers:
+      #   - "MCX713106AEHEA_QP1"
   template:
       numVfs: 1
       linkType: Ethernet

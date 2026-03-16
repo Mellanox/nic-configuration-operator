@@ -167,6 +167,10 @@ func deviceMatchesConfigurationTemplateSelectors(device *v1alpha1.NicDevice, tem
 		return false
 	}
 
+	if !deviceMatchesPartNumberSelector(device, nicSelector.PartNumbers) {
+		return false
+	}
+
 	return true
 }
 
@@ -199,6 +203,16 @@ func deviceMatchesPCISelector(device *v1alpha1.NicDevice, pciAddresses []string)
 func deviceMatchesSerialNumberSelector(device *v1alpha1.NicDevice, serialNumbers []string) bool {
 	if len(serialNumbers) > 0 {
 		if !slices.Contains(serialNumbers, device.Status.SerialNumber) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func deviceMatchesPartNumberSelector(device *v1alpha1.NicDevice, partNumbers []string) bool {
+	if len(partNumbers) > 0 {
+		if !slices.Contains(partNumbers, device.Status.PartNumber) {
 			return false
 		}
 	}

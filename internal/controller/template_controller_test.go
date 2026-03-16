@@ -125,6 +125,7 @@ var _ = Describe("NicConfigurationTemplate Controller", func() {
 					NicType:       "ConnectX6",
 					PciAddresses:  []string{"0000:3b:00.0", "0000:d8:00.0"},
 					SerialNumbers: []string{"serialNumber1", "serialNumber2"},
+					PartNumbers:   []string{"partNumber1", "partNumber2"},
 				},
 				Template: &v1alpha1.ConfigurationTemplateSpec{
 					NumVfs:   4,
@@ -141,6 +142,7 @@ var _ = Describe("NicConfigurationTemplate Controller", func() {
 			Type:         "ConnectX6",
 			Ports:        []v1alpha1.NicDevicePortSpec{{PCI: "0000:3b:00.0"}},
 			SerialNumber: "serialNumber1",
+			PartNumber:   "partNumber1",
 		}
 		Expect(k8sClient.Status().Update(ctx, device1)).To(Succeed())
 
@@ -151,6 +153,7 @@ var _ = Describe("NicConfigurationTemplate Controller", func() {
 			Type:         "ConnectX6",
 			Ports:        []v1alpha1.NicDevicePortSpec{{PCI: "0000:d8:00.0"}},
 			SerialNumber: "serialNumber2",
+			PartNumber:   "partNumber2",
 		}
 		Expect(k8sClient.Status().Update(ctx, device2)).To(Succeed())
 
@@ -162,6 +165,7 @@ var _ = Describe("NicConfigurationTemplate Controller", func() {
 			Type:         "ConnectX6",
 			Ports:        []v1alpha1.NicDevicePortSpec{{PCI: "0000:3b:00.0"}},
 			SerialNumber: "serialNumber1",
+			PartNumber:   "partNumber1",
 		}
 		Expect(k8sClient.Status().Update(ctx, device3)).To(Succeed())
 
@@ -173,6 +177,7 @@ var _ = Describe("NicConfigurationTemplate Controller", func() {
 			Type:         "ConnectX4",
 			Ports:        []v1alpha1.NicDevicePortSpec{{PCI: "0000:d8:00.0"}},
 			SerialNumber: "serialNumber1",
+			PartNumber:   "partNumber1",
 		}
 		Expect(k8sClient.Status().Update(ctx, device4)).To(Succeed())
 
@@ -184,6 +189,7 @@ var _ = Describe("NicConfigurationTemplate Controller", func() {
 			Type:         "ConnectX6",
 			Ports:        []v1alpha1.NicDevicePortSpec{{PCI: "0000:81:00.0"}},
 			SerialNumber: "serialNumber1",
+			PartNumber:   "partNumber1",
 		}
 		Expect(k8sClient.Status().Update(ctx, device5)).To(Succeed())
 
@@ -195,8 +201,21 @@ var _ = Describe("NicConfigurationTemplate Controller", func() {
 			Type:         "ConnectX6",
 			Ports:        []v1alpha1.NicDevicePortSpec{{PCI: "0000:3b:00.0"}},
 			SerialNumber: "serialNumber3",
+			PartNumber:   "partNumber1",
 		}
 		Expect(k8sClient.Status().Update(ctx, device6)).To(Succeed())
+
+		// device7 doesn't match Part number selector
+		device7 := &v1alpha1.NicDevice{ObjectMeta: metav1.ObjectMeta{Name: "device7", Namespace: namespaceName}}
+		Expect(k8sClient.Create(ctx, device7)).To(Succeed())
+		device7.Status = v1alpha1.NicDeviceStatus{
+			Node:         validNode.Name,
+			Type:         "ConnectX6",
+			Ports:        []v1alpha1.NicDevicePortSpec{{PCI: "0000:3b:00.0"}},
+			SerialNumber: "serialNumber1",
+			PartNumber:   "partNumber3",
+		}
+		Expect(k8sClient.Status().Update(ctx, device7)).To(Succeed())
 
 		Eventually(getDeviceSpecTemplate(ctx, device1.Name, namespaceName, k8sClient)).WithTimeout(1 * time.Minute).Should(Equal(template.Spec.Template))
 		Eventually(getDeviceSpecTemplate(ctx, device2.Name, namespaceName, k8sClient)).Should(Equal(template.Spec.Template))
@@ -205,6 +224,7 @@ var _ = Describe("NicConfigurationTemplate Controller", func() {
 		Consistently(getDeviceSpecTemplate(ctx, device4.Name, namespaceName, k8sClient)).Should(BeNil())
 		Consistently(getDeviceSpecTemplate(ctx, device5.Name, namespaceName, k8sClient)).Should(BeNil())
 		Consistently(getDeviceSpecTemplate(ctx, device6.Name, namespaceName, k8sClient)).Should(BeNil())
+		Consistently(getDeviceSpecTemplate(ctx, device7.Name, namespaceName, k8sClient)).Should(BeNil())
 	})
 
 	It("should update spec if resetToDefault differs", func() {

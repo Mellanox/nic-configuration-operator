@@ -52,6 +52,8 @@ spec:
          - “0000:04:00.0”
       serialNumbers:
          - "MT2116X09299"
+      partNumbers:
+         - "MCX713106AEHEA_QP1"
    resetToDefault: false # if set, template is ignored, device configuration should reset
    template:
       numVfs: 2
@@ -145,6 +147,8 @@ spec:
       feature.node.kubernetes.io/network-sriov.capable: "true"
   nicSelector:
       nicType: "1023" # ConnectX-8. Use "a2dc" for BlueField-3 SuperNIC (hwplb not supported on BF3)
+      # partNumbers:
+      #   - "MCX713106AEHEA_QP1"
   template:
       numVfs: 1
       linkType: Ethernet
@@ -220,6 +224,8 @@ spec:
     kubernetes.io/hostname: cloud-dev-41
   nicSelector:
     nicType: "101d"
+    # partNumbers:
+    #   - "MCX713106AEHEA_QP1"
   template:
     nicFirmwareSourceRef: connectx6dx-firmware-22-44-1036
     updatePolicy: Update

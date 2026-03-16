@@ -28,6 +28,8 @@ type NicSelectorSpec struct {
 	PciAddresses []string `json:"pciAddresses,omitempty"`
 	// Serial numbers of the NICs to be selected, e.g. MT2116X09299
 	SerialNumbers []string `json:"serialNumbers,omitempty"`
+	// Part numbers of the NICs to be selected, e.g. MCX713106AEHEA_QP1
+	PartNumbers []string `json:"partNumbers,omitempty"`
 }
 
 // LinkTypeEnum described the link type (Ethernet / Infiniband)
