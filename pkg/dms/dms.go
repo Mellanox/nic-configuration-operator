@@ -46,7 +46,7 @@ type DMSManager interface {
 type DMSServer interface {
 	DMSManager
 	// StartDMSServer starts a single DMS server for all given NIC devices
-	StartDMSServer(devices []v1alpha1.NicDeviceStatus) error
+	StartDMSServer(devices []v1alpha1.NicDevice) error
 	// StopDMSServer stops the running DMS server
 	StopDMSServer() error
 	// IsRunning returns whether the DMS server is running
@@ -86,18 +86,18 @@ type externalDMSManager struct {
 // address: bind address of the external DMS server (e.g. "remotehost:9339")
 // authParams: authentication/security flags passed to dmsc (e.g. []string{"--insecure"} or
 // []string{"--tls-ca", "/path/ca.pem", "--tls-cert", "/path/cert.pem", "--tls-key", "/path/key.pem"})
-func NewExternalDMSManager(devices []v1alpha1.NicDeviceStatus, address string, authParams []string) DMSManager {
+func NewExternalDMSManager(devices []v1alpha1.NicDevice, address string, authParams []string) DMSManager {
 	log.Log.V(2).Info("Creating new External DMS Manager", "address", address, "deviceCount", len(devices))
 	clients := make(map[string]*dmsClient)
 	for _, device := range devices {
 		client := &dmsClient{
-			device:        device,
-			targetPCI:     device.Ports[0].PCI,
+			device:        device.Status,
+			targetPCI:     device.Status.Ports[0].PCI,
 			bindAddress:   address,
 			authParams:    authParams,
 			execInterface: execUtils.New(),
 		}
-		clients[device.SerialNumber] = client
+		clients[device.Status.SerialNumber] = client
 	}
 	return &externalDMSManager{clients: clients}
 }
@@ -114,8 +114,20 @@ func (m *externalDMSManager) GetDMSClientBySerialNumber(serialNumber string) (DM
 	return client, nil
 }
 
+// isDMSDRunning checks if a dmsd process is already running on the host
+func (m *dmsServer) isDMSDRunning() bool {
+	cmd := m.execInterface.Command("pgrep", "-x", "dmsd")
+	output, err := cmd.Output()
+	if err != nil {
+		// pgrep returns exit code 1 when no processes found - this is expected
+		return false
+	}
+	log.Log.V(2).Info("Found existing dmsd process", "pids", strings.TrimSpace(string(output)))
+	return true
+}
+
 // StartDMSServer starts a single DMS server for all given NIC devices
-func (m *dmsServer) StartDMSServer(devices []v1alpha1.NicDeviceStatus) error {
+func (m *dmsServer) StartDMSServer(devices []v1alpha1.NicDevice) error {
 	log.Log.V(2).Info("StartDMSServer", "deviceCount", len(devices))
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
@@ -123,6 +135,10 @@ func (m *dmsServer) StartDMSServer(devices []v1alpha1.NicDeviceStatus) error {
 	if m.running.Load() {
 		log.Log.V(2).Info("DMS server already running")
 		return nil
+	}
+
+	if m.isDMSDRunning() {
+		return fmt.Errorf("dmsd process already running on host, cannot start a new instance")
 	}
 
 	if len(devices) == 0 {
@@ -154,7 +170,7 @@ func (m *dmsServer) StartDMSServer(devices []v1alpha1.NicDeviceStatus) error {
 	// Collect all first-port PCI addresses
 	pciAddresses := make([]string, 0, len(devices))
 	for _, device := range devices {
-		pciAddresses = append(pciAddresses, device.Ports[0].PCI)
+		pciAddresses = append(pciAddresses, device.Status.Ports[0].PCI)
 	}
 	targetPCI := strings.Join(pciAddresses, ",")
 
@@ -198,13 +214,13 @@ func (m *dmsServer) StartDMSServer(devices []v1alpha1.NicDeviceStatus) error {
 	// Create clients for each device
 	for _, device := range devices {
 		client := &dmsClient{
-			device:        device,
-			targetPCI:     device.Ports[0].PCI,
+			device:        device.Status,
+			targetPCI:     device.Status.Ports[0].PCI,
 			bindAddress:   bindAddress,
 			authParams:    []string{"--insecure"},
 			execInterface: m.execInterface,
 		}
-		m.clients[device.SerialNumber] = client
+		m.clients[device.Status.SerialNumber] = client
 	}
 
 	log.Log.Info("Started DMS server", "bind_address", bindAddress, "targetPCI", targetPCI, "clientCount", len(m.clients))

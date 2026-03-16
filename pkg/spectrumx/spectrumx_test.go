@@ -2294,7 +2294,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				execFake.cmds = []*fakeCmd{
 					{output: []byte("ok"), err: nil}, // mlxreg set
 				}
-				err := manager.ApplyRuntimeConfig(device)
+				_, err := manager.ApplyRuntimeConfig(device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -2307,7 +2307,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				execFake.cmds = []*fakeCmd{
 					{output: []byte(""), err: errors.New("mlxreg set error")},
 				}
-				err := manager.ApplyRuntimeConfig(device)
+				_, err := manager.ApplyRuntimeConfig(device)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("CC Probe MP mode"))
 			})
@@ -2318,7 +2318,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					{Name: "ar_before", Value: "y", DMSPath: "/ar/before"},
 				}).Return(errors.New("dms set error"))
 
-				err := manager.ApplyRuntimeConfig(device)
+				_, err := manager.ApplyRuntimeConfig(device)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("dms set error"))
 			})

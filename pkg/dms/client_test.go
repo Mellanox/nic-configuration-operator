@@ -70,12 +70,18 @@ func createToSPath(netInterface string) string {
 }
 
 // createTrustModeSetPath returns the path payload used for setting trust mode
+//
+//nolint:unparam
 func createTrustModeSetPath(netInterface, value string) string {
 	return "/interfaces/interface[name=" + netInterface + "]/nvidia/qos/config/trust-mode:::string:::" + value
 }
+
+//nolint:unparam
 func createPFCSetPath(netInterface, value string) string {
 	return "/interfaces/interface[name=" + netInterface + "]/nvidia/qos/config/pfc:::string:::" + value
 }
+
+//nolint:unparam
 func createToSSetPath(netInterface string, value int) string {
 	return fmt.Sprintf("/interfaces/interface[name=%s]/nvidia/roce/config/tos:::int:::%d", netInterface, value)
 }

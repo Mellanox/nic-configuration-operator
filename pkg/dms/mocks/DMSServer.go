@@ -63,7 +63,7 @@ func (_m *DMSServer) IsRunning() bool {
 }
 
 // StartDMSServer provides a mock function with given fields: devices
-func (_m *DMSServer) StartDMSServer(devices []v1alpha1.NicDeviceStatus) error {
+func (_m *DMSServer) StartDMSServer(devices []v1alpha1.NicDevice) error {
 	ret := _m.Called(devices)
 
 	if len(ret) == 0 {
@@ -71,7 +71,7 @@ func (_m *DMSServer) StartDMSServer(devices []v1alpha1.NicDeviceStatus) error {
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func([]v1alpha1.NicDeviceStatus) error); ok {
+	if rf, ok := ret.Get(0).(func([]v1alpha1.NicDevice) error); ok {
 		r0 = rf(devices)
 	} else {
 		r0 = ret.Error(0)

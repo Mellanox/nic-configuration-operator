@@ -134,7 +134,7 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 	}
 
 	for _, nicDeviceCR := range list.Items {
-		observedDeviceStatus, exists := observedDevices[nicDeviceCR.Status.SerialNumber]
+		observedDevice, exists := observedDevices[nicDeviceCR.Status.SerialNumber]
 
 		if !exists {
 			log.Log.V(2).Info("device doesn't exist on the node anymore, deleting", "device", nicDeviceCR.Name)
@@ -146,6 +146,8 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 
 			continue
 		}
+
+		observedDeviceStatus := observedDevice.Status
 
 		if changed := d.updateFwCondition(&nicDeviceCR); changed {
 			log.Log.V(2).Info("FirmwareConfigMatch condition changed, updating device", "nicDeviceCR", nicDeviceCR)
@@ -175,7 +177,8 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 	}
 
 	// Remaining devices don't have CR representation, need to create a CR
-	for _, deviceStatus := range observedDevices {
+	for _, observedDevice := range observedDevices {
+		deviceStatus := observedDevice.Status
 		deviceName := d.getCRName(deviceStatus.Type, deviceStatus.SerialNumber)
 		device := &v1alpha1.NicDevice{
 			ObjectMeta: metav1.ObjectMeta{

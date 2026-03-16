@@ -1001,7 +1001,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			firmwareManager.On("GetFirmwareVersionsFromDevice", mock.Anything).Return(oldFwVersion, oldFwVersion, nil)
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
-			firmwareManager.On("BurnNicFirmware", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+			firmwareManager.On("InstallFirmware", mock.Anything, mock.Anything, mock.Anything).Return(false, nil)
 			configurationManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(resetErr)
 			// Reboot returns an error so the reconciler retries and we can observe the state
 			maintenanceManager.On("Reboot").Return(errors.New("reboot failed"))

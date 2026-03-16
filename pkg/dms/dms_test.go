@@ -28,11 +28,25 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 )
 
+// pgrepNotFound returns a FakeCommandAction that simulates pgrep finding no dmsd process
+func pgrepNotFound() execTesting.FakeCommandAction {
+	return func(cmd string, args ...string) exec.Cmd {
+		return &execTesting.FakeCmd{
+			OutputScript: []execTesting.FakeAction{
+				func() ([]byte, []byte, error) {
+					return nil, nil, errors.New("exit status 1")
+				},
+			},
+		}
+	}
+}
+
 var _ = Describe("DMSServer", func() {
 	var (
-		server      *dmsServer
-		fakeExec    *execTesting.FakeExec
-		testDevices []v1alpha1.NicDeviceStatus
+		server       *dmsServer
+		fakeExec     *execTesting.FakeExec
+		testDevices  []v1alpha1.NicDevice
+		testStatuses []v1alpha1.NicDeviceStatus
 	)
 
 	BeforeEach(func() {
@@ -43,7 +57,7 @@ var _ = Describe("DMSServer", func() {
 			execInterface: fakeExec,
 		}
 
-		testDevices = []v1alpha1.NicDeviceStatus{
+		testStatuses = []v1alpha1.NicDeviceStatus{
 			{
 				SerialNumber: "test-serial-1",
 				Ports: []v1alpha1.NicDevicePortSpec{
@@ -62,6 +76,11 @@ var _ = Describe("DMSServer", func() {
 					},
 				},
 			},
+		}
+
+		testDevices = []v1alpha1.NicDevice{
+			{Status: testStatuses[0]},
+			{Status: testStatuses[1]},
 		}
 	})
 
@@ -93,7 +112,7 @@ var _ = Describe("DMSServer", func() {
 					}
 				}
 
-				fakeExec.CommandScript = []execTesting.FakeCommandAction{cmdAction}
+				fakeExec.CommandScript = []execTesting.FakeCommandAction{pgrepNotFound(), cmdAction}
 			})
 
 			AfterEach(func() {
@@ -139,7 +158,7 @@ var _ = Describe("DMSServer", func() {
 					}
 				}
 
-				fakeExec.CommandScript = []execTesting.FakeCommandAction{cmdAction}
+				fakeExec.CommandScript = []execTesting.FakeCommandAction{pgrepNotFound(), cmdAction}
 			})
 
 			It("should return an error", func() {
@@ -155,9 +174,37 @@ var _ = Describe("DMSServer", func() {
 			})
 		})
 
+		Context("when dmsd is already running on the host", func() {
+			BeforeEach(func() {
+				// pgrep returns success (exit code 0) when process is found
+				pgrepAction := func(cmd string, args ...string) exec.Cmd {
+					Expect(cmd).To(Equal("pgrep"))
+					return &execTesting.FakeCmd{
+						OutputScript: []execTesting.FakeAction{
+							func() ([]byte, []byte, error) {
+								return []byte("12345\n"), nil, nil
+							},
+						},
+					}
+				}
+
+				fakeExec.CommandScript = []execTesting.FakeCommandAction{pgrepAction}
+			})
+
+			It("should return an error", func() {
+				err := server.StartDMSServer(testDevices)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("dmsd process already running on host"))
+			})
+		})
+
 		Context("when no devices are provided", func() {
+			BeforeEach(func() {
+				fakeExec.CommandScript = []execTesting.FakeCommandAction{pgrepNotFound()}
+			})
+
 			It("should return nil without starting a server", func() {
-				err := server.StartDMSServer([]v1alpha1.NicDeviceStatus{})
+				err := server.StartDMSServer([]v1alpha1.NicDevice{})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(server.running.Load()).To(BeFalse())
 			})
@@ -186,7 +233,7 @@ var _ = Describe("DMSServer", func() {
 					}
 				}
 
-				fakeExec.CommandScript = []execTesting.FakeCommandAction{cmdAction}
+				fakeExec.CommandScript = []execTesting.FakeCommandAction{pgrepNotFound(), cmdAction}
 			})
 
 			AfterEach(func() {
@@ -224,7 +271,7 @@ var _ = Describe("DMSServer", func() {
 					}
 				}
 
-				fakeExec.CommandScript = []execTesting.FakeCommandAction{cmdAction}
+				fakeExec.CommandScript = []execTesting.FakeCommandAction{pgrepNotFound(), cmdAction}
 			})
 
 			AfterEach(func() {
@@ -286,20 +333,20 @@ var _ = Describe("DMSServer", func() {
 		Context("when server is running and the device exists", func() {
 			BeforeEach(func() {
 				client := &dmsClient{
-					device:        testDevices[0],
-					targetPCI:     testDevices[0].Ports[0].PCI,
+					device:        testStatuses[0],
+					targetPCI:     testStatuses[0].Ports[0].PCI,
 					bindAddress:   "localhost:9339",
 					authParams:    []string{"--insecure"},
 					execInterface: fakeExec,
 				}
-				server.clients[testDevices[0].SerialNumber] = client
+				server.clients[testStatuses[0].SerialNumber] = client
 				server.running.Store(true)
 			})
 
 			It("should return the client for the device", func() {
-				client, err := server.GetDMSClientBySerialNumber(testDevices[0].SerialNumber)
+				client, err := server.GetDMSClientBySerialNumber(testStatuses[0].SerialNumber)
 				Expect(err).NotTo(HaveOccurred())
-				Expect(client).To(Equal(server.clients[testDevices[0].SerialNumber]))
+				Expect(client).To(Equal(server.clients[testStatuses[0].SerialNumber]))
 			})
 		})
 
@@ -318,7 +365,7 @@ var _ = Describe("DMSServer", func() {
 
 		Context("when server is not running", func() {
 			It("should return an error", func() {
-				client, err := server.GetDMSClientBySerialNumber(testDevices[0].SerialNumber)
+				client, err := server.GetDMSClientBySerialNumber(testStatuses[0].SerialNumber)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("DMS server is not running"))
 				Expect(client).To(BeNil())
@@ -328,16 +375,18 @@ var _ = Describe("DMSServer", func() {
 })
 
 var _ = Describe("ExternalDMSManager", func() {
-	var testDevices []v1alpha1.NicDeviceStatus
+	var extTestDevices []v1alpha1.NicDevice
 
 	BeforeEach(func() {
-		testDevices = []v1alpha1.NicDeviceStatus{
+		extTestDevices = []v1alpha1.NicDevice{
 			{
-				SerialNumber: "test-serial-1",
-				Ports: []v1alpha1.NicDevicePortSpec{
-					{
-						PCI:              "0000:01:00.0",
-						NetworkInterface: "enp1s0f0np0",
+				Status: v1alpha1.NicDeviceStatus{
+					SerialNumber: "test-serial-1",
+					Ports: []v1alpha1.NicDevicePortSpec{
+						{
+							PCI:              "0000:01:00.0",
+							NetworkInterface: "enp1s0f0np0",
+						},
 					},
 				},
 			},
@@ -345,14 +394,14 @@ var _ = Describe("ExternalDMSManager", func() {
 	})
 
 	It("should create clients for all devices", func() {
-		mgr := NewExternalDMSManager(testDevices, "remotehost:9339", []string{"--insecure"})
+		mgr := NewExternalDMSManager(extTestDevices, "remotehost:9339", []string{"--insecure"})
 		client, err := mgr.GetDMSClientBySerialNumber("test-serial-1")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(client).NotTo(BeNil())
 	})
 
 	It("should return error for unknown serial number", func() {
-		mgr := NewExternalDMSManager(testDevices, "remotehost:9339", []string{"--insecure"})
+		mgr := NewExternalDMSManager(extTestDevices, "remotehost:9339", []string{"--insecure"})
 		client, err := mgr.GetDMSClientBySerialNumber("unknown-serial")
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("no DMS client found for device"))
@@ -361,7 +410,7 @@ var _ = Describe("ExternalDMSManager", func() {
 
 	It("should pass custom auth params to clients", func() {
 		authParams := []string{"--tls-ca", "/path/ca.pem", "--tls-cert", "/path/cert.pem", "--tls-key", "/path/key.pem"}
-		mgr := NewExternalDMSManager(testDevices, "remotehost:9339", authParams)
+		mgr := NewExternalDMSManager(extTestDevices, "remotehost:9339", authParams)
 		client, err := mgr.GetDMSClientBySerialNumber("test-serial-1")
 		Expect(err).NotTo(HaveOccurred())
 		// Verify auth params are stored on the client
