@@ -274,7 +274,7 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 		status = types.ApplyStatusPartiallyApplied
 	}
 
-	return &types.ConfigurationApplyResult{Status: status, RebootRequired: true}, nil
+	return &types.ConfigurationApplyResult{Status: status, RebootRequired: anyParamsApplied}, nil
 }
 
 // applySpectrumXNVConfiguration handles the Spectrum-X NV configuration path (breakout + nvconfig)

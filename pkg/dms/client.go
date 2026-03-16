@@ -473,7 +473,8 @@ func (i *dmsClient) SetParameters(params []types.ConfigurationParameter) error {
 	log.Log.V(2).Info("dmsClient.SetParameters() batch command", "args", strings.Join(args, " "))
 
 	command := i.execInterface.Command(args[0], args[1:]...)
-	output, err := command.Output()
+	output, err := command.CombinedOutput()
+	log.Log.V(2).Info("dmsClient.SetParameters() batch output", "device", i.device.SerialNumber, "output", string(output))
 	if err != nil {
 		allIgnore := true
 		for _, param := range params {

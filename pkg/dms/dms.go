@@ -90,6 +90,10 @@ func NewExternalDMSManager(devices []v1alpha1.NicDevice, address string, authPar
 	log.Log.V(2).Info("Creating new External DMS Manager", "address", address, "deviceCount", len(devices))
 	clients := make(map[string]*dmsClient)
 	for _, device := range devices {
+		if len(device.Status.Ports) == 0 {
+			log.Log.Error(nil, "device has no ports, skipping", "serialNumber", device.Status.SerialNumber)
+			continue
+		}
 		client := &dmsClient{
 			device:        device.Status,
 			targetPCI:     device.Status.Ports[0].PCI,
@@ -170,6 +174,10 @@ func (m *dmsServer) StartDMSServer(devices []v1alpha1.NicDevice) error {
 	// Collect all first-port PCI addresses
 	pciAddresses := make([]string, 0, len(devices))
 	for _, device := range devices {
+		if len(device.Status.Ports) == 0 {
+			log.Log.Error(nil, "device has no ports, skipping", "serialNumber", device.Status.SerialNumber)
+			continue
+		}
 		pciAddresses = append(pciAddresses, device.Status.Ports[0].PCI)
 	}
 	targetPCI := strings.Join(pciAddresses, ",")
@@ -186,7 +194,7 @@ func (m *dmsServer) StartDMSServer(devices []v1alpha1.NicDevice) error {
 	m.running.Store(true)
 
 	go func() {
-		output, err := m.cmd.Output()
+		output, err := m.cmd.CombinedOutput()
 		if err != nil {
 			m.errMutex.Lock()
 			m.cmdErr = err
@@ -213,6 +221,9 @@ func (m *dmsServer) StartDMSServer(devices []v1alpha1.NicDevice) error {
 
 	// Create clients for each device
 	for _, device := range devices {
+		if len(device.Status.Ports) == 0 {
+			continue
+		}
 		client := &dmsClient{
 			device:        device.Status,
 			targetPCI:     device.Status.Ports[0].PCI,

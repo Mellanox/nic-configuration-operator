@@ -103,7 +103,7 @@ var _ = Describe("DMSServer", func() {
 					}
 
 					return &execTesting.FakeCmd{
-						OutputScript: []execTesting.FakeAction{
+						CombinedOutputScript: []execTesting.FakeAction{
 							func() ([]byte, []byte, error) {
 								<-stopChan
 								return []byte("DMS server stopped"), nil, nil
@@ -150,7 +150,7 @@ var _ = Describe("DMSServer", func() {
 			BeforeEach(func() {
 				cmdAction := func(cmd string, args ...string) exec.Cmd {
 					return &execTesting.FakeCmd{
-						OutputScript: []execTesting.FakeAction{
+						CombinedOutputScript: []execTesting.FakeAction{
 							func() ([]byte, []byte, error) {
 								return nil, nil, errors.New("failed to start DMS server")
 							},
@@ -224,7 +224,7 @@ var _ = Describe("DMSServer", func() {
 
 				cmdAction := func(cmd string, args ...string) exec.Cmd {
 					return &execTesting.FakeCmd{
-						OutputScript: []execTesting.FakeAction{
+						CombinedOutputScript: []execTesting.FakeAction{
 							func() ([]byte, []byte, error) {
 								<-stopChan
 								return []byte("DMS server stopped"), nil, nil
@@ -262,7 +262,7 @@ var _ = Describe("DMSServer", func() {
 				cmdAction := func(cmd string, args ...string) exec.Cmd {
 					capturedArgs = args
 					return &execTesting.FakeCmd{
-						OutputScript: []execTesting.FakeAction{
+						CombinedOutputScript: []execTesting.FakeAction{
 							func() ([]byte, []byte, error) {
 								<-stopChan
 								return []byte("DMS server stopped"), nil, nil

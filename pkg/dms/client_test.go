@@ -43,12 +43,12 @@ const (
 
 // createFakeCmd creates a fake exec Command with specified output and error
 func createFakeCmd(output []byte, err error) *execTesting.FakeCmd {
+	action := func() ([]byte, []byte, error) {
+		return output, nil, err
+	}
 	return &execTesting.FakeCmd{
-		OutputScript: []execTesting.FakeAction{
-			func() ([]byte, []byte, error) {
-				return output, nil, err
-			},
-		},
+		OutputScript:         []execTesting.FakeAction{action},
+		CombinedOutputScript: []execTesting.FakeAction{action},
 	}
 }
 

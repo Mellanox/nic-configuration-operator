@@ -768,7 +768,7 @@ var _ = Describe("ConfigurationManager", func() {
 							Return(desiredConfig, nil)
 
 						result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
-						Expect(result.RebootRequired).To(BeTrue())
+						Expect(result.RebootRequired).To(BeFalse())
 						Expect(result.Status).To(Equal(types.ApplyStatusPartiallyApplied))
 						Expect(err).To(BeNil())
 
@@ -854,7 +854,7 @@ var _ = Describe("ConfigurationManager", func() {
 						mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig0).Return(map[string]string{"TRACER_ENABLED": "1"}, nil)
 
 						result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
-						Expect(result.RebootRequired).To(BeTrue())
+						Expect(result.RebootRequired).To(BeFalse())
 						Expect(result.Status).To(Equal(types.ApplyStatusPartiallyApplied))
 						Expect(err).To(BeNil())
 
