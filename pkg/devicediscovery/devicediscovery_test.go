@@ -192,9 +192,9 @@ var _ = Describe("DeviceDiscovery", func() {
 				}
 
 				Expect(devices).To(HaveKey("serial-number"))
-				Expect(devices["serial-number"]).To(Equal(expectedDeviceStatus))
+				Expect(devices["serial-number"].Status).To(Equal(expectedDeviceStatus))
 				// Verify that the returned device has the correct nodeName
-				Expect(devices["serial-number"].Node).To(Equal("test-node"))
+				Expect(devices["serial-number"].Status.Node).To(Equal("test-node"))
 
 				mockUtils.AssertExpectations(GinkgoT())
 			})
@@ -255,7 +255,7 @@ var _ = Describe("DeviceDiscovery", func() {
 			}
 
 			Expect(devices).To(HaveKey("serial-number"))
-			Expect(devices["serial-number"]).To(Equal(expectedDeviceStatus))
+			Expect(devices["serial-number"].Status).To(Equal(expectedDeviceStatus))
 			mockUtils.AssertExpectations(GinkgoT())
 		})
 
@@ -372,8 +372,8 @@ var _ = Describe("DeviceDiscovery", func() {
 			}
 
 			Expect(devices).To(HaveKey("serial-number"))
-			Expect(devices["serial-number"]).To(Equal(expectedDeviceStatus1))
-			Expect(devices["serial-number-2"]).To(Equal(expectedDeviceStatus2))
+			Expect(devices["serial-number"].Status).To(Equal(expectedDeviceStatus1))
+			Expect(devices["serial-number-2"].Status).To(Equal(expectedDeviceStatus2))
 
 			mockUtils.AssertExpectations(GinkgoT())
 		})
@@ -446,7 +446,7 @@ var _ = Describe("DeviceDiscovery", func() {
 			}
 
 			Expect(devices).To(HaveKey("serial-number"))
-			Expect(devices[sameSerialNumber]).To(Equal(expectedDeviceStatus))
+			Expect(devices[sameSerialNumber].Status).To(Equal(expectedDeviceStatus))
 
 			mockUtils.AssertExpectations(GinkgoT())
 		})
@@ -473,9 +473,9 @@ var _ = Describe("DeviceDiscovery", func() {
 			devicesBySerial, err := manager.DiscoverNicDevices()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(devicesBySerial).To(HaveKey("serial-number"))
-			discoveredDeviceStatus := devicesBySerial["serial-number"]
-			Expect(discoveredDeviceStatus.ModelName).To(Equal("ConnectX-8"))
-			Expect(discoveredDeviceStatus.SuperNIC).To(BeTrue())
+			discoveredDevice := devicesBySerial["serial-number"]
+			Expect(discoveredDevice.Status.ModelName).To(Equal("ConnectX-8"))
+			Expect(discoveredDevice.Status.SuperNIC).To(BeTrue())
 		})
 	})
 
@@ -507,8 +507,8 @@ var _ = Describe("DeviceDiscovery", func() {
 
 			devicesBySerial, err := manager.DiscoverNicDevices()
 			Expect(err).NotTo(HaveOccurred())
-			discoveredDeviceStatus := devicesBySerial["serial-number"]
-			Expect(discoveredDeviceStatus.DPU).To(BeTrue())
+			discoveredDevice := devicesBySerial["serial-number"]
+			Expect(discoveredDevice.Status.DPU).To(BeTrue())
 		})
 
 		It("should skip zero-trust device", func() {

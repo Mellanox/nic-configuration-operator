@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	execUtils "k8s.io/utils/exec"
@@ -40,6 +41,8 @@ type NVConfigUtils interface {
 	QueryNvConfig(ctx context.Context, pciAddr string, additionalParameter string) (types.NvConfigQuery, error)
 	// SetNvConfigParameter sets a nv config parameter for a mellanox device
 	SetNvConfigParameter(pciAddr string, paramName string, paramValue string) error
+	// SetNvConfigParametersBatch sets multiple nv config parameters for a mellanox device in a single mlxconfig call
+	SetNvConfigParametersBatch(pciAddr string, params map[string]string, withDefault bool) error
 	// ResetNvConfig resets NIC's nv config
 	ResetNvConfig(pciAddr string) error
 }
@@ -176,6 +179,42 @@ func (h *nvConfigUtils) SetNvConfigParameter(pciAddr string, paramName string, p
 	output, err := utils.RunCommand(cmd)
 	if err != nil {
 		log.Log.Error(err, "SetNvConfigParameter(): Failed to run mlxconfig", "output", string(output))
+		return err
+	}
+	return nil
+}
+
+// SetNvConfigParametersBatch sets multiple nv config parameters for a mellanox device in a single mlxconfig call
+func (h *nvConfigUtils) SetNvConfigParametersBatch(pciAddr string, params map[string]string, withDefault bool) error {
+	log.Log.Info("ConfigurationUtils.SetNvConfigParametersBatch()", "pciAddr", pciAddr, "params", params, "withDefault", withDefault)
+
+	if len(params) == 0 {
+		return nil
+	}
+
+	// Build sorted param list for deterministic command
+	paramNames := make([]string, 0, len(params))
+	for name := range params {
+		paramNames = append(paramNames, name)
+	}
+	sort.Strings(paramNames)
+
+	paramArgs := make([]string, 0, len(params))
+	for _, name := range paramNames {
+		paramArgs = append(paramArgs, name+"="+params[name])
+	}
+
+	args := []string{"-d", pciAddr, "--yes"}
+	if withDefault {
+		args = append(args, "--with_default")
+	}
+	args = append(args, "set")
+	args = append(args, paramArgs...)
+
+	cmd := h.execInterface.Command("mlxconfig", args...)
+	output, err := utils.RunCommand(cmd)
+	if err != nil {
+		log.Log.Error(err, "SetNvConfigParametersBatch(): Failed to run mlxconfig", "output", string(output))
 		return err
 	}
 	return nil

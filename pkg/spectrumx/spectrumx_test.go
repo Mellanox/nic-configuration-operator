@@ -66,6 +66,28 @@ type fakeExec struct {
 const (
 	shutdownInterfaceParamName = "Shut down interface"
 	bringUpInterfaceParamName  = "Bring up interface to apply IPG settings"
+
+	// Realistic mlxreg ROCE_ACCL --get output snippets for CC Probe MP mode tests.
+	// Includes other fields with 0x00000001 to verify parsing targets the correct field.
+	mlxregGetCCProbeMPSet = `Sending access register...
+
+Field Name                                     | Data
+============================================================
+roce_adp_retrans_en                            | 0x00000001
+roce_tx_window_en                              | 0x00000001
+adaptive_routing_forced_en                     | 0x00000001
+cc_probe_mp_mode                               | 0x00000001
+============================================================`
+
+	mlxregGetCCProbeMPUnset = `Sending access register...
+
+Field Name                                     | Data
+============================================================
+roce_adp_retrans_en                            | 0x00000001
+roce_tx_window_en                              | 0x00000001
+adaptive_routing_forced_en                     | 0x00000001
+cc_probe_mp_mode                               | 0x00000000
+============================================================`
 )
 
 var (
@@ -237,13 +259,13 @@ var _ = Describe("SpectrumXConfigManager", func() {
 	Describe("ApplyNvConfig", func() {
 		It("sets parameters via DMS", func() {
 			dmsCli.On("SetParameters", cfgs["v1"].NVConfig).Return(nil)
-			err := manager.ApplyNvConfig(ctx, device)
+			_, err := manager.ApplyNvConfig(ctx, device)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
 		It("returns error if DMS set fails", func() {
 			dmsCli.On("SetParameters", cfgs["v1"].NVConfig).Return(errors.New("set error"))
-			err := manager.ApplyNvConfig(ctx, device)
+			_, err := manager.ApplyNvConfig(ctx, device)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -255,7 +277,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			device.Status.Type = "1023"
 			expected := []types.ConfigurationParameter{{Name: "match", Value: "ok", DMSPath: "/m", DeviceId: "1023"}}
 			dmsCli.On("SetParameters", expected).Return(nil)
-			err := manager.ApplyNvConfig(ctx, device)
+			_, err := manager.ApplyNvConfig(ctx, device)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
@@ -313,7 +335,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			})).Return(nil)
 
 			nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
-			err := manager.ApplyRuntimeConfig(device)
+			_, err := manager.ApplyRuntimeConfig(device)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -336,7 +358,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			})).Return(nil)
 
 			nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
-			err := manager.ApplyRuntimeConfig(device)
+			_, err := manager.ApplyRuntimeConfig(device)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -352,14 +374,14 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
 
 			nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
-			err := manager.ApplyRuntimeConfig(device)
+			_, err := manager.ApplyRuntimeConfig(device)
 			Expect(err).To(HaveOccurred())
 			Expect(strings.ToLower(err.Error())).To(ContainSubstring("invalid overlay"))
 		})
 
 		It("bubbles up DMS errors", func() {
 			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(errors.New("roce set error"))
-			err := manager.ApplyRuntimeConfig(device)
+			_, err := manager.ApplyRuntimeConfig(device)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("roce set error"))
 		})
@@ -731,9 +753,9 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					{Name: "none_num_pfs", Value: "1", DMSPath: "/none/num-pf"},
 				}
 				dmsCli.On("SetParameters", expectedDmsParams).Return(nil)
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "NUM_OF_PLANES_P1", "0").Return(nil)
+				nvConfigMgr.On("SetNvConfigParametersBatch", "0000:00:00.0", map[string]string{"NUM_OF_PLANES_P1": "0"}, false).Return(nil)
 
-				err := manager.ApplyBreakoutConfig(ctx, device)
+				_, err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -743,7 +765,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 				cfgs["v1"].BreakoutConfig.None = nil
 
-				err := manager.ApplyBreakoutConfig(ctx, device)
+				_, err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -756,7 +778,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				expectedParams := cfgs["v1"].BreakoutConfig.Swplb[2]
 				dmsCli.On("SetParameters", expectedParams).Return(nil)
 
-				err := manager.ApplyBreakoutConfig(ctx, device)
+				_, err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -767,7 +789,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				expectedParams := cfgs["v1"].BreakoutConfig.Swplb[4]
 				dmsCli.On("SetParameters", expectedParams).Return(nil)
 
-				err := manager.ApplyBreakoutConfig(ctx, device)
+				_, err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -780,7 +802,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				expectedParams := cfgs["v1"].BreakoutConfig.Hwplb[2]
 				dmsCli.On("SetParameters", expectedParams).Return(nil)
 
-				err := manager.ApplyBreakoutConfig(ctx, device)
+				_, err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -791,7 +813,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				expectedParams := cfgs["v1"].BreakoutConfig.Hwplb[4]
 				dmsCli.On("SetParameters", expectedParams).Return(nil)
 
-				err := manager.ApplyBreakoutConfig(ctx, device)
+				_, err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -804,7 +826,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				expectedParams := cfgs["v1"].BreakoutConfig.Uniplane[2]
 				dmsCli.On("SetParameters", expectedParams).Return(nil)
 
-				err := manager.ApplyBreakoutConfig(ctx, device)
+				_, err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -815,7 +837,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				expectedParams := cfgs["v1"].BreakoutConfig.Uniplane[4]
 				dmsCli.On("SetParameters", expectedParams).Return(nil)
 
-				err := manager.ApplyBreakoutConfig(ctx, device)
+				_, err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -825,7 +847,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = "invalid-mode"
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
 
-				err := manager.ApplyBreakoutConfig(ctx, device)
+				_, err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).To(HaveOccurred())
 				Expect(strings.ToLower(err.Error())).To(ContainSubstring("invalid multiplane mode"))
 			})
@@ -837,7 +859,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				expectedParams := cfgs["v1"].BreakoutConfig.Swplb[2]
 				dmsCli.On("SetParameters", expectedParams).Return(errors.New("dms set error"))
 
-				err := manager.ApplyBreakoutConfig(ctx, device)
+				_, err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("dms set error"))
 			})
@@ -862,7 +884,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 				dmsCli.On("SetParameters", expectedParams).Return(nil)
 
-				err := manager.ApplyBreakoutConfig(ctx, device)
+				_, err := manager.ApplyBreakoutConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -876,7 +898,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			cfgs["v1"].BreakoutConfig.Swplb[2] = []types.ConfigurationParameter{}
 
 			// No DMS call should be made when breakout config is empty
-			err := manager.ApplyBreakoutConfig(ctx, device)
+			_, err := manager.ApplyBreakoutConfig(ctx, device)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -1155,17 +1177,16 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 	Describe("ApplyNvConfig with MLXConfig", func() {
 		Context("Basic MLXConfig setting", func() {
-			It("sets mlxconfig params via SetNvConfigParameter", func() {
+			It("sets mlxconfig params via SetNvConfigParametersBatch", func() {
 				cfgs["v1"].NVConfig = []types.ConfigurationParameter{
 					{Name: "mlx_param1", MlxConfig: "NUM_OF_PLANES_P1", Value: "2"},
 					{Name: "mlx_param2", MlxConfig: "ADVANCED_PCI_SETTINGS", Value: "1"},
 				}
 
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "NUM_OF_PLANES_P1", "2").Return(nil)
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "ADVANCED_PCI_SETTINGS", "1").Return(nil)
+				nvConfigMgr.On("SetNvConfigParametersBatch", "0000:00:00.0", map[string]string{"NUM_OF_PLANES_P1": "2", "ADVANCED_PCI_SETTINGS": "1"}, false).Return(nil)
 				dmsCli.On("SetParameters", []types.ConfigurationParameter{}).Return(nil)
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -1176,11 +1197,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					{Name: "mlx_param2", MlxConfig: "ADVANCED_PCI_SETTINGS", Value: "1"},
 				}
 
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "NUM_OF_PLANES_P1", "2").Return(nil)
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "ADVANCED_PCI_SETTINGS", "1").Return(nil)
+				nvConfigMgr.On("SetNvConfigParametersBatch", "0000:00:00.0", map[string]string{"NUM_OF_PLANES_P1": "2", "ADVANCED_PCI_SETTINGS": "1"}, false).Return(nil)
 				dmsCli.On("SetParameters", []types.ConfigurationParameter{{Name: "dms_param", DMSPath: "/dms/path", Value: "val1"}}).Return(nil)
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -1191,9 +1211,9 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 				dmsCli.On("SetParameters", cfgs["v1"].NVConfig).Return(nil)
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
-				// SetNvConfigParameter should not be called
+				// SetNvConfigParametersBatch should not be called
 			})
 		})
 
@@ -1209,10 +1229,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
 
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "PARAM1", "val1").Return(nil)
+				nvConfigMgr.On("SetNvConfigParametersBatch", "0000:00:00.0", map[string]string{"PARAM1": "val1"}, false).Return(nil)
 				dmsCli.On("SetParameters", []types.ConfigurationParameter{{Name: "dms_param", DMSPath: "/swplb/param", Value: "val2"}}).Return(nil)
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -1225,10 +1245,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeHwplb
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 4
 
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "NUM_OF_PLANES_P1", "4").Return(nil)
+				nvConfigMgr.On("SetNvConfigParametersBatch", "0000:00:00.0", map[string]string{"NUM_OF_PLANES_P1": "4"}, false).Return(nil)
 				dmsCli.On("SetParameters", []types.ConfigurationParameter{}).Return(nil)
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -1243,54 +1263,52 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeUniplane
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
 
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "BASE_PARAM", "base_val").Return(nil)
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "MULTIPLANE_PARAM", "mp_val").Return(nil)
+				nvConfigMgr.On("SetNvConfigParametersBatch", "0000:00:00.0", map[string]string{"BASE_PARAM": "base_val"}, false).Return(nil)
 				dmsCli.On("SetParameters", []types.ConfigurationParameter{}).Return(nil)
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
 
 		Context("Error handling", func() {
-			It("returns error when SetNvConfigParameter fails", func() {
+			It("returns error when SetNvConfigParametersBatch fails", func() {
 				cfgs["v1"].NVConfig = []types.ConfigurationParameter{
 					{Name: "mlx_param", MlxConfig: "NUM_OF_PLANES_P1", Value: "2"},
 				}
 
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "NUM_OF_PLANES_P1", "2").
+				nvConfigMgr.On("SetNvConfigParametersBatch", "0000:00:00.0", map[string]string{"NUM_OF_PLANES_P1": "2"}, false).
 					Return(errors.New("set failed"))
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("set failed"))
 			})
 
-			It("returns error when SetNvConfigParameter fails before DMS set", func() {
+			It("returns error when SetNvConfigParametersBatch fails before DMS set", func() {
 				cfgs["v1"].NVConfig = []types.ConfigurationParameter{
 					{Name: "mlx_param", MlxConfig: "NUM_OF_PLANES_P1", Value: "2"},
 					{Name: "dms_param", DMSPath: "/dms/path", Value: "val1"},
 				}
 
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "NUM_OF_PLANES_P1", "2").
+				nvConfigMgr.On("SetNvConfigParametersBatch", "0000:00:00.0", map[string]string{"NUM_OF_PLANES_P1": "2"}, false).
 					Return(errors.New("mlxconfig set error"))
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("mlxconfig set error"))
 			})
 
-			It("returns error when SetNvConfigParameter fails on second param", func() {
+			It("returns error when SetNvConfigParametersBatch fails with multiple params", func() {
 				cfgs["v1"].NVConfig = []types.ConfigurationParameter{
 					{Name: "mlx_param1", MlxConfig: "PARAM1", Value: "val1"},
 					{Name: "mlx_param2", MlxConfig: "PARAM2", Value: "val2"},
 				}
 
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "PARAM1", "val1").Return(nil)
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "PARAM2", "val2").
+				nvConfigMgr.On("SetNvConfigParametersBatch", "0000:00:00.0", map[string]string{"PARAM1": "val1", "PARAM2": "val2"}, false).
 					Return(errors.New("second param failed"))
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("second param failed"))
 			})
@@ -1306,11 +1324,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					{Name: "mlx_match2", MlxConfig: "PARAM3", Value: "val3", DeviceId: consts.BlueField3DeviceID},
 				}
 
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "PARAM1", "val1").Return(nil).Times(1)
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "PARAM3", "val3").Return(nil).Times(1)
+				nvConfigMgr.On("SetNvConfigParametersBatch", "0000:00:00.0", map[string]string{"PARAM1": "val1", "PARAM3": "val3"}, false).Return(nil).Times(1)
 				dmsCli.On("SetParameters", []types.ConfigurationParameter{}).Return(nil)
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -1324,10 +1341,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					{Name: "dms_skip", DMSPath: "/path2", Value: "dms2", DeviceId: consts.BlueField3DeviceID},
 				}
 
-				nvConfigMgr.On("SetNvConfigParameter", "0000:00:00.0", "PARAM1", "val1").Return(nil)
+				nvConfigMgr.On("SetNvConfigParametersBatch", "0000:00:00.0", map[string]string{"PARAM1": "val1"}, false).Return(nil)
 				dmsCli.On("SetParameters", []types.ConfigurationParameter{{Name: "dms_match", DMSPath: "/path1", Value: "dms1", DeviceId: "1023"}}).Return(nil)
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -1344,10 +1361,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				}
 
 				// Should use first port's PCI
-				nvConfigMgr.On("SetNvConfigParameter", "0000:03:00.0", "NUM_OF_PLANES_P1", "2").Return(nil)
+				nvConfigMgr.On("SetNvConfigParametersBatch", "0000:03:00.0", map[string]string{"NUM_OF_PLANES_P1": "2"}, false).Return(nil)
 				dmsCli.On("SetParameters", []types.ConfigurationParameter{}).Return(nil)
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -1397,7 +1414,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 				dmsCli.On("SetParameters", expectedParams).Return(nil)
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -1445,7 +1462,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 				dmsCli.On("SetParameters", expectedParams).Return(nil)
 
-				err := manager.ApplyNvConfig(ctx, device)
+				_, err := manager.ApplyNvConfig(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -1543,7 +1560,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(map[string]string{"/cc": "z"}, nil)
 				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(map[string]string{"/ipg": "25"}, nil)
 
-				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
+				// Stage mlxreg get for cc_probe_mp_mode check (1 PF)
+				execFake.cmds = []*fakeCmd{
+					{output: []byte(mlxregGetCCProbeMPSet), err: nil},
+				}
 				applied, err := manager.RuntimeConfigApplied(device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(applied).To(BeTrue())
@@ -1652,7 +1672,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				})).Return(nil)
 
 				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
-				err := manager.ApplyRuntimeConfig(device)
+				_, err := manager.ApplyRuntimeConfig(device)
 				Expect(err).NotTo(HaveOccurred())
 
 				// Verify the file was written with swplb value
@@ -1681,8 +1701,12 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					return len(params) == 1 && params[0].Name == bringUpInterfaceParamName
 				})).Return(nil)
 
+				// Stage mlxreg set for cc_probe_mp_mode (1 PF), then doca_spcx_cc
+				execFake.cmds = []*fakeCmd{
+					{output: []byte("ok"), err: nil}, // mlxreg set
+				}
 				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
-				err := manager.ApplyRuntimeConfig(device)
+				_, err := manager.ApplyRuntimeConfig(device)
 				Expect(err).NotTo(HaveOccurred())
 
 				// Verify the file was written with hwplb value
@@ -1715,7 +1739,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				})).Return(nil)
 
 				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
-				err := manager.ApplyRuntimeConfig(device)
+				_, err := manager.ApplyRuntimeConfig(device)
 				Expect(err).NotTo(HaveOccurred())
 
 				// uniplane expects 24
@@ -1747,7 +1771,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				})).Return(nil)
 
 				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
-				err := manager.ApplyRuntimeConfig(device)
+				_, err := manager.ApplyRuntimeConfig(device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -1826,6 +1850,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				dmsCli.On("GetParameters", expectedCC).Return(map[string]string{"/cc/match": "val4"}, nil)
 				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(map[string]string{"/ipg/match": "val6"}, nil)
 
+				// Stage mlxreg get for cc_probe_mp_mode check (1 PF)
+				execFake.cmds = []*fakeCmd{
+					{output: []byte(mlxregGetCCProbeMPSet), err: nil},
+				}
 				applied, err := manager.RuntimeConfigApplied(device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(applied).To(BeTrue())
@@ -1861,6 +1889,10 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(map[string]string{"/cc/match": "val5"}, nil)
 				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(map[string]string{"/ipg/match": "val6"}, nil)
 
+				// Stage mlxreg get for cc_probe_mp_mode check (1 PF)
+				execFake.cmds = []*fakeCmd{
+					{output: []byte(mlxregGetCCProbeMPSet), err: nil},
+				}
 				applied, err := manager.RuntimeConfigApplied(device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(applied).To(BeTrue())
@@ -1935,7 +1967,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					return len(params) == 1 && params[0].Name == bringUpInterfaceParamName
 				})).Return(nil)
 
-				err := manager.ApplyRuntimeConfig(device)
+				_, err := manager.ApplyRuntimeConfig(device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -1977,7 +2009,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					return len(params) == 1 && params[0].Name == bringUpInterfaceParamName
 				})).Return(nil)
 
-				err := manager.ApplyRuntimeConfig(device)
+				_, err := manager.ApplyRuntimeConfig(device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -2017,7 +2049,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					return len(params) == 1 && params[0].Name == bringUpInterfaceParamName
 				})).Return(nil)
 
-				err := manager.ApplyRuntimeConfig(device)
+				_, err := manager.ApplyRuntimeConfig(device)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -2053,8 +2085,267 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					return len(params) == 1 && params[0].Name == bringUpInterfaceParamName
 				})).Return(nil)
 
-				err := manager.ApplyRuntimeConfig(device)
+				_, err := manager.ApplyRuntimeConfig(device)
 				Expect(err).NotTo(HaveOccurred())
+			})
+		})
+	})
+
+	Describe("CC Probe MP Mode (mlxreg workaround)", func() {
+		Describe("checkCCProbeMPMode", func() {
+			It("returns true when mlxreg output contains 0x00000001 for all PFs", func() {
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", RdmaInterface: "mlx5_0"},
+					{PCI: "0000:00:00.1", RdmaInterface: "mlx5_1"},
+				}
+				execFake.cmds = []*fakeCmd{
+					{output: []byte(mlxregGetCCProbeMPSet), err: nil},
+					{output: []byte(mlxregGetCCProbeMPSet), err: nil},
+				}
+				applied, err := manager.checkCCProbeMPMode(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
+			})
+
+			It("returns false when any PF has 0x00000000", func() {
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", RdmaInterface: "mlx5_0"},
+					{PCI: "0000:00:00.1", RdmaInterface: "mlx5_1"},
+				}
+				execFake.cmds = []*fakeCmd{
+					{output: []byte(mlxregGetCCProbeMPSet), err: nil},
+					{output: []byte(mlxregGetCCProbeMPUnset), err: nil},
+				}
+				applied, err := manager.checkCCProbeMPMode(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeFalse())
+			})
+
+			It("returns error when mlxreg command fails", func() {
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", RdmaInterface: "mlx5_0"},
+				}
+				execFake.cmds = []*fakeCmd{
+					{output: []byte(""), err: errors.New("mlxreg failed")},
+				}
+				_, err := manager.checkCCProbeMPMode(device)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("mlxreg"))
+			})
+
+			It("returns true for empty ports (no PFs to check)", func() {
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{}
+				applied, err := manager.checkCCProbeMPMode(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
+			})
+		})
+
+		Describe("setCCProbeMPMode", func() {
+			It("succeeds when mlxreg set works on all PFs", func() {
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", RdmaInterface: "mlx5_0"},
+					{PCI: "0000:00:00.1", RdmaInterface: "mlx5_1"},
+				}
+				execFake.cmds = []*fakeCmd{
+					{output: []byte("ok"), err: nil},
+					{output: []byte("ok"), err: nil},
+				}
+				err := manager.setCCProbeMPMode(device)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("returns error when mlxreg set fails on a PF", func() {
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", RdmaInterface: "mlx5_0"},
+					{PCI: "0000:00:00.1", RdmaInterface: "mlx5_1"},
+				}
+				execFake.cmds = []*fakeCmd{
+					{output: []byte("ok"), err: nil},
+					{output: []byte(""), err: errors.New("mlxreg set error")},
+				}
+				err := manager.setCCProbeMPMode(device)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("mlxreg"))
+			})
+		})
+
+		Describe("RuntimeConfigApplied with hwplb CC Probe MP mode", func() {
+			BeforeEach(func() {
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeHwplb
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", RdmaInterface: "mlx5_0"},
+				}
+				cfgs["v1"].RuntimeConfig.AdaptiveRouting = []types.ConfigurationParameter{
+					{Name: "ar_before", Value: "y", DMSPath: "/ar/before"},
+					{Name: "ar_force", Value: "y", DMSPath: "/ar/force"},
+				}
+				cfgs["v1"].UseSoftwareCCAlgorithm = false
+			})
+
+			It("returns true when all params including cc_probe_mp_mode are applied", func() {
+				dmsCli.On("GetParameters", []types.ConfigurationParameter{
+					{Name: "ar_before", Value: "y", DMSPath: "/ar/before"},
+				}).Return(map[string]string{"/ar/before": "y"}, nil)
+				dmsCli.On("GetParameters", []types.ConfigurationParameter{
+					{Name: "ar_force", Value: "y", DMSPath: "/ar/force"},
+				}).Return(map[string]string{"/ar/force": "y"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(map[string]string{"/cc": "z"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(map[string]string{"/ipg": "25"}, nil)
+
+				execFake.cmds = []*fakeCmd{
+					{output: []byte(mlxregGetCCProbeMPSet), err: nil},
+				}
+				applied, err := manager.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
+			})
+
+			It("returns false when cc_probe_mp_mode is not set", func() {
+				dmsCli.On("GetParameters", []types.ConfigurationParameter{
+					{Name: "ar_before", Value: "y", DMSPath: "/ar/before"},
+				}).Return(map[string]string{"/ar/before": "y"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
+
+				execFake.cmds = []*fakeCmd{
+					{output: []byte(mlxregGetCCProbeMPUnset), err: nil},
+				}
+				applied, err := manager.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeFalse())
+			})
+
+			It("returns error when mlxreg check fails", func() {
+				dmsCli.On("GetParameters", []types.ConfigurationParameter{
+					{Name: "ar_before", Value: "y", DMSPath: "/ar/before"},
+				}).Return(map[string]string{"/ar/before": "y"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
+
+				execFake.cmds = []*fakeCmd{
+					{output: []byte(""), err: errors.New("mlxreg failed")},
+				}
+				_, err := manager.RuntimeConfigApplied(device)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("CC Probe MP mode"))
+			})
+
+			It("returns false when before-last AR params not applied", func() {
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
+				dmsCli.On("GetParameters", []types.ConfigurationParameter{
+					{Name: "ar_before", Value: "y", DMSPath: "/ar/before"},
+				}).Return(map[string]string{"/ar/before": "wrong"}, nil)
+
+				applied, err := manager.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeFalse())
+			})
+
+			It("returns false when last AR param (AR Force) not applied", func() {
+				dmsCli.On("GetParameters", []types.ConfigurationParameter{
+					{Name: "ar_before", Value: "y", DMSPath: "/ar/before"},
+				}).Return(map[string]string{"/ar/before": "y"}, nil)
+				dmsCli.On("GetParameters", []types.ConfigurationParameter{
+					{Name: "ar_force", Value: "y", DMSPath: "/ar/force"},
+				}).Return(map[string]string{"/ar/force": "wrong"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
+
+				execFake.cmds = []*fakeCmd{
+					{output: []byte(mlxregGetCCProbeMPSet), err: nil},
+				}
+				applied, err := manager.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeFalse())
+			})
+		})
+
+		Describe("ApplyRuntimeConfig with hwplb CC Probe MP mode", func() {
+			BeforeEach(func() {
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeHwplb
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", RdmaInterface: "mlx5_0"},
+				}
+				cfgs["v1"].RuntimeConfig.AdaptiveRouting = []types.ConfigurationParameter{
+					{Name: "ar_before", Value: "y", DMSPath: "/ar/before"},
+					{Name: "ar_force", Value: "y", DMSPath: "/ar/force"},
+				}
+				cfgs["v1"].UseSoftwareCCAlgorithm = false
+			})
+
+			It("applies all params with mlxreg between AR groups", func() {
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(nil)
+				dmsCli.On("SetParameters", []types.ConfigurationParameter{
+					{Name: "ar_before", Value: "y", DMSPath: "/ar/before"},
+				}).Return(nil)
+				dmsCli.On("SetParameters", []types.ConfigurationParameter{
+					{Name: "ar_force", Value: "y", DMSPath: "/ar/force"},
+				}).Return(nil)
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(nil)
+				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
+					return len(params) == 1 && params[0].Name == shutdownInterfaceParamName
+				})).Return(nil)
+				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
+					return len(params) == 1 && params[0].Name == bringUpInterfaceParamName
+				})).Return(nil)
+
+				execFake.cmds = []*fakeCmd{
+					{output: []byte("ok"), err: nil}, // mlxreg set
+				}
+				_, err := manager.ApplyRuntimeConfig(device)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("returns error when mlxreg set fails", func() {
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(nil)
+				dmsCli.On("SetParameters", []types.ConfigurationParameter{
+					{Name: "ar_before", Value: "y", DMSPath: "/ar/before"},
+				}).Return(nil)
+
+				execFake.cmds = []*fakeCmd{
+					{output: []byte(""), err: errors.New("mlxreg set error")},
+				}
+				_, err := manager.ApplyRuntimeConfig(device)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("CC Probe MP mode"))
+			})
+
+			It("returns error when before-last AR set fails", func() {
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(nil)
+				dmsCli.On("SetParameters", []types.ConfigurationParameter{
+					{Name: "ar_before", Value: "y", DMSPath: "/ar/before"},
+				}).Return(errors.New("dms set error"))
+
+				_, err := manager.ApplyRuntimeConfig(device)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("dms set error"))
+			})
+
+			It("checks cc_probe_mp_mode on multiple PFs", func() {
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", RdmaInterface: "mlx5_0"},
+					{PCI: "0000:00:00.1", RdmaInterface: "mlx5_1"},
+				}
+				dmsCli.On("GetParameters", []types.ConfigurationParameter{
+					{Name: "ar_before", Value: "y", DMSPath: "/ar/before"},
+				}).Return(map[string]string{"/ar/before": "y"}, nil)
+				dmsCli.On("GetParameters", []types.ConfigurationParameter{
+					{Name: "ar_force", Value: "y", DMSPath: "/ar/force"},
+				}).Return(map[string]string{"/ar/force": "y"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(map[string]string{"/cc": "z"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(map[string]string{"/ipg": "25"}, nil)
+
+				// 2 PFs → 2 mlxreg get commands
+				execFake.cmds = []*fakeCmd{
+					{output: []byte(mlxregGetCCProbeMPSet), err: nil},
+					{output: []byte(mlxregGetCCProbeMPSet), err: nil},
+				}
+				applied, err := manager.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
 			})
 		})
 	})

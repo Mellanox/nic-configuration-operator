@@ -231,6 +231,24 @@ func (_m *FirmwareUtils) InstallDebPackage(debPath string) error {
 	return r0
 }
 
+// ResetNicFirmware provides a mock function with given fields: ctx, pciAddress
+func (_m *FirmwareUtils) ResetNicFirmware(ctx context.Context, pciAddress string) error {
+	ret := _m.Called(ctx, pciAddress)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ResetNicFirmware")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = rf(ctx, pciAddress)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // UnzipFiles provides a mock function with given fields: zipPath, destDir
 func (_m *FirmwareUtils) UnzipFiles(zipPath string, destDir string) ([]string, error) {
 	ret := _m.Called(zipPath, destDir)

@@ -7,6 +7,8 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
+	types "github.com/Mellanox/nic-configuration-operator/pkg/types"
+
 	v1alpha1 "github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 )
 
@@ -15,22 +17,32 @@ type FirmwareManager struct {
 	mock.Mock
 }
 
-// BurnNicFirmware provides a mock function with given fields: ctx, device, version
-func (_m *FirmwareManager) BurnNicFirmware(ctx context.Context, device *v1alpha1.NicDevice, version string) error {
-	ret := _m.Called(ctx, device, version)
+// InstallFirmware provides a mock function with given fields: ctx, device, options
+func (_m *FirmwareManager) InstallFirmware(ctx context.Context, device *v1alpha1.NicDevice, options *types.FirmwareInstallOptions) (bool, error) {
+	ret := _m.Called(ctx, device, options)
 
 	if len(ret) == 0 {
-		panic("no return value specified for BurnNicFirmware")
+		panic("no return value specified for InstallFirmware")
 	}
 
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *v1alpha1.NicDevice, string) error); ok {
-		r0 = rf(ctx, device, version)
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *v1alpha1.NicDevice, *types.FirmwareInstallOptions) (bool, error)); ok {
+		return rf(ctx, device, options)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *v1alpha1.NicDevice, *types.FirmwareInstallOptions) bool); ok {
+		r0 = rf(ctx, device, options)
 	} else {
-		r0 = ret.Error(0)
+		r0 = ret.Get(0).(bool)
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func(context.Context, *v1alpha1.NicDevice, *types.FirmwareInstallOptions) error); ok {
+		r1 = rf(ctx, device, options)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // GetFirmwareVersionsFromDevice provides a mock function with given fields: device

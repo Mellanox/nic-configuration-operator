@@ -130,14 +130,16 @@ var _ = Describe("DeviceDiscoveryController", func() {
 				partNumber := "test-part-number"
 				fwVersion := "test-fw-version"
 
-				deviceDiscovery.On("DiscoverNicDevices").Return(map[string]v1alpha1.NicDeviceStatus{
+				deviceDiscovery.On("DiscoverNicDevices").Return(map[string]v1alpha1.NicDevice{
 					"123456": {
-						Node:            nodeName,
-						SerialNumber:    "123456",
-						Type:            "connectx6",
-						Ports:           []v1alpha1.NicDevicePortSpec{{PCI: "0000:3b:00.0"}},
-						PartNumber:      partNumber,
-						FirmwareVersion: fwVersion,
+						Status: v1alpha1.NicDeviceStatus{
+							Node:            nodeName,
+							SerialNumber:    "123456",
+							Type:            "connectx6",
+							Ports:           []v1alpha1.NicDevicePortSpec{{PCI: "0000:3b:00.0"}},
+							PartNumber:      partNumber,
+							FirmwareVersion: fwVersion,
+						},
 					},
 				}, nil)
 				hostUtils.On("DiscoverOfedVersion").Return("00.00-0.0.0", nil)
@@ -174,7 +176,7 @@ var _ = Describe("DeviceDiscoveryController", func() {
 			})
 
 			It("should delete CRs if they do not represent observed devices", func() {
-				deviceDiscovery.On("DiscoverNicDevices").Return(map[string]v1alpha1.NicDeviceStatus{}, nil)
+				deviceDiscovery.On("DiscoverNicDevices").Return(map[string]v1alpha1.NicDevice{}, nil)
 
 				startManager(mgr, ctx, &wg)
 
@@ -189,11 +191,13 @@ var _ = Describe("DeviceDiscoveryController", func() {
 				serialNumber := "new-serial-num"
 
 				// Add a new device that does not have a CR representation
-				deviceDiscovery.On("DiscoverNicDevices").Return(map[string]v1alpha1.NicDeviceStatus{
+				deviceDiscovery.On("DiscoverNicDevices").Return(map[string]v1alpha1.NicDevice{
 					serialNumber: {
-						SerialNumber: serialNumber,
-						Type:         deviceType,
-						Ports:        []v1alpha1.NicDevicePortSpec{{PCI: "0000:81:00.0"}},
+						Status: v1alpha1.NicDeviceStatus{
+							SerialNumber: serialNumber,
+							Type:         deviceType,
+							Ports:        []v1alpha1.NicDevicePortSpec{{PCI: "0000:81:00.0"}},
+						},
 					},
 				}, nil)
 				hostUtils.On("DiscoverOfedVersion").Return("00.00-0.0.0", nil)

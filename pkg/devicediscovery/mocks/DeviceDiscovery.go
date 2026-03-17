@@ -13,23 +13,23 @@ type DeviceDiscovery struct {
 }
 
 // DiscoverNicDevices provides a mock function with no fields
-func (_m *DeviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDeviceStatus, error) {
+func (_m *DeviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, error) {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for DiscoverNicDevices")
 	}
 
-	var r0 map[string]v1alpha1.NicDeviceStatus
+	var r0 map[string]v1alpha1.NicDevice
 	var r1 error
-	if rf, ok := ret.Get(0).(func() (map[string]v1alpha1.NicDeviceStatus, error)); ok {
+	if rf, ok := ret.Get(0).(func() (map[string]v1alpha1.NicDevice, error)); ok {
 		return rf()
 	}
-	if rf, ok := ret.Get(0).(func() map[string]v1alpha1.NicDeviceStatus); ok {
+	if rf, ok := ret.Get(0).(func() map[string]v1alpha1.NicDevice); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[string]v1alpha1.NicDeviceStatus)
+			r0 = ret.Get(0).(map[string]v1alpha1.NicDevice)
 		}
 	}
 
