@@ -232,6 +232,11 @@ var _ = Describe("FirmwareManager", func() {
 			_ = os.RemoveAll(tmpDir)
 		})
 
+		It("should return an error if options is nil", func() {
+			_, err := manager.InstallFirmware(context.Background(), createNicDevice(), nil)
+			Expect(err).To(MatchError("options must not be nil"))
+		})
+
 		It("should return an error if the device's spec is empty", func() {
 			device := createNicDevice()
 			device.Spec.Firmware = nil

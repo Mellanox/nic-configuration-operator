@@ -76,13 +76,11 @@ const (
 type ConfigurationApplyResult struct {
 	Status         ApplyStatus
 	RebootRequired bool
-	Error          error
 }
 
 // RuntimeConfigurationApplyResult represents the result of applying runtime configuration
 type RuntimeConfigurationApplyResult struct {
 	Status ApplyStatus
-	Error  error
 }
 
 // FirmwareInstallOptions contains options for firmware installation

@@ -206,7 +206,7 @@ Extends DMSManager with server lifecycle management. Used only by the daemon ent
 type DMSServer interface {
     DMSManager
     // StartDMSServer starts a single DMS server for all given NIC devices
-    StartDMSServer(devices []v1alpha1.NicDeviceStatus) error
+    StartDMSServer(devices []v1alpha1.NicDevice) error
     // StopDMSServer stops the running DMS server (SIGTERM)
     StopDMSServer() error
     // IsRunning returns whether the DMS server process is alive
@@ -224,7 +224,7 @@ func NewDMSServer() DMSServer
 // authParams: authentication/security flags for dmsc (e.g. ["--insecure"],
 // ["--tls-ca", "/ca.pem", "--tls-cert", "/cert.pem", "--tls-key", "/key.pem"],
 // ["-u", "user", "-p", "pass"])
-func NewExternalDMSManager(devices []v1alpha1.NicDeviceStatus, address string, authParams []string) DMSManager
+func NewExternalDMSManager(devices []v1alpha1.NicDevice, address string, authParams []string) DMSManager
 ```
 
 #### DMSClient Interface

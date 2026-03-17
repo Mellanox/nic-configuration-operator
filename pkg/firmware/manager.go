@@ -207,13 +207,18 @@ func (f firmwareManager) InstallFirmware(ctx context.Context, device *v1alpha1.N
 		return false, errors.New("device has no ports")
 	}
 
+	if options == nil {
+		return false, errors.New("options must not be nil")
+	}
+
 	pci := device.Status.Ports[0].PCI
 	version := options.Version
 	var err error
 
-	// In library mode with no version specified, extract version from the firmware file
+	// In library mode with no version specified, extract version (and PSID for ConnectX) from the firmware file
+	var psidFromFile string
 	if version == "" && options.FwFilePath != "" {
-		version, err = f.getVersionFromFirmwareFile(device, options.FwFilePath)
+		version, psidFromFile, err = f.getVersionFromFirmwareFile(device, options.FwFilePath)
 		if err != nil {
 			return false, fmt.Errorf("failed to determine firmware version from file: %w", err)
 		}
@@ -244,7 +249,7 @@ func (f firmwareManager) InstallFirmware(ctx context.Context, device *v1alpha1.N
 	if utilsPkg.IsBlueFieldDevice(device.Status.Type) {
 		err = f.installBlueFieldFirmware(ctx, device, version, fwFilePath)
 	} else {
-		err = f.installConnectXFirmware(ctx, device, version, pci, fwFilePath)
+		err = f.installConnectXFirmware(ctx, device, version, pci, fwFilePath, psidFromFile)
 	}
 	if err != nil {
 		return false, err
@@ -355,27 +360,27 @@ func (f firmwareManager) resolveFirmwareBinaryFilePathFromCache(cacheDir string,
 	return copiedFilePath, nil
 }
 
-// getVersionFromFirmwareFile extracts the firmware version from a firmware file.
+// getVersionFromFirmwareFile extracts the firmware version (and PSID for ConnectX) from a firmware file.
 // For ConnectX .bin files: uses flint to read version and PSID.
-// For BlueField .bfb files: uses mlx-mkbfb to extract version map, then looks up device type.
-func (f firmwareManager) getVersionFromFirmwareFile(device *v1alpha1.NicDevice, fwFilePath string) (string, error) {
+// For BlueField .bfb files: uses mlx-mkbfb to extract version map, then looks up device type (PSID returned empty).
+func (f firmwareManager) getVersionFromFirmwareFile(device *v1alpha1.NicDevice, fwFilePath string) (string, string, error) {
 	if utilsPkg.IsBlueFieldDevice(device.Status.Type) {
 		versions, err := f.utils.GetFWVersionsFromBFB(fwFilePath)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		version, found := versions[device.Status.Type]
 		if !found {
-			return "", fmt.Errorf("BFB file does not contain firmware for device type %s", device.Status.Type)
+			return "", "", fmt.Errorf("BFB file does not contain firmware for device type %s", device.Status.Type)
 		}
-		return version, nil
+		return version, "", nil
 	}
 
-	version, _, err := f.utils.GetFirmwareVersionAndPSIDFromFWBinary(fwFilePath)
+	version, psid, err := f.utils.GetFirmwareVersionAndPSIDFromFWBinary(fwFilePath)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return version, nil
+	return version, psid, nil
 }
 
 // installBlueFieldFirmware installs firmware on a BlueField device via DMS
@@ -395,18 +400,27 @@ func (f firmwareManager) installBlueFieldFirmware(ctx context.Context, device *v
 	return nil
 }
 
-// installConnectXFirmware validates and burns firmware for a ConnectX NIC
-func (f firmwareManager) installConnectXFirmware(ctx context.Context, device *v1alpha1.NicDevice, version string, pci string, fwFilePath string) error {
-	versionInFile, psidInFile, err := f.utils.GetFirmwareVersionAndPSIDFromFWBinary(fwFilePath)
-	if err != nil {
-		log.Log.Error(err, "couldn't get FW version and PSID from FW binary file", "path", fwFilePath)
-		return err
-	}
-	if versionInFile != version || psidInFile != device.Status.PSID {
-		return fmt.Errorf("found FW binary file doesn't match expected version or PSID. Requested %s, %s, found %s, %s", version, device.Status.PSID, versionInFile, psidInFile)
+// installConnectXFirmware validates and burns firmware for a ConnectX NIC.
+// knownPSID is set when the PSID was already extracted from the file (library mode) to avoid a redundant flint call.
+func (f firmwareManager) installConnectXFirmware(ctx context.Context, device *v1alpha1.NicDevice, version string, pci string, fwFilePath string, knownPSID string) error {
+	if knownPSID != "" {
+		// Library mode: PSID already extracted during version detection
+		if knownPSID != device.Status.PSID {
+			return fmt.Errorf("firmware file PSID %s does not match device PSID %s", knownPSID, device.Status.PSID)
+		}
+	} else {
+		// Operator mode: validate file contents against requested version and device PSID
+		versionInFile, psidInFile, err := f.utils.GetFirmwareVersionAndPSIDFromFWBinary(fwFilePath)
+		if err != nil {
+			log.Log.Error(err, "couldn't get FW version and PSID from FW binary file", "path", fwFilePath)
+			return err
+		}
+		if versionInFile != version || psidInFile != device.Status.PSID {
+			return fmt.Errorf("found FW binary file doesn't match expected version or PSID. Requested %s, %s, found %s, %s", version, device.Status.PSID, versionInFile, psidInFile)
+		}
 	}
 
-	err = f.utils.VerifyImageBootable(fwFilePath)
+	err := f.utils.VerifyImageBootable(fwFilePath)
 	if err != nil {
 		log.Log.Error(err, "fw image file is not bootable", "path", fwFilePath)
 		return err
