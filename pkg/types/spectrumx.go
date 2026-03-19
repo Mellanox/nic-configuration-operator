@@ -23,19 +23,19 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// SpectrumXConfig is the hierarchical config format.
+// MlxConfig: multiplaneMode -> deviceId -> {breakout, postBreakout}
 type SpectrumXConfig struct {
-	BreakoutConfig         SpectrumXBreakoutConfig  `yaml:"breakout"`
-	NVConfig               []ConfigurationParameter `yaml:"nvConfig"`
-	RuntimeConfig          SpectrumXRuntimeConfig   `yaml:"runtimeConfig"`
-	UseSoftwareCCAlgorithm bool                     `yaml:"useSoftwareCCAlgorithm"`
-	DocaCCVersion          string                   `yaml:"docaCCVersion"`
+	MlxConfig              map[string]map[string]SpectrumXDeviceConfig `yaml:"mlxConfig"`
+	RuntimeConfig          SpectrumXRuntimeConfig                      `yaml:"runtimeConfig"`
+	UseSoftwareCCAlgorithm bool                                        `yaml:"useSoftwareCCAlgorithm"`
+	DocaCCVersion          string                                      `yaml:"docaCCVersion"`
 }
 
-type SpectrumXBreakoutConfig struct {
-	Swplb    map[int][]ConfigurationParameter `yaml:"swplb"`
-	Hwplb    map[int][]ConfigurationParameter `yaml:"hwplb"`
-	Uniplane map[int][]ConfigurationParameter `yaml:"uniplane"`
-	None     map[int][]ConfigurationParameter `yaml:"none"`
+// SpectrumXDeviceConfig holds per-device mlxconfig parameters.
+type SpectrumXDeviceConfig struct {
+	Breakout     map[int]map[string]string `yaml:"breakout"`     // breakoutNum -> rawMlxConfig
+	PostBreakout map[string]string         `yaml:"postBreakout"` // rawMlxConfig applied after breakout
 }
 
 type SpectrumXRuntimeConfig struct {

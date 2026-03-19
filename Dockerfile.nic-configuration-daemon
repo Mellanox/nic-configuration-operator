@@ -26,12 +26,11 @@ COPY ./ ./
 # by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
 RUN --mount=type=cache,target=/go/pkg/mod/ GO_GCFLAGS=${GCFLAGS} make build-daemon
 
-FROM ${BASE_IMAGE_DOCA_FULL_RT_HOST:-nvcr.io/nvstaging/doca/doca:3.3.0-full-rt-host-latest}
+FROM ${BASE_IMAGE_DOCA_FULL_RT_HOST:-nvcr.io/nvstaging/doca/doca:full-rt-3.4.0-amd64-host-dev}
 
 ARG TARGETARCH
-ENV MFT_VERSION=4.33.0-169
 
-ARG PACKAGES="dpkg-dev=1.22.6ubuntu6.5 libusb-1.0-0=2:1.0.27-1 ipmitool=1.8.19-7ubuntu0.24.04.3 rshim curl=8.5.0-2ubuntu10.7 systemd-sysv=255.4-1ubuntu8.12 mstflint=4.26.0+1-2ubuntu3"
+ARG PACKAGES="dpkg-dev libusb-1.0-0 ipmitool rshim curl systemd-sysv mstflint"
 
 # enable deb-src repos
 RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
@@ -43,15 +42,6 @@ RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
 RUN apt-get update -y
 RUN apt-get install -y --no-install-recommends ${PACKAGES}
 RUN apt-get source ${PACKAGES}
-
-RUN case ${TARGETARCH} in \
-        amd64) ARCH=x86_64 ;; \
-        arm64) ARCH=arm64 ;; \
-        *) echo "Unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
-    esac && \
-    curl -fsSL https://www.mellanox.com/downloads/MFT/mft-${MFT_VERSION}-${ARCH}-deb.tgz | tar -xz -C /tmp && \
-    cd /tmp/mft-${MFT_VERSION}-${ARCH}-deb && \
-    ./install.sh --without-kernel
 
 WORKDIR /
 COPY --from=builder /workspace/build/nic-configuration-daemon .

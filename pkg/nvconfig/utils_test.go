@@ -96,7 +96,7 @@ Configurations:                              Default         Current         Nex
 		})
 
 		It("should parse mlxconfig output correctly", func() {
-			query, err := h.QueryNvConfig(context.TODO(), pciAddress, "")
+			query, err := h.QueryNvConfig(context.TODO(), pciAddress, nil)
 			Expect(err).ToNot(HaveOccurred())
 
 			// Verify regular parameters
@@ -145,7 +145,7 @@ Device type:    ConnectX4
 
 			h.execInterface = fakeExec
 
-			query, err := h.QueryNvConfig(context.TODO(), pciAddress, "")
+			query, err := h.QueryNvConfig(context.TODO(), pciAddress, nil)
 			Expect(err).ToNot(HaveOccurred())
 
 			Expect(query.DefaultConfig).To(BeEmpty())
@@ -179,7 +179,7 @@ Configurations:                              Default         Current         Nex
 
 			h.execInterface = fakeExec
 
-			query, err := h.QueryNvConfig(context.TODO(), pciAddress, consts.BF3OperationModeParam)
+			query, err := h.QueryNvConfig(context.TODO(), pciAddress, []string{consts.BF3OperationModeParam})
 			Expect(err).ToNot(HaveOccurred())
 
 			// Verify regular parameters
@@ -207,7 +207,7 @@ Configurations:                              Default         Current         Nex
 
 			h.execInterface = fakeExec
 
-			_, err := h.QueryNvConfig(context.TODO(), pciAddress, "")
+			_, err := h.QueryNvConfig(context.TODO(), pciAddress, nil)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(Equal("mlxconfig error"))
 		})

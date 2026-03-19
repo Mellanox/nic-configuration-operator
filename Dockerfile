@@ -43,12 +43,11 @@ COPY ./ ./
 #RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/maintenance-manager/main.go
 RUN --mount=type=cache,target=/go/pkg/mod/ GO_GCFLAGS=${GCFLAGS} make build-manager
 
-FROM ${BASE_IMAGE_DOCA_FULL_RT_HOST:-nvcr.io/nvstaging/doca/doca:3.3.0099-full-rt-host-latest}
+FROM ${BASE_IMAGE_DOCA_FULL_RT_HOST:-nvcr.io/nvstaging/doca/doca:full-rt-3.4.0-amd64-host-dev}
 
 ARG TARGETARCH
-ENV MFT_VERSION=4.33.0-169
 
-ARG PACKAGES="dpkg-dev=1.22.6ubuntu6.5"
+ARG PACKAGES="dpkg-dev"
 
 # enable deb-src repos
 RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
