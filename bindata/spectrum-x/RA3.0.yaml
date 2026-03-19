@@ -472,5 +472,5 @@ runtimeConfig:
         value: 33
         dmsPath: /interfaces/interface/ethernet/nvidia/config/inter-packet-gap
         valueType: int
-docaCCVersion: 3.3.0
+docaCCVersion: 3.4.0
 useSoftwareCCAlgorithm: true

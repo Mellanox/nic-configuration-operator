@@ -497,7 +497,7 @@ var _ = Describe("DeviceDiscovery", func() {
 			mockUtils.On("GetRDMADeviceName", "0000:00:00.0").Return("mlx5_0")
 
 			nvConfigUtilsMock := nvmmocks.NewNVConfigUtils(GinkgoT())
-			nvConfigUtilsMock.On("QueryNvConfig", mock.Anything, "0000:00:00.0", consts.BF3OperationModeParam).Return(types.NvConfigQuery{
+			nvConfigUtilsMock.On("QueryNvConfig", mock.Anything, "0000:00:00.0", []string{consts.BF3OperationModeParam}).Return(types.NvConfigQuery{
 				CurrentConfig:  map[string][]string{consts.BF3OperationModeParam: {"enabled", consts.NvParamBF3DpuMode}},
 				NextBootConfig: map[string][]string{},
 				DefaultConfig:  map[string][]string{},

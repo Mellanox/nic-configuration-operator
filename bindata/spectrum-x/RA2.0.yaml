@@ -13,49 +13,34 @@
 # limitations under the License.
 #
 # SPDX-License-Identifier: Apache-2.0
-nvConfig:
-  - name: Ethernet mode
-    value: 2
-    mlxconfig: "LINK_TYPE_P1"
-  - name: Enable SR-IOV
-    value: 1
-    mlxconfig: "SRIOV_EN"
-  - name: Set NUM_OF_VFS
-    value: 1
-    mlxconfig: "NUM_OF_VFS"
-  - name: NIC mode
-    value: NIC
-    dmsPath: /nvidia/mode/config/mode
-    valueType: string
-    deviceId: "a2dc"
-  - name: RoCE Adaptive Routing
-    value: true
-    dmsPath: /nvidia/roce/config/adaptive-routing
-    valueType: bool
-  - name: Programmable Congestion Control
-    value: true
-    dmsPath: /nvidia/cc/config/user-programmable
-    valueType: bool
-  - name: RoCE TX Scheduling Locality Mode
-    value: TX_SCHED_LOCALITY_ACCUMULATIVE
-    dmsPath: /nvidia/roce/config/tx-sched-locality-mode
-    valueType: string
-  - name: RoCE Multipath DSCP
-    value: MULTIPATH_DSCP_DEFAULT
-    dmsPath: /nvidia/roce/config/multipath-dscp
-    valueType: string
-  - name: CNP DSCP
-    value: 0
-    dmsPath: /interfaces/interface/nvidia/roce/config/rtt-resp-dscp
-    valueType: int
-  - name: CNP DSCP mode
-    value: RTT_RESP_DSCP_DEFAULT
-    dmsPath: /interfaces/interface/nvidia/roce/config/rtt-resp-dscp-mode
-    valueType: string
-  - name: RoCE CC Steering Ext
-    value: ENABLED
-    dmsPath: /nvidia/roce/config/cc-steering-ext
-    valueType: string
+mlxConfig:
+  none:
+    "1023":
+      postBreakout:
+        LINK_TYPE_P1: "2"
+        SRIOV_EN: "1"
+        NUM_OF_VFS: "1"
+        ROCE_ADAPTIVE_ROUTING_EN: "1"
+        USER_PROGRAMMABLE_CC: "1"
+        TX_SCHEDULER_LOCALITY_MODE: "2"
+        ROCE_CC_STEERING_EXT: "2"
+        MULTIPATH_DSCP: "0"
+        ROCE_RTT_RESP_DSCP_P1: "0"
+        ROCE_RTT_RESP_DSCP_MODE_P1: "0"
+    "a2dc":
+      postBreakout:
+        LINK_TYPE_P1: "2"
+        SRIOV_EN: "1"
+        NUM_OF_VFS: "1"
+        INTERNAL_CPU_MODEL: "1"
+        INTERNAL_CPU_OFFLOAD_ENGINE: "1"
+        ROCE_ADAPTIVE_ROUTING_EN: "1"
+        USER_PROGRAMMABLE_CC: "1"
+        TX_SCHEDULER_LOCALITY_MODE: "2"
+        ROCE_CC_STEERING_EXT: "2"
+        MULTIPATH_DSCP: "0"
+        ROCE_RTT_RESP_DSCP_P1: "0"
+        ROCE_RTT_RESP_DSCP_MODE_P1: "0"
 runtimeConfig:
   roce:
     - name: Trust
@@ -67,11 +52,6 @@ runtimeConfig:
       value: "00010000"
       dmsPath: /interfaces/interface/nvidia/qos/config/pfc
       valueType: string
-    # TODO: figure out if NIC operator or RDMA cni needs to set the tos
-    # - name: Type of Service
-    #   value: 96
-    #   dmsPath: /interfaces/interface/nvidia/roce/config/tos
-    #   valueType: int
   adaptiveRouting:
     - name: Adaptive Retransmission
       value: true
@@ -96,15 +76,15 @@ runtimeConfig:
   congestionControl:
     - name: Congestion Control on RP points
       value: true
-      dmsPath:  /interfaces/interface/nvidia/cc/config/priority/rp_enabled # priority[id=0..7]
+      dmsPath: /interfaces/interface/nvidia/cc/config/priority/rp_enabled
       valueType: bool
       alternativeValue: "1"
-    - name:  Congestion Control on NP points
+    - name: Congestion Control on NP points
       value: true
-      dmsPath: /interfaces/interface/nvidia/cc/config/priority/np_enabled # priority[id=0..7]
+      dmsPath: /interfaces/interface/nvidia/cc/config/priority/np_enabled
       valueType: bool
       alternativeValue: "1"
-    - name: Congestion Control  
+    - name: Congestion Control
       value: true
       dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/config/enabled
       valueType: bool
@@ -194,11 +174,11 @@ runtimeConfig:
         value: 25
         dmsPath: /interfaces/interface/ethernet/nvidia/config/inter-packet-gap
         valueType: int
-      - name: Shut down interface 
+      - name: Shut down interface
         value: false
         dmsPath: /interfaces/interface/config/enabled
         valueType: bool
-      - name: Bring up interface to apply IPG settings 
+      - name: Bring up interface to apply IPG settings
         value: false
         dmsPath: /interfaces/interface/config/enabled
         valueType: bool
@@ -207,11 +187,11 @@ runtimeConfig:
         value: 33
         dmsPath: /interfaces/interface/ethernet/nvidia/config/inter-packet-gap
         valueType: int
-      - name: Shut down interface 
+      - name: Shut down interface
         value: false
         dmsPath: /interfaces/interface/config/enabled
         valueType: bool
-      - name: Bring up interface to apply IPG settings 
+      - name: Bring up interface to apply IPG settings
         value: false
         dmsPath: /interfaces/interface/config/enabled
         valueType: bool

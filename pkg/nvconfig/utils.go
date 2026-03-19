@@ -37,8 +37,8 @@ const (
 // NVConfigUtils is an interface that contains util functions related to querying and setting nv config
 type NVConfigUtils interface {
 	// QueryNvConfig queries nv config for a mellanox device and returns default, current and next boot configs
-	// additionalParameter is an optional specific parameter to query, e.g. "ESWITCH_HAIRPIN_DESCRIPTORS[0..7]"
-	QueryNvConfig(ctx context.Context, pciAddr string, additionalParameter string) (types.NvConfigQuery, error)
+	// parameters is an optional list of specific parameters to query, e.g. "ESWITCH_HAIRPIN_DESCRIPTORS[0..7]"
+	QueryNvConfig(ctx context.Context, pciAddr string, parameters []string) (types.NvConfigQuery, error)
 	// SetNvConfigParameter sets a nv config parameter for a mellanox device
 	SetNvConfigParameter(pciAddr string, paramName string, paramValue string) error
 	// SetNvConfigParametersBatch sets multiple nv config parameters for a mellanox device in a single mlxconfig call
@@ -158,17 +158,28 @@ func (h *nvConfigUtils) queryMLXConfig(ctx context.Context, query types.NvConfig
 }
 
 // QueryNvConfig queries nv config for a mellanox device and returns default, current and next boot configs
-func (h *nvConfigUtils) QueryNvConfig(ctx context.Context, pciAddr string, additionalParameter string) (types.NvConfigQuery, error) {
+func (h *nvConfigUtils) QueryNvConfig(ctx context.Context, pciAddr string, parameters []string) (types.NvConfigQuery, error) {
 	log.Log.Info("ConfigurationUtils.QueryNvConfig()", "pciAddr", pciAddr)
 
 	query := types.NewNvConfigQuery()
 
-	err := h.queryMLXConfig(ctx, query, pciAddr, additionalParameter)
-	if err != nil {
-		log.Log.Error(err, "Failed to parse mlxconfig query output", "device", pciAddr)
+	if len(parameters) == 0 {
+		err := h.queryMLXConfig(ctx, query, pciAddr, "")
+		if err != nil {
+			log.Log.Error(err, "Failed to parse mlxconfig query output", "device", pciAddr)
+			return query, err
+		}
+	} else {
+		for _, param := range parameters {
+			err := h.queryMLXConfig(ctx, query, pciAddr, param)
+			if err != nil {
+				log.Log.Error(err, "Failed to parse mlxconfig query output", "device", pciAddr, "parameter", param)
+				return query, err
+			}
+		}
 	}
 
-	return query, err
+	return query, nil
 }
 
 // SetNvConfigParameter sets a nv config parameter for a mellanox device

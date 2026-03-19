@@ -15,9 +15,9 @@ type NVConfigUtils struct {
 	mock.Mock
 }
 
-// QueryNvConfig provides a mock function with given fields: ctx, pciAddr, additionalParameter
-func (_m *NVConfigUtils) QueryNvConfig(ctx context.Context, pciAddr string, additionalParameter string) (types.NvConfigQuery, error) {
-	ret := _m.Called(ctx, pciAddr, additionalParameter)
+// QueryNvConfig provides a mock function with given fields: ctx, pciAddr, parameters
+func (_m *NVConfigUtils) QueryNvConfig(ctx context.Context, pciAddr string, parameters []string) (types.NvConfigQuery, error) {
+	ret := _m.Called(ctx, pciAddr, parameters)
 
 	if len(ret) == 0 {
 		panic("no return value specified for QueryNvConfig")
@@ -25,17 +25,17 @@ func (_m *NVConfigUtils) QueryNvConfig(ctx context.Context, pciAddr string, addi
 
 	var r0 types.NvConfigQuery
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, string) (types.NvConfigQuery, error)); ok {
-		return rf(ctx, pciAddr, additionalParameter)
+	if rf, ok := ret.Get(0).(func(context.Context, string, []string) (types.NvConfigQuery, error)); ok {
+		return rf(ctx, pciAddr, parameters)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, string) types.NvConfigQuery); ok {
-		r0 = rf(ctx, pciAddr, additionalParameter)
+	if rf, ok := ret.Get(0).(func(context.Context, string, []string) types.NvConfigQuery); ok {
+		r0 = rf(ctx, pciAddr, parameters)
 	} else {
 		r0 = ret.Get(0).(types.NvConfigQuery)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
-		r1 = rf(ctx, pciAddr, additionalParameter)
+	if rf, ok := ret.Get(1).(func(context.Context, string, []string) error); ok {
+		r1 = rf(ctx, pciAddr, parameters)
 	} else {
 		r1 = ret.Error(1)
 	}

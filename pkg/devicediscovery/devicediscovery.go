@@ -111,7 +111,7 @@ func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, er
 
 			dpu := false
 			if isBlueField {
-				nvConfig, err := d.nvConfigUtils.QueryNvConfig(context.Background(), device.Address, consts.BF3OperationModeParam)
+				nvConfig, err := d.nvConfigUtils.QueryNvConfig(context.Background(), device.Address, []string{consts.BF3OperationModeParam})
 				if err != nil {
 					log.Log.Error(err, "Failed to get BlueField device's operation mode", "address", device.Address)
 					return nil, err

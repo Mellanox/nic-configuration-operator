@@ -72,28 +72,32 @@ func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *
 	log.Log.Info("configurationManager.ValidateDeviceNvSpec", "device", device.Name)
 
 	if device.Spec.Configuration.Template != nil && device.Spec.Configuration.Template.SpectrumXOptimized != nil && device.Spec.Configuration.Template.SpectrumXOptimized.Enabled {
-		// First check breakout config (from breakout section) - requires reboot to apply
-		breakoutConfigApplied, err := h.spectrumXConfigManager.BreakoutConfigApplied(ctx, device)
+		pci := device.Status.Ports[0].PCI
+
+		breakoutParams, err := h.spectrumXConfigManager.GetBreakoutMlxConfig(device)
 		if err != nil {
-			log.Log.Error(err, "failed to check spectrumx breakout config", "device", device.Name)
 			return false, false, err
 		}
-
-		if !breakoutConfigApplied {
-			log.Log.V(2).Info("breakout config not applied, update and reboot required", "device", device.Name)
-			return true, true, nil
+		if len(breakoutParams) > 0 {
+			if mismatch, err := h.checkMlxConfigMismatch(ctx, pci, breakoutParams); err != nil {
+				return false, false, err
+			} else if mismatch {
+				log.Log.V(2).Info("breakout config not applied, update and reboot required", "device", device.Name)
+				return true, true, nil
+			}
 		}
 
-		// Then check nvconfig (from nvConfig section) - may require reboot
-		nvConfigApplied, err := h.spectrumXConfigManager.NvConfigApplied(ctx, device)
+		postBreakoutParams, err := h.spectrumXConfigManager.GetPostBreakoutMlxConfig(device)
 		if err != nil {
-			log.Log.Error(err, "failed to check spectrumx nvconfig", "device", device.Name)
 			return false, false, err
 		}
-
-		if !nvConfigApplied {
-			log.Log.V(2).Info("nvconfig not applied, update and reboot required", "device", device.Name)
-			return true, true, nil
+		if len(postBreakoutParams) > 0 {
+			if mismatch, err := h.checkMlxConfigMismatch(ctx, pci, postBreakoutParams); err != nil {
+				return false, false, err
+			} else if mismatch {
+				log.Log.V(2).Info("postBreakout config not applied, update and reboot required", "device", device.Name)
+				return true, true, nil
+			}
 		}
 
 		return false, false, nil
@@ -277,45 +281,76 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 	return &types.ConfigurationApplyResult{Status: status, RebootRequired: anyParamsApplied}, nil
 }
 
-// applySpectrumXNVConfiguration handles the Spectrum-X NV configuration path (breakout + nvconfig)
+// checkMlxConfigMismatch queries mlxconfig for the given params and returns true if any value doesn't match.
+func (h configurationManager) checkMlxConfigMismatch(ctx context.Context, pci string, params map[string]string) (bool, error) {
+	paramNames := make([]string, 0, len(params))
+	for name := range params {
+		paramNames = append(paramNames, name)
+	}
+
+	query, err := h.nvConfigUtils.QueryNvConfig(ctx, pci, paramNames)
+	if err != nil {
+		return false, err
+	}
+
+	for name, desiredValue := range params {
+		currentValues := query.CurrentConfig[name]
+		if !slices.Contains(currentValues, desiredValue) {
+			log.Log.V(2).Info("mlxconfig parameter mismatch", "param", name, "desired", desiredValue, "current", currentValues)
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// applySpectrumXNVConfiguration handles the Spectrum-X NV configuration path (breakout + postBreakout)
 func (h configurationManager) applySpectrumXNVConfiguration(ctx context.Context, device *v1alpha1.NicDevice) (*types.ConfigurationApplyResult, error) {
-	// First check and apply breakout config (from breakout section)
-	// Breakout config must be applied first and requires a reboot before nvconfig can be applied
-	breakoutConfigApplied, err := h.spectrumXConfigManager.BreakoutConfigApplied(ctx, device)
+	pci := device.Status.Ports[0].PCI
+
+	breakoutParams, err := h.spectrumXConfigManager.GetBreakoutMlxConfig(device)
 	if err != nil {
-		log.Log.Error(err, "failed to check spectrumx breakout config", "device", device.Name)
 		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}
 
-	if !breakoutConfigApplied {
-		log.Log.Info("applying breakout config", "device", device.Name)
-		result, err := h.spectrumXConfigManager.ApplyBreakoutConfig(ctx, device)
-		if err != nil {
-			log.Log.Error(err, "failed to apply spectrumx breakout config", "device", device.Name)
-			return result, err
+	// Check and apply breakout config — requires reboot before postBreakout can be applied
+	if len(breakoutParams) > 0 {
+		if mismatch, err := h.checkMlxConfigMismatch(ctx, pci, breakoutParams); err != nil {
+			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+		} else if mismatch {
+			log.Log.Info("applying breakout config", "device", device.Name)
+			if err := h.nvConfigUtils.SetNvConfigParametersBatch(pci, breakoutParams, true); err != nil {
+				return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+			}
+			log.Log.Info("breakout config applied, reboot required", "device", device.Name)
+			return &types.ConfigurationApplyResult{Status: types.ApplyStatusPartiallyApplied, RebootRequired: true}, nil
 		}
-		// Always require reboot after applying breakout config to ensure the device is in correct state
-		// before applying nvconfig
-		log.Log.Info("breakout config applied, reboot required", "device", device.Name)
-		return &types.ConfigurationApplyResult{Status: types.ApplyStatusPartiallyApplied, RebootRequired: true}, nil
 	}
 
-	// Then check and apply nvconfig (from nvConfig section)
-	nvConfigApplied, err := h.spectrumXConfigManager.NvConfigApplied(ctx, device)
+	// Check and apply postBreakout config
+	postBreakoutParams, err := h.spectrumXConfigManager.GetPostBreakoutMlxConfig(device)
 	if err != nil {
-		log.Log.Error(err, "failed to check spectrumx nvconfig", "device", device.Name)
 		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}
 
-	if !nvConfigApplied {
-		log.Log.Info("applying nvconfig", "device", device.Name)
-		result, err := h.spectrumXConfigManager.ApplyNvConfig(ctx, device)
-		if err != nil {
-			log.Log.Error(err, "failed to apply spectrumx nvconfig", "device", device.Name)
-			return result, err
+	if len(postBreakoutParams) > 0 {
+		if mismatch, err := h.checkMlxConfigMismatch(ctx, pci, postBreakoutParams); err != nil {
+			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+		} else if mismatch {
+			// Apply concatenated breakout + postBreakout params
+			merged := make(map[string]string, len(breakoutParams)+len(postBreakoutParams))
+			for k, v := range breakoutParams {
+				merged[k] = v
+			}
+			for k, v := range postBreakoutParams {
+				merged[k] = v
+			}
+			log.Log.Info("applying postBreakout config", "device", device.Name)
+			if err := h.nvConfigUtils.SetNvConfigParametersBatch(pci, merged, true); err != nil {
+				return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+			}
+			log.Log.Info("postBreakout config applied, reboot required", "device", device.Name)
+			return &types.ConfigurationApplyResult{Status: types.ApplyStatusSuccess, RebootRequired: true}, nil
 		}
-		log.Log.Info("nvconfig applied, reboot required", "device", device.Name)
-		return result, nil
 	}
 
 	return &types.ConfigurationApplyResult{Status: types.ApplyStatusNothingToDo}, nil
@@ -454,7 +489,7 @@ func (h configurationManager) queryNvConfigs(ctx context.Context, device *v1alph
 	nvConfigs := make(map[string]types.NvConfigQuery)
 	for _, port := range device.Status.Ports {
 		pciAddr := port.PCI
-		nvConfig, err := h.nvConfigUtils.QueryNvConfig(ctx, pciAddr, "")
+		nvConfig, err := h.nvConfigUtils.QueryNvConfig(ctx, pciAddr, nil)
 		if err != nil {
 			return nil, err
 		}
