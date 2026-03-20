@@ -129,6 +129,39 @@ spec:
                           qos:
                             description: Quality of Service settings
                             properties:
+                              cableLen:
+                                description: Cable length in meters, used for ECN
+                                  buffer threshold calculation
+                                type: integer
+                              ecn:
+                                description: ECN (Explicit Congestion Notification)
+                                  settings
+                                properties:
+                                  enabled:
+                                    description: Enable ECN on the specified priority
+                                    type: boolean
+                                  priority:
+                                    description: Traffic class / priority to enable
+                                      ECN on (0-7)
+                                    maximum: 7
+                                    minimum: 0
+                                    type: integer
+                                required:
+                                - enabled
+                                - priority
+                                type: object
+                              pauseFrames:
+                                description: Global pause frame settings (disable
+                                  when using PFC)
+                                properties:
+                                  enabled:
+                                    description: Enable global pause frames (autoneg,
+                                      rx, tx). Set to false to disable all pause frames
+                                      (recommended when PFC is used).
+                                    type: boolean
+                                required:
+                                - enabled
+                                type: object
                               pfc:
                                 description: Priority-based Flow Control configuration,
                                   e.g. "0,0,0,1,0,0,0,0"
@@ -138,12 +171,45 @@ spec:
                                 description: 8-bit value for type of service
                                 type: integer
                               trust:
-                                description: Trust mode for QoS settings, e.g. trust-dscp
+                                description: Trust mode for QoS settings, e.g. dscp
                                 type: string
                             required:
                             - pfc
                             - trust
                             type: object
+                          roceMode:
+                            description: 'RoCE mode: 1 for RoCE v1, 2 for RoCE v2.
+                              Only effective when roceOptimized.enabled is true.'
+                            enum:
+                            - 1
+                            - 2
+                            type: integer
+                        required:
+                        - enabled
+                        type: object
+                      runtimePerformanceOptimized:
+                        description: Runtime NIC performance tuning (ring buffers,
+                          channels, LRO) applied via ethtool
+                        properties:
+                          combinedChannels:
+                            description: Number of combined channels (ethtool -L combined)
+                            minimum: 1
+                            type: integer
+                          enabled:
+                            description: Enable runtime performance optimization
+                            type: boolean
+                          lro:
+                            description: Enable Large Receive Offload (ethtool -K
+                              lro)
+                            type: boolean
+                          rxRingSize:
+                            description: RX ring buffer size (ethtool -G rx)
+                            minimum: 1
+                            type: integer
+                          txRingSize:
+                            description: TX ring buffer size (ethtool -G tx)
+                            minimum: 1
+                            type: integer
                         required:
                         - enabled
                         type: object

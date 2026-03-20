@@ -47,9 +47,7 @@ type configValidation interface {
 	// RuntimeConfigApplied checks if desired runtime config is applied
 	RuntimeConfigApplied(device *v1alpha1.NicDevice) (bool, error)
 	// CalculateDesiredRuntimeConfig returns desired values for runtime config
-	// returns int - maxReadRequestSize
-	// returns *v1alpha1.QosSpec - qos settings
-	CalculateDesiredRuntimeConfig(device *v1alpha1.NicDevice) (int, *v1alpha1.QosSpec)
+	CalculateDesiredRuntimeConfig(device *v1alpha1.NicDevice) types.DesiredRuntimeConfig
 }
 
 type configValidationImpl struct {
@@ -269,33 +267,89 @@ func (v *configValidationImpl) AdvancedPCISettingsEnabled(nvConfig types.NvConfi
 	return false
 }
 
-// RuntimeConfigApplied checks if desired runtime config is applied
-func (v *configValidationImpl) RuntimeConfigApplied(device *v1alpha1.NicDevice) (bool, error) {
-	ports := device.Status.Ports
-
-	desiredMaxReadReqSize, desiredQoSSpec := v.CalculateDesiredRuntimeConfig(device)
-
-	if desiredMaxReadReqSize != 0 {
-		for _, port := range ports {
-			actualMaxReadReqSize, err := v.utils.GetMaxReadRequestSize(port.PCI)
-			if err != nil {
-				log.Log.Error(err, "can't validate maxReadReqSize", "device", device.Name)
-				return false, err
-			}
-			if actualMaxReadReqSize != desiredMaxReadReqSize {
-				return false, nil
-			}
+// validatePortExtendedQoS validates per-port extended QoS settings (CableLen, ECN, PauseFrames)
+func (v *configValidationImpl) validatePortExtendedQoS(iface, deviceName string, qos *v1alpha1.QosSpec) (bool, error) {
+	if qos.CableLen != 0 {
+		actual, err := v.utils.GetCableLen(iface)
+		if err != nil {
+			log.Log.Error(err, "can't validate cableLen", "device", deviceName)
+			return false, err
+		}
+		if actual != qos.CableLen {
+			return false, nil
 		}
 	}
 
-	// Don't validate QoS settings if neither trust nor pfc changes are requested
-	if desiredQoSSpec == nil || (desiredQoSSpec.Trust == "" && desiredQoSSpec.PFC == "" && desiredQoSSpec.ToS == 0) {
-		return true, nil
+	if qos.ECN != nil {
+		rp, np, err := v.utils.GetECNEnabled(iface, qos.ECN.Priority)
+		if err != nil {
+			log.Log.Error(err, "can't validate ECN", "device", deviceName)
+			return false, err
+		}
+		if rp != qos.ECN.Enabled || np != qos.ECN.Enabled {
+			return false, nil
+		}
 	}
 
-	for _, port := range ports {
+	if qos.PauseFrames != nil {
+		actual, err := v.utils.GetPauseFrames(iface)
+		if err != nil {
+			log.Log.Error(err, "can't validate pauseFrames", "device", deviceName)
+			return false, err
+		}
+		if actual != qos.PauseFrames.Enabled {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
+// validatePortRuntimePerf validates per-port runtime performance settings (ring size, channels, LRO)
+func (v *configValidationImpl) validatePortRuntimePerf(iface, deviceName string, perf *v1alpha1.RuntimePerformanceOptimizedSpec) (bool, error) {
+	if perf.RxRingSize != 0 || perf.TxRingSize != 0 {
+		rx, tx, err := v.utils.GetRingSize(iface)
+		if err != nil {
+			log.Log.Error(err, "can't validate ringSize", "device", deviceName)
+			return false, err
+		}
+		if (perf.RxRingSize != 0 && rx != perf.RxRingSize) ||
+			(perf.TxRingSize != 0 && tx != perf.TxRingSize) {
+			return false, nil
+		}
+	}
+
+	if perf.CombinedChannels != 0 {
+		actual, err := v.utils.GetCombinedChannels(iface)
+		if err != nil {
+			log.Log.Error(err, "can't validate combinedChannels", "device", deviceName)
+			return false, err
+		}
+		// actual == 0 means the driver doesn't expose combined channels; skip validation
+		if actual != 0 && actual != perf.CombinedChannels {
+			return false, nil
+		}
+	}
+
+	if perf.LRO != nil {
+		actual, err := v.utils.GetLRO(iface)
+		if err != nil {
+			log.Log.Error(err, "can't validate LRO", "device", deviceName)
+			return false, err
+		}
+		if actual != *perf.LRO {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
+// validateDMSQoS validates QoS settings (trust, PFC, ToS) via DMS for all ports
+func (v *configValidationImpl) validateDMSQoS(device *v1alpha1.NicDevice, qos *v1alpha1.QosSpec) (bool, error) {
+	for _, port := range device.Status.Ports {
 		if port.NetworkInterface == "" {
-			err := fmt.Errorf("cannot apply QoS settings for device port %s, network interface is missing", port.PCI)
+			err := fmt.Errorf("cannot validate QoS settings for device port %s, network interface is missing", port.PCI)
 			log.Log.Error(err, "cannot validate QoS settings", "device", device.Name, "port", port.PCI)
 			return false, err
 		}
@@ -304,40 +358,109 @@ func (v *configValidationImpl) RuntimeConfigApplied(device *v1alpha1.NicDevice) 
 			log.Log.Error(err, "cannot validate QoS settings", "device", device.Name, "port", port.PCI)
 			return false, err
 		}
-		if desiredQoSSpec != nil && (actualSpec.Trust != desiredQoSSpec.Trust || actualSpec.PFC != desiredQoSSpec.PFC || actualSpec.ToS != desiredQoSSpec.ToS) {
+		if actualSpec.Trust != qos.Trust || actualSpec.PFC != qos.PFC || actualSpec.ToS != qos.ToS {
 			return false, nil
 		}
+	}
+	return true, nil
+}
+
+// RuntimeConfigApplied checks if desired runtime config is applied
+func (v *configValidationImpl) RuntimeConfigApplied(device *v1alpha1.NicDevice) (bool, error) {
+	ports := device.Status.Ports
+	desired := v.CalculateDesiredRuntimeConfig(device)
+
+	if desired.MaxReadRequestSize != 0 {
+		for _, port := range ports {
+			actualMaxReadReqSize, err := v.utils.GetMaxReadRequestSize(port.PCI)
+			if err != nil {
+				log.Log.Error(err, "can't validate maxReadReqSize", "device", device.Name)
+				return false, err
+			}
+			if actualMaxReadReqSize != desired.MaxReadRequestSize {
+				return false, nil
+			}
+		}
+	}
+
+	// Validate QoS settings (trust, PFC, ToS) via DMS.
+	// Note: DMS only manages Trust/PFC/ToS. Extended QoS fields (CableLen, ECN, PauseFrames)
+	// are validated separately in the per-port loop below via direct ethtool/sysfs queries.
+	if desired.Qos != nil && (desired.Qos.Trust != "" || desired.Qos.PFC != "" || desired.Qos.ToS != 0) {
+		applied, err := v.validateDMSQoS(device, desired.Qos)
+		if err != nil || !applied {
+			return applied, err
+		}
+	}
+
+	// Validate per-port runtime settings
+	validatedAnyPort := false
+	for _, port := range ports {
+		if port.NetworkInterface == "" {
+			log.Log.V(2).Info("skipping runtime config validation for port with empty NetworkInterface", "device", device.Name, "port", port.PCI)
+			continue
+		}
+		validatedAnyPort = true
+		iface := port.NetworkInterface
+
+		if desired.RoceMode != 0 {
+			actual, err := v.utils.GetRoceMode(iface)
+			if err != nil {
+				log.Log.Error(err, "can't validate roceMode", "device", device.Name)
+				return false, err
+			}
+			if actual != desired.RoceMode {
+				return false, nil
+			}
+		}
+
+		if desired.Qos != nil {
+			applied, err := v.validatePortExtendedQoS(iface, device.Name, desired.Qos)
+			if err != nil || !applied {
+				return applied, err
+			}
+		}
+
+		if desired.RuntimePerf != nil && desired.RuntimePerf.Enabled {
+			applied, err := v.validatePortRuntimePerf(iface, device.Name, desired.RuntimePerf)
+			if err != nil || !applied {
+				return applied, err
+			}
+		}
+	}
+
+	// If extended settings are requested but no port could be validated, treat as not applied
+	if !validatedAnyPort && (desired.RoceMode != 0 || desired.Qos != nil || desired.RuntimePerf != nil) {
+		return false, nil
 	}
 
 	return true, nil
 }
 
 // CalculateDesiredRuntimeConfig returns desired values for runtime config
-// returns int - maxReadRequestSize
-// returns string - qos trust mode
-// returns string - qos pfc settings
-func (v *configValidationImpl) CalculateDesiredRuntimeConfig(device *v1alpha1.NicDevice) (int, *v1alpha1.QosSpec) {
-	maxReadRequestSize := 0
-
+func (v *configValidationImpl) CalculateDesiredRuntimeConfig(device *v1alpha1.NicDevice) types.DesiredRuntimeConfig {
+	result := types.DesiredRuntimeConfig{}
 	template := device.Spec.Configuration.Template
 
 	if template.PciPerformanceOptimized != nil && template.PciPerformanceOptimized.Enabled {
 		if template.PciPerformanceOptimized.MaxReadRequest != 0 {
-			maxReadRequestSize = template.PciPerformanceOptimized.MaxReadRequest
+			result.MaxReadRequestSize = template.PciPerformanceOptimized.MaxReadRequest
 		} else {
-			maxReadRequestSize = 4096
+			result.MaxReadRequestSize = 4096
 		}
 	}
 
-	// QoS settings are not available for IB devices
+	// QoS, RoCE, and runtime perf settings are not available for IB devices
 	if template.LinkType == consts.Infiniband {
-		return maxReadRequestSize, nil
+		return result
 	}
 
-	var qos *v1alpha1.QosSpec = nil
+	if template.RuntimePerformanceOptimized != nil && template.RuntimePerformanceOptimized.Enabled {
+		result.RuntimePerf = template.RuntimePerformanceOptimized
+	}
 
 	if template.RoceOptimized != nil && template.RoceOptimized.Enabled {
-		trust := "dscp"
+		trust := consts.TrustModeDscp
 		pfc := "0,0,0,1,0,0,0,0"
 		tos := 0
 
@@ -346,14 +469,25 @@ func (v *configValidationImpl) CalculateDesiredRuntimeConfig(device *v1alpha1.Ni
 			pfc = template.RoceOptimized.Qos.PFC
 			tos = template.RoceOptimized.Qos.ToS
 		}
-		qos = &v1alpha1.QosSpec{
+
+		qos := &v1alpha1.QosSpec{
 			Trust: trust,
 			PFC:   pfc,
 			ToS:   tos,
 		}
+
+		// Copy over extended QoS fields
+		if template.RoceOptimized.Qos != nil {
+			qos.CableLen = template.RoceOptimized.Qos.CableLen
+			qos.ECN = template.RoceOptimized.Qos.ECN
+			qos.PauseFrames = template.RoceOptimized.Qos.PauseFrames
+		}
+
+		result.Qos = qos
+		result.RoceMode = template.RoceOptimized.RoceMode
 	}
 
-	return maxReadRequestSize, qos
+	return result
 }
 
 func newConfigValidation(utils ConfigurationUtils, eventRecorder record.EventRecorder) configValidation {
