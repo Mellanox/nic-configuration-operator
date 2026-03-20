@@ -444,26 +444,98 @@ func (h configurationManager) ApplyRuntimeConfiguration(ctx context.Context, dev
 		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusNothingToDo}, nil
 	}
 
-	desiredMaxReadReqSize, desiredQoS := h.configValidation.CalculateDesiredRuntimeConfig(device)
+	desired := h.configValidation.CalculateDesiredRuntimeConfig(device)
 
 	ports := device.Status.Ports
 
-	if desiredMaxReadReqSize != 0 {
+	if desired.MaxReadRequestSize != 0 {
 		for _, port := range ports {
-			err = h.configurationUtils.SetMaxReadRequestSize(port.PCI, desiredMaxReadReqSize)
+			err = h.configurationUtils.SetMaxReadRequestSize(port.PCI, desired.MaxReadRequestSize)
 			if err != nil {
-				log.Log.Error(err, "failed to apply runtime configuration", "device", device)
+				log.Log.Error(err, "failed to apply maxReadRequestSize", "device", device)
 				return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 			}
 		}
 	}
 
-	// Don't apply QoS settings if neither trust nor pfc changes are requested
-	if desiredQoS != nil {
-		err = h.configurationUtils.SetQoSSettings(device, desiredQoS)
+	// Apply QoS settings (trust, PFC, ToS) via DMS
+	if desired.Qos != nil && (desired.Qos.Trust != "" || desired.Qos.PFC != "" || desired.Qos.ToS != 0) {
+		err = h.configurationUtils.SetQoSSettings(device, desired.Qos)
 		if err != nil {
-			log.Log.Error(err, "failed to apply runtime configuration", "device", device)
+			log.Log.Error(err, "failed to apply QoS settings", "device", device)
 			return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+		}
+	}
+
+	// Apply per-port runtime settings
+	for _, port := range ports {
+		if port.NetworkInterface == "" {
+			log.Log.V(2).Info("skipping runtime config apply for port with empty NetworkInterface", "device", device.Name, "port", port.PCI)
+			continue
+		}
+		iface := port.NetworkInterface
+
+		if desired.RoceMode != 0 {
+			if err = h.configurationUtils.SetRoceMode(iface, desired.RoceMode); err != nil {
+				log.Log.Error(err, "failed to apply roceMode", "device", device, "interface", iface)
+				return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+			}
+		}
+
+		if desired.Qos != nil {
+			if desired.Qos.CableLen != 0 {
+				if err = h.configurationUtils.SetCableLen(iface, desired.Qos.CableLen); err != nil {
+					log.Log.Error(err, "failed to apply cableLen", "device", device, "interface", iface)
+					return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+				}
+			}
+
+			if desired.Qos.ECN != nil {
+				if err = h.configurationUtils.SetECNEnabled(iface, desired.Qos.ECN.Priority, desired.Qos.ECN.Enabled, desired.Qos.ECN.Enabled); err != nil {
+					log.Log.Error(err, "failed to apply ECN", "device", device, "interface", iface)
+					return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+				}
+			}
+
+			if desired.Qos.PauseFrames != nil {
+				if err = h.configurationUtils.SetPauseFrames(iface, desired.Qos.PauseFrames.Enabled); err != nil {
+					log.Log.Error(err, "failed to apply pauseFrames", "device", device, "interface", iface)
+					return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+				}
+			}
+		}
+
+		if desired.RuntimePerf != nil && desired.RuntimePerf.Enabled {
+			if desired.RuntimePerf.RxRingSize != 0 || desired.RuntimePerf.TxRingSize != 0 {
+				if err = h.configurationUtils.SetRingSize(iface, desired.RuntimePerf.RxRingSize, desired.RuntimePerf.TxRingSize); err != nil {
+					log.Log.Error(err, "failed to apply ringSize", "device", device, "interface", iface)
+					return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+				}
+			}
+
+			if desired.RuntimePerf.CombinedChannels != 0 {
+				// Check if the driver exposes combined channels before attempting to set
+				current, err := h.configurationUtils.GetCombinedChannels(iface)
+				if err != nil {
+					log.Log.Error(err, "failed to get combinedChannels", "device", device, "interface", iface)
+					return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+				}
+				if current != 0 {
+					if err = h.configurationUtils.SetCombinedChannels(iface, desired.RuntimePerf.CombinedChannels); err != nil {
+						log.Log.Error(err, "failed to apply combinedChannels", "device", device, "interface", iface)
+						return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+					}
+				} else {
+					log.Log.V(2).Info("skipping combinedChannels apply, driver does not expose combined channels", "device", device, "interface", iface)
+				}
+			}
+
+			if desired.RuntimePerf.LRO != nil {
+				if err = h.configurationUtils.SetLRO(iface, *desired.RuntimePerf.LRO); err != nil {
+					log.Log.Error(err, "failed to apply LRO", "device", device, "interface", iface)
+					return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+				}
+			}
 		}
 	}
 
