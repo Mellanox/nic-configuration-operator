@@ -172,6 +172,291 @@ func (_m *ConfigurationUtils) SetQoSSettings(device *v1alpha1.NicDevice, spec *v
 	return r0
 }
 
+// GetRoceMode provides a mock function with given fields: interfaceName
+func (_m *ConfigurationUtils) GetRoceMode(interfaceName string) (int, error) {
+	ret := _m.Called(interfaceName)
+	if len(ret) == 0 {
+		panic("no return value specified for GetRoceMode")
+	}
+	var r0 int
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (int, error)); ok {
+		return rf(interfaceName)
+	}
+	if rf, ok := ret.Get(0).(func(string) int); ok {
+		r0 = rf(interfaceName)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(interfaceName)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// SetRoceMode provides a mock function with given fields: interfaceName, mode
+func (_m *ConfigurationUtils) SetRoceMode(interfaceName string, mode int) error {
+	ret := _m.Called(interfaceName, mode)
+	if len(ret) == 0 {
+		panic("no return value specified for SetRoceMode")
+	}
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, int) error); ok {
+		r0 = rf(interfaceName, mode)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// GetCableLen provides a mock function with given fields: interfaceName
+func (_m *ConfigurationUtils) GetCableLen(interfaceName string) (int, error) {
+	ret := _m.Called(interfaceName)
+	if len(ret) == 0 {
+		panic("no return value specified for GetCableLen")
+	}
+	var r0 int
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (int, error)); ok {
+		return rf(interfaceName)
+	}
+	if rf, ok := ret.Get(0).(func(string) int); ok {
+		r0 = rf(interfaceName)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(interfaceName)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// SetCableLen provides a mock function with given fields: interfaceName, length
+func (_m *ConfigurationUtils) SetCableLen(interfaceName string, length int) error {
+	ret := _m.Called(interfaceName, length)
+	if len(ret) == 0 {
+		panic("no return value specified for SetCableLen")
+	}
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, int) error); ok {
+		r0 = rf(interfaceName, length)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// GetECNEnabled provides a mock function with given fields: interfaceName, priority
+func (_m *ConfigurationUtils) GetECNEnabled(interfaceName string, priority int) (bool, bool, error) {
+	ret := _m.Called(interfaceName, priority)
+	if len(ret) == 0 {
+		panic("no return value specified for GetECNEnabled")
+	}
+	var r0 bool
+	var r1 bool
+	var r2 error
+	if rf, ok := ret.Get(0).(func(string, int) (bool, bool, error)); ok {
+		return rf(interfaceName, priority)
+	}
+	if rf, ok := ret.Get(0).(func(string, int) bool); ok {
+		r0 = rf(interfaceName, priority)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+	if rf, ok := ret.Get(1).(func(string, int) bool); ok {
+		r1 = rf(interfaceName, priority)
+	} else {
+		r1 = ret.Get(1).(bool)
+	}
+	if rf, ok := ret.Get(2).(func(string, int) error); ok {
+		r2 = rf(interfaceName, priority)
+	} else {
+		r2 = ret.Error(2)
+	}
+	return r0, r1, r2
+}
+
+// SetECNEnabled provides a mock function with given fields: interfaceName, priority, rp, np
+func (_m *ConfigurationUtils) SetECNEnabled(interfaceName string, priority int, rp bool, np bool) error {
+	ret := _m.Called(interfaceName, priority, rp, np)
+	if len(ret) == 0 {
+		panic("no return value specified for SetECNEnabled")
+	}
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, int, bool, bool) error); ok {
+		r0 = rf(interfaceName, priority, rp, np)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// GetPauseFrames provides a mock function with given fields: interfaceName
+func (_m *ConfigurationUtils) GetPauseFrames(interfaceName string) (bool, error) {
+	ret := _m.Called(interfaceName)
+	if len(ret) == 0 {
+		panic("no return value specified for GetPauseFrames")
+	}
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (bool, error)); ok {
+		return rf(interfaceName)
+	}
+	if rf, ok := ret.Get(0).(func(string) bool); ok {
+		r0 = rf(interfaceName)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(interfaceName)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// SetPauseFrames provides a mock function with given fields: interfaceName, enabled
+func (_m *ConfigurationUtils) SetPauseFrames(interfaceName string, enabled bool) error {
+	ret := _m.Called(interfaceName, enabled)
+	if len(ret) == 0 {
+		panic("no return value specified for SetPauseFrames")
+	}
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, bool) error); ok {
+		r0 = rf(interfaceName, enabled)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// GetRingSize provides a mock function with given fields: interfaceName
+func (_m *ConfigurationUtils) GetRingSize(interfaceName string) (int, int, error) {
+	ret := _m.Called(interfaceName)
+	if len(ret) == 0 {
+		panic("no return value specified for GetRingSize")
+	}
+	var r0 int
+	var r1 int
+	var r2 error
+	if rf, ok := ret.Get(0).(func(string) (int, int, error)); ok {
+		return rf(interfaceName)
+	}
+	if rf, ok := ret.Get(0).(func(string) int); ok {
+		r0 = rf(interfaceName)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+	if rf, ok := ret.Get(1).(func(string) int); ok {
+		r1 = rf(interfaceName)
+	} else {
+		r1 = ret.Get(1).(int)
+	}
+	if rf, ok := ret.Get(2).(func(string) error); ok {
+		r2 = rf(interfaceName)
+	} else {
+		r2 = ret.Error(2)
+	}
+	return r0, r1, r2
+}
+
+// SetRingSize provides a mock function with given fields: interfaceName, rx, tx
+func (_m *ConfigurationUtils) SetRingSize(interfaceName string, rx int, tx int) error {
+	ret := _m.Called(interfaceName, rx, tx)
+	if len(ret) == 0 {
+		panic("no return value specified for SetRingSize")
+	}
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, int, int) error); ok {
+		r0 = rf(interfaceName, rx, tx)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// GetCombinedChannels provides a mock function with given fields: interfaceName
+func (_m *ConfigurationUtils) GetCombinedChannels(interfaceName string) (int, error) {
+	ret := _m.Called(interfaceName)
+	if len(ret) == 0 {
+		panic("no return value specified for GetCombinedChannels")
+	}
+	var r0 int
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (int, error)); ok {
+		return rf(interfaceName)
+	}
+	if rf, ok := ret.Get(0).(func(string) int); ok {
+		r0 = rf(interfaceName)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(interfaceName)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// SetCombinedChannels provides a mock function with given fields: interfaceName, channels
+func (_m *ConfigurationUtils) SetCombinedChannels(interfaceName string, channels int) error {
+	ret := _m.Called(interfaceName, channels)
+	if len(ret) == 0 {
+		panic("no return value specified for SetCombinedChannels")
+	}
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, int) error); ok {
+		r0 = rf(interfaceName, channels)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// GetLRO provides a mock function with given fields: interfaceName
+func (_m *ConfigurationUtils) GetLRO(interfaceName string) (bool, error) {
+	ret := _m.Called(interfaceName)
+	if len(ret) == 0 {
+		panic("no return value specified for GetLRO")
+	}
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (bool, error)); ok {
+		return rf(interfaceName)
+	}
+	if rf, ok := ret.Get(0).(func(string) bool); ok {
+		r0 = rf(interfaceName)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(interfaceName)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// SetLRO provides a mock function with given fields: interfaceName, enabled
+func (_m *ConfigurationUtils) SetLRO(interfaceName string, enabled bool) error {
+	ret := _m.Called(interfaceName, enabled)
+	if len(ret) == 0 {
+		panic("no return value specified for SetLRO")
+	}
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, bool) error); ok {
+		r0 = rf(interfaceName, enabled)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
 // NewConfigurationUtils creates a new instance of ConfigurationUtils. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewConfigurationUtils(t interface {
