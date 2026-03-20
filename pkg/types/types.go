@@ -18,6 +18,8 @@ package types
 import (
 	"fmt"
 	"strings"
+
+	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 )
 
 // VPD represents the Vital Product Data of a device
@@ -94,4 +96,12 @@ type FirmwareInstallOptions struct {
 type ConfigurationOptions struct {
 	SkipReset   bool // Skip mlxfwreset after NV config apply
 	WithDefault bool // Add --with_default flag to mlxconfig set
+}
+
+// DesiredRuntimeConfig holds the desired runtime configuration for a NIC device
+type DesiredRuntimeConfig struct {
+	MaxReadRequestSize int
+	Qos                *v1alpha1.QosSpec
+	RoceMode           int
+	RuntimePerf        *v1alpha1.RuntimePerformanceOptimizedSpec
 }
