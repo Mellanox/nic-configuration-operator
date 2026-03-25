@@ -6,13 +6,7 @@ operator:
     # -- image tag to use for the operator image
     tag: latest
   # -- tolerations for the operator
-  tolerations:
-    - key: "node-role.kubernetes.io/master"
-      operator: "Exists"
-      effect: "NoSchedule"
-    - key: "node-role.kubernetes.io/control-plane"
-      operator: "Exists"
-      effect: "NoSchedule"
+  tolerations: []
   # -- node selector for the operator
   nodeSelector: {}
   # -- node affinity for the operator
@@ -23,12 +17,12 @@ operator:
           preference:
             matchExpressions:
               - key: "node-role.kubernetes.io/master"
-                operator: Exists
+                operator: DoesNotExist
         - weight: 1
           preference:
             matchExpressions:
               - key: "node-role.kubernetes.io/control-plane"
-                operator: Exists
+                operator: DoesNotExist
   # -- specify resource requests and limits for the operator
   resources:
     limits:
