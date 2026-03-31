@@ -1,10 +1,10 @@
 module github.com/Mellanox/nic-configuration-operator
 
-go 1.24.11
+go 1.25.0
 
 require (
 	github.com/Mellanox/maintenance-operator/api v0.3.0
-	github.com/Mellanox/rdmamap v1.1.0
+	github.com/Mellanox/rdmamap v1.2.0
 	github.com/jaypipes/ghw v0.23.0
 	github.com/jaypipes/pcidb v1.1.1
 	github.com/onsi/ginkgo/v2 v2.28.1
@@ -69,7 +69,7 @@ require (
 	golang.org/x/net v0.49.0 // indirect
 	golang.org/x/oauth2 v0.27.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/sys v0.40.0 // indirect
+	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/term v0.39.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
 	golang.org/x/time v0.7.0 // indirect
