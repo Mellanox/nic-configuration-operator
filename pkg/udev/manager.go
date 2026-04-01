@@ -222,6 +222,11 @@ func (m *udevManager) generateUdevRules(devices []*v1alpha1.NicDevice) (netRules
 			continue
 		}
 
+		// Track the first PF's RDMA name to detect multiport mode.
+		// In multiport mode (no %plane_id% in RdmaDevicePrefix), all PFs share
+		// one RDMA device, so only one udev rule is needed per NIC.
+		var firstPFRdmaName string
+
 		// Generate rules for each PF based on PlaneIndices count
 		for pfIndex := 0; pfIndex < numPFs; pfIndex++ {
 			// Use the actual PCI address from Status.Ports when available,
@@ -260,7 +265,15 @@ func (m *udevManager) generateUdevRules(devices []*v1alpha1.NicDevice) (netRules
 				spec.RailIndex,
 			)
 			if rdmaDeviceName != "" {
-				rdmaRulesMap[pciAddr] = generateRdmaDeviceRule(pciAddr, rdmaDeviceName)
+				if pfIndex == 0 {
+					firstPFRdmaName = rdmaDeviceName
+					rdmaRulesMap[pciAddr] = generateRdmaDeviceRule(pciAddr, rdmaDeviceName)
+				} else if rdmaDeviceName != firstPFRdmaName {
+					// Different name per PF = standard mode, generate rule for each
+					rdmaRulesMap[pciAddr] = generateRdmaDeviceRule(pciAddr, rdmaDeviceName)
+				}
+				// In multiport mode (pfIndex > 0 && rdmaDeviceName == firstPFRdmaName):
+				// skip rule generation but expectedNames still gets the shared name below
 			}
 
 			// Store expected names for this PCI address
