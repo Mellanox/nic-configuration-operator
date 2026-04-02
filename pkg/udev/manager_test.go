@@ -428,6 +428,100 @@ var _ = Describe("UdevManager", func() {
 			Expect(string(rdmaContent)).To(Equal(UdevRulesHeader))
 		})
 
+		It("should generate single RDMA rule per NIC when RdmaDevicePrefix has no plane_id placeholder (multiport mode)", func() {
+			// In multiport mode (HW PLB with usw_multiport=true), all PFs share one RDMA device.
+			// RdmaDevicePrefix has no %plane_id%, so all PFs produce the same RDMA name.
+			// Only one RDMA rule should be generated (for PF0).
+			devices := []*v1alpha1.NicDevice{
+				{
+					Spec: v1alpha1.NicDeviceSpec{
+						InterfaceNameTemplate: &v1alpha1.NicDeviceInterfaceNameSpec{
+							NicIndex:         0,
+							RailIndex:        0,
+							PlaneIndices:     []int{0, 1},
+							RdmaDevicePrefix: "rdma_r%rail_id%_n%nic_id%",            // no %plane_id%
+							NetDevicePrefix:  "nic_p%plane_id%_r%rail_id%_n%nic_id%", // has %plane_id%
+						},
+					},
+					Status: v1alpha1.NicDeviceStatus{
+						Ports: []v1alpha1.NicDevicePortSpec{
+							{PCI: "0000:1a:00.0"},
+							{PCI: "0000:1a:00.1"},
+						},
+					},
+				},
+			}
+
+			expectedNames, updated, err := manager.ApplyUdevRules(context.Background(), devices)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updated).To(BeTrue())
+
+			// Both PFs should have the same expected RDMA name
+			Expect(expectedNames).To(HaveLen(2))
+			Expect(expectedNames["0000:1a:00.0"]).To(Equal(ExpectedInterfaceNames{NetDevice: "nic_p0_r0_n0", RdmaDevice: "rdma_r0_n0"}))
+			Expect(expectedNames["0000:1a:00.1"]).To(Equal(ExpectedInterfaceNames{NetDevice: "nic_p1_r0_n0", RdmaDevice: "rdma_r0_n0"}))
+
+			// Net rules: 2 rules (one per PF)
+			netRulesPath := filepath.Join(tempDir, UdevNetRulesFile)
+			netContent, err := os.ReadFile(netRulesPath)
+			Expect(err).NotTo(HaveOccurred())
+			netContentStr := string(netContent)
+			Expect(netContentStr).To(ContainSubstring(`KERNELS=="0000:1a:00.0", NAME="nic_p0_r0_n0"`))
+			Expect(netContentStr).To(ContainSubstring(`KERNELS=="0000:1a:00.1", NAME="nic_p1_r0_n0"`))
+
+			// RDMA rules: only 1 rule (for PF0 only)
+			rdmaRulesPath := filepath.Join(tempDir, UdevRdmaRulesFile)
+			rdmaContent, err := os.ReadFile(rdmaRulesPath)
+			Expect(err).NotTo(HaveOccurred())
+			rdmaContentStr := string(rdmaContent)
+			Expect(rdmaContentStr).To(ContainSubstring(`KERNELS=="0000:1a:00.0"`))
+			Expect(rdmaContentStr).To(ContainSubstring("rdma_r0_n0"))
+			Expect(rdmaContentStr).NotTo(ContainSubstring(`KERNELS=="0000:1a:00.1"`))
+		})
+
+		It("should generate per-PF RDMA rules when RdmaDevicePrefix has plane_id placeholder (standard mode)", func() {
+			// In standard mode, each PF has its own RDMA device.
+			// RdmaDevicePrefix has %plane_id%, so each PF gets a different RDMA name.
+			devices := []*v1alpha1.NicDevice{
+				{
+					Spec: v1alpha1.NicDeviceSpec{
+						InterfaceNameTemplate: &v1alpha1.NicDeviceInterfaceNameSpec{
+							NicIndex:         0,
+							RailIndex:        0,
+							PlaneIndices:     []int{0, 1},
+							RdmaDevicePrefix: "rdma_p%plane_id%_r%rail_id%",
+							NetDevicePrefix:  "nic_p%plane_id%_r%rail_id%",
+						},
+					},
+					Status: v1alpha1.NicDeviceStatus{
+						Ports: []v1alpha1.NicDevicePortSpec{
+							{PCI: "0000:1a:00.0"},
+							{PCI: "0000:1a:00.1"},
+						},
+					},
+				},
+			}
+
+			expectedNames, updated, err := manager.ApplyUdevRules(context.Background(), devices)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updated).To(BeTrue())
+
+			// Each PF should have a different expected RDMA name
+			Expect(expectedNames).To(HaveLen(2))
+			Expect(expectedNames["0000:1a:00.0"]).To(Equal(ExpectedInterfaceNames{NetDevice: "nic_p0_r0", RdmaDevice: "rdma_p0_r0"}))
+			Expect(expectedNames["0000:1a:00.1"]).To(Equal(ExpectedInterfaceNames{NetDevice: "nic_p1_r0", RdmaDevice: "rdma_p1_r0"}))
+
+			// RDMA rules: 2 rules (one per PF)
+			rdmaRulesPath := filepath.Join(tempDir, UdevRdmaRulesFile)
+			rdmaContent, err := os.ReadFile(rdmaRulesPath)
+			Expect(err).NotTo(HaveOccurred())
+			rdmaContentStr := string(rdmaContent)
+			Expect(rdmaContentStr).To(ContainSubstring(`KERNELS=="0000:1a:00.0"`))
+			Expect(rdmaContentStr).To(ContainSubstring("rdma_p0_r0"))
+			Expect(rdmaContentStr).To(ContainSubstring(`KERNELS=="0000:1a:00.1"`))
+			Expect(rdmaContentStr).To(ContainSubstring("rdma_p1_r0"))
+		})
+
 		It("should return error if udevadm control --reload-rules fails", func() {
 			// Set up exec to fail on first command
 			execFake.commands = []*fakeCmd{

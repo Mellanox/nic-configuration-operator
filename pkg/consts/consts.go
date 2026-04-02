@@ -163,4 +163,6 @@ const (
 	InterfaceNameAppliedReason = "InterfaceNameApplied"
 	// InterfaceNameMismatchReason indicates interface names don't match the expected values
 	InterfaceNameMismatchReason = "InterfaceNameMismatch"
+	// InterfaceNameSpecEmptyReason indicates the interface name template spec was removed
+	InterfaceNameSpecEmptyReason = "InterfaceNameSpecEmpty"
 )
