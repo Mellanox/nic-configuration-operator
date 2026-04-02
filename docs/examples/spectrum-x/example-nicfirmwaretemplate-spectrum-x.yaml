@@ -22,7 +22,7 @@ metadata:
   namespace: nvidia-network-operator
 spec:
   nicSelector:
-    nicType: "a2dc" # BlueField-3 SuperNIC, Can also be "1023" for ConnectX-8
+    nicType: "a2dc" # BlueField-3 SuperNIC, Can also be "1023" for ConnectX-8 or "1025" for ConnectX-9
     # partNumbers:
     #   - "MCX713106AEHEA_QP1"
   template:

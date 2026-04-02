@@ -324,7 +324,7 @@ func NewSpectrumXConfigManager(
 2. **NV config** → filter by `DeviceId`, `Breakout`, `Multiplane` → split into MLXConfig params (`SetNvConfigParametersBatch`) and DMS params (`SetParameters`) → apply in batch → reboot
 3. **Runtime** → RoCE, Adaptive Routing, Congestion Control, InterPacketGap settings applied via DMS and sysfs — no reboot
 
-**Parameter filtering:** each `ConfigurationParameter` can be filtered by `DeviceId` (e.g., `"1023"` for CX8, `"a2dc"` for BF3), `Breakout` (plane count), and `Multiplane` mode.
+**Parameter filtering:** each `ConfigurationParameter` can be filtered by `DeviceId` (e.g., `"1023"` for CX8, `"1025"` for CX9, `"a2dc"` for BF3), `Breakout` (plane count), and `Multiplane` mode.
 
 #### CC Process Lifecycle
 

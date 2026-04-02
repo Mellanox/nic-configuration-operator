@@ -68,6 +68,59 @@ mlxConfig:
         ROCE_RTT_RESP_DSCP_P1: "0"
         ROCE_RTT_RESP_DSCP_MODE_P1: "0"
         MULTIPATH_DSCP: "0"
+    "1025":
+      breakout:
+        2:
+          NUM_OF_PF: "2"
+          NUM_OF_PLANES_P1: "0"
+          LAG_RESOURCE_ALLOCATION: "0"
+          MODULE_SPLIT_M0[0]: "0x1"
+          MODULE_SPLIT_M0[1]: "0x1"
+          MODULE_SPLIT_M0[2]: "0x1"
+          MODULE_SPLIT_M0[3]: "0x1"
+          MODULE_SPLIT_M0[4]: "0x2"
+          MODULE_SPLIT_M0[5]: "0x2"
+          MODULE_SPLIT_M0[6]: "0x2"
+          MODULE_SPLIT_M0[7]: "0x2"
+          MODULE_SPLIT_M0[8]: "0xff"
+          MODULE_SPLIT_M0[9]: "0xff"
+          MODULE_SPLIT_M0[10]: "0xff"
+          MODULE_SPLIT_M0[11]: "0xff"
+          MODULE_SPLIT_M0[12]: "0xff"
+          MODULE_SPLIT_M0[13]: "0xff"
+          MODULE_SPLIT_M0[14]: "0xff"
+          MODULE_SPLIT_M0[15]: "0xff"
+        4:
+          NUM_OF_PF: "4"
+          NUM_OF_PLANES_P1: "0"
+          LAG_RESOURCE_ALLOCATION: "0"
+          MODULE_SPLIT_M0[0]: "0x1"
+          MODULE_SPLIT_M0[1]: "0x1"
+          MODULE_SPLIT_M0[2]: "0x2"
+          MODULE_SPLIT_M0[3]: "0x2"
+          MODULE_SPLIT_M0[4]: "0x3"
+          MODULE_SPLIT_M0[5]: "0x3"
+          MODULE_SPLIT_M0[6]: "0x4"
+          MODULE_SPLIT_M0[7]: "0x4"
+          MODULE_SPLIT_M0[8]: "0xff"
+          MODULE_SPLIT_M0[9]: "0xff"
+          MODULE_SPLIT_M0[10]: "0xff"
+          MODULE_SPLIT_M0[11]: "0xff"
+          MODULE_SPLIT_M0[12]: "0xff"
+          MODULE_SPLIT_M0[13]: "0xff"
+          MODULE_SPLIT_M0[14]: "0xff"
+          MODULE_SPLIT_M0[15]: "0xff"
+      postBreakout:
+        LINK_TYPE_P1: "2"
+        SRIOV_EN: "1"
+        NUM_OF_VFS: "1"
+        ROCE_ADAPTIVE_ROUTING_EN: "1"
+        USER_PROGRAMMABLE_CC: "1"
+        TX_SCHEDULER_LOCALITY_MODE: "2"
+        ROCE_CC_STEERING_EXT: "2"
+        ROCE_RTT_RESP_DSCP_P1: "0"
+        ROCE_RTT_RESP_DSCP_MODE_P1: "0"
+        MULTIPATH_DSCP: "0"
     "a2dc":
       breakout:
         2:
@@ -179,6 +232,61 @@ mlxConfig:
         FLEX_PARSER_PROFILE_ENABLE: "10"
         RDE_DISABLE: "1"
         VF_LOG_BAR_SIZE: "5"
+    "1025":
+      breakout:
+        2:
+          NUM_OF_PF: "2"
+          NUM_OF_PLANES_P1: "2"
+          LAG_RESOURCE_ALLOCATION: "1"
+          MODULE_SPLIT_M0[0]: "0x1"
+          MODULE_SPLIT_M0[1]: "0x1"
+          MODULE_SPLIT_M0[2]: "0x1"
+          MODULE_SPLIT_M0[3]: "0x1"
+          MODULE_SPLIT_M0[4]: "0x1"
+          MODULE_SPLIT_M0[5]: "0x1"
+          MODULE_SPLIT_M0[6]: "0x1"
+          MODULE_SPLIT_M0[7]: "0x1"
+          MODULE_SPLIT_M0[8]: "0xff"
+          MODULE_SPLIT_M0[9]: "0xff"
+          MODULE_SPLIT_M0[10]: "0xff"
+          MODULE_SPLIT_M0[11]: "0xff"
+          MODULE_SPLIT_M0[12]: "0xff"
+          MODULE_SPLIT_M0[13]: "0xff"
+          MODULE_SPLIT_M0[14]: "0xff"
+          MODULE_SPLIT_M0[15]: "0xff"
+        4:
+          NUM_OF_PF: "4"
+          NUM_OF_PLANES_P1: "4"
+          LAG_RESOURCE_ALLOCATION: "1"
+          MODULE_SPLIT_M0[0]: "0x1"
+          MODULE_SPLIT_M0[1]: "0x1"
+          MODULE_SPLIT_M0[2]: "0x1"
+          MODULE_SPLIT_M0[3]: "0x1"
+          MODULE_SPLIT_M0[4]: "0x1"
+          MODULE_SPLIT_M0[5]: "0x1"
+          MODULE_SPLIT_M0[6]: "0x1"
+          MODULE_SPLIT_M0[7]: "0x1"
+          MODULE_SPLIT_M0[8]: "0xff"
+          MODULE_SPLIT_M0[9]: "0xff"
+          MODULE_SPLIT_M0[10]: "0xff"
+          MODULE_SPLIT_M0[11]: "0xff"
+          MODULE_SPLIT_M0[12]: "0xff"
+          MODULE_SPLIT_M0[13]: "0xff"
+          MODULE_SPLIT_M0[14]: "0xff"
+          MODULE_SPLIT_M0[15]: "0xff"
+      postBreakout:
+        LINK_TYPE_P1: "2"
+        SRIOV_EN: "1"
+        NUM_OF_VFS: "1"
+        ROCE_ADAPTIVE_ROUTING_EN: "1"
+        USER_PROGRAMMABLE_CC: "1"
+        TX_SCHEDULER_LOCALITY_MODE: "2"
+        ROCE_CC_STEERING_EXT: "2"
+        ROCE_RTT_RESP_DSCP_P1: "48"
+        ROCE_RTT_RESP_DSCP_MODE_P1: "1"
+        FLEX_PARSER_PROFILE_ENABLE: "10"
+        RDE_DISABLE: "1"
+        VF_LOG_BAR_SIZE: "5"
     "a2dc":
       postBreakout:
         LINK_TYPE_P1: "2"
@@ -197,6 +305,40 @@ mlxConfig:
         VF_LOG_BAR_SIZE: "5"
   uniplane:
     "1023":
+      breakout:
+        2:
+          NUM_OF_PF: "2"
+          NUM_OF_PLANES_P1: "0"
+          NUM_OF_PLANES_P2: "0"
+          LAG_RESOURCE_ALLOCATION: "0"
+          MODULE_SPLIT_M0[0]: "0x1"
+          MODULE_SPLIT_M0[1]: "0x1"
+          MODULE_SPLIT_M0[2]: "0x1"
+          MODULE_SPLIT_M0[3]: "0x1"
+          MODULE_SPLIT_M0[4]: "0x2"
+          MODULE_SPLIT_M0[5]: "0x2"
+          MODULE_SPLIT_M0[6]: "0x2"
+          MODULE_SPLIT_M0[7]: "0x2"
+          MODULE_SPLIT_M0[8]: "0xff"
+          MODULE_SPLIT_M0[9]: "0xff"
+          MODULE_SPLIT_M0[10]: "0xff"
+          MODULE_SPLIT_M0[11]: "0xff"
+          MODULE_SPLIT_M0[12]: "0xff"
+          MODULE_SPLIT_M0[13]: "0xff"
+          MODULE_SPLIT_M0[14]: "0xff"
+          MODULE_SPLIT_M0[15]: "0xff"
+      postBreakout:
+        LINK_TYPE_P1: "2"
+        SRIOV_EN: "1"
+        NUM_OF_VFS: "1"
+        ROCE_ADAPTIVE_ROUTING_EN: "1"
+        USER_PROGRAMMABLE_CC: "1"
+        TX_SCHEDULER_LOCALITY_MODE: "2"
+        ROCE_CC_STEERING_EXT: "2"
+        ROCE_RTT_RESP_DSCP_P1: "0"
+        ROCE_RTT_RESP_DSCP_MODE_P1: "0"
+        MULTIPATH_DSCP: "0"
+    "1025":
       breakout:
         2:
           NUM_OF_PF: "2"
@@ -268,6 +410,18 @@ mlxConfig:
         MULTIPATH_DSCP: "0"
   none:
     "1023":
+      postBreakout:
+        LINK_TYPE_P1: "2"
+        SRIOV_EN: "1"
+        NUM_OF_VFS: "1"
+        ROCE_ADAPTIVE_ROUTING_EN: "1"
+        USER_PROGRAMMABLE_CC: "1"
+        TX_SCHEDULER_LOCALITY_MODE: "2"
+        ROCE_CC_STEERING_EXT: "2"
+        ROCE_RTT_RESP_DSCP_P1: "0"
+        ROCE_RTT_RESP_DSCP_MODE_P1: "0"
+        MULTIPATH_DSCP: "0"
+    "1025":
       postBreakout:
         LINK_TYPE_P1: "2"
         SRIOV_EN: "1"
@@ -364,6 +518,18 @@ runtimeConfig:
       dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=0]/config/value
       valueType: int
       deviceId: "1023"
+      breakout: 4
+    - name: Bandwidth
+      value: 400
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=0]/config/value
+      valueType: int
+      deviceId: "1025"
+      breakout: 2
+    - name: Bandwidth
+      value: 200
+      dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=0]/config/value
+      valueType: int
+      deviceId: "1025"
       breakout: 4
     - name: Bandwidth
       value: 200
