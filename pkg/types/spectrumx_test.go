@@ -60,11 +60,26 @@ var _ = Describe("LoadSpectrumXConfig", func() {
 		Expect(cx8Swplb.PostBreakout).To(HaveKeyWithValue("SRIOV_EN", "1"))
 		Expect(bf3Swplb.PostBreakout).To(HaveKeyWithValue("INTERNAL_CPU_MODEL", "1"))
 
-		// Check hwplb CX8 only
+		// Check CX9 swplb breakout (same config as CX8)
+		cx9Swplb := cfg.MlxConfig["swplb"]["1025"]
+		Expect(cx9Swplb.Breakout).To(HaveKey(2))
+		Expect(cx9Swplb.Breakout).To(HaveKey(4))
+		Expect(cx9Swplb.Breakout[2]).To(HaveKeyWithValue("NUM_OF_PF", "2"))
+		Expect(cx9Swplb.PostBreakout).To(HaveKeyWithValue("LINK_TYPE_P1", "2"))
+
+		// Check hwplb CX8 and CX9
 		Expect(cfg.MlxConfig["hwplb"]).To(HaveKey("1023"))
+		Expect(cfg.MlxConfig["hwplb"]).To(HaveKey("1025"))
 		cx8Hwplb := cfg.MlxConfig["hwplb"]["1023"]
 		Expect(cx8Hwplb.Breakout[2]).To(HaveKeyWithValue("NUM_OF_PLANES_P1", "2"))
 		Expect(cx8Hwplb.PostBreakout).To(HaveKeyWithValue("FLEX_PARSER_PROFILE_ENABLE", "10"))
+		cx9Hwplb := cfg.MlxConfig["hwplb"]["1025"]
+		Expect(cx9Hwplb.Breakout[2]).To(HaveKeyWithValue("NUM_OF_PLANES_P1", "2"))
+		Expect(cx9Hwplb.PostBreakout).To(HaveKeyWithValue("FLEX_PARSER_PROFILE_ENABLE", "10"))
+
+		// Check CX9 uniplane and none
+		Expect(cfg.MlxConfig["uniplane"]).To(HaveKey("1025"))
+		Expect(cfg.MlxConfig["none"]).To(HaveKey("1025"))
 
 		// Check runtime config
 		Expect(cfg.UseSoftwareCCAlgorithm).To(BeTrue())
