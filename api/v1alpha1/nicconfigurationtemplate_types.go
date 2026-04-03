@@ -47,15 +47,54 @@ type PciPerformanceOptimizedSpec struct {
 	MaxReadRequest int `json:"maxReadRequest,omitempty"`
 }
 
+// ECNSpec specifies Explicit Congestion Notification settings
+type ECNSpec struct {
+	// Enable ECN on the specified priority
+	Enabled bool `json:"enabled"`
+	// Traffic class / priority to enable ECN on (0-7)
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=7
+	Priority int `json:"priority"`
+}
+
+// PauseFramesSpec specifies global pause frame settings
+type PauseFramesSpec struct {
+	// Enable global pause frames (autoneg, rx, tx). Set to false to disable all pause frames (recommended when PFC is used).
+	Enabled bool `json:"enabled"`
+}
+
 // QosSpec specifies Quality of Service settings
 type QosSpec struct {
-	// Trust mode for QoS settings, e.g. trust-dscp
+	// Trust mode for QoS settings, e.g. dscp
 	Trust string `json:"trust"`
 	// Priority-based Flow Control configuration, e.g. "0,0,0,1,0,0,0,0"
 	// +kubebuilder:validation:Pattern=`^([01],){7}[01]$`
 	PFC string `json:"pfc"`
 	// 8-bit value for type of service
 	ToS int `json:"tos,omitempty"`
+	// Cable length in meters, used for ECN buffer threshold calculation
+	CableLen int `json:"cableLen,omitempty"`
+	// ECN (Explicit Congestion Notification) settings
+	ECN *ECNSpec `json:"ecn,omitempty"`
+	// Global pause frame settings (disable when using PFC)
+	PauseFrames *PauseFramesSpec `json:"pauseFrames,omitempty"`
+}
+
+// RuntimePerformanceOptimizedSpec specifies runtime NIC performance tuning applied via ethtool
+type RuntimePerformanceOptimizedSpec struct {
+	// Enable runtime performance optimization
+	Enabled bool `json:"enabled"`
+	// RX ring buffer size (ethtool -G rx)
+	// +kubebuilder:validation:Minimum=1
+	RxRingSize int `json:"rxRingSize,omitempty"`
+	// TX ring buffer size (ethtool -G tx)
+	// +kubebuilder:validation:Minimum=1
+	TxRingSize int `json:"txRingSize,omitempty"`
+	// Number of combined channels (ethtool -L combined)
+	// +kubebuilder:validation:Minimum=1
+	CombinedChannels int `json:"combinedChannels,omitempty"`
+	// Enable Large Receive Offload (ethtool -K lro)
+	LRO *bool `json:"lro,omitempty"`
 }
 
 // RoceOptimizedSpec specifies RoCE optimization settings
@@ -64,6 +103,9 @@ type RoceOptimizedSpec struct {
 	Enabled bool `json:"enabled"`
 	// Quality of Service settings
 	Qos *QosSpec `json:"qos,omitempty"`
+	// RoCE mode: 1 for RoCE v1, 2 for RoCE v2. Only effective when roceOptimized.enabled is true.
+	// +kubebuilder:validation:Enum=1;2
+	RoceMode int `json:"roceMode,omitempty"`
 }
 
 // GpuDirectOptimizedSpec specifies GPU Direct optimization settings
@@ -129,6 +171,8 @@ type ConfigurationTemplateSpec struct {
 	RoceOptimized *RoceOptimizedSpec `json:"roceOptimized,omitempty"`
 	// GPU Direct optimization settings
 	GpuDirectOptimized *GpuDirectOptimizedSpec `json:"gpuDirectOptimized,omitempty"`
+	// Runtime NIC performance tuning (ring buffers, channels, LRO) applied via ethtool
+	RuntimePerformanceOptimized *RuntimePerformanceOptimizedSpec `json:"runtimePerformanceOptimized,omitempty"`
 	// Spectrum-X optimization settings. Works only with linkType==Ethernet && numVfs==0. Other optimizations must be skipped or disabled. RawNvConfig must be empty.
 	SpectrumXOptimized *SpectrumXOptimizedSpec `json:"spectrumXOptimized,omitempty"`
 	// List of arbitrary nv config parameters

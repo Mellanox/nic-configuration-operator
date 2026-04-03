@@ -641,9 +641,9 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			maxReadRequestSize, qos := validator.CalculateDesiredRuntimeConfig(device)
-			Expect(maxReadRequestSize).To(Equal(0))
-			Expect(qos).To(BeNil())
+			result := validator.CalculateDesiredRuntimeConfig(device)
+			Expect(result.MaxReadRequestSize).To(Equal(0))
+			Expect(result.Qos).To(BeNil())
 		})
 
 		It("should calculate maxReadRequestSize when PciPerformanceOptimized is enabled with MaxReadRequest", func() {
@@ -661,9 +661,9 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			maxReadRequestSize, qos := validator.CalculateDesiredRuntimeConfig(device)
-			Expect(maxReadRequestSize).To(Equal(1024))
-			Expect(qos).To(BeNil())
+			result := validator.CalculateDesiredRuntimeConfig(device)
+			Expect(result.MaxReadRequestSize).To(Equal(1024))
+			Expect(result.Qos).To(BeNil())
 		})
 
 		It("should default maxReadReqSize to 4096 when PciPerformanceOptimized is enabled without MaxReadRequest", func() {
@@ -681,9 +681,9 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			maxReadRequestSize, qos := validator.CalculateDesiredRuntimeConfig(device)
-			Expect(maxReadRequestSize).To(Equal(4096))
-			Expect(qos).To(BeNil())
+			result := validator.CalculateDesiredRuntimeConfig(device)
+			Expect(result.MaxReadRequestSize).To(Equal(4096))
+			Expect(result.Qos).To(BeNil())
 		})
 
 		It("should calculate QoS when RoceOptimized is enabled with Qos", func() {
@@ -705,12 +705,12 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			maxReadRequestSize, qos := validator.CalculateDesiredRuntimeConfig(device)
-			Expect(maxReadRequestSize).To(Equal(0))
-			Expect(qos).ToNot(BeNil())
-			Expect(qos.Trust).To(Equal("dscp"))
-			Expect(qos.PFC).To(Equal("0,1,0,1,0,0,0,0"))
-			Expect(qos.ToS).To(Equal(100))
+			result := validator.CalculateDesiredRuntimeConfig(device)
+			Expect(result.MaxReadRequestSize).To(Equal(0))
+			Expect(result.Qos).ToNot(BeNil())
+			Expect(result.Qos.Trust).To(Equal("dscp"))
+			Expect(result.Qos.PFC).To(Equal("0,1,0,1,0,0,0,0"))
+			Expect(result.Qos.ToS).To(Equal(100))
 		})
 
 		It("should default QoS settings when RoceOptimized is enabled without Qos", func() {
@@ -728,12 +728,12 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			maxReadRequestSize, qos := validator.CalculateDesiredRuntimeConfig(device)
-			Expect(maxReadRequestSize).To(Equal(0))
-			Expect(qos).ToNot(BeNil())
-			Expect(qos.Trust).To(Equal("dscp"))
-			Expect(qos.PFC).To(Equal("0,0,0,1,0,0,0,0"))
-			Expect(qos.ToS).To(Equal(0))
+			result := validator.CalculateDesiredRuntimeConfig(device)
+			Expect(result.MaxReadRequestSize).To(Equal(0))
+			Expect(result.Qos).ToNot(BeNil())
+			Expect(result.Qos.Trust).To(Equal("dscp"))
+			Expect(result.Qos.PFC).To(Equal("0,0,0,1,0,0,0,0"))
+			Expect(result.Qos.ToS).To(Equal(0))
 		})
 
 		It("should prioritize RoceOptimized settings over defaults when both optimizations are enabled", func() {
@@ -757,12 +757,12 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			maxReadRequestSize, qos := validator.CalculateDesiredRuntimeConfig(device)
-			Expect(maxReadRequestSize).To(Equal(256))
-			Expect(qos).ToNot(BeNil())
-			Expect(qos.Trust).To(Equal("customTrust"))
-			Expect(qos.PFC).To(Equal("1,1,1,1,1,1,1,1"))
-			Expect(qos.ToS).To(Equal(0))
+			result := validator.CalculateDesiredRuntimeConfig(device)
+			Expect(result.MaxReadRequestSize).To(Equal(256))
+			Expect(result.Qos).ToNot(BeNil())
+			Expect(result.Qos.Trust).To(Equal("customTrust"))
+			Expect(result.Qos.PFC).To(Equal("1,1,1,1,1,1,1,1"))
+			Expect(result.Qos.ToS).To(Equal(0))
 		})
 
 		It("should not calculate desired QoS settings for an IB configuration", func() {
@@ -787,9 +787,9 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			maxReadRequestSize, qos := validator.CalculateDesiredRuntimeConfig(device)
-			Expect(maxReadRequestSize).To(Equal(256))
-			Expect(qos).To(BeNil())
+			result := validator.CalculateDesiredRuntimeConfig(device)
+			Expect(result.MaxReadRequestSize).To(Equal(256))
+			Expect(result.Qos).To(BeNil())
 		})
 		It("should not calculate desired QoS settings if RoCE optimizations are disabled", func() {
 			device := &v1alpha1.NicDevice{
@@ -809,9 +809,102 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			maxReadRequestSize, qos := validator.CalculateDesiredRuntimeConfig(device)
-			Expect(maxReadRequestSize).To(Equal(256))
-			Expect(qos).To(BeNil())
+			result := validator.CalculateDesiredRuntimeConfig(device)
+			Expect(result.MaxReadRequestSize).To(Equal(256))
+			Expect(result.Qos).To(BeNil())
+		})
+
+		It("should include RoceMode when set", func() {
+			device := &v1alpha1.NicDevice{
+				Spec: v1alpha1.NicDeviceSpec{
+					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
+						Template: &v1alpha1.ConfigurationTemplateSpec{
+							RoceOptimized: &v1alpha1.RoceOptimizedSpec{
+								Enabled:  true,
+								RoceMode: consts.RoceModeV2,
+							},
+						},
+					},
+				},
+			}
+
+			result := validator.CalculateDesiredRuntimeConfig(device)
+			Expect(result.RoceMode).To(Equal(consts.RoceModeV2))
+		})
+
+		It("should include ECN, CableLen, and PauseFrames from QoS", func() {
+			device := &v1alpha1.NicDevice{
+				Spec: v1alpha1.NicDeviceSpec{
+					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
+						Template: &v1alpha1.ConfigurationTemplateSpec{
+							RoceOptimized: &v1alpha1.RoceOptimizedSpec{
+								Enabled: true,
+								Qos: &v1alpha1.QosSpec{
+									Trust:       "dscp",
+									PFC:         "0,0,0,1,0,0,0,0",
+									CableLen:    5,
+									ECN:         &v1alpha1.ECNSpec{Enabled: true, Priority: 3},
+									PauseFrames: &v1alpha1.PauseFramesSpec{Enabled: false},
+								},
+							},
+						},
+					},
+				},
+			}
+
+			result := validator.CalculateDesiredRuntimeConfig(device)
+			Expect(result.Qos).ToNot(BeNil())
+			Expect(result.Qos.CableLen).To(Equal(5))
+			Expect(result.Qos.ECN).ToNot(BeNil())
+			Expect(result.Qos.ECN.Enabled).To(BeTrue())
+			Expect(result.Qos.ECN.Priority).To(Equal(3))
+			Expect(result.Qos.PauseFrames).ToNot(BeNil())
+			Expect(result.Qos.PauseFrames.Enabled).To(BeFalse())
+		})
+
+		It("should not include RuntimePerf for IB devices", func() {
+			device := &v1alpha1.NicDevice{
+				Spec: v1alpha1.NicDeviceSpec{
+					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
+						Template: &v1alpha1.ConfigurationTemplateSpec{
+							LinkType: consts.Infiniband,
+							RuntimePerformanceOptimized: &v1alpha1.RuntimePerformanceOptimizedSpec{
+								Enabled:    true,
+								RxRingSize: 1024,
+							},
+						},
+					},
+				},
+			}
+
+			result := validator.CalculateDesiredRuntimeConfig(device)
+			Expect(result.RuntimePerf).To(BeNil())
+		})
+
+		It("should include RuntimePerf for Ethernet devices", func() {
+			lroTrue := true
+			device := &v1alpha1.NicDevice{
+				Spec: v1alpha1.NicDeviceSpec{
+					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
+						Template: &v1alpha1.ConfigurationTemplateSpec{
+							RuntimePerformanceOptimized: &v1alpha1.RuntimePerformanceOptimizedSpec{
+								Enabled:          true,
+								RxRingSize:       1024,
+								TxRingSize:       512,
+								CombinedChannels: 8,
+								LRO:              &lroTrue,
+							},
+						},
+					},
+				},
+			}
+
+			result := validator.CalculateDesiredRuntimeConfig(device)
+			Expect(result.RuntimePerf).ToNot(BeNil())
+			Expect(result.RuntimePerf.RxRingSize).To(Equal(1024))
+			Expect(result.RuntimePerf.TxRingSize).To(Equal(512))
+			Expect(result.RuntimePerf.CombinedChannels).To(Equal(8))
+			Expect(*result.RuntimePerf.LRO).To(BeTrue())
 		})
 	})
 
@@ -842,13 +935,13 @@ var _ = Describe("ConfigValidationImpl", func() {
 
 		Context("when desired runtime config is applied correctly on all ports", func() {
 			BeforeEach(func() {
-				desiredMaxReadReqSize, desiredQos := validator.CalculateDesiredRuntimeConfig(device)
+				desired := validator.CalculateDesiredRuntimeConfig(device)
 
-				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desiredMaxReadReqSize, nil)
-				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.1").Return(desiredMaxReadReqSize, nil)
+				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desired.MaxReadRequestSize, nil)
+				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.1").Return(desired.MaxReadRequestSize, nil)
 
-				mockConfigurationUtils.On("GetQoSSettings", device, "interface0").Return(desiredQos, nil)
-				mockConfigurationUtils.On("GetQoSSettings", device, "interface1").Return(desiredQos, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, "interface0").Return(desired.Qos, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, "interface1").Return(desired.Qos, nil)
 			})
 
 			It("should return true with no error", func() {
@@ -871,12 +964,12 @@ var _ = Describe("ConfigValidationImpl", func() {
 						},
 					},
 				}
-				desiredMaxReadReqSize, desiredQos := validator.CalculateDesiredRuntimeConfig(device)
+				desired := validator.CalculateDesiredRuntimeConfig(device)
 
-				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desiredMaxReadReqSize+128, nil)
+				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desired.MaxReadRequestSize+128, nil)
 
-				mockConfigurationUtils.On("GetQoSSettings", device, "interface0").Return(desiredQos, nil)
-				mockConfigurationUtils.On("GetQoSSettings", device, "interface1").Return(desiredQos, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, "interface0").Return(desired.Qos, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, "interface1").Return(desired.Qos, nil)
 
 				// The second port should not be called since the first port already fails
 			})
@@ -902,13 +995,13 @@ var _ = Describe("ConfigValidationImpl", func() {
 					},
 				}
 
-				desiredMaxReadReqSize, desiredQos := validator.CalculateDesiredRuntimeConfig(device)
+				desired := validator.CalculateDesiredRuntimeConfig(device)
 
-				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desiredMaxReadReqSize, nil)
-				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.1").Return(desiredMaxReadReqSize+256, nil)
+				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desired.MaxReadRequestSize, nil)
+				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.1").Return(desired.MaxReadRequestSize+256, nil)
 
-				mockConfigurationUtils.On("GetQoSSettings", device, "interface0").Return(desiredQos, nil)
-				mockConfigurationUtils.On("GetQoSSettings", device, "interface1").Return(desiredQos, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, "interface0").Return(desired.Qos, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, "interface1").Return(desired.Qos, nil)
 			})
 
 			It("should return false with no error", func() {
@@ -920,12 +1013,12 @@ var _ = Describe("ConfigValidationImpl", func() {
 
 		Context("when trust setting does not match on the first port", func() {
 			BeforeEach(func() {
-				desiredMaxReadReqSize, desiredQos := validator.CalculateDesiredRuntimeConfig(device)
+				desired := validator.CalculateDesiredRuntimeConfig(device)
 
-				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desiredMaxReadReqSize, nil)
-				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.1").Return(desiredMaxReadReqSize, nil)
+				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desired.MaxReadRequestSize, nil)
+				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.1").Return(desired.MaxReadRequestSize, nil)
 
-				mockConfigurationUtils.On("GetQoSSettings", device, "interface0").Return(&v1alpha1.QosSpec{Trust: "differentTrust", PFC: desiredQos.PFC}, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, "interface0").Return(&v1alpha1.QosSpec{Trust: "differentTrust", PFC: desired.Qos.PFC}, nil)
 				// The second port should not be called since the first port already fails
 			})
 
@@ -938,13 +1031,13 @@ var _ = Describe("ConfigValidationImpl", func() {
 
 		Context("when PFC setting does not match on the second port", func() {
 			BeforeEach(func() {
-				desiredMaxReadReqSize, desiredQos := validator.CalculateDesiredRuntimeConfig(device)
+				desired := validator.CalculateDesiredRuntimeConfig(device)
 
-				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desiredMaxReadReqSize, nil)
-				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.1").Return(desiredMaxReadReqSize, nil)
+				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desired.MaxReadRequestSize, nil)
+				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.1").Return(desired.MaxReadRequestSize, nil)
 
-				mockConfigurationUtils.On("GetQoSSettings", device, "interface0").Return(&v1alpha1.QosSpec{Trust: desiredQos.Trust, PFC: "differentPfc"}, nil)
-				mockConfigurationUtils.On("GetQoSSettings", device, "interface1").Return(&v1alpha1.QosSpec{Trust: desiredQos.Trust, PFC: "differentPfc"}, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, "interface0").Return(&v1alpha1.QosSpec{Trust: desired.Qos.Trust, PFC: "differentPfc"}, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, "interface1").Return(&v1alpha1.QosSpec{Trust: desired.Qos.Trust, PFC: "differentPfc"}, nil)
 			})
 
 			It("should return false with no error", func() {
@@ -968,7 +1061,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 					},
 				}
 
-				_, _ = validator.CalculateDesiredRuntimeConfig(device)
+				_ = validator.CalculateDesiredRuntimeConfig(device)
 
 				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(0, fmt.Errorf("command failed"))
 			})
@@ -983,10 +1076,10 @@ var _ = Describe("ConfigValidationImpl", func() {
 
 		Context("when GetQoSSettings returns an error on the first port", func() {
 			BeforeEach(func() {
-				desiredMaxReadReqSize, _ := validator.CalculateDesiredRuntimeConfig(device)
+				desired := validator.CalculateDesiredRuntimeConfig(device)
 
-				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desiredMaxReadReqSize, nil)
-				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.1").Return(desiredMaxReadReqSize, nil)
+				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desired.MaxReadRequestSize, nil)
+				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.1").Return(desired.MaxReadRequestSize, nil)
 
 				mockConfigurationUtils.On("GetQoSSettings", device, "interface0").Return(&v1alpha1.QosSpec{}, fmt.Errorf("failed to get trust and pfc"))
 			})
@@ -1006,10 +1099,10 @@ var _ = Describe("ConfigValidationImpl", func() {
 					{PCI: "0000:03:00.0", NetworkInterface: "interface0"},
 				}
 
-				desiredMaxReadReqSize, desiredQos := validator.CalculateDesiredRuntimeConfig(device)
+				desired := validator.CalculateDesiredRuntimeConfig(device)
 
-				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desiredMaxReadReqSize, nil)
-				mockConfigurationUtils.On("GetQoSSettings", device, "interface0").Return(desiredQos, nil)
+				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desired.MaxReadRequestSize, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, "interface0").Return(desired.Qos, nil)
 			})
 
 			It("should return true with no error", func() {
@@ -1026,10 +1119,10 @@ var _ = Describe("ConfigValidationImpl", func() {
 					{PCI: "0000:03:00.0", NetworkInterface: "interface0"},
 				}
 
-				desiredMaxReadReqSize, desiredQos := validator.CalculateDesiredRuntimeConfig(device)
+				desired := validator.CalculateDesiredRuntimeConfig(device)
 
-				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desiredMaxReadReqSize, nil)
-				mockConfigurationUtils.On("GetQoSSettings", device, "interface0").Return(&v1alpha1.QosSpec{Trust: "differentTrust", PFC: desiredQos.PFC}, nil)
+				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desired.MaxReadRequestSize, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, "interface0").Return(&v1alpha1.QosSpec{Trust: "differentTrust", PFC: desired.Qos.PFC}, nil)
 			})
 
 			It("should return false with no error", func() {
@@ -1046,14 +1139,259 @@ var _ = Describe("ConfigValidationImpl", func() {
 					{PCI: "0000:03:00.0", NetworkInterface: ""},
 				}
 
-				desiredMaxReadReqSize, _ := validator.CalculateDesiredRuntimeConfig(device)
+				desired := validator.CalculateDesiredRuntimeConfig(device)
 
-				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desiredMaxReadReqSize, nil)
+				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desired.MaxReadRequestSize, nil)
 			})
 
 			It("should return an error", func() {
 				applied, err = validator.RuntimeConfigApplied(device)
-				Expect(err).To(MatchError("cannot apply QoS settings for device port 0000:03:00.0, network interface is missing"))
+				Expect(err).To(MatchError("cannot validate QoS settings for device port 0000:03:00.0, network interface is missing"))
+				Expect(applied).To(BeFalse())
+			})
+		})
+
+		Context("when validating RoCE mode", func() {
+			BeforeEach(func() {
+				device.Spec.Configuration.Template.RoceOptimized.RoceMode = consts.RoceModeV2
+			})
+
+			It("should return true when RoCE mode matches", func() {
+				desired := validator.CalculateDesiredRuntimeConfig(device)
+
+				mockConfigurationUtils.On("GetMaxReadRequestSize", mock.Anything).Return(desired.MaxReadRequestSize, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, mock.Anything).Return(desired.Qos, nil)
+				mockConfigurationUtils.On("GetRoceMode", mock.Anything).Return(consts.RoceModeV2, nil)
+
+				applied, err = validator.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
+			})
+
+			It("should return false when RoCE mode does not match", func() {
+				desired := validator.CalculateDesiredRuntimeConfig(device)
+
+				mockConfigurationUtils.On("GetMaxReadRequestSize", mock.Anything).Return(desired.MaxReadRequestSize, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, mock.Anything).Return(desired.Qos, nil)
+				mockConfigurationUtils.On("GetRoceMode", "interface0").Return(consts.RoceModeV1, nil)
+
+				applied, err = validator.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeFalse())
+			})
+		})
+
+		Context("when validating ECN settings", func() {
+			BeforeEach(func() {
+				device.Spec.Configuration.Template.RoceOptimized.Qos = &v1alpha1.QosSpec{
+					Trust: "dscp",
+					PFC:   "0,0,0,1,0,0,0,0",
+					ECN:   &v1alpha1.ECNSpec{Enabled: true, Priority: 3},
+				}
+			})
+
+			It("should return true when ECN is enabled and matches", func() {
+				desired := validator.CalculateDesiredRuntimeConfig(device)
+
+				mockConfigurationUtils.On("GetMaxReadRequestSize", mock.Anything).Return(desired.MaxReadRequestSize, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, mock.Anything).Return(desired.Qos, nil)
+				mockConfigurationUtils.On("GetECNEnabled", mock.Anything, 3).Return(true, true, nil)
+
+				applied, err = validator.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
+			})
+
+			It("should return false when ECN is enabled but not applied", func() {
+				desired := validator.CalculateDesiredRuntimeConfig(device)
+
+				mockConfigurationUtils.On("GetMaxReadRequestSize", mock.Anything).Return(desired.MaxReadRequestSize, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, mock.Anything).Return(desired.Qos, nil)
+				mockConfigurationUtils.On("GetECNEnabled", "interface0", 3).Return(false, false, nil)
+
+				applied, err = validator.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeFalse())
+			})
+		})
+
+		Context("when validating ECN disabled", func() {
+			BeforeEach(func() {
+				device.Spec.Configuration.Template.RoceOptimized.Qos = &v1alpha1.QosSpec{
+					Trust: "dscp",
+					PFC:   "0,0,0,1,0,0,0,0",
+					ECN:   &v1alpha1.ECNSpec{Enabled: false, Priority: 3},
+				}
+			})
+
+			It("should return true when ECN is disabled and matches", func() {
+				desired := validator.CalculateDesiredRuntimeConfig(device)
+
+				mockConfigurationUtils.On("GetMaxReadRequestSize", mock.Anything).Return(desired.MaxReadRequestSize, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, mock.Anything).Return(desired.Qos, nil)
+				mockConfigurationUtils.On("GetECNEnabled", mock.Anything, 3).Return(false, false, nil)
+
+				applied, err = validator.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
+			})
+
+			It("should return false when ECN should be disabled but is still enabled", func() {
+				desired := validator.CalculateDesiredRuntimeConfig(device)
+
+				mockConfigurationUtils.On("GetMaxReadRequestSize", mock.Anything).Return(desired.MaxReadRequestSize, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, mock.Anything).Return(desired.Qos, nil)
+				mockConfigurationUtils.On("GetECNEnabled", "interface0", 3).Return(true, true, nil)
+
+				applied, err = validator.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeFalse())
+			})
+		})
+
+		Context("when validating pause frames", func() {
+			BeforeEach(func() {
+				device.Spec.Configuration.Template.RoceOptimized.Qos = &v1alpha1.QosSpec{
+					Trust:       "dscp",
+					PFC:         "0,0,0,1,0,0,0,0",
+					PauseFrames: &v1alpha1.PauseFramesSpec{Enabled: false},
+				}
+			})
+
+			It("should return true when pause frames match", func() {
+				desired := validator.CalculateDesiredRuntimeConfig(device)
+
+				mockConfigurationUtils.On("GetMaxReadRequestSize", mock.Anything).Return(desired.MaxReadRequestSize, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, mock.Anything).Return(desired.Qos, nil)
+				mockConfigurationUtils.On("GetPauseFrames", mock.Anything).Return(false, nil)
+
+				applied, err = validator.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
+			})
+
+			It("should return false when pause frames do not match", func() {
+				desired := validator.CalculateDesiredRuntimeConfig(device)
+
+				mockConfigurationUtils.On("GetMaxReadRequestSize", mock.Anything).Return(desired.MaxReadRequestSize, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, mock.Anything).Return(desired.Qos, nil)
+				mockConfigurationUtils.On("GetPauseFrames", "interface0").Return(true, nil)
+
+				applied, err = validator.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeFalse())
+			})
+		})
+
+		Context("when validating runtime performance settings", func() {
+			var lroTrue = true
+
+			BeforeEach(func() {
+				device.Spec.Configuration.Template.RuntimePerformanceOptimized = &v1alpha1.RuntimePerformanceOptimizedSpec{
+					Enabled:          true,
+					RxRingSize:       1024,
+					TxRingSize:       512,
+					CombinedChannels: 8,
+					LRO:              &lroTrue,
+				}
+			})
+
+			It("should return true when all runtime perf settings match", func() {
+				desired := validator.CalculateDesiredRuntimeConfig(device)
+
+				mockConfigurationUtils.On("GetMaxReadRequestSize", mock.Anything).Return(desired.MaxReadRequestSize, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, mock.Anything).Return(desired.Qos, nil)
+				mockConfigurationUtils.On("GetRingSize", mock.Anything).Return(1024, 512, nil)
+				mockConfigurationUtils.On("GetCombinedChannels", mock.Anything).Return(8, nil)
+				mockConfigurationUtils.On("GetLRO", mock.Anything).Return(true, nil)
+
+				applied, err = validator.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
+			})
+
+			It("should return false when ring size does not match", func() {
+				desired := validator.CalculateDesiredRuntimeConfig(device)
+
+				mockConfigurationUtils.On("GetMaxReadRequestSize", mock.Anything).Return(desired.MaxReadRequestSize, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, mock.Anything).Return(desired.Qos, nil)
+				mockConfigurationUtils.On("GetRingSize", "interface0").Return(256, 512, nil)
+
+				applied, err = validator.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeFalse())
+			})
+
+			It("should return false when combined channels does not match", func() {
+				desired := validator.CalculateDesiredRuntimeConfig(device)
+
+				mockConfigurationUtils.On("GetMaxReadRequestSize", mock.Anything).Return(desired.MaxReadRequestSize, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, mock.Anything).Return(desired.Qos, nil)
+				mockConfigurationUtils.On("GetRingSize", mock.Anything).Return(1024, 512, nil)
+				mockConfigurationUtils.On("GetCombinedChannels", "interface0").Return(4, nil)
+
+				applied, err = validator.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeFalse())
+			})
+
+			It("should return false when LRO does not match", func() {
+				desired := validator.CalculateDesiredRuntimeConfig(device)
+
+				mockConfigurationUtils.On("GetMaxReadRequestSize", mock.Anything).Return(desired.MaxReadRequestSize, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, mock.Anything).Return(desired.Qos, nil)
+				mockConfigurationUtils.On("GetRingSize", mock.Anything).Return(1024, 512, nil)
+				mockConfigurationUtils.On("GetCombinedChannels", mock.Anything).Return(8, nil)
+				mockConfigurationUtils.On("GetLRO", "interface0").Return(false, nil)
+
+				applied, err = validator.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeFalse())
+			})
+
+			It("should return error when GetRingSize fails", func() {
+				desired := validator.CalculateDesiredRuntimeConfig(device)
+
+				mockConfigurationUtils.On("GetMaxReadRequestSize", mock.Anything).Return(desired.MaxReadRequestSize, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, mock.Anything).Return(desired.Qos, nil)
+				mockConfigurationUtils.On("GetRingSize", "interface0").Return(0, 0, fmt.Errorf("ethtool failed"))
+
+				applied, err = validator.RuntimeConfigApplied(device)
+				Expect(err).To(HaveOccurred())
+				Expect(applied).To(BeFalse())
+			})
+		})
+
+		Context("when validating cable length", func() {
+			BeforeEach(func() {
+				device.Spec.Configuration.Template.RoceOptimized.Qos = &v1alpha1.QosSpec{
+					Trust:    "dscp",
+					PFC:      "0,0,0,1,0,0,0,0",
+					CableLen: 10,
+				}
+			})
+
+			It("should return true when cable length matches", func() {
+				desired := validator.CalculateDesiredRuntimeConfig(device)
+
+				mockConfigurationUtils.On("GetMaxReadRequestSize", mock.Anything).Return(desired.MaxReadRequestSize, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, mock.Anything).Return(desired.Qos, nil)
+				mockConfigurationUtils.On("GetCableLen", mock.Anything).Return(10, nil)
+
+				applied, err = validator.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
+			})
+
+			It("should return false when cable length does not match", func() {
+				desired := validator.CalculateDesiredRuntimeConfig(device)
+
+				mockConfigurationUtils.On("GetMaxReadRequestSize", mock.Anything).Return(desired.MaxReadRequestSize, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, mock.Anything).Return(desired.Qos, nil)
+				mockConfigurationUtils.On("GetCableLen", "interface0").Return(5, nil)
+
+				applied, err = validator.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
 				Expect(applied).To(BeFalse())
 			})
 		})
