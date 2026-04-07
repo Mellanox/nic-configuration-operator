@@ -118,7 +118,7 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 
 	selectorFields := fields.OneTermEqualSelector("status.node", d.nodeName)
 
-	err = d.Client.List(ctx, list, &client.ListOptions{FieldSelector: selectorFields})
+	err = d.List(ctx, list, &client.ListOptions{FieldSelector: selectorFields})
 	if err != nil {
 		log.Log.Error(err, "failed to list NicDevice CRs")
 		return err
@@ -127,7 +127,7 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 	log.Log.V(2).Info("listed devices", "devices", list.Items)
 
 	node := &v1.Node{}
-	err = d.Client.Get(ctx, types.NamespacedName{Name: d.nodeName}, node)
+	err = d.Get(ctx, types.NamespacedName{Name: d.nodeName}, node)
 	if err != nil {
 		log.Log.Error(err, "failed to get node object")
 		return err
@@ -139,7 +139,7 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 		if !exists {
 			log.Log.V(2).Info("device doesn't exist on the node anymore, deleting", "device", nicDeviceCR.Name)
 			// Need to delete this CR, it doesn't represent the observedDevice on host anymore
-			err = d.Client.Delete(ctx, &nicDeviceCR)
+			err = d.Delete(ctx, &nicDeviceCR)
 			if err != nil {
 				log.Log.Error(err, "failed  to delete NicDevice CR", "device", nicDeviceCR.Name)
 			}
@@ -187,12 +187,12 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 			},
 		}
 
-		err := controllerutil.SetOwnerReference(node, device, d.Client.Scheme())
+		err := controllerutil.SetOwnerReference(node, device, d.Scheme())
 		if err != nil {
 			log.Log.Error(err, "failed to set owner reference for device", "device", device)
 			continue
 		}
-		err = d.Client.Create(ctx, device)
+		err = d.Create(ctx, device)
 		if err != nil {
 			log.Log.Error(err, "failed to create device", "device", device)
 			continue
@@ -200,7 +200,7 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 
 		if apierrors.IsAlreadyExists(err) {
 			// Device already exists but was not matched by SerialNumber, which means the status was not applied properly
-			err = d.Client.Get(ctx, types.NamespacedName{Name: device.Name, Namespace: device.Namespace}, device)
+			err = d.Get(ctx, types.NamespacedName{Name: device.Name, Namespace: device.Namespace}, device)
 			if err != nil {
 				log.Log.Error(err, "failed to get NicDevice obj", "device", device)
 				continue

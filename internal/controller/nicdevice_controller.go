@@ -382,7 +382,7 @@ func (r *NicDeviceReconciler) getDevices(ctx context.Context) (nicDeviceConfigur
 
 	selectorFields := fields.OneTermEqualSelector("status.node", r.NodeName)
 
-	err := r.Client.List(ctx, devices, &client.ListOptions{FieldSelector: selectorFields})
+	err := r.List(ctx, devices, &client.ListOptions{FieldSelector: selectorFields})
 	if err != nil {
 		log.Log.Error(err, "failed to list NicDevice CRs")
 		return nil, err

@@ -371,9 +371,10 @@ func (h configurationManager) applyResetToDefault(device *v1alpha1.NicDevice, pc
 	if isBF3device {
 		val := bf3OperationModeValue[0]
 		mode := ""
-		if val == consts.NvParamBF3DpuMode {
+		switch val {
+		case consts.NvParamBF3DpuMode:
 			mode = "DPU"
-		} else if val == consts.NvParamBF3NicMode {
+		case consts.NvParamBF3NicMode:
 			mode = "NIC"
 		}
 		log.Log.Info(fmt.Sprintf("The device %s is the BlueField-3, restoring the previous mode of operation (%s mode) after configuration reset", device.Name, mode))

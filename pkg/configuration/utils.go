@@ -242,12 +242,14 @@ func (h *configurationUtils) SetQoSSettings(device *v1alpha1.NicDevice, spec *v1
 }
 
 func encapTypeToLinkType(encapType string) string {
-	if encapType == "ether" {
+	switch encapType {
+	case "ether":
 		return consts.Ethernet
-	} else if encapType == "infiniband" {
+	case "infiniband":
 		return consts.Infiniband
+	default:
+		return ""
 	}
-	return ""
 }
 
 func newConfigurationUtils(dmsManager dms.DMSManager) ConfigurationUtils {

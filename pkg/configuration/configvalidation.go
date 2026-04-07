@@ -58,13 +58,14 @@ type configValidationImpl struct {
 }
 
 func nvParamLinkTypeFromName(linkType string) string {
-	if linkType == consts.Infiniband {
+	switch linkType {
+	case consts.Infiniband:
 		return consts.NvParamLinkTypeInfiniband
-	} else if linkType == consts.Ethernet {
+	case consts.Ethernet:
 		return consts.NvParamLinkTypeEthernet
+	default:
+		return ""
 	}
-
-	return ""
 }
 
 func applyDefaultNvConfigValueIfExists(
