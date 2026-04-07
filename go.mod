@@ -1,6 +1,6 @@
 module github.com/Mellanox/nic-configuration-operator
 
-go 1.24.11
+go 1.25
 
 require (
 	github.com/Mellanox/maintenance-operator/api v0.3.0
