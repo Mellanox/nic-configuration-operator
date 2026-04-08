@@ -993,7 +993,7 @@ var _ = Describe("ConfigurationManager", func() {
 		Context("when applying max read request size", func() {
 			BeforeEach(func() {
 				mockConfigValidation.On("RuntimeConfigApplied", device).Return(false, nil)
-				mockConfigValidation.On("CalculateDesiredRuntimeConfig", device).Return(2048, nil)
+				mockConfigValidation.On("CalculateDesiredRuntimeConfig", device).Return(types.DesiredRuntimeConfig{MaxReadRequestSize: 2048})
 			})
 
 			It("should apply max read request size successfully", func() {
@@ -1021,7 +1021,7 @@ var _ = Describe("ConfigurationManager", func() {
 		Context("when applying QoS settings", func() {
 			BeforeEach(func() {
 				mockConfigValidation.On("RuntimeConfigApplied", device).Return(false, nil)
-				mockConfigValidation.On("CalculateDesiredRuntimeConfig", device).Return(0, &v1alpha1.QosSpec{Trust: "trust", PFC: "pfc"})
+				mockConfigValidation.On("CalculateDesiredRuntimeConfig", device).Return(types.DesiredRuntimeConfig{Qos: &v1alpha1.QosSpec{Trust: "trust", PFC: "pfc"}})
 			})
 
 			It("should apply QoS settings successfully", func() {
@@ -1049,7 +1049,7 @@ var _ = Describe("ConfigurationManager", func() {
 		Context("when applying both max read request size and QoS settings", func() {
 			BeforeEach(func() {
 				mockConfigValidation.On("RuntimeConfigApplied", device).Return(false, nil)
-				mockConfigValidation.On("CalculateDesiredRuntimeConfig", device).Return(2048, &v1alpha1.QosSpec{Trust: "trust", PFC: "pfc"})
+				mockConfigValidation.On("CalculateDesiredRuntimeConfig", device).Return(types.DesiredRuntimeConfig{MaxReadRequestSize: 2048, Qos: &v1alpha1.QosSpec{Trust: "trust", PFC: "pfc"}})
 			})
 
 			It("should apply both settings successfully", func() {
@@ -1085,6 +1085,185 @@ var _ = Describe("ConfigurationManager", func() {
 
 				mockHostUtils.AssertExpectations(GinkgoT())
 				mockConfigValidation.AssertExpectations(GinkgoT())
+			})
+		})
+
+		Context("when applying per-port RoCE mode", func() {
+			BeforeEach(func() {
+				mockConfigValidation.On("RuntimeConfigApplied", device).Return(false, nil)
+				mockConfigValidation.On("CalculateDesiredRuntimeConfig", device).Return(types.DesiredRuntimeConfig{RoceMode: consts.RoceModeV2})
+			})
+
+			It("should apply RoCE mode successfully", func() {
+				mockHostUtils.On("SetRoceMode", "eth0", consts.RoceModeV2).Return(nil)
+
+				result, err := manager.ApplyRuntimeConfiguration(ctx, device)
+				Expect(err).To(BeNil())
+				Expect(result.Status).To(Equal(types.ApplyStatusSuccess))
+				mockHostUtils.AssertExpectations(GinkgoT())
+			})
+
+			It("should return error if SetRoceMode fails", func() {
+				setErr := errors.New("failed to set roce mode")
+				mockHostUtils.On("SetRoceMode", "eth0", consts.RoceModeV2).Return(setErr)
+
+				_, err := manager.ApplyRuntimeConfiguration(ctx, device)
+				Expect(err).To(MatchError(setErr))
+				mockHostUtils.AssertExpectations(GinkgoT())
+			})
+		})
+
+		Context("when applying per-port ECN settings", func() {
+			BeforeEach(func() {
+				mockConfigValidation.On("RuntimeConfigApplied", device).Return(false, nil)
+				mockConfigValidation.On("CalculateDesiredRuntimeConfig", device).Return(types.DesiredRuntimeConfig{
+					Qos: &v1alpha1.QosSpec{ECN: &v1alpha1.ECNSpec{Enabled: true, Priority: 3}},
+				})
+			})
+
+			It("should apply ECN successfully", func() {
+				mockHostUtils.On("SetECNEnabled", "eth0", 3, true, true).Return(nil)
+
+				result, err := manager.ApplyRuntimeConfiguration(ctx, device)
+				Expect(err).To(BeNil())
+				Expect(result.Status).To(Equal(types.ApplyStatusSuccess))
+				mockHostUtils.AssertExpectations(GinkgoT())
+			})
+
+			It("should return error if SetECNEnabled fails", func() {
+				setErr := errors.New("failed to set ECN")
+				mockHostUtils.On("SetECNEnabled", "eth0", 3, true, true).Return(setErr)
+
+				_, err := manager.ApplyRuntimeConfiguration(ctx, device)
+				Expect(err).To(MatchError(setErr))
+				mockHostUtils.AssertExpectations(GinkgoT())
+			})
+		})
+
+		Context("when applying per-port pause frames", func() {
+			BeforeEach(func() {
+				mockConfigValidation.On("RuntimeConfigApplied", device).Return(false, nil)
+				mockConfigValidation.On("CalculateDesiredRuntimeConfig", device).Return(types.DesiredRuntimeConfig{
+					Qos: &v1alpha1.QosSpec{PauseFrames: &v1alpha1.PauseFramesSpec{Enabled: true}},
+				})
+			})
+
+			It("should apply pause frames successfully", func() {
+				mockHostUtils.On("SetPauseFrames", "eth0", true).Return(nil)
+
+				result, err := manager.ApplyRuntimeConfiguration(ctx, device)
+				Expect(err).To(BeNil())
+				Expect(result.Status).To(Equal(types.ApplyStatusSuccess))
+				mockHostUtils.AssertExpectations(GinkgoT())
+			})
+
+			It("should return error if SetPauseFrames fails", func() {
+				setErr := errors.New("failed to set pause frames")
+				mockHostUtils.On("SetPauseFrames", "eth0", true).Return(setErr)
+
+				_, err := manager.ApplyRuntimeConfiguration(ctx, device)
+				Expect(err).To(MatchError(setErr))
+				mockHostUtils.AssertExpectations(GinkgoT())
+			})
+		})
+
+		Context("when applying per-port runtime performance settings", func() {
+			lroEnabled := true
+
+			BeforeEach(func() {
+				mockConfigValidation.On("RuntimeConfigApplied", device).Return(false, nil)
+				mockConfigValidation.On("CalculateDesiredRuntimeConfig", device).Return(types.DesiredRuntimeConfig{
+					RuntimePerf: &v1alpha1.RuntimePerformanceOptimizedSpec{
+						Enabled:          true,
+						RxRingSize:       4096,
+						TxRingSize:       4096,
+						CombinedChannels: 8,
+						LRO:              &lroEnabled,
+					},
+				})
+			})
+
+			It("should apply all runtime perf settings successfully", func() {
+				mockHostUtils.On("SetRingSize", "eth0", 4096, 4096).Return(nil)
+				mockHostUtils.On("GetCombinedChannels", "eth0").Return(4, nil)
+				mockHostUtils.On("SetCombinedChannels", "eth0", 8).Return(nil)
+				mockHostUtils.On("SetLRO", "eth0", true).Return(nil)
+
+				result, err := manager.ApplyRuntimeConfiguration(ctx, device)
+				Expect(err).To(BeNil())
+				Expect(result.Status).To(Equal(types.ApplyStatusSuccess))
+				mockHostUtils.AssertExpectations(GinkgoT())
+			})
+
+			It("should skip combined channels when driver does not support it", func() {
+				mockHostUtils.On("SetRingSize", "eth0", 4096, 4096).Return(nil)
+				mockHostUtils.On("GetCombinedChannels", "eth0").Return(0, nil)
+				mockHostUtils.On("SetLRO", "eth0", true).Return(nil)
+
+				result, err := manager.ApplyRuntimeConfiguration(ctx, device)
+				Expect(err).To(BeNil())
+				Expect(result.Status).To(Equal(types.ApplyStatusSuccess))
+				mockHostUtils.AssertNotCalled(GinkgoT(), "SetCombinedChannels", mock.Anything, mock.Anything)
+				mockHostUtils.AssertExpectations(GinkgoT())
+			})
+
+			It("should return error if SetRingSize fails", func() {
+				setErr := errors.New("failed to set ring size")
+				mockHostUtils.On("SetRingSize", "eth0", 4096, 4096).Return(setErr)
+
+				_, err := manager.ApplyRuntimeConfiguration(ctx, device)
+				Expect(err).To(MatchError(setErr))
+				mockHostUtils.AssertExpectations(GinkgoT())
+			})
+
+			It("should return error if SetCombinedChannels fails", func() {
+				mockHostUtils.On("SetRingSize", "eth0", 4096, 4096).Return(nil)
+				mockHostUtils.On("GetCombinedChannels", "eth0").Return(4, nil)
+				setErr := errors.New("failed to set combined channels")
+				mockHostUtils.On("SetCombinedChannels", "eth0", 8).Return(setErr)
+
+				_, err := manager.ApplyRuntimeConfiguration(ctx, device)
+				Expect(err).To(MatchError(setErr))
+				mockHostUtils.AssertExpectations(GinkgoT())
+			})
+
+			It("should return error if SetLRO fails", func() {
+				mockHostUtils.On("SetRingSize", "eth0", 4096, 4096).Return(nil)
+				mockHostUtils.On("GetCombinedChannels", "eth0").Return(4, nil)
+				mockHostUtils.On("SetCombinedChannels", "eth0", 8).Return(nil)
+				setErr := errors.New("failed to set LRO")
+				mockHostUtils.On("SetLRO", "eth0", true).Return(setErr)
+
+				_, err := manager.ApplyRuntimeConfiguration(ctx, device)
+				Expect(err).To(MatchError(setErr))
+				mockHostUtils.AssertExpectations(GinkgoT())
+			})
+		})
+
+		Context("when applying per-port cable length", func() {
+			BeforeEach(func() {
+				mockConfigValidation.On("RuntimeConfigApplied", device).Return(false, nil)
+				mockConfigValidation.On("CalculateDesiredRuntimeConfig", device).Return(types.DesiredRuntimeConfig{
+					Qos: &v1alpha1.QosSpec{CableLen: 3},
+				})
+			})
+
+			It("should apply cable length successfully", func() {
+				mockHostUtils.On("SetCableLen", "eth0", 3).Return(nil)
+
+				result, err := manager.ApplyRuntimeConfiguration(ctx, device)
+				Expect(err).To(BeNil())
+				Expect(result.Status).To(Equal(types.ApplyStatusSuccess))
+				mockHostUtils.AssertExpectations(GinkgoT())
+			})
+
+			It("should return error if SetCableLen fails", func() {
+				setErr := errors.New("failed to set cable length")
+				mockHostUtils.On("SetCableLen", "eth0", 3).Return(setErr)
+
+				_, err := manager.ApplyRuntimeConfiguration(ctx, device)
+				Expect(err).To(MatchError(setErr))
+				mockHostUtils.AssertExpectations(GinkgoT())
 			})
 		})
 	})
