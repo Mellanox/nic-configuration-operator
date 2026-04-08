@@ -138,11 +138,11 @@ var _ = Describe("NicConfigurationTemplate CEL validation", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("rejects when SpectrumXOptimized enabled together with non-empty RawNvConfig", func() {
+	It("allows SpectrumXOptimized enabled together with non-empty RawNvConfig", func() {
 		obj := newNicConfigurationTemplate("spcx-with-rawnv", "Ethernet", 1, &SpectrumXOptimizedSpec{Enabled: true, Version: "RA2.0"})
 		obj.Spec.Template.RawNvConfig = []NvConfigParam{{Name: "FOO", Value: "BAR"}}
 		err := k8sClient.Create(ctx, obj)
-		Expect(err).To(HaveOccurred())
+		Expect(err).NotTo(HaveOccurred())
 	})
 
 	It("allows SpectrumXOptimized enabled for ConnectX-8 (NicType 1023)", func() {

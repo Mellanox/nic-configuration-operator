@@ -102,6 +102,14 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
+	// Always reconcile InterfaceNameTemplates to clean up stale udev rules
+	// even when no devices have specs to reconcile
+	err = r.reconcileInterfaceNameTemplates(ctx, configStatuses)
+	if err != nil {
+		log.Log.Error(err, "failed to reconcile interface name templates")
+		return ctrl.Result{}, err
+	}
+
 	if len(configStatuses) == 0 {
 		log.Log.V(2).Info("no devices from this node to reconcile")
 
@@ -115,13 +123,6 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	log.Log.V(2).Info(fmt.Sprintf("reconciling %d NicDevices", len(configStatuses)))
-
-	// First, reconcile InterfaceNameTemplate specs by applying udev rules
-	err = r.reconcileInterfaceNameTemplates(ctx, configStatuses)
-	if err != nil {
-		log.Log.Error(err, "failed to reconcile interface name templates")
-		return ctrl.Result{}, err
-	}
 
 	// Next we need to validate the firmware spec of all devices
 	// NicDevices with empty FW specs are skipped during this step
@@ -334,6 +335,39 @@ func (r *NicDeviceReconciler) reconcileInterfaceNameTemplates(ctx context.Contex
 		}
 	}
 
+	// When udev rules changed, refresh port names for devices being reconciled on this node.
+	// Udev rule changes (additions or removals) can affect any device's interface names.
+	// Downstream consumers (DMS QoS, Spectrum-X runtime config, DOCA CC) rely on
+	// accurate port names in the same reconcile loop.
+	if updated {
+		for _, status := range statuses {
+			device := status.device
+			if device.Spec.InterfaceNameTemplate != nil {
+				continue // already updated in the loop above
+			}
+			portsChanged := false
+			for i := range device.Status.Ports {
+				port := &device.Status.Ports[i]
+				if port.PCI == "" {
+					continue
+				}
+				actualNetDevice := r.DeviceDiscoveryUtils.GetInterfaceName(port.PCI)
+				actualRdmaDevice := r.DeviceDiscoveryUtils.GetRDMADeviceName(port.PCI)
+				if port.NetworkInterface != actualNetDevice || port.RdmaInterface != actualRdmaDevice {
+					port.NetworkInterface = actualNetDevice
+					port.RdmaInterface = actualRdmaDevice
+					portsChanged = true
+				}
+			}
+			if portsChanged {
+				if err := r.Client.Status().Update(ctx, device); err != nil {
+					log.Log.Error(err, "Failed to update device port status after udev rules change", "device", device.Name)
+					return err
+				}
+			}
+		}
+	}
+
 	if hasError {
 		return fmt.Errorf("one or more devices have mismatched interface names")
 	}
@@ -348,7 +382,7 @@ func (r *NicDeviceReconciler) getDevices(ctx context.Context) (nicDeviceConfigur
 
 	selectorFields := fields.OneTermEqualSelector("status.node", r.NodeName)
 
-	err := r.Client.List(ctx, devices, &client.ListOptions{FieldSelector: selectorFields})
+	err := r.List(ctx, devices, &client.ListOptions{FieldSelector: selectorFields})
 	if err != nil {
 		log.Log.Error(err, "failed to list NicDevice CRs")
 		return nil, err
@@ -377,6 +411,17 @@ func (r *NicDeviceReconciler) getDevices(ctx context.Context) (nicDeviceConfigur
 			statusCondition := meta.FindStatusCondition(device.Status.Conditions, consts.ConfigUpdateInProgressCondition)
 			if statusCondition == nil || statusCondition.Reason != consts.DeviceConfigSpecEmptyReason {
 				err = r.updateConfigInProgressStatusCondition(ctx, &device, consts.DeviceConfigSpecEmptyReason, metav1.ConditionFalse, "")
+				if err != nil {
+					log.Log.Error(err, "failed to update status condition", "device", device.Name)
+					return nil, err
+				}
+			}
+		}
+
+		if device.Spec.InterfaceNameTemplate == nil {
+			statusCondition := meta.FindStatusCondition(device.Status.Conditions, consts.InterfaceNameCondition)
+			if statusCondition != nil && statusCondition.Reason != consts.InterfaceNameSpecEmptyReason {
+				err = r.updateInterfaceNameStatusCondition(ctx, &device, consts.InterfaceNameSpecEmptyReason, metav1.ConditionFalse, "")
 				if err != nil {
 					log.Log.Error(err, "failed to update status condition", "device", device.Name)
 					return nil, err
@@ -835,6 +880,10 @@ func (r *NicDeviceReconciler) updateConfigInProgressStatusCondition(ctx context.
 
 func (r *NicDeviceReconciler) updateFirmwareUpdateInProgressStatusCondition(ctx context.Context, device *v1alpha1.NicDevice, reason string, status metav1.ConditionStatus, message string) error {
 	return r.updateStatusCondition(ctx, device, consts.FirmwareUpdateInProgressCondition, reason, status, message)
+}
+
+func (r *NicDeviceReconciler) updateInterfaceNameStatusCondition(ctx context.Context, device *v1alpha1.NicDevice, reason string, status metav1.ConditionStatus, message string) error {
+	return r.updateStatusCondition(ctx, device, consts.InterfaceNameCondition, reason, status, message)
 }
 
 func (r *NicDeviceReconciler) updateStatusCondition(ctx context.Context, device *v1alpha1.NicDevice, conditionType string, reason string, status metav1.ConditionStatus, message string) error {

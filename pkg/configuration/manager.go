@@ -78,6 +78,14 @@ func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *
 		if err != nil {
 			return false, false, err
 		}
+		postBreakoutParams, err := h.spectrumXConfigManager.GetPostBreakoutMlxConfig(device)
+		if err != nil {
+			return false, false, err
+		}
+		// Merge rawNvConfig overrides into the appropriate phase:
+		// params that overlap with breakout go into breakout, the rest into postBreakout
+		postBreakoutParams = mergeRawNvConfigIntoPhases(device, breakoutParams, postBreakoutParams)
+
 		if len(breakoutParams) > 0 {
 			if mismatch, err := h.checkMlxConfigMismatch(ctx, pci, breakoutParams); err != nil {
 				return false, false, err
@@ -87,10 +95,6 @@ func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *
 			}
 		}
 
-		postBreakoutParams, err := h.spectrumXConfigManager.GetPostBreakoutMlxConfig(device)
-		if err != nil {
-			return false, false, err
-		}
 		if len(postBreakoutParams) > 0 {
 			if mismatch, err := h.checkMlxConfigMismatch(ctx, pci, postBreakoutParams); err != nil {
 				return false, false, err
@@ -312,6 +316,14 @@ func (h configurationManager) applySpectrumXNVConfiguration(ctx context.Context,
 		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}
 
+	postBreakoutParams, err := h.spectrumXConfigManager.GetPostBreakoutMlxConfig(device)
+	if err != nil {
+		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+	}
+	// Merge rawNvConfig overrides into the appropriate phase:
+	// params that overlap with breakout go into breakout, the rest into postBreakout
+	postBreakoutParams = mergeRawNvConfigIntoPhases(device, breakoutParams, postBreakoutParams)
+
 	// Check and apply breakout config — requires reboot before postBreakout can be applied
 	if len(breakoutParams) > 0 {
 		if mismatch, err := h.checkMlxConfigMismatch(ctx, pci, breakoutParams); err != nil {
@@ -326,12 +338,7 @@ func (h configurationManager) applySpectrumXNVConfiguration(ctx context.Context,
 		}
 	}
 
-	// Check and apply postBreakout config
-	postBreakoutParams, err := h.spectrumXConfigManager.GetPostBreakoutMlxConfig(device)
-	if err != nil {
-		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
-	}
-
+	// Check and apply postBreakout config (includes rawNvConfig params that don't overlap with breakout)
 	if len(postBreakoutParams) > 0 {
 		if mismatch, err := h.checkMlxConfigMismatch(ctx, pci, postBreakoutParams); err != nil {
 			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
@@ -371,9 +378,10 @@ func (h configurationManager) applyResetToDefault(device *v1alpha1.NicDevice, pc
 	if isBF3device {
 		val := bf3OperationModeValue[0]
 		mode := ""
-		if val == consts.NvParamBF3DpuMode {
+		switch val {
+		case consts.NvParamBF3DpuMode:
 			mode = "DPU"
-		} else if val == consts.NvParamBF3NicMode {
+		case consts.NvParamBF3NicMode:
 			mode = "NIC"
 		}
 		log.Log.Info(fmt.Sprintf("The device %s is the BlueField-3, restoring the previous mode of operation (%s mode) after configuration reset", device.Name, mode))
@@ -496,6 +504,44 @@ func (h configurationManager) queryNvConfigs(ctx context.Context, device *v1alph
 		nvConfigs[pciAddr] = nvConfig
 	}
 	return nvConfigs, nil
+}
+
+// getRawNvConfigParams extracts rawNvConfig params from the device template,
+// filtering out _P2 suffixed params for single-port devices.
+func getRawNvConfigParams(device *v1alpha1.NicDevice) map[string]string {
+	template := device.Spec.Configuration.Template
+	if template == nil || len(template.RawNvConfig) == 0 {
+		return nil
+	}
+	secondPortPresent := len(device.Status.Ports) > 1
+	params := make(map[string]string, len(template.RawNvConfig))
+	for _, rawParam := range template.RawNvConfig {
+		if strings.HasSuffix(rawParam.Name, consts.SecondPortPrefix) && !secondPortPresent {
+			continue
+		}
+		params[rawParam.Name] = rawParam.Value
+	}
+	if len(params) == 0 {
+		return nil
+	}
+	return params
+}
+
+// mergeRawNvConfigIntoPhases merges rawNvConfig overrides into the appropriate Spectrum-X phase.
+// Params that overlap with breakout keys are overridden in breakoutParams;
+// all other raw params are merged into postBreakoutParams.
+func mergeRawNvConfigIntoPhases(device *v1alpha1.NicDevice, breakoutParams map[string]string, postBreakoutParams map[string]string) map[string]string {
+	for k, v := range getRawNvConfigParams(device) {
+		if _, exists := breakoutParams[k]; exists {
+			breakoutParams[k] = v
+		} else {
+			if postBreakoutParams == nil {
+				postBreakoutParams = make(map[string]string)
+			}
+			postBreakoutParams[k] = v
+		}
+	}
+	return postBreakoutParams
 }
 
 func NewConfigurationManager(eventRecorder record.EventRecorder, dmsManager dms.DMSManager, nvConfigUtils nvconfig.NVConfigUtils, spectrumXConfigManager spectrumx.SpectrumXManager) ConfigurationManager {

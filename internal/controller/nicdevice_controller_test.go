@@ -1430,6 +1430,138 @@ var _ = Describe("NicDeviceReconciler", func() {
 				return false
 			}, time.Second*2).Should(BeFalse())
 		})
+
+		It("Should clear InterfaceNameCondition when InterfaceNameTemplate spec is removed", func() {
+			expectedNames := map[string]udev.ExpectedInterfaceNames{
+				pciAddress: {NetDevice: "net1p1", RdmaDevice: "rdma1p1"},
+			}
+
+			// Reset the mock to override the default behavior
+			udevManager.ExpectedCalls = nil
+			udevManager.On("ApplyUdevRules", mock.Anything, mock.Anything).Return(expectedNames, true, nil)
+
+			// Mock device discovery to return matching names
+			deviceDiscoveryUtils.On("GetInterfaceName", pciAddress).Return("net1p1")
+			deviceDiscoveryUtils.On("GetRDMADeviceName", pciAddress).Return("rdma1p1")
+
+			// Mock maintenance manager to release maintenance at the end
+			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
+
+			device := createDeviceWithInterfaceNameTemplate()
+
+			// Wait for the InterfaceNameApplied condition to be set
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.InterfaceNameCondition,
+				Status:  metav1.ConditionTrue,
+				Reason:  consts.InterfaceNameAppliedReason,
+				Message: "Interface names applied successfully",
+			}))
+
+			// Now remove the InterfaceNameTemplate spec
+			Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
+			device.Spec.InterfaceNameTemplate = nil
+			Expect(k8sClient.Update(ctx, device)).To(Succeed())
+
+			// The condition should be cleared to False with InterfaceNameSpecEmpty reason
+			Eventually(func() bool {
+				d := &v1alpha1.NicDevice{}
+				if err := k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, d); err != nil {
+					return false
+				}
+				cond := meta.FindStatusCondition(d.Status.Conditions, consts.InterfaceNameCondition)
+				return cond != nil &&
+					cond.Status == metav1.ConditionFalse &&
+					cond.Reason == consts.InterfaceNameSpecEmptyReason
+			}, timeout).Should(BeTrue())
+		})
+
+		It("Should refresh port names for non-template devices when udev rules updated", func() {
+			expectedNames := map[string]udev.ExpectedInterfaceNames{
+				pciAddress: {NetDevice: "net1p1", RdmaDevice: "rdma1p1"},
+			}
+
+			// Reset the mock to override the default behavior
+			udevManager.ExpectedCalls = nil
+			udevManager.On("ApplyUdevRules", mock.Anything, mock.Anything).Return(expectedNames, true, nil)
+
+			// Mock device discovery to return matching names for the template device
+			deviceDiscoveryUtils.On("GetInterfaceName", pciAddress).Return("net1p1")
+			deviceDiscoveryUtils.On("GetRDMADeviceName", pciAddress).Return("rdma1p1")
+
+			// Mock maintenance manager
+			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
+
+			// Create a device WITH a template
+			createDeviceWithInterfaceNameTemplate()
+
+			// Create a second device WITHOUT a template but with a configuration spec
+			secondDeviceName := "second-device"
+			secondPCI := "0000:4b:00.0"
+			secondDevice := &v1alpha1.NicDevice{
+				ObjectMeta: metav1.ObjectMeta{Name: secondDeviceName, Namespace: namespaceName},
+				Spec: v1alpha1.NicDeviceSpec{
+					Configuration: &v1alpha1.NicDeviceConfigurationSpec{},
+				},
+			}
+			Expect(k8sClient.Create(ctx, secondDevice)).To(Succeed())
+			secondDevice.Status = v1alpha1.NicDeviceStatus{
+				Node: nodeName,
+				Ports: []v1alpha1.NicDevicePortSpec{
+					{PCI: secondPCI, NetworkInterface: "old_eth0", RdmaInterface: "old_mlx5_0"},
+				},
+			}
+			Expect(k8sClient.Status().Update(ctx, secondDevice)).To(Succeed())
+
+			// Mock device discovery for the second device to return updated names
+			deviceDiscoveryUtils.On("GetInterfaceName", secondPCI).Return("new_eth0")
+			deviceDiscoveryUtils.On("GetRDMADeviceName", secondPCI).Return("new_mlx5_0")
+
+			// Mock configuration validation for the second device
+			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil)
+			configurationManager.On("ApplyRuntimeConfiguration", mock.Anything, mock.Anything).Return(&types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusSuccess}, nil)
+
+			// Verify the second device's port names are refreshed
+			Eventually(func() string {
+				d := &v1alpha1.NicDevice{}
+				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: secondDeviceName, Namespace: namespaceName}, d)).To(Succeed())
+				if len(d.Status.Ports) > 0 {
+					return d.Status.Ports[0].NetworkInterface
+				}
+				return ""
+			}, timeout).Should(Equal("new_eth0"))
+		})
+
+		It("Should not set InterfaceNameCondition on devices that never had a template", func() {
+			// Mock maintenance manager
+			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
+
+			// Create a device with only Configuration spec, no InterfaceNameTemplate
+			device := &v1alpha1.NicDevice{
+				ObjectMeta: metav1.ObjectMeta{Name: deviceName, Namespace: namespaceName},
+				Spec: v1alpha1.NicDeviceSpec{
+					Configuration: &v1alpha1.NicDeviceConfigurationSpec{},
+				},
+			}
+			Expect(k8sClient.Create(ctx, device)).To(Succeed())
+			device.Status = v1alpha1.NicDeviceStatus{
+				Node: nodeName,
+				Ports: []v1alpha1.NicDevicePortSpec{
+					{PCI: pciAddress, NetworkInterface: "eth0", RdmaInterface: "mlx5_0"},
+				},
+			}
+			Expect(k8sClient.Status().Update(ctx, device)).To(Succeed())
+
+			// Mock configuration validation
+			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil)
+			configurationManager.On("ApplyRuntimeConfiguration", mock.Anything, mock.Anything).Return(&types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusSuccess}, nil)
+
+			// The InterfaceNameCondition should never be set
+			Consistently(func() bool {
+				d := &v1alpha1.NicDevice{}
+				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, d)).To(Succeed())
+				return meta.FindStatusCondition(d.Status.Conditions, consts.InterfaceNameCondition) != nil
+			}, time.Second*3).Should(BeFalse())
+		})
 	})
 
 	Describe("reconcile triggered by CC process termination", func() {
