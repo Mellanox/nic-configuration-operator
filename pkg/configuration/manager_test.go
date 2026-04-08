@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -1124,6 +1125,7 @@ var _ = Describe("ConfigurationManager", func() {
 			It("returns update+reboot when breakout params mismatch", func() {
 				breakoutParams := map[string]string{"NUM_OF_PF": "2", "NUM_OF_PLANES_P1": "0"}
 				mockSpcXMgr.On("GetBreakoutMlxConfig", device).Return(breakoutParams, nil)
+				mockSpcXMgr.On("GetPostBreakoutMlxConfig", device).Return(nil, nil)
 				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, mock.Anything).Return(
 					types.NvConfigQuery{CurrentConfig: map[string][]string{"NUM_OF_PF": {"1"}, "NUM_OF_PLANES_P1": {"0"}}}, nil)
 
@@ -1176,6 +1178,7 @@ var _ = Describe("ConfigurationManager", func() {
 			It("returns error when QueryNvConfig fails during breakout check", func() {
 				breakoutParams := map[string]string{"NUM_OF_PF": "2"}
 				mockSpcXMgr.On("GetBreakoutMlxConfig", device).Return(breakoutParams, nil)
+				mockSpcXMgr.On("GetPostBreakoutMlxConfig", device).Return(nil, nil)
 				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, mock.Anything).Return(
 					types.NvConfigQuery{}, errors.New("query failed"))
 
@@ -1196,12 +1199,96 @@ var _ = Describe("ConfigurationManager", func() {
 				Expect(updateNeeded).To(BeTrue())
 				Expect(rebootNeeded).To(BeTrue())
 			})
+
+			It("returns update+reboot when rawNvConfig params mismatch", func() {
+				device.Spec.Configuration.Template.RawNvConfig = []v1alpha1.NvConfigParam{
+					{Name: "CUSTOM_PARAM_P1", Value: "42"},
+				}
+				breakoutParams := map[string]string{"NUM_OF_PF": "2"}
+				postBreakoutParams := map[string]string{"LINK_TYPE_P1": "2"}
+				mockSpcXMgr.On("GetBreakoutMlxConfig", device).Return(breakoutParams, nil)
+				mockSpcXMgr.On("GetPostBreakoutMlxConfig", device).Return(postBreakoutParams, nil)
+				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, []string{"NUM_OF_PF"}).Return(
+					types.NvConfigQuery{CurrentConfig: map[string][]string{"NUM_OF_PF": {"2"}}}, nil)
+				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, mock.MatchedBy(func(names []string) bool {
+					return len(names) == 2 && slices.Contains(names, "LINK_TYPE_P1") && slices.Contains(names, "CUSTOM_PARAM_P1")
+				})).Return(
+					types.NvConfigQuery{CurrentConfig: map[string][]string{"LINK_TYPE_P1": {"2"}, "CUSTOM_PARAM_P1": {"0"}}}, nil)
+
+				updateNeeded, rebootNeeded, err := manager.ValidateDeviceNvSpec(ctx, device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(updateNeeded).To(BeTrue())
+				Expect(rebootNeeded).To(BeTrue())
+			})
+
+			It("returns no update when all params including rawNvConfig match", func() {
+				device.Spec.Configuration.Template.RawNvConfig = []v1alpha1.NvConfigParam{
+					{Name: "CUSTOM_PARAM_P1", Value: "42"},
+				}
+				breakoutParams := map[string]string{"NUM_OF_PF": "2"}
+				postBreakoutParams := map[string]string{"LINK_TYPE_P1": "2"}
+				mockSpcXMgr.On("GetBreakoutMlxConfig", device).Return(breakoutParams, nil)
+				mockSpcXMgr.On("GetPostBreakoutMlxConfig", device).Return(postBreakoutParams, nil)
+				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, []string{"NUM_OF_PF"}).Return(
+					types.NvConfigQuery{CurrentConfig: map[string][]string{"NUM_OF_PF": {"2"}}}, nil)
+				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, mock.MatchedBy(func(names []string) bool {
+					return len(names) == 2 && slices.Contains(names, "LINK_TYPE_P1") && slices.Contains(names, "CUSTOM_PARAM_P1")
+				})).Return(
+					types.NvConfigQuery{CurrentConfig: map[string][]string{"LINK_TYPE_P1": {"2"}, "CUSTOM_PARAM_P1": {"42"}}}, nil)
+
+				updateNeeded, rebootNeeded, err := manager.ValidateDeviceNvSpec(ctx, device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(updateNeeded).To(BeFalse())
+				Expect(rebootNeeded).To(BeFalse())
+			})
+
+			It("rawNvConfig overrides conflicting postBreakout param in validation", func() {
+				// postBreakout wants LINK_TYPE_P1=2, but rawNvConfig overrides to LINK_TYPE_P1=1
+				// current config has LINK_TYPE_P1=1, so merged desired (1) matches current (1) → no mismatch
+				device.Spec.Configuration.Template.RawNvConfig = []v1alpha1.NvConfigParam{
+					{Name: "LINK_TYPE_P1", Value: "1"},
+				}
+				breakoutParams := map[string]string{"NUM_OF_PF": "2"}
+				postBreakoutParams := map[string]string{"LINK_TYPE_P1": "2"}
+				mockSpcXMgr.On("GetBreakoutMlxConfig", device).Return(breakoutParams, nil)
+				mockSpcXMgr.On("GetPostBreakoutMlxConfig", device).Return(postBreakoutParams, nil)
+				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, []string{"NUM_OF_PF"}).Return(
+					types.NvConfigQuery{CurrentConfig: map[string][]string{"NUM_OF_PF": {"2"}}}, nil)
+				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, []string{"LINK_TYPE_P1"}).Return(
+					types.NvConfigQuery{CurrentConfig: map[string][]string{"LINK_TYPE_P1": {"1"}}}, nil)
+
+				updateNeeded, rebootNeeded, err := manager.ValidateDeviceNvSpec(ctx, device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(updateNeeded).To(BeFalse())
+				Expect(rebootNeeded).To(BeFalse())
+			})
+
+			It("rawNvConfig overrides breakout param and is checked in breakout phase", func() {
+				// rawNvConfig overrides NUM_OF_PF which is a breakout param
+				// current has NUM_OF_PF=2, rawNvConfig sets it to 4 → mismatch in breakout phase
+				device.Spec.Configuration.Template.RawNvConfig = []v1alpha1.NvConfigParam{
+					{Name: "NUM_OF_PF", Value: "4"},
+				}
+				breakoutParams := map[string]string{"NUM_OF_PF": "2"}
+				postBreakoutParams := map[string]string{"LINK_TYPE_P1": "2"}
+				mockSpcXMgr.On("GetBreakoutMlxConfig", device).Return(breakoutParams, nil)
+				mockSpcXMgr.On("GetPostBreakoutMlxConfig", device).Return(postBreakoutParams, nil)
+				// After merge, breakout has NUM_OF_PF=4 (rawNvConfig override)
+				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, []string{"NUM_OF_PF"}).Return(
+					types.NvConfigQuery{CurrentConfig: map[string][]string{"NUM_OF_PF": {"2"}}}, nil)
+
+				updateNeeded, rebootNeeded, err := manager.ValidateDeviceNvSpec(ctx, device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(updateNeeded).To(BeTrue())
+				Expect(rebootNeeded).To(BeTrue())
+			})
 		})
 
 		Describe("ApplyNVConfiguration (SpectrumX path)", func() {
 			It("applies breakout only and returns PartiallyApplied when breakout mismatches", func() {
 				breakoutParams := map[string]string{"NUM_OF_PF": "2"}
 				mockSpcXMgr.On("GetBreakoutMlxConfig", device).Return(breakoutParams, nil)
+				mockSpcXMgr.On("GetPostBreakoutMlxConfig", device).Return(nil, nil)
 				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, mock.Anything).Return(
 					types.NvConfigQuery{CurrentConfig: map[string][]string{"NUM_OF_PF": {"1"}}}, nil)
 				mockNVConfigUtils.On("SetNvConfigParametersBatch", pciAddress, breakoutParams, true).Return(nil)
@@ -1248,6 +1335,7 @@ var _ = Describe("ConfigurationManager", func() {
 			It("returns error when SetNvConfigParametersBatch fails", func() {
 				breakoutParams := map[string]string{"NUM_OF_PF": "2"}
 				mockSpcXMgr.On("GetBreakoutMlxConfig", device).Return(breakoutParams, nil)
+				mockSpcXMgr.On("GetPostBreakoutMlxConfig", device).Return(nil, nil)
 				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, mock.Anything).Return(
 					types.NvConfigQuery{CurrentConfig: map[string][]string{"NUM_OF_PF": {"1"}}}, nil)
 				mockNVConfigUtils.On("SetNvConfigParametersBatch", pciAddress, breakoutParams, true).Return(errors.New("set failed"))
@@ -1255,6 +1343,97 @@ var _ = Describe("ConfigurationManager", func() {
 				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
 				Expect(err).To(HaveOccurred())
 				Expect(result.Status).To(Equal(types.ApplyStatusFailed))
+			})
+
+			It("merges rawNvConfig into postBreakout and applies", func() {
+				device.Spec.Configuration.Template.RawNvConfig = []v1alpha1.NvConfigParam{
+					{Name: "CUSTOM_PARAM_P1", Value: "42"},
+				}
+				breakoutParams := map[string]string{"NUM_OF_PF": "2"}
+				postBreakoutParams := map[string]string{"LINK_TYPE_P1": "2"}
+				mockSpcXMgr.On("GetBreakoutMlxConfig", device).Return(breakoutParams, nil)
+				mockSpcXMgr.On("GetPostBreakoutMlxConfig", device).Return(postBreakoutParams, nil)
+				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, []string{"NUM_OF_PF"}).Return(
+					types.NvConfigQuery{CurrentConfig: map[string][]string{"NUM_OF_PF": {"2"}}}, nil)
+				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, mock.MatchedBy(func(names []string) bool {
+					return len(names) == 2 && slices.Contains(names, "LINK_TYPE_P1") && slices.Contains(names, "CUSTOM_PARAM_P1")
+				})).Return(
+					types.NvConfigQuery{CurrentConfig: map[string][]string{"LINK_TYPE_P1": {"2"}, "CUSTOM_PARAM_P1": {"0"}}}, nil)
+				merged := map[string]string{"NUM_OF_PF": "2", "LINK_TYPE_P1": "2", "CUSTOM_PARAM_P1": "42"}
+				mockNVConfigUtils.On("SetNvConfigParametersBatch", pciAddress, merged, true).Return(nil)
+
+				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.Status).To(Equal(types.ApplyStatusSuccess))
+				Expect(result.RebootRequired).To(BeTrue())
+			})
+
+			It("rawNvConfig overrides conflicting postBreakout param", func() {
+				device.Spec.Configuration.Template.RawNvConfig = []v1alpha1.NvConfigParam{
+					{Name: "LINK_TYPE_P1", Value: "1"},
+				}
+				breakoutParams := map[string]string{"NUM_OF_PF": "2"}
+				postBreakoutParams := map[string]string{"LINK_TYPE_P1": "2"}
+				mockSpcXMgr.On("GetBreakoutMlxConfig", device).Return(breakoutParams, nil)
+				mockSpcXMgr.On("GetPostBreakoutMlxConfig", device).Return(postBreakoutParams, nil)
+				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, []string{"NUM_OF_PF"}).Return(
+					types.NvConfigQuery{CurrentConfig: map[string][]string{"NUM_OF_PF": {"2"}}}, nil)
+				// After merge, LINK_TYPE_P1 should be "1" (rawNvConfig override)
+				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, []string{"LINK_TYPE_P1"}).Return(
+					types.NvConfigQuery{CurrentConfig: map[string][]string{"LINK_TYPE_P1": {"2"}}}, nil)
+				// The merged set should have rawNvConfig's value "1" for LINK_TYPE_P1
+				merged := map[string]string{"NUM_OF_PF": "2", "LINK_TYPE_P1": "1"}
+				mockNVConfigUtils.On("SetNvConfigParametersBatch", pciAddress, merged, true).Return(nil)
+
+				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.Status).To(Equal(types.ApplyStatusSuccess))
+				Expect(result.RebootRequired).To(BeTrue())
+			})
+
+			It("rawNvConfig overrides breakout param and applies in breakout phase", func() {
+				device.Spec.Configuration.Template.RawNvConfig = []v1alpha1.NvConfigParam{
+					{Name: "NUM_OF_PF", Value: "4"},
+				}
+				breakoutParams := map[string]string{"NUM_OF_PF": "2"}
+				postBreakoutParams := map[string]string{"LINK_TYPE_P1": "2"}
+				mockSpcXMgr.On("GetBreakoutMlxConfig", device).Return(breakoutParams, nil)
+				mockSpcXMgr.On("GetPostBreakoutMlxConfig", device).Return(postBreakoutParams, nil)
+				// After merge, breakout has NUM_OF_PF=4 (rawNvConfig override), which mismatches current
+				mergedBreakout := map[string]string{"NUM_OF_PF": "4"}
+				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, []string{"NUM_OF_PF"}).Return(
+					types.NvConfigQuery{CurrentConfig: map[string][]string{"NUM_OF_PF": {"2"}}}, nil)
+				mockNVConfigUtils.On("SetNvConfigParametersBatch", pciAddress, mergedBreakout, true).Return(nil)
+
+				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.Status).To(Equal(types.ApplyStatusPartiallyApplied))
+				Expect(result.RebootRequired).To(BeTrue())
+			})
+
+			It("filters _P2 rawNvConfig params for single-port device", func() {
+				device.Spec.Configuration.Template.RawNvConfig = []v1alpha1.NvConfigParam{
+					{Name: "CUSTOM_PARAM_P1", Value: "42"},
+					{Name: "CUSTOM_PARAM_P2", Value: "42"},
+				}
+				breakoutParams := map[string]string{"NUM_OF_PF": "2"}
+				postBreakoutParams := map[string]string{"LINK_TYPE_P1": "2"}
+				mockSpcXMgr.On("GetBreakoutMlxConfig", device).Return(breakoutParams, nil)
+				mockSpcXMgr.On("GetPostBreakoutMlxConfig", device).Return(postBreakoutParams, nil)
+				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, []string{"NUM_OF_PF"}).Return(
+					types.NvConfigQuery{CurrentConfig: map[string][]string{"NUM_OF_PF": {"2"}}}, nil)
+				// Only LINK_TYPE_P1 and CUSTOM_PARAM_P1 should be checked (P2 filtered for single-port)
+				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, mock.MatchedBy(func(names []string) bool {
+					return len(names) == 2 && slices.Contains(names, "LINK_TYPE_P1") && slices.Contains(names, "CUSTOM_PARAM_P1") && !slices.Contains(names, "CUSTOM_PARAM_P2")
+				})).Return(
+					types.NvConfigQuery{CurrentConfig: map[string][]string{"LINK_TYPE_P1": {"2"}, "CUSTOM_PARAM_P1": {"0"}}}, nil)
+				merged := map[string]string{"NUM_OF_PF": "2", "LINK_TYPE_P1": "2", "CUSTOM_PARAM_P1": "42"}
+				mockNVConfigUtils.On("SetNvConfigParametersBatch", pciAddress, merged, true).Return(nil)
+
+				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.Status).To(Equal(types.ApplyStatusSuccess))
+				Expect(result.RebootRequired).To(BeTrue())
 			})
 		})
 	})

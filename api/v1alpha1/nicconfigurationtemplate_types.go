@@ -114,7 +114,6 @@ type NvConfigParam struct {
 // ConfigurationTemplateSpec is a set of configurations for the NICs
 // +kubebuilder:validation:XValidation:rule="!(has(self.spectrumXOptimized) && self.spectrumXOptimized.enabled) || (self.linkType == 'Ethernet' && self.numVfs == 1)",message="spectrumXOptimized can be enabled only when linkType=='Ethernet' and numVfs==1"
 // +kubebuilder:validation:XValidation:rule="!(has(self.spectrumXOptimized) && self.spectrumXOptimized.enabled) || !(has(self.roceOptimized) && self.roceOptimized.enabled)",message="spectrumXOptimized includes RoCE optimizations, so separate roceOptimized section must not be enabled"
-// +kubebuilder:validation:XValidation:rule="!(has(self.spectrumXOptimized) && self.spectrumXOptimized.enabled) || !has(self.rawNvConfig) || size(self.rawNvConfig) == 0",message="when spectrumXOptimized is enabled, rawNvConfig must be empty"
 type ConfigurationTemplateSpec struct {
 	// Number of VFs to be configured
 	// +required
@@ -129,7 +128,7 @@ type ConfigurationTemplateSpec struct {
 	RoceOptimized *RoceOptimizedSpec `json:"roceOptimized,omitempty"`
 	// GPU Direct optimization settings
 	GpuDirectOptimized *GpuDirectOptimizedSpec `json:"gpuDirectOptimized,omitempty"`
-	// Spectrum-X optimization settings. Works only with linkType==Ethernet && numVfs==0. Other optimizations must be skipped or disabled. RawNvConfig must be empty.
+	// Spectrum-X optimization settings. Works only with linkType==Ethernet && numVfs==1. RawNvConfig parameters, if provided, are merged as overrides on top of Spectrum-X calculated params.
 	SpectrumXOptimized *SpectrumXOptimizedSpec `json:"spectrumXOptimized,omitempty"`
 	// List of arbitrary nv config parameters
 	RawNvConfig []NvConfigParam `json:"rawNvConfig,omitempty"`

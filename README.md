@@ -107,7 +107,7 @@ spec:
 * `spectrumXOptimized`: enables Spectrum-X specific NIC optimizations. When enabled:
   * Requires `linkType=Ethernet` and `numVfs=1`
   * Cannot be combined with `roceOptimized` (RoCE settings are included automatically)
-  * Cannot be combined with `rawNvConfig`
+  * Can be combined with `rawNvConfig` — raw params are merged as overrides on top of Spectrum-X calculated params
   * Only supported on ConnectX-8 (`nicType: 1023`) and BlueField-3 SuperNIC (`nicType: a2dc`)
   * `version`: Required. Reference Architecture version (`RA1.3`, `RA2.0`, or `RA2.1`)
   * `overlay`: Optional, default `none`. Set to `l3` for L3 EVPN overlay
