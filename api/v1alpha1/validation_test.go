@@ -28,6 +28,7 @@ import (
 
 const (
 	nicTypeConnectX8   = "1023"
+	nicTypeConnectX9   = "1025"
 	nicTypeBlueField3  = "a2dc"
 	unsupportedNicType = "a2d0"
 )
@@ -147,6 +148,13 @@ var _ = Describe("NicConfigurationTemplate CEL validation", func() {
 	It("allows SpectrumXOptimized enabled for ConnectX-8 (NicType 1023)", func() {
 		obj := newNicConfigurationTemplate("spcx-allow-1023", "Ethernet", 1, &SpectrumXOptimizedSpec{Enabled: true, Version: "RA2.0"})
 		obj.Spec.NicSelector.NicType = nicTypeConnectX8
+		err := k8sClient.Create(ctx, obj)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("allows SpectrumXOptimized enabled for ConnectX-9 (NicType 1025)", func() {
+		obj := newNicConfigurationTemplate("spcx-allow-1025", "Ethernet", 1, &SpectrumXOptimizedSpec{Enabled: true, Version: "RA2.0"})
+		obj.Spec.NicSelector.NicType = nicTypeConnectX9
 		err := k8sClient.Create(ctx, obj)
 		Expect(err).NotTo(HaveOccurred())
 	})
@@ -381,6 +389,17 @@ var _ = Describe("NicConfigurationTemplate CEL validation", func() {
 			Expect(k8sClient.Create(ctx, obj)).To(Succeed())
 		})
 
+		It("allows hwplb with NicType 1025 (ConnectX-9)", func() {
+			obj := newNicConfigurationTemplate("hwplb-cx9-valid", "Ethernet", 1, &SpectrumXOptimizedSpec{
+				Enabled:        true,
+				Version:        "RA2.1",
+				MultiplaneMode: "hwplb",
+				NumberOfPlanes: 4,
+			})
+			obj.Spec.NicSelector.NicType = nicTypeConnectX9
+			Expect(k8sClient.Create(ctx, obj)).To(Succeed())
+		})
+
 		It("rejects hwplb with NicType a2dc (BlueField-3)", func() {
 			obj := newNicConfigurationTemplate("hwplb-bf3-invalid", "Ethernet", 1, &SpectrumXOptimizedSpec{
 				Enabled:        true,
@@ -391,7 +410,7 @@ var _ = Describe("NicConfigurationTemplate CEL validation", func() {
 			obj.Spec.NicSelector.NicType = nicTypeBlueField3
 			err := k8sClient.Create(ctx, obj)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("hwplb MultiplaneMode can only be enabled for ConnectX-8 (NicType 1023)"))
+			Expect(err.Error()).To(ContainSubstring("hwplb MultiplaneMode can only be enabled for ConnectX-8 (NicType 1023) or ConnectX-9 (NicType 1025)"))
 		})
 
 		It("allows swplb with NicType a2dc (BlueField-3)", func() {
@@ -438,7 +457,7 @@ var _ = Describe("NicConfigurationTemplate CEL validation", func() {
 			err := k8sClient.Create(ctx, obj)
 			Expect(err).To(HaveOccurred())
 			// Should fail on the spectrumXOptimized device type check first
-			Expect(err.Error()).To(ContainSubstring("spectrumXOptimized can be enabled only for ConnectX-8 or BlueField-3 SuperNICs"))
+			Expect(err.Error()).To(ContainSubstring("spectrumXOptimized can be enabled only for ConnectX-8, ConnectX-9 or BlueField-3 SuperNICs"))
 		})
 	})
 })

@@ -24,7 +24,7 @@ spec:
   nodeSelector:
       feature.node.kubernetes.io/network-sriov.capable: "true"
   nicSelector:
-      nicType: "1023" # ConnectX-8. Use "a2dc" for BlueField-3 SuperNIC (hwplb not supported on BF3)
+      nicType: "1023" # ConnectX-8. Use "1025" for ConnectX-9, or "a2dc" for BlueField-3 SuperNIC (hwplb not supported on BF3)
       # partNumbers:
       #   - "MCX713106AEHEA_QP1"
   template:

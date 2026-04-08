@@ -108,8 +108,8 @@ spec:
   * Requires `linkType=Ethernet` and `numVfs=1`
   * Cannot be combined with `roceOptimized` (RoCE settings are included automatically)
   * Can be combined with `rawNvConfig` — raw params are merged as overrides on top of Spectrum-X calculated params
-  * Only supported on ConnectX-8 (`nicType: 1023`) and BlueField-3 SuperNIC (`nicType: a2dc`)
-  * `version`: Required. Reference Architecture version (`RA1.3`, `RA2.0`, or `RA2.1`)
+  * Only supported on ConnectX-8 (`nicType: 1023`), ConnectX-9 (`nicType: 1025`) and BlueField-3 SuperNIC (`nicType: a2dc`)
+  * `version`: Required. Reference Architecture version (`RA1.3`, `RA2.0`, `RA2.1`, or `RA3.0`)
   * `overlay`: Optional, default `none`. Set to `l3` for L3 EVPN overlay
   * `multiplaneMode`: Optional, default `none`. Only available with RA2.1. Options: `none`, `swplb`, `hwplb`, `uniplane`
   * `numberOfPlanes`: Optional, default `1`. Only available with RA2.1. Options: `1`, `2`, or `4`
@@ -121,16 +121,17 @@ The NIC Configuration Operator supports Spectrum-X-specific NIC configuration fo
 
 Supported NIC types for Spectrum-X:
 * ConnectX-8 (device ID `1023`) -- supports all multiplane modes
+* ConnectX-9 (device ID `1025`) -- supports all multiplane modes (same configuration as ConnectX-8)
 * BlueField-3 SuperNIC (device ID `a2dc`) -- supports all multiplane modes except `hwplb`
 
 RA2.1 introduces multiplane mode support, allowing NICs to be configured with multiple data planes. Available modes:
 
 | Mode | Description | Supported NICs | Planes |
 |------|-------------|----------------|--------|
-| `none` | Single plane (default) | ConnectX-8, BF3 SuperNIC | 1 |
-| `swplb` | Software Packet Load Balancing | ConnectX-8, BF3 SuperNIC | 2, 4 |
-| `hwplb` | Hardware Packet Load Balancing | ConnectX-8 only | 2, 4 |
-| `uniplane` | Uniplane mode | ConnectX-8, BF3 SuperNIC | 2 |
+| `none` | Single plane (default) | ConnectX-8, ConnectX-9, BF3 SuperNIC | 1 |
+| `swplb` | Software Packet Load Balancing | ConnectX-8, ConnectX-9, BF3 SuperNIC | 2, 4 |
+| `hwplb` | Hardware Packet Load Balancing | ConnectX-8, ConnectX-9 only | 2, 4 |
+| `uniplane` | Uniplane mode | ConnectX-8, ConnectX-9, BF3 SuperNIC | 2 |
 
 > **Note:** Multiplane modes are only available with RA2.1. For RA1.3 and RA2.0, `multiplaneMode` must be `none` and `numberOfPlanes` must be `1`.
 
@@ -146,7 +147,7 @@ spec:
   nodeSelector:
       feature.node.kubernetes.io/network-sriov.capable: "true"
   nicSelector:
-      nicType: "1023" # ConnectX-8. Use "a2dc" for BlueField-3 SuperNIC (hwplb not supported on BF3)
+      nicType: "1023" # ConnectX-8. Use "1025" for ConnectX-9, or "a2dc" for BlueField-3 SuperNIC (hwplb not supported on BF3)
       # partNumbers:
       #   - "MCX713106AEHEA_QP1"
   template:
