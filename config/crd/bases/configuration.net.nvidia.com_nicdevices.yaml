@@ -276,7 +276,6 @@ spec:
                 - nicIndex
                 - planeIndices
                 - railIndex
-                - rdmaDevicePrefix
                 type: object
             type: object
           status:

@@ -27,13 +27,14 @@ type NicInterfaceNameTemplateSpec struct {
 	// Used to calculate the number of planes per NIC
 	// +required
 	PfsPerNic int `json:"pfsPerNic"`
-	// RdmaDevicePrefix specifies the prefix for the rdma device name
+	// RdmaDevicePrefix specifies the prefix for the rdma device name.
+	// When empty, no RDMA udev rules are generated and RDMA device naming is skipped.
 	// %nic_id%, %plane_id% and %rail_id% placeholders can be used to construct the device name
 	// %nic_id% is the index of the NIC in the flattened list of NICs
 	// %plane_id% is the index of the plane of the specific NIC
 	// %rail_id% is the index of the rail where the given NIC belongs to
-	// +required
-	RdmaDevicePrefix string `json:"rdmaDevicePrefix"`
+	// +optional
+	RdmaDevicePrefix string `json:"rdmaDevicePrefix,omitempty"`
 	// NetDevicePrefix specifies the prefix for the net device name
 	// %nic_id%, %plane_id% and %rail_id% placeholders can be used to construct the device name
 	// %nic_id% is the index of the NIC in the flattened list of NICs

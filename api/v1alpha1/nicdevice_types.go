@@ -42,8 +42,8 @@ type NicDeviceInterfaceNameSpec struct {
 	// PlaneIndices is the indices of the planes for the given NIC based on the Template
 	PlaneIndices []int `json:"planeIndices"`
 	// --- Parameters from the NicInterfaceNameTemplate CR ---
-	// RdmaDevicePrefix specifies the prefix for the rdma device name
-	RdmaDevicePrefix string `json:"rdmaDevicePrefix"`
+	// RdmaDevicePrefix specifies the prefix for the rdma device name. Empty means RDMA naming is skipped.
+	RdmaDevicePrefix string `json:"rdmaDevicePrefix,omitempty"`
 	// NetDevicePrefix specifies the prefix for the net device name
 	NetDevicePrefix string `json:"netDevicePrefix"`
 }

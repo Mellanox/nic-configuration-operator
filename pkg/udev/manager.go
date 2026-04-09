@@ -271,9 +271,11 @@ func (m *udevManager) generateUdevRules(devices []*v1alpha1.NicDevice) (netRules
 				} else if rdmaDeviceName != firstPFRdmaName {
 					// Different name per PF = standard mode, generate rule for each
 					rdmaRulesMap[pciAddr] = generateRdmaDeviceRule(pciAddr, rdmaDeviceName)
+				} else {
+					// Same name as PF0 = multiport/hwplb mode.
+					// Non-first PFs have no RDMA device, so skip rule and clear expected name.
+					rdmaDeviceName = ""
 				}
-				// In multiport mode (pfIndex > 0 && rdmaDeviceName == firstPFRdmaName):
-				// skip rule generation but expectedNames still gets the shared name below
 			}
 
 			// Store expected names for this PCI address

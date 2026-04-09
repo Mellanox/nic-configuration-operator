@@ -576,6 +576,110 @@ var _ = Describe("DMSClient", func() {
 		})
 	})
 
+	Describe("HwplbFirstPortOnly", func() {
+		const (
+			secondNetworkInterface = "enp3s0f1np1"
+			secondPCI              = "0000:00:00.1"
+		)
+
+		var multiPortClient *dmsClient
+
+		BeforeEach(func() {
+			multiPortDevice := v1alpha1.NicDeviceStatus{
+				SerialNumber: "test-serial",
+				Ports: []v1alpha1.NicDevicePortSpec{
+					{PCI: testPCI, NetworkInterface: testNetworkInterface},
+					{PCI: secondPCI, NetworkInterface: secondNetworkInterface},
+				},
+			}
+			multiPortClient = &dmsClient{
+				device:        multiPortDevice,
+				targetPCI:     testPCI,
+				bindAddress:   ":9339",
+				authParams:    []string{"--insecure"},
+				execInterface: fakeExec,
+			}
+		})
+
+		collectUpdatePayloads := func(args []string) []string {
+			var payloads []string
+			for i, arg := range args {
+				if arg == "--update" && i+1 < len(args) {
+					payloads = append(payloads, args[i+1])
+				}
+			}
+			return payloads
+		}
+
+		It("should iterate only first port when HwplbFirstPortOnly is true", func() {
+			param := types.ConfigurationParameter{
+				DMSPath:            "/interfaces/interface/nvidia/cc/config/priority/rp_enabled",
+				Value:              "1",
+				ValueType:          ValueTypeBool,
+				HwplbFirstPortOnly: true,
+			}
+
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(cmd string, args ...string) exec.Cmd {
+					payloads := collectUpdatePayloads(args)
+					// 8 priorities × 1 port = 8 updates (not 16)
+					Expect(payloads).To(HaveLen(8))
+					for _, p := range payloads {
+						Expect(p).To(ContainSubstring(testNetworkInterface))
+						Expect(p).NotTo(ContainSubstring(secondNetworkInterface))
+					}
+					return createFakeCmd(nil, nil)
+				},
+			}
+
+			err := multiPortClient.SetParameters([]types.ConfigurationParameter{param})
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("should iterate all ports when HwplbFirstPortOnly is false", func() {
+			param := types.ConfigurationParameter{
+				DMSPath:            "/interfaces/interface/nvidia/cc/config/priority/rp_enabled",
+				Value:              "1",
+				ValueType:          ValueTypeBool,
+				HwplbFirstPortOnly: false,
+			}
+
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(cmd string, args ...string) exec.Cmd {
+					payloads := collectUpdatePayloads(args)
+					// 8 priorities × 2 ports = 16 updates
+					Expect(payloads).To(HaveLen(16))
+					return createFakeCmd(nil, nil)
+				},
+			}
+
+			err := multiPortClient.SetParameters([]types.ConfigurationParameter{param})
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("should query only first port when HwplbFirstPortOnly is true", func() {
+			param := types.ConfigurationParameter{
+				DMSPath:            "/interfaces/interface/nvidia/cc/config/priority/rp_enabled",
+				HwplbFirstPortOnly: true,
+			}
+
+			// 8 priority queries for first port only
+			for i := 0; i < 8; i++ {
+				expectedPath := fmt.Sprintf("/interfaces/interface[name=%s]/nvidia/cc/config/priority[id=%d]/rp_enabled", testNetworkInterface, i)
+				fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+					reqPath := args[len(args)-1]
+					Expect(reqPath).To(Equal(expectedPath))
+					Expect(reqPath).NotTo(ContainSubstring(secondNetworkInterface))
+					return createFakeCmd(makeGetOutput(expectedPath, param.DMSPath, "1"), nil)
+				})
+			}
+
+			vals, err := multiPortClient.GetParameters([]types.ConfigurationParameter{param})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(vals[param.DMSPath]).To(Equal("1"))
+		})
+	})
+
 	Describe("InstallBFB", func() {
 		const (
 			testBFBVersion = "24.35.1000"

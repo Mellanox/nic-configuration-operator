@@ -428,10 +428,10 @@ var _ = Describe("UdevManager", func() {
 			Expect(string(rdmaContent)).To(Equal(UdevRulesHeader))
 		})
 
-		It("should generate single RDMA rule per NIC when RdmaDevicePrefix has no plane_id placeholder (multiport mode)", func() {
+		It("should generate single RDMA rule and clear expected RDMA for non-first PFs in multiport mode", func() {
 			// In multiport mode (HW PLB with usw_multiport=true), all PFs share one RDMA device.
 			// RdmaDevicePrefix has no %plane_id%, so all PFs produce the same RDMA name.
-			// Only one RDMA rule should be generated (for PF0).
+			// Only PF0 gets an RDMA rule; non-first PFs have no RDMA device so expected name is empty.
 			devices := []*v1alpha1.NicDevice{
 				{
 					Spec: v1alpha1.NicDeviceSpec{
@@ -456,10 +456,10 @@ var _ = Describe("UdevManager", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(updated).To(BeTrue())
 
-			// Both PFs should have the same expected RDMA name
+			// PF0 gets expected RDMA name; PF1 gets empty (no RDMA device in multiport)
 			Expect(expectedNames).To(HaveLen(2))
 			Expect(expectedNames["0000:1a:00.0"]).To(Equal(ExpectedInterfaceNames{NetDevice: "nic_p0_r0_n0", RdmaDevice: "rdma_r0_n0"}))
-			Expect(expectedNames["0000:1a:00.1"]).To(Equal(ExpectedInterfaceNames{NetDevice: "nic_p1_r0_n0", RdmaDevice: "rdma_r0_n0"}))
+			Expect(expectedNames["0000:1a:00.1"]).To(Equal(ExpectedInterfaceNames{NetDevice: "nic_p1_r0_n0", RdmaDevice: ""}))
 
 			// Net rules: 2 rules (one per PF)
 			netRulesPath := filepath.Join(tempDir, UdevNetRulesFile)
@@ -520,6 +520,50 @@ var _ = Describe("UdevManager", func() {
 			Expect(rdmaContentStr).To(ContainSubstring("rdma_p0_r0"))
 			Expect(rdmaContentStr).To(ContainSubstring(`KERNELS=="0000:1a:00.1"`))
 			Expect(rdmaContentStr).To(ContainSubstring("rdma_p1_r0"))
+		})
+
+		It("should generate no RDMA rules when RdmaDevicePrefix is empty", func() {
+			devices := []*v1alpha1.NicDevice{
+				{
+					Spec: v1alpha1.NicDeviceSpec{
+						InterfaceNameTemplate: &v1alpha1.NicDeviceInterfaceNameSpec{
+							NicIndex:         0,
+							RailIndex:        0,
+							PlaneIndices:     []int{0, 1},
+							RdmaDevicePrefix: "", // empty — skip RDMA
+							NetDevicePrefix:  "nic_p%plane_id%_r%rail_id%",
+						},
+					},
+					Status: v1alpha1.NicDeviceStatus{
+						Ports: []v1alpha1.NicDevicePortSpec{
+							{PCI: "0000:1a:00.0"},
+							{PCI: "0000:1a:00.1"},
+						},
+					},
+				},
+			}
+
+			expectedNames, updated, err := manager.ApplyUdevRules(context.Background(), devices)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updated).To(BeTrue())
+
+			// Net rules generated, RDMA names empty
+			Expect(expectedNames).To(HaveLen(2))
+			Expect(expectedNames["0000:1a:00.0"]).To(Equal(ExpectedInterfaceNames{NetDevice: "nic_p0_r0", RdmaDevice: ""}))
+			Expect(expectedNames["0000:1a:00.1"]).To(Equal(ExpectedInterfaceNames{NetDevice: "nic_p1_r0", RdmaDevice: ""}))
+
+			// Net rules: 2 rules
+			netRulesPath := filepath.Join(tempDir, UdevNetRulesFile)
+			netContent, err := os.ReadFile(netRulesPath)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(netContent)).To(ContainSubstring(`KERNELS=="0000:1a:00.0", NAME="nic_p0_r0"`))
+			Expect(string(netContent)).To(ContainSubstring(`KERNELS=="0000:1a:00.1", NAME="nic_p1_r0"`))
+
+			// RDMA rules: header only (no rules)
+			rdmaRulesPath := filepath.Join(tempDir, UdevRdmaRulesFile)
+			rdmaContent, err := os.ReadFile(rdmaRulesPath)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(rdmaContent)).To(Equal(UdevRulesHeader))
 		})
 
 		It("should return error if udevadm control --reload-rules fails", func() {

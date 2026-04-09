@@ -1303,4 +1303,26 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			})
 		})
 	})
+
+	Describe("filterParameters", func() {
+		It("should keep HwplbFirstPortOnly when in hwplb mode", func() {
+			params := []types.ConfigurationParameter{
+				{Name: "rp_enabled", DMSPath: "/interfaces/interface/nvidia/cc/config/priority/rp_enabled", HwplbFirstPortOnly: true},
+				{Name: "other", DMSPath: "/interfaces/interface/nvidia/cc/slot[id=0]/config/enabled"},
+			}
+			filtered := filterParameters(params, "", 0, consts.MultiplaneModeHwplb)
+			Expect(filtered).To(HaveLen(2))
+			Expect(filtered[0].HwplbFirstPortOnly).To(BeTrue())
+			Expect(filtered[1].HwplbFirstPortOnly).To(BeFalse())
+		})
+
+		It("should clear HwplbFirstPortOnly when not in hwplb mode", func() {
+			params := []types.ConfigurationParameter{
+				{Name: "rp_enabled", DMSPath: "/interfaces/interface/nvidia/cc/config/priority/rp_enabled", HwplbFirstPortOnly: true},
+			}
+			filtered := filterParameters(params, "", 0, consts.MultiplaneModeSwplb)
+			Expect(filtered).To(HaveLen(1))
+			Expect(filtered[0].HwplbFirstPortOnly).To(BeFalse())
+		})
+	})
 })

@@ -105,6 +105,10 @@ func filterParameters(params []types.ConfigurationParameter, deviceType string, 
 		if param.Multiplane != "" && param.Multiplane != multiplaneMode {
 			continue
 		}
+		// HwplbFirstPortOnly only takes effect in hwplb mode; clear it otherwise
+		if param.HwplbFirstPortOnly && multiplaneMode != consts.MultiplaneModeHwplb {
+			param.HwplbFirstPortOnly = false
+		}
 		filtered = append(filtered, param)
 	}
 	return filtered
