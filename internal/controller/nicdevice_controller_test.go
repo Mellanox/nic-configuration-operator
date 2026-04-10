@@ -1370,6 +1370,35 @@ var _ = Describe("NicDeviceReconciler", func() {
 			}, timeout).Should(BeTrue())
 		})
 
+		It("Should skip RDMA validation when expected RDMA name is empty", func() {
+			// When RdmaDevicePrefix is empty or multiport clears expected RDMA,
+			// the reconciler should not report a mismatch for RDMA
+			expectedNames := map[string]udev.ExpectedInterfaceNames{
+				pciAddress: {NetDevice: "net1p1", RdmaDevice: ""}, // empty RDMA expected
+			}
+
+			// Reset the mock to override the default behavior
+			udevManager.ExpectedCalls = nil
+			udevManager.On("ApplyUdevRules", mock.Anything, mock.Anything).Return(expectedNames, true, nil)
+
+			// Mock device discovery — net matches, RDMA returns something (should be ignored)
+			deviceDiscoveryUtils.On("GetInterfaceName", pciAddress).Return("net1p1")
+			deviceDiscoveryUtils.On("GetRDMADeviceName", pciAddress).Return("some_rdma_device")
+
+			// Mock maintenance manager to release maintenance at the end
+			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
+
+			createDeviceWithInterfaceNameTemplate()
+
+			// Should succeed — RDMA mismatch not checked when expected is empty
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.InterfaceNameCondition,
+				Status:  metav1.ConditionTrue,
+				Reason:  consts.InterfaceNameAppliedReason,
+				Message: "Interface names applied successfully",
+			}))
+		})
+
 		It("Should update port status with actual interface names from sysfs", func() {
 			expectedNames := map[string]udev.ExpectedInterfaceNames{
 				pciAddress: {NetDevice: "net1p1", RdmaDevice: "rdma1p1"},

@@ -51,16 +51,17 @@ type InterPacketGapConfig struct {
 }
 
 type ConfigurationParameter struct {
-	Name             string `yaml:"name,omitempty"`
-	MlxConfig        string `yaml:"mlxconfig,omitempty"`
-	Value            string `yaml:"value,omitempty"`
-	ValueType        string `yaml:"valueType,omitempty"`
-	DMSPath          string `yaml:"dmsPath,omitempty"`
-	AlternativeValue string `yaml:"alternativeValue,omitempty"`
-	DeviceId         string `yaml:"deviceId,omitempty"`
-	Breakout         int    `yaml:"breakout,omitempty"`
-	Multiplane       string `yaml:"multiplane,omitempty"`
-	IgnoreError      bool   `yaml:"ignoreError,omitempty"`
+	Name               string `yaml:"name,omitempty"`
+	MlxConfig          string `yaml:"mlxconfig,omitempty"`
+	Value              string `yaml:"value,omitempty"`
+	ValueType          string `yaml:"valueType,omitempty"`
+	DMSPath            string `yaml:"dmsPath,omitempty"`
+	AlternativeValue   string `yaml:"alternativeValue,omitempty"`
+	DeviceId           string `yaml:"deviceId,omitempty"`
+	Breakout           int    `yaml:"breakout,omitempty"`
+	Multiplane         string `yaml:"multiplane,omitempty"`
+	IgnoreError        bool   `yaml:"ignoreError,omitempty"`
+	HwplbFirstPortOnly bool   `yaml:"hwplbFirstPortOnly,omitempty"`
 }
 
 func LoadSpectrumXConfig(configPath string) (*SpectrumXConfig, error) {

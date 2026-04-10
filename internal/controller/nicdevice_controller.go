@@ -299,7 +299,7 @@ func (r *NicDeviceReconciler) reconcileInterfaceNameTemplates(ctx context.Contex
 				mismatchedPorts = append(mismatchedPorts,
 					fmt.Sprintf("net:%s expected=%s actual=%s", port.PCI, expected.NetDevice, actualNetDevice))
 			}
-			if actualRdmaDevice != expected.RdmaDevice {
+			if expected.RdmaDevice != "" && actualRdmaDevice != expected.RdmaDevice {
 				mismatchedPorts = append(mismatchedPorts,
 					fmt.Sprintf("rdma:%s expected=%s actual=%s", port.PCI, expected.RdmaDevice, actualRdmaDevice))
 			}

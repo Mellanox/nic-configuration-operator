@@ -490,11 +490,13 @@ runtimeConfig:
       dmsPath: /interfaces/interface/nvidia/cc/config/priority/rp_enabled
       valueType: bool
       alternativeValue: "1"
+      hwplbFirstPortOnly: true
     - name: Congestion Control on NP points
       value: true
       dmsPath: /interfaces/interface/nvidia/cc/config/priority/np_enabled
       valueType: bool
       alternativeValue: "1"
+      hwplbFirstPortOnly: true
     - name: Congestion Control
       value: true
       dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/config/enabled

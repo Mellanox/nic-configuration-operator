@@ -391,7 +391,11 @@ func (i *dmsClient) GetParameters(params []types.ConfigurationParameter) (map[st
 		value := ""
 
 		if slices.Contains(paramPathParts, Interface) {
-			for _, port := range i.device.Ports {
+			ports := i.device.Ports
+			if param.HwplbFirstPortOnly && len(ports) > 0 {
+				ports = ports[:1]
+			}
+			for _, port := range ports {
 				filterRules := interfaceNameFilter(port.NetworkInterface)
 
 				if slices.Contains(paramPathParts, Priority) {
@@ -434,7 +438,11 @@ func (i *dmsClient) collectSetUpdates(params []types.ConfigurationParameter) []s
 		paramPathParts := strings.Split(param.DMSPath, "/")
 
 		if slices.Contains(paramPathParts, Interface) {
-			for _, port := range i.device.Ports {
+			ports := i.device.Ports
+			if param.HwplbFirstPortOnly && len(ports) > 0 {
+				ports = ports[:1]
+			}
+			for _, port := range ports {
 				filterRules := interfaceNameFilter(port.NetworkInterface)
 
 				if slices.Contains(paramPathParts, Priority) {
