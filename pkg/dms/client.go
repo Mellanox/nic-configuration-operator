@@ -47,7 +47,8 @@ const (
 	Interface = "interface"
 	Priority  = "priority"
 
-	dmsClientPath = "/opt/mellanox/doca/services/dms/dmsc"
+	dmsClientPath    = "/opt/mellanox/doca/services/dms/dmsc"
+	dmsClientTimeout = "300s"
 )
 
 // DMSClient interface defines methods for interacting with a DMS server to manage NIC device configuration
@@ -148,7 +149,7 @@ func (i *dmsClient) RunGetPathCommand(path string, filterRules map[string]string
 	queryPath := injectFilterRules(path, filterRules)
 
 	args := append([]string{dmsClientPath, "-a", i.bindAddress}, i.authParams...)
-	args = append(args, "--target", i.targetPCI, "get", "--path", queryPath)
+	args = append(args, "--target", i.targetPCI, "--timeout", dmsClientTimeout, "get", "--path", queryPath)
 	log.Log.V(2).Info("dmsClient.RunGetPathCommand()", "args", strings.Join(args, " "))
 
 	command := i.execInterface.Command(args[0], args[1:]...)
@@ -206,7 +207,7 @@ func (i *dmsClient) RunSetPathCommand(path, value, valueType string, filterRules
 	log.Log.V(2).Info("dmsClient.RunSetPathCommand()", "path", path, "value", value, "valueType", valueType, "device", i.device.SerialNumber)
 
 	args := append([]string{dmsClientPath, "-a", i.bindAddress}, i.authParams...)
-	args = append(args, "--target", i.targetPCI, "set", "--update", formatSetUpdate(path, value, valueType, filterRules))
+	args = append(args, "--target", i.targetPCI, "--timeout", dmsClientTimeout, "set", "--update", formatSetUpdate(path, value, valueType, filterRules))
 	log.Log.V(2).Info("dmsClient.RunSetPathCommand()", "args", strings.Join(args, " "))
 
 	command := i.execInterface.Command(args[0], args[1:]...)
@@ -474,7 +475,7 @@ func (i *dmsClient) SetParameters(params []types.ConfigurationParameter) error {
 	log.Log.V(2).Info("Collected set updates", "device", i.device.SerialNumber, "updateCount", len(updates))
 
 	args := append([]string{dmsClientPath, "-a", i.bindAddress}, i.authParams...)
-	args = append(args, "--target", i.targetPCI, "set", "--timeout", "5m")
+	args = append(args, "--target", i.targetPCI, "--timeout", dmsClientTimeout, "set")
 	for _, update := range updates {
 		args = append(args, "--update", update)
 	}
