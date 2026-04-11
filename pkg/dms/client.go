@@ -49,7 +49,8 @@ const (
 	Interface = "interface"
 	Priority  = "priority"
 
-	dmsClientPath = "/opt/mellanox/doca/services/dms/dmsc"
+	dmsClientPath    = "/opt/mellanox/doca/services/dms/dmsc"
+	dmsClientTimeout = "300s"
 )
 
 // DMSClient interface defines methods for interacting with a DMS instance to manage NIC device configuration
@@ -162,7 +163,7 @@ func (i *dmsInstance) RunGetPathCommand(path string, filterRules map[string]stri
 
 	queryPath := injectFilterRules(path, filterRules)
 
-	args := []string{dmsClientPath, "-a", i.bindAddress, "--insecure", "get", "--path", queryPath}
+	args := []string{dmsClientPath, "-a", i.bindAddress, "--insecure", "--timeout", dmsClientTimeout, "get", "--path", queryPath}
 	log.Log.V(2).Info("dmsInstance.RunGetPathCommand()", "args", strings.Join(args, " "))
 
 	command := i.execInterface.Command(args[0], args[1:]...)
@@ -215,7 +216,7 @@ func (i *dmsInstance) RunSetPathCommand(path, value, valueType string, filterRul
 
 	queryPath := injectFilterRules(path, filterRules)
 
-	args := []string{dmsClientPath, "-a", i.bindAddress, "--insecure", "set", "--update", fmt.Sprintf("%s:::%s:::%s", queryPath, valueType, value)}
+	args := []string{dmsClientPath, "-a", i.bindAddress, "--insecure", "--timeout", dmsClientTimeout, "set", "--update", fmt.Sprintf("%s:::%s:::%s", queryPath, valueType, value)}
 	log.Log.V(2).Info("dmsInstance.RunSetPathCommand()", "args", strings.Join(args, " "))
 
 	command := i.execInterface.Command(args[0], args[1:]...)
