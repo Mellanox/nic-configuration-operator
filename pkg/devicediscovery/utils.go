@@ -36,6 +36,10 @@ import (
 
 const pciDevicesPath = "/sys/bus/pci/devices"
 
+// physPortNameRegex matches physical port names like "p0", "p1" — the PF uplink interfaces.
+// VF/SF representors have names like "pf0vf0", "pf0sf0" which do NOT match this pattern.
+var physPortNameRegex = regexp.MustCompile(`^p\d+$`)
+
 type DeviceDiscoveryUtils interface {
 	// GetPCIDevices returns a list of PCI devices on the host
 	GetPCIDevices() ([]*pci.Device, error)
@@ -228,8 +232,32 @@ func (d *deviceDiscoveryUtils) IsZeroTrust(pciAddr string) (bool, error) {
 	return false, fmt.Errorf("IsZeroTrustDevice(): failed to parse mlxprivhost output")
 }
 
+// isPhysicalPort checks if a network interface under a PCI device is a physical port (PF uplink)
+// rather than a VF/SF representor. It reads the phys_port_name sysfs attribute:
+// - PF uplinks have phys_port_name like "p0", "p1"
+// - Representors have phys_port_name like "pf0vf0", "pf0sf0"
+// Returns true if the interface is a physical port or if phys_port_name cannot be determined
+// (backward compatibility for devices that don't expose this attribute).
+func isPhysicalPort(basePath, pciAddr, ifaceName string) bool {
+	physPortNamePath := filepath.Join(basePath, pciAddr, "net", ifaceName, "phys_port_name")
+	data, err := os.ReadFile(physPortNamePath)
+	if err != nil {
+		// File doesn't exist or can't be read — assume it's a physical port for backward compatibility
+		return true
+	}
+	portName := strings.TrimSpace(string(data))
+	if portName == "" {
+		return true
+	}
+	return physPortNameRegex.MatchString(portName)
+}
+
 func getNetNames(pciAddr string) ([]string, error) {
-	netDir := filepath.Join(pciDevicesPath, pciAddr, "net")
+	return getNetNamesFromPath(pciDevicesPath, pciAddr)
+}
+
+func getNetNamesFromPath(basePath, pciAddr string) ([]string, error) {
+	netDir := filepath.Join(basePath, pciAddr, "net")
 	if _, err := os.Lstat(netDir); err != nil {
 		return nil, fmt.Errorf("GetNetNames(): no net directory under pci device %s: %q", pciAddr, err)
 	}
@@ -241,7 +269,10 @@ func getNetNames(pciAddr string) ([]string, error) {
 
 	names := make([]string, 0)
 	for _, f := range fInfos {
-		names = append(names, f.Name())
+		name := f.Name()
+		if isPhysicalPort(basePath, pciAddr, name) {
+			names = append(names, name)
+		}
 	}
 
 	return names, nil
