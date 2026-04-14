@@ -24,7 +24,7 @@ type NicSelectorSpec struct {
 	// Type of the NIC to be selected, e.g. 101d,1015,a2d6 etc.
 	NicType string `json:"nicType"`
 	// Array of PCI addresses to be selected, e.g. "0000:03:00.0"
-	// +kubebuilder:validation:items:Pattern=`^0000:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]$`
+	// +kubebuilder:validation:items:Pattern=`^[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]$`
 	PciAddresses []string `json:"pciAddresses,omitempty"`
 	// Serial numbers of the NICs to be selected, e.g. MT2116X09299
 	SerialNumbers []string `json:"serialNumbers,omitempty"`
