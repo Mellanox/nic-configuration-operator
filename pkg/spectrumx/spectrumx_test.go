@@ -712,7 +712,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				})).Return(nil)
 
 				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
-				err := manager.ApplyRuntimeConfig(device)
+				_, err := manager.ApplyRuntimeConfig(device)
 				Expect(err).NotTo(HaveOccurred())
 
 				// Verify the file was written with none value
