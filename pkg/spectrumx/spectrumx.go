@@ -41,9 +41,7 @@ import (
 var cnpDscpSysfsPathTemplate = "/sys/class/net/%s/ecn/roce_np/cnp_dscp"
 
 // cnpDscpExpectedValue is the expected value for CNP DSCP
-const cnpDscpExpectedValueSwplb = "24"
-const cnpDscpExpectedValueUniplane = "24"
-const cnpDscpExpectedValueHwplb = "48"
+const cnpDscpExpectedValue = "48"
 
 // mlxreg constants for CC Probe MP mode workaround.
 // Workaround: CC Probe MP mode is not configurable via DMS, so we use mlxreg instead.
@@ -332,20 +330,8 @@ func getCnpDscpPath(interfaceName string) string {
 	return fmt.Sprintf(cnpDscpSysfsPathTemplate, interfaceName)
 }
 
-func getCnpDscpExpectedValue(multiplaneMode string) string {
-	switch multiplaneMode {
-	case consts.MultiplaneModeSwplb:
-		return cnpDscpExpectedValueSwplb
-	case consts.MultiplaneModeHwplb:
-		return cnpDscpExpectedValueHwplb
-	case consts.MultiplaneModeUniplane:
-		return cnpDscpExpectedValueUniplane
-	}
-	return ""
-}
-
 // checkCnpDscp checks if CNP DSCP is set to the expected value for all ports
-func checkCnpDscp(device *v1alpha1.NicDevice, multiplaneMode string) (bool, error) {
+func checkCnpDscp(device *v1alpha1.NicDevice) (bool, error) {
 	log.Log.V(2).Info("SpectrumXConfigManager.checkCnpDscp()", "device", device.Name)
 
 	for _, port := range device.Status.Ports {
@@ -361,8 +347,6 @@ func checkCnpDscp(device *v1alpha1.NicDevice, multiplaneMode string) (bool, erro
 			return false, err
 		}
 
-		cnpDscpExpectedValue := getCnpDscpExpectedValue(multiplaneMode)
-
 		value := strings.TrimSpace(string(data))
 		if value != cnpDscpExpectedValue {
 			log.Log.V(2).Info("SpectrumXConfigManager.checkCnpDscp(): CNP DSCP value mismatch",
@@ -375,7 +359,7 @@ func checkCnpDscp(device *v1alpha1.NicDevice, multiplaneMode string) (bool, erro
 }
 
 // writeCnpDscp writes the expected CNP DSCP value for all ports
-func writeCnpDscp(device *v1alpha1.NicDevice, multiplaneMode string) error {
+func writeCnpDscp(device *v1alpha1.NicDevice) error {
 	log.Log.V(2).Info("SpectrumXConfigManager.writeCnpDscp()", "device", device.Name)
 
 	for _, port := range device.Status.Ports {
@@ -384,7 +368,6 @@ func writeCnpDscp(device *v1alpha1.NicDevice, multiplaneMode string) error {
 			continue
 		}
 
-		cnpDscpExpectedValue := getCnpDscpExpectedValue(multiplaneMode)
 		cnpDscpPath := getCnpDscpPath(port.NetworkInterface)
 		err := os.WriteFile(cnpDscpPath, []byte(cnpDscpExpectedValue), 0644)
 		if err != nil {
@@ -519,7 +502,7 @@ func (m *spectrumXConfigManager) RuntimeConfigApplied(device *v1alpha1.NicDevice
 
 	// Check CNP DSCP after RoCE config
 	log.Log.V(2).Info("SpectrumXConfigManager.RuntimeConfigApplied(): checking CNP DSCP config", "device", device.Name)
-	cnpDscpApplied, err := checkCnpDscp(device, multiplaneMode)
+	cnpDscpApplied, err := checkCnpDscp(device)
 	if err != nil {
 		log.Log.Error(err, "RuntimeConfigApplied(): failed to check if CNP DSCP is applied", "device", device.Name)
 		return false, err
@@ -669,7 +652,7 @@ func (m *spectrumXConfigManager) ApplyRuntimeConfig(device *v1alpha1.NicDevice) 
 
 	// Write CNP DSCP after RoCE config
 	log.Log.V(2).Info("SpectrumXConfigManager.ApplyRuntimeConfig(): setting CNP DSCP config", "device", device.Name)
-	err = writeCnpDscp(device, multiplaneMode)
+	err = writeCnpDscp(device)
 	if err != nil {
 		log.Log.Error(err, "ApplyRuntimeConfig(): failed to set CNP DSCP config", "device", device.Name)
 		return err
