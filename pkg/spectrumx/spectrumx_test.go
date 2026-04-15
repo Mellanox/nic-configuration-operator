@@ -1535,7 +1535,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
 					{PCI: "0000:00:00.0", NetworkInterface: "eth0", RdmaInterface: "mlx5_0"},
 				}
-				createCnpDscpFile("eth0", "24") // swplb expects 24
+				createCnpDscpFile("eth0", "48") // swplb expects 48
 
 				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
 				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(map[string]string{"/ar": "y"}, nil)
@@ -1574,13 +1574,35 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				Expect(applied).To(BeTrue())
 			})
 
+			It("returns true when CNP DSCP is set to expected value for none", func() {
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeNone
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 1
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", NetworkInterface: "eth0", RdmaInterface: "mlx5_0"},
+				}
+				createCnpDscpFile("eth0", "48") // none expects 48
+
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(map[string]string{"/ar": "y"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(map[string]string{"/cc": "z"}, nil)
+				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(map[string]string{"/ipg": "25"}, nil)
+
+				manager.ccProcesses[device.Status.Ports[0].RdmaInterface] = &ccProcess{port: device.Status.Ports[0]}
+				manager.ccProcesses[device.Status.Ports[0].RdmaInterface].running.Store(true)
+
+				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
+				applied, err := manager.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
+			})
+
 			It("returns false when CNP DSCP has wrong value", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
 				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
 					{PCI: "0000:00:00.0", NetworkInterface: "eth0", RdmaInterface: "mlx5_0"},
 				}
-				createCnpDscpFile("eth0", "48") // wrong value for swplb (expects 24)
+				createCnpDscpFile("eth0", "12") // wrong value for swplb (expects 48)
 
 				manager.ccProcesses[device.Status.Ports[0].RdmaInterface] = &ccProcess{port: device.Status.Ports[0]}
 				manager.ccProcesses[device.Status.Ports[0].RdmaInterface].running.Store(true)
@@ -1634,8 +1656,8 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					{PCI: "0000:00:00.0", NetworkInterface: "eth0", RdmaInterface: "mlx5_0"},
 					{PCI: "0000:00:00.1", NetworkInterface: "eth1", RdmaInterface: "mlx5_1"},
 				}
-				createCnpDscpFile("eth0", "24") // uniplane expects 24
-				createCnpDscpFile("eth1", "24")
+				createCnpDscpFile("eth0", "48") // uniplane expects 48
+				createCnpDscpFile("eth1", "48")
 
 				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
 				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(map[string]string{"/ar": "y"}, nil)
@@ -1655,7 +1677,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 		})
 
 		Context("ApplyRuntimeConfig", func() {
-			It("writes CNP DSCP value 24 for swplb", func() {
+			It("writes CNP DSCP value 48 for swplb", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
 				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
@@ -1683,7 +1705,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				// Verify the file was written with swplb value
 				data, err := os.ReadFile(filepath.Join(dir, "cnp_dscp"))
 				Expect(err).NotTo(HaveOccurred())
-				Expect(string(data)).To(Equal("24"))
+				Expect(string(data)).To(Equal("48"))
 			})
 
 			It("writes CNP DSCP value 48 for hwplb", func() {
@@ -1720,6 +1742,36 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				Expect(string(data)).To(Equal("48"))
 			})
 
+			It("writes CNP DSCP value 48 for none", func() {
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeNone
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 1
+				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+					{PCI: "0000:00:00.0", NetworkInterface: "eth0", RdmaInterface: "mlx5_0"},
+				}
+				dir := filepath.Join(tmpDir, "eth0", "ecn", "roce_np")
+				Expect(os.MkdirAll(dir, 0755)).To(Succeed())
+
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(nil)
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.AdaptiveRouting).Return(nil)
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.CongestionControl).Return(nil)
+				dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.InterPacketGap.PureL3).Return(nil)
+				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
+					return len(params) == 1 && params[0].Name == shutdownInterfaceParamName
+				})).Return(nil)
+				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
+					return len(params) == 1 && params[0].Name == bringUpInterfaceParamName
+				})).Return(nil)
+
+				nextCmd = &fakeCmd{output: []byte("started"), err: nil, delay: 5 * time.Second}
+				err := manager.ApplyRuntimeConfig(device)
+				Expect(err).NotTo(HaveOccurred())
+
+				// Verify the file was written with none value
+				data, err := os.ReadFile(filepath.Join(dir, "cnp_dscp"))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(string(data)).To(Equal("48"))
+			})
+
 			It("writes CNP DSCP for multiple ports", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeUniplane
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
@@ -1747,14 +1799,14 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				err := manager.ApplyRuntimeConfig(device)
 				Expect(err).NotTo(HaveOccurred())
 
-				// uniplane expects 24
+				// uniplane expects 48
 				data0, err := os.ReadFile(filepath.Join(dir0, "cnp_dscp"))
 				Expect(err).NotTo(HaveOccurred())
-				Expect(string(data0)).To(Equal("24"))
+				Expect(string(data0)).To(Equal("48"))
 
 				data1, err := os.ReadFile(filepath.Join(dir1, "cnp_dscp"))
 				Expect(err).NotTo(HaveOccurred())
-				Expect(string(data1)).To(Equal("24"))
+				Expect(string(data1)).To(Equal("48"))
 			})
 
 			It("skips ports without network interface", func() {
