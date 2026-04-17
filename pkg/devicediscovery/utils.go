@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/Mellanox/rdmamap"
 	"github.com/jaypipes/ghw"
@@ -35,6 +36,31 @@ import (
 )
 
 const pciDevicesPath = "/sys/bus/pci/devices"
+
+const mlxvpdMaxAttempts = 3
+
+// mlxvpdBackoff is a var (not const) so tests can override it to keep runs fast.
+var mlxvpdBackoff = 500 * time.Millisecond
+
+// runCommandWithRetry runs `name args...` up to maxAttempts times, sleeping backoff
+// between failed attempts. Returns combined stdout+stderr from the last attempt and
+// its error. A fresh Cmd is built each iteration (execUtils.Cmd is single-use).
+func runCommandWithRetry(execInterface execUtils.Interface, name string, args []string, maxAttempts int, backoff time.Duration) ([]byte, error) {
+	var output []byte
+	var err error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		output, err = execInterface.Command(name, args...).CombinedOutput()
+		log.Log.V(2).Info("command output", "command", name, "attempt", attempt, "output", string(output))
+		if err == nil {
+			return output, nil
+		}
+		if attempt < maxAttempts {
+			log.Log.V(1).Info("command failed, retrying", "command", name, "attempt", attempt, "error", err)
+			time.Sleep(backoff)
+		}
+	}
+	return output, err
+}
 
 // physPortNameRegex matches physical port names like "p0", "p1" — the PF uplink interfaces.
 // VF/SF representors have names like "pf0vf0", "pf0sf0" which do NOT match this pattern.
@@ -80,11 +106,10 @@ func (d *deviceDiscoveryUtils) GetPCIDevices() ([]*pci.Device, error) {
 
 // GetVPD uses mlxvpd util to retrieve Part Number, Serial Number, Model Name of the PCI device
 func (d *deviceDiscoveryUtils) GetVPD(pciAddr string) (*types.VPD, error) {
-	log.Log.Info("HostUtils.GetPartAndSerialNumber()", "pciAddr", pciAddr)
-	cmd := d.execInterface.Command("mlxvpd", "-d", pciAddr)
-	output, err := utils.RunCommand(cmd)
+	log.Log.Info("HostUtils.GetVPD()", "pciAddr", pciAddr)
+	output, err := runCommandWithRetry(d.execInterface, "mlxvpd", []string{"-d", pciAddr}, mlxvpdMaxAttempts, mlxvpdBackoff)
 	if err != nil {
-		log.Log.Error(err, "GetPartAndSerialNumber(): Failed to run mlxvpd")
+		log.Log.Error(err, "GetVPD(): Failed to run mlxvpd")
 		return nil, err
 	}
 
