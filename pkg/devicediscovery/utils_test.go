@@ -16,9 +16,11 @@ limitations under the License.
 package devicediscovery
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -31,6 +33,17 @@ const pciAddress = "0000:03:00.0"
 var _ = Describe("HostUtils", func() {
 	//nolint:dupl
 	Describe("GetVPD", func() {
+		var originalBackoff time.Duration
+
+		BeforeEach(func() {
+			originalBackoff = mlxvpdBackoff
+			mlxvpdBackoff = 1 * time.Millisecond
+		})
+
+		AfterEach(func() {
+			mlxvpdBackoff = originalBackoff
+		})
+
 		It("should return part, serial and model name", func() {
 			partNumber := "MCX623106AE-CDAT"
 			serialNumber := "MT2235J01129"
@@ -39,7 +52,7 @@ var _ = Describe("HostUtils", func() {
 			fakeExec := &execTesting.FakeExec{}
 
 			fakeCmd := &execTesting.FakeCmd{}
-			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte("  VPD-KEYWORD    DESCRIPTION             VALUE\n" +
 						"  -----------    -----------             -----\n" +
 						"Read Only Section:\n" +
@@ -74,7 +87,7 @@ var _ = Describe("HostUtils", func() {
 			fakeExec := &execTesting.FakeExec{}
 
 			fakeCmd := &execTesting.FakeCmd{}
-			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte("  SN             Serial Number           MT2235J01129\n"), nil, nil
 			})
 
@@ -95,7 +108,7 @@ var _ = Describe("HostUtils", func() {
 			Expect(vpd).To(BeNil())
 
 			fakeCmd = &execTesting.FakeCmd{}
-			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte("  PN             Part Number             MCX623106AE-CDAT\n"), nil, nil
 			})
 
@@ -118,7 +131,7 @@ var _ = Describe("HostUtils", func() {
 			fakeExec := &execTesting.FakeExec{}
 
 			fakeCmd := &execTesting.FakeCmd{}
-			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
 				return []byte("  VPD-KEYWORD    DESCRIPTION             VALUE\n" +
 						"  -----------    -----------             -----\n" +
 						"Read Only Section:\n" +
@@ -146,6 +159,77 @@ var _ = Describe("HostUtils", func() {
 			Expect(vpd.PartNumber).To(Equal(partNumber))
 			Expect(vpd.SerialNumber).To(Equal(serialNumber))
 			Expect(vpd.ModelName).To(Equal(""))
+		})
+		It("should retry and succeed on the 2nd attempt", func() {
+			partNumber := "MCX623106AE-CDAT"
+			serialNumber := "MT2235J01129"
+
+			fakeExec := &execTesting.FakeExec{}
+
+			failingCmd := &execTesting.FakeCmd{}
+			failingCmd.CombinedOutputScript = append(failingCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
+				return nil, nil, errors.New("exit status 2")
+			})
+
+			successCmd := &execTesting.FakeCmd{}
+			successCmd.CombinedOutputScript = append(successCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
+				return []byte("  PN             Part Number             " + partNumber + "\n" +
+						"  SN             Serial Number           " + serialNumber + "\n"),
+					nil, nil
+			})
+
+			cmds := []exec.Cmd{failingCmd, successCmd}
+			fakeExec.CommandScript = append(fakeExec.CommandScript,
+				func(cmd string, args ...string) exec.Cmd {
+					Expect(cmd).To(Equal("mlxvpd"))
+					return cmds[0]
+				},
+				func(cmd string, args ...string) exec.Cmd {
+					Expect(cmd).To(Equal("mlxvpd"))
+					return cmds[1]
+				},
+			)
+
+			h := &deviceDiscoveryUtils{
+				execInterface: fakeExec,
+			}
+
+			vpd, err := h.GetVPD(pciAddress)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(vpd.PartNumber).To(Equal(partNumber))
+			Expect(vpd.SerialNumber).To(Equal(serialNumber))
+			Expect(fakeExec.CommandCalls).To(Equal(2))
+		})
+		It("should retry up to maxAttempts and return an error", func() {
+			fakeExec := &execTesting.FakeExec{}
+
+			newFailingCmd := func() *execTesting.FakeCmd {
+				c := &execTesting.FakeCmd{}
+				c.CombinedOutputScript = append(c.CombinedOutputScript, func() ([]byte, []byte, error) {
+					return []byte("mlxvpd: failed to read VPD"), nil, errors.New("exit status 2")
+				})
+				return c
+			}
+
+			cmds := []exec.Cmd{newFailingCmd(), newFailingCmd(), newFailingCmd()}
+			for i := range cmds {
+				c := cmds[i]
+				fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+					Expect(cmd).To(Equal("mlxvpd"))
+					return c
+				})
+			}
+
+			h := &deviceDiscoveryUtils{
+				execInterface: fakeExec,
+			}
+
+			vpd, err := h.GetVPD(pciAddress)
+
+			Expect(err).To(HaveOccurred())
+			Expect(vpd).To(BeNil())
+			Expect(fakeExec.CommandCalls).To(Equal(mlxvpdMaxAttempts))
 		})
 	})
 	//nolint:dupl
