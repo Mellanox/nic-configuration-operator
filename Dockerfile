@@ -48,7 +48,7 @@ FROM nvcr.io/nvidia/doca/doca:3.3.0-full-rt-host
 ARG TARGETARCH
 ENV MFT_VERSION=4.33.0-169
 
-ARG PACKAGES="dpkg-dev=1.22.6ubuntu6.5"
+ARG PACKAGES="dpkg-dev"
 
 # enable deb-src repos
 RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
