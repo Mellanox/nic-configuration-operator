@@ -67,6 +67,24 @@ func (_m *FirmwareUtils) DownloadFile(url string, destPath string) error {
 	return r0
 }
 
+// EnsureDeviceBoundToMlx5Core provides a mock function with given fields: pciAddress
+func (_m *FirmwareUtils) EnsureDeviceBoundToMlx5Core(pciAddress string) error {
+	ret := _m.Called(pciAddress)
+
+	if len(ret) == 0 {
+		panic("no return value specified for EnsureDeviceBoundToMlx5Core")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(pciAddress)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // GetDocaSpcXCCVersion provides a mock function with given fields: docaSpcXCCPath
 func (_m *FirmwareUtils) GetDocaSpcXCCVersion(docaSpcXCCPath string) (string, error) {
 	ret := _m.Called(docaSpcXCCPath)

@@ -391,6 +391,18 @@ func (f firmwareManager) installBlueFieldFirmware(ctx context.Context, device *v
 		return err
 	}
 
+	// Workaround for a DMS bug: `os install` / `os activate` unconditionally unbinds every
+	// PCI function of the device, which fails with ENODEV if a function is already unbound
+	// (e.g. manually unbound by an operator). Rebind any managed PF that is currently unbound
+	// so the DMS unbind step finds each function in the expected state.
+	for _, port := range device.Status.Ports {
+		if err := f.utils.EnsureDeviceBoundToMlx5Core(port.PCI); err != nil {
+			log.Log.Error(err, "failed to ensure PCI function is bound to mlx5_core before BFB install",
+				"device", device.Name, "pci", port.PCI)
+			return err
+		}
+	}
+
 	err = dmsClient.InstallBFB(ctx, version, fwFilePath)
 	if err != nil {
 		log.Log.Error(err, "failed to install BFB", "device", device.Name)

@@ -922,6 +922,89 @@ var _ = Describe("utils", func() {
 			})
 		})
 	})
+
+	Describe("EnsureDeviceBoundToMlx5Core", func() {
+		const pciAddr = "0000:75:00.0"
+
+		var (
+			devicesDir  string
+			driversDir  string
+			bindFile    string
+			origDevices string
+			origBind    string
+		)
+
+		BeforeEach(func() {
+			// Build a fake sysfs tree:
+			//   <tmpDir>/devices/<pci>/   (driver symlink added per-case)
+			//   <tmpDir>/drivers/mlx5_core/bind
+			devicesDir = filepath.Join(tmpDir, "devices")
+			driversDir = filepath.Join(tmpDir, "drivers")
+			Expect(os.MkdirAll(filepath.Join(devicesDir, pciAddr), 0755)).To(Succeed())
+			Expect(os.MkdirAll(filepath.Join(driversDir, consts.Mlx5CoreDriverName), 0755)).To(Succeed())
+			Expect(os.MkdirAll(filepath.Join(driversDir, "other_driver"), 0755)).To(Succeed())
+
+			// Real sysfs bind is write-only (0200). We use 0600 so the test can also
+			// read the file back to assert whether a rebind was attempted.
+			bindFile = filepath.Join(driversDir, consts.Mlx5CoreDriverName, "bind")
+			Expect(os.WriteFile(bindFile, nil, 0600)).To(Succeed())
+
+			origDevices = pciDevicesSysfsPath
+			origBind = mlx5CoreBindPath
+			pciDevicesSysfsPath = devicesDir
+			mlx5CoreBindPath = bindFile
+		})
+
+		AfterEach(func() {
+			pciDevicesSysfsPath = origDevices
+			mlx5CoreBindPath = origBind
+		})
+
+		It("should be a no-op when the device is already bound to mlx5_core", func() {
+			driverLink := filepath.Join(devicesDir, pciAddr, "driver")
+			Expect(os.Symlink(filepath.Join(driversDir, consts.Mlx5CoreDriverName), driverLink)).To(Succeed())
+
+			err := testedUtils.EnsureDeviceBoundToMlx5Core(pciAddr)
+			Expect(err).NotTo(HaveOccurred())
+
+			// bind file must remain empty — no rebind attempted
+			data, readErr := os.ReadFile(bindFile)
+			Expect(readErr).NotTo(HaveOccurred())
+			Expect(data).To(BeEmpty())
+		})
+
+		It("should bind the device when it is currently unbound", func() {
+			// No driver symlink under the device dir — simulates unbound state.
+			err := testedUtils.EnsureDeviceBoundToMlx5Core(pciAddr)
+			Expect(err).NotTo(HaveOccurred())
+
+			data, readErr := os.ReadFile(bindFile)
+			Expect(readErr).NotTo(HaveOccurred())
+			Expect(string(data)).To(Equal(pciAddr))
+		})
+
+		It("should return an error when the device is bound to a different driver", func() {
+			driverLink := filepath.Join(devicesDir, pciAddr, "driver")
+			Expect(os.Symlink(filepath.Join(driversDir, "other_driver"), driverLink)).To(Succeed())
+
+			err := testedUtils.EnsureDeviceBoundToMlx5Core(pciAddr)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("bound to driver \"other_driver\""))
+
+			data, readErr := os.ReadFile(bindFile)
+			Expect(readErr).NotTo(HaveOccurred())
+			Expect(data).To(BeEmpty())
+		})
+
+		It("should return an error when the bind sysfs write fails", func() {
+			// Point the bind path at a non-existent file so WriteFile fails.
+			mlx5CoreBindPath = filepath.Join(driversDir, "does-not-exist", "bind")
+
+			err := testedUtils.EnsureDeviceBoundToMlx5Core(pciAddr)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("failed to bind PCI device"))
+		})
+	})
 })
 
 func newTestFirmwareUtils() FirmwareUtils {

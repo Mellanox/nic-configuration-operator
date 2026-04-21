@@ -28,7 +28,11 @@ import (
 	execTesting "k8s.io/utils/exec/testing"
 )
 
-const pciAddress = "0000:03:00.0"
+const (
+	pciAddress   = "0000:03:00.0"
+	partNumber   = "MCX623106AE-CDAT"
+	serialNumber = "MT2235J01129"
+)
 
 var _ = Describe("HostUtils", func() {
 	//nolint:dupl
@@ -45,8 +49,6 @@ var _ = Describe("HostUtils", func() {
 		})
 
 		It("should return part, serial and model name", func() {
-			partNumber := "MCX623106AE-CDAT"
-			serialNumber := "MT2235J01129"
 			modelName := "ConnectX-6 Dx EN adapter card, 100GbE, Dual-port QSFP56, PCIe 4.0 x16, Crypto, No Secure Boot"
 
 			fakeExec := &execTesting.FakeExec{}
@@ -57,11 +59,11 @@ var _ = Describe("HostUtils", func() {
 						"  -----------    -----------             -----\n" +
 						"Read Only Section:\n" +
 						"\n" +
-						"  PN             Part Number             MCX623106AE-CDAT\n" +
+						"  PN             Part Number             " + partNumber + "\n" +
 						"  EC             Revision                AB\n" +
-						"  SN             Serial Number           MT2235J01129\n" +
+						"  SN             Serial Number           " + serialNumber + "\n" +
 						"  V3             N/A                     3869145f5722ed118000b83fd2193152\n" +
-						"  IDTAG          Board Id                ConnectX-6 Dx EN adapter card, 100GbE, Dual-port QSFP56, PCIe 4.0 x16, Crypto, No Secure Boot\n"),
+						"  IDTAG          Board Id                " + modelName + "\n"),
 					nil, nil
 			})
 
@@ -88,7 +90,7 @@ var _ = Describe("HostUtils", func() {
 
 			fakeCmd := &execTesting.FakeCmd{}
 			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
-				return []byte("  SN             Serial Number           MT2235J01129\n"), nil, nil
+				return []byte("  SN             Serial Number           " + serialNumber + "\n"), nil, nil
 			})
 
 			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
@@ -109,7 +111,7 @@ var _ = Describe("HostUtils", func() {
 
 			fakeCmd = &execTesting.FakeCmd{}
 			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
-				return []byte("  PN             Part Number             MCX623106AE-CDAT\n"), nil, nil
+				return []byte("  PN             Part Number             " + partNumber + "\n"), nil, nil
 			})
 
 			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
@@ -125,9 +127,6 @@ var _ = Describe("HostUtils", func() {
 			Expect(vpd).To(BeNil())
 		})
 		It("should set empty model name when IDTAG is absent", func() {
-			partNumber := "MCX623106AE-CDAT"
-			serialNumber := "MT2235J01129"
-
 			fakeExec := &execTesting.FakeExec{}
 
 			fakeCmd := &execTesting.FakeCmd{}
@@ -161,9 +160,6 @@ var _ = Describe("HostUtils", func() {
 			Expect(vpd.ModelName).To(Equal(""))
 		})
 		It("should retry and succeed on the 2nd attempt", func() {
-			partNumber := "MCX623106AE-CDAT"
-			serialNumber := "MT2235J01129"
-
 			fakeExec := &execTesting.FakeExec{}
 
 			failingCmd := &execTesting.FakeCmd{}

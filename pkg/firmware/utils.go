@@ -20,6 +20,7 @@ import (
 	"archive/zip"
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -66,7 +67,18 @@ type FirmwareUtils interface {
 	// GetInstalledDebPackageVersion retrieves the version from the installed .deb package
 	// Return empty string if the package is not installed
 	GetInstalledDebPackageVersion(packageName string) string
+	// EnsureDeviceBoundToMlx5Core verifies that the given PCI device is bound to mlx5_core,
+	// and binds it if it is currently unbound. Returns an error if the device is bound to a
+	// different driver or if the bind write fails.
+	EnsureDeviceBoundToMlx5Core(pciAddress string) error
 }
+
+// pciDevicesSysfsPath and mlx5CoreBindPath are package-level vars so tests can point them
+// at a fake sysfs tree. In production they resolve to the real sysfs paths from consts.
+var (
+	pciDevicesSysfsPath = consts.PCIDevicesSysfsPath
+	mlx5CoreBindPath    = consts.Mlx5CoreDriverBindPath
+)
 
 type utils struct {
 	execInterface execUtils.Interface
@@ -481,6 +493,36 @@ func (u *utils) GetInstalledDebPackageVersion(packageName string) string {
 	installedVersion := strings.Trim(string(output), "'\"\n")
 	log.Log.V(2).Info("GetInstalledDebPackageVersion(): Installed version of package", "package", packageName, "version", installedVersion)
 	return installedVersion
+}
+
+// EnsureDeviceBoundToMlx5Core verifies that the given PCI device is bound to mlx5_core,
+// and binds it if it is currently unbound. Returns an error if the device is bound to a
+// different driver or if the bind write fails.
+//
+// Workaround for a DMS bug where "os install" / "os activate" unconditionally unbinds every
+// PCI function of the device, which fails with ENODEV if a function is already unbound.
+func (u *utils) EnsureDeviceBoundToMlx5Core(pciAddress string) error {
+	log.Log.V(2).Info("FirmwareUtils.EnsureDeviceBoundToMlx5Core()", "pciAddress", pciAddress)
+
+	driverLink := filepath.Join(pciDevicesSysfsPath, pciAddress, "driver")
+	target, err := os.Readlink(driverLink)
+	switch {
+	case err == nil:
+		currentDriver := filepath.Base(target)
+		if currentDriver == consts.Mlx5CoreDriverName {
+			return nil
+		}
+		return fmt.Errorf("PCI device %s is bound to driver %q, expected %q",
+			pciAddress, currentDriver, consts.Mlx5CoreDriverName)
+	case errors.Is(err, os.ErrNotExist):
+		log.Log.Info("PCI device is unbound, binding to mlx5_core before FW install", "pciAddress", pciAddress)
+		if err := os.WriteFile(mlx5CoreBindPath, []byte(pciAddress), 0200); err != nil {
+			return fmt.Errorf("failed to bind PCI device %s to mlx5_core: %w", pciAddress, err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("failed to read driver link for PCI device %s: %w", pciAddress, err)
+	}
 }
 
 func newFirmwareUtils() FirmwareUtils {

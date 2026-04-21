@@ -106,6 +106,9 @@ const (
 
 	SupportedNicFirmwareConfigmap = "nic-configuration-operator-supported-nic-firmware"
 	Mlx5ModuleVersionPath         = "/sys/bus/pci/drivers/mlx5_core/module/version"
+	Mlx5CoreDriverName            = "mlx5_core"
+	PCIDevicesSysfsPath           = "/sys/bus/pci/devices"
+	Mlx5CoreDriverBindPath        = "/sys/bus/pci/drivers/mlx5_core/bind"
 
 	FwConfigNotAppliedAfterRebootErrorMsg = "firmware configuration failed to apply after reboot"
 

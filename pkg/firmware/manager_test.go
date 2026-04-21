@@ -489,6 +489,7 @@ var _ = Describe("FirmwareManager", func() {
 				fwUtilsMock.On("GetFirmwareVersionsFromDevice", pci).
 					Return("", "", errors.New("version check failed")).Once()
 				dmsManagerMock.On("GetDMSClientBySerialNumber", testSerial).Return(dmsClientMock, nil).Once()
+				fwUtilsMock.On("EnsureDeviceBoundToMlx5Core", pci).Return(nil).Once()
 				dmsClientMock.On("InstallBFB", mock.Anything, fwVersion, expectedBFBPath).Return(nil).Once()
 
 				_, err := manager.InstallFirmware(context.Background(), device, &types.FirmwareInstallOptions{Version: fwVersion, SkipReset: true})
@@ -502,10 +503,42 @@ var _ = Describe("FirmwareManager", func() {
 				fwUtilsMock.On("GetFirmwareVersionsFromDevice", pci).
 					Return("", "", errors.New("version check failed")).Once()
 				dmsManagerMock.On("GetDMSClientBySerialNumber", testSerial).Return(dmsClientMock, nil).Once()
+				fwUtilsMock.On("EnsureDeviceBoundToMlx5Core", pci).Return(nil).Once()
 				dmsClientMock.On("InstallBFB", mock.Anything, fwVersion, expectedBFBPath).Return(nil).Once()
 
 				_, err := manager.InstallFirmware(context.Background(), device, &types.FirmwareInstallOptions{Version: fwVersion, SkipReset: true})
 				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("should ensure every managed PF is bound before InstallBFB", func() {
+				device := createBlueFieldDevice(consts.BlueField3DeviceID)
+				secondPCI := "0000:3b:00.1"
+				device.Status.Ports = append(device.Status.Ports, v1alpha1.NicDevicePortSpec{PCI: secondPCI})
+				expectedBFBPath := path.Join(bfbCacheDir, bfbFileName)
+
+				fwUtilsMock.On("GetFirmwareVersionsFromDevice", pci).
+					Return("", "", errors.New("version check failed")).Once()
+				dmsManagerMock.On("GetDMSClientBySerialNumber", testSerial).Return(dmsClientMock, nil).Once()
+				fwUtilsMock.On("EnsureDeviceBoundToMlx5Core", pci).Return(nil).Once()
+				fwUtilsMock.On("EnsureDeviceBoundToMlx5Core", secondPCI).Return(nil).Once()
+				dmsClientMock.On("InstallBFB", mock.Anything, fwVersion, expectedBFBPath).Return(nil).Once()
+
+				_, err := manager.InstallFirmware(context.Background(), device, &types.FirmwareInstallOptions{Version: fwVersion, SkipReset: true})
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("should abort BFB install when a PF fails to bind", func() {
+				device := createBlueFieldDevice(consts.BlueField3DeviceID)
+				bindErr := errors.New("bind write failed")
+
+				fwUtilsMock.On("GetFirmwareVersionsFromDevice", pci).
+					Return("", "", errors.New("version check failed")).Once()
+				dmsManagerMock.On("GetDMSClientBySerialNumber", testSerial).Return(dmsClientMock, nil).Once()
+				fwUtilsMock.On("EnsureDeviceBoundToMlx5Core", pci).Return(bindErr).Once()
+				// InstallBFB must not be called if binding fails — no mock expectation set.
+
+				_, err := manager.InstallFirmware(context.Background(), device, &types.FirmwareInstallOptions{Version: fwVersion, SkipReset: true})
+				Expect(err).To(MatchError(bindErr))
 			})
 
 			It("should return error when BFB file not found", func() {
@@ -543,6 +576,7 @@ var _ = Describe("FirmwareManager", func() {
 				fwUtilsMock.On("GetFirmwareVersionsFromDevice", pci).
 					Return("", "", errors.New("version check failed")).Once()
 				dmsManagerMock.On("GetDMSClientBySerialNumber", testSerial).Return(dmsClientMock, nil).Once()
+				fwUtilsMock.On("EnsureDeviceBoundToMlx5Core", pci).Return(nil).Once()
 				dmsClientMock.On("InstallBFB", mock.Anything, fwVersion, expectedBFBPath).Return(installError).Once()
 
 				_, err := manager.InstallFirmware(context.Background(), device, &types.FirmwareInstallOptions{Version: fwVersion, SkipReset: true})
