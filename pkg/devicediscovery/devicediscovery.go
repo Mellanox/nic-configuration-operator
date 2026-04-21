@@ -106,8 +106,11 @@ func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, er
 				return nil, err
 			}
 
-			// Trim the model name to the first word, e.g. ConnectX-6 or BlueField-2
-			shortName := strings.SplitN(vpd.ModelName, " ", 2)[0]
+			// mlxvpd's IDTAG "Board Id" is a long marketing string like
+			//   "NVIDIA ConnectX-9 C9180 HHHL SuperNIC, 800Gbs XDR IB / 800GbE (default), ..."
+			// The portion before the first comma is the product name; everything after is
+			// feature/packaging detail we don't want in the CR.
+			modelName := strings.TrimSpace(strings.SplitN(vpd.ModelName, ",", 2)[0])
 
 			dpu := false
 			if isBlueField {
@@ -125,13 +128,15 @@ func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, er
 				Type:            device.Product.ID,
 				SerialNumber:    vpd.SerialNumber,
 				PartNumber:      vpd.PartNumber,
-				ModelName:       shortName,
+				ModelName:       modelName,
 				PSID:            psid,
 				FirmwareVersion: firmwareVersion,
 				SuperNIC:        utils.ContainsIgnoreCase(vpd.ModelName, consts.SuperNIC),
 				DPU:             dpu,
 				Ports:           []v1alpha1.NicDevicePortSpec{},
 			}
+
+			log.Log.Info("Discovered NIC device", "address", device.Address, "status", deviceStatus)
 
 			statuses[vpd.SerialNumber] = deviceStatus
 		}
