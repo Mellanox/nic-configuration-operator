@@ -453,7 +453,7 @@ var _ = Describe("DeviceDiscovery", func() {
 	})
 
 	Context("when parsing model name and SuperNIC flag", func() {
-		It("should shorten model name and set SuperNIC", func() {
+		It("should truncate model name at first comma and set SuperNIC", func() {
 			mockUtils.On("GetPCIDevices").Return([]*pci.Device{
 				{
 					Address: "0000:00:00.0",
@@ -463,7 +463,11 @@ var _ = Describe("DeviceDiscovery", func() {
 				},
 			}, nil)
 			mockUtils.On("IsSriovVF", "0000:00:00.0").Return(false)
-			mockUtils.On("GetVPD", "0000:00:00.0").Return(&types.VPD{PartNumber: "part-number", SerialNumber: "serial-number", ModelName: "ConnectX-8 SuperNIC"}, nil)
+			mockUtils.On("GetVPD", "0000:00:00.0").Return(&types.VPD{
+				PartNumber:   "part-number",
+				SerialNumber: "serial-number",
+				ModelName:    "NVIDIA ConnectX-8 C8180 HHHL SuperNIC, 800Gbs XDR IB / 800GbE (default), Single-cage OSFP",
+			}, nil)
 			mockUtils.On("GetFirmwareVersionAndPSID", "0000:00:00.0").Return("fw-version", "psid", nil)
 			mockUtils.On("GetInterfaceName", "0000:00:00.0").Return("eth0")
 			mockUtils.On("GetRDMADeviceName", "0000:00:00.0").Return("mlx5_0")
@@ -474,7 +478,7 @@ var _ = Describe("DeviceDiscovery", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(devicesBySerial).To(HaveKey("serial-number"))
 			discoveredDevice := devicesBySerial["serial-number"]
-			Expect(discoveredDevice.Status.ModelName).To(Equal("ConnectX-8"))
+			Expect(discoveredDevice.Status.ModelName).To(Equal("NVIDIA ConnectX-8 C8180 HHHL SuperNIC"))
 			Expect(discoveredDevice.Status.SuperNIC).To(BeTrue())
 		})
 	})
