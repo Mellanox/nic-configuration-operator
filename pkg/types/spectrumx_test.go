@@ -30,8 +30,8 @@ func repoRootFromThisFile() string {
 }
 
 var _ = Describe("LoadSpectrumXConfig", func() {
-	It("parses RA3.0.yaml and populates fields", func() {
-		configPath := filepath.Join(repoRootFromThisFile(), "bindata", "spectrum-x", "RA3.0.yaml")
+	It("parses RA2.2.yaml and populates fields", func() {
+		configPath := filepath.Join(repoRootFromThisFile(), "bindata", "spectrum-x", "RA2.2.yaml")
 
 		cfg, err := LoadSpectrumXConfig(configPath)
 		Expect(err).ToNot(HaveOccurred())

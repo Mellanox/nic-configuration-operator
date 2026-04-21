@@ -109,7 +109,7 @@ spec:
   * Cannot be combined with `roceOptimized` (RoCE settings are included automatically)
   * Can be combined with `rawNvConfig` — raw params are merged as overrides on top of Spectrum-X calculated params
   * Only supported on ConnectX-8 (`nicType: 1023`), ConnectX-9 (`nicType: 1025`) and BlueField-3 SuperNIC (`nicType: a2dc`)
-  * `version`: Required. Reference Architecture version (`RA1.3`, `RA2.0`, `RA2.1`, or `RA3.0`)
+  * `version`: Required. Reference Architecture version (`RA1.3`, `RA2.0`, `RA2.1`, or `RA2.2`)
   * `overlay`: Optional, default `none`. Set to `l3` for L3 EVPN overlay
   * `multiplaneMode`: Optional, default `none`. Only available with RA2.1. Options: `none`, `swplb`, `hwplb`, `uniplane`
   * `numberOfPlanes`: Optional, default `1`. Only available with RA2.1. Options: `1`, `2`, or `4`

@@ -82,7 +82,7 @@ type SpectrumXOptimizedSpec struct {
 	// Optimize Spectrum X
 	Enabled bool `json:"enabled"`
 	// Version of the Spectrum-X architecture to optimize for
-	// +kubebuilder:validation:Enum=RA1.3;RA2.0;RA2.1;RA3.0
+	// +kubebuilder:validation:Enum=RA1.3;RA2.0;RA2.1;RA2.2
 	// +required
 	Version string `json:"version"`
 	// Overlay mode to be configured

@@ -316,7 +316,7 @@ func NewSpectrumXConfigManager(
     spectrumXConfigs map[string]*types.SpectrumXConfig,
 ) SpectrumXManager
 ```
-- `spectrumXConfigs`: keyed by version string (e.g., `"RA1.3"`, `"RA2.0"`, `"RA2.1"`), loaded from YAML via `types.LoadSpectrumXConfig()`
+- `spectrumXConfigs`: keyed by version string (e.g., `"RA1.3"`, `"RA2.0"`, `"RA2.1"`, `"RA2.2"`), loaded from YAML via `types.LoadSpectrumXConfig()`
 
 #### Two-Phase Configuration Flow
 
@@ -643,7 +643,7 @@ type QosSpec struct {
 ```go
 type SpectrumXOptimizedSpec struct {
     Enabled        bool
-    Version        string // "RA1.3", "RA2.0", "RA2.1"
+    Version        string // "RA1.3", "RA2.0", "RA2.1", "RA2.2"
     Overlay        string // "l3" or "none"
     MultiplaneMode string // "none", "swplb", "hwplb", "uniplane"
     NumberOfPlanes int    // 1, 2, or 4
