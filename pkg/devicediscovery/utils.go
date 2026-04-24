@@ -104,46 +104,86 @@ func (d *deviceDiscoveryUtils) GetPCIDevices() ([]*pci.Device, error) {
 	return pciRegistry.Devices, nil
 }
 
-// GetVPD uses mlxvpd util to retrieve Part Number, Serial Number, Model Name of the PCI device
+// vpdOutputPatterns is the set of line-regexes used to extract fields from one
+// VPD tool's output. Each pattern must have a single capture group for the value.
+type vpdOutputPatterns struct {
+	partNumber   *regexp.Regexp
+	serialNumber *regexp.Regexp
+	modelName    *regexp.Regexp
+}
+
+// mlxvpd output is a 3-column table: "  PN             Part Number             <value>"
+var mlxvpdPatterns = vpdOutputPatterns{
+	partNumber:   regexp.MustCompile(`^\s*` + consts.PartNumberPrefix + `\s+` + consts.PartNumberDescription + `\s+(.+)$`),
+	serialNumber: regexp.MustCompile(`^\s*` + consts.SerialNumberPrefix + `\s+` + consts.SerialNumberDescription + `\s+(.+)$`),
+	modelName:    regexp.MustCompile(`^\s*` + consts.ModelNamePrefix + `\s+` + consts.ModelNameDescription + `\s+(.+)$`),
+}
+
+// mstvpd output is "KEY: <value>" with model name under "ID:" (no Board Id / IDTAG column).
+var mstvpdPatterns = vpdOutputPatterns{
+	partNumber:   regexp.MustCompile(`^\s*PN:\s+(.+)$`),
+	serialNumber: regexp.MustCompile(`^\s*SN:\s+(.+)$`),
+	modelName:    regexp.MustCompile(`^\s*ID:\s+(.+)$`),
+}
+
+// GetVPD retrieves Part Number, Serial Number, and Model Name for a PCI device.
+// Primary: mlxvpd (MFT). Fallback: mstvpd (mstflint) — used when mlxvpd fails all
+// retries or its output is unparseable. MFT 4.36 segfaults on BlueField-4 PF0;
+// mstvpd reads /sys/bus/pci/devices/<pci>/vpd directly and is hardware-agnostic.
 func (d *deviceDiscoveryUtils) GetVPD(pciAddr string) (*types.VPD, error) {
 	log.Log.Info("HostUtils.GetVPD()", "pciAddr", pciAddr)
+
+	vpd, mlxvpdErr := d.getVPDViaMlxvpd(pciAddr)
+	if mlxvpdErr == nil {
+		return vpd, nil
+	}
+	log.Log.Info("GetVPD(): mlxvpd failed, falling back to mstvpd", "pciAddr", pciAddr, "error", mlxvpdErr.Error())
+
+	vpd, mstvpdErr := d.getVPDViaMstvpd(pciAddr)
+	if mstvpdErr != nil {
+		return nil, fmt.Errorf("both mlxvpd and mstvpd failed: mlxvpd: %w; mstvpd: %w", mlxvpdErr, mstvpdErr)
+	}
+	return vpd, nil
+}
+
+func (d *deviceDiscoveryUtils) getVPDViaMlxvpd(pciAddr string) (*types.VPD, error) {
 	output, err := runCommandWithRetry(d.execInterface, "mlxvpd", []string{"-d", pciAddr}, mlxvpdMaxAttempts, mlxvpdBackoff)
 	if err != nil {
-		log.Log.Error(err, "GetVPD(): Failed to run mlxvpd")
-		return nil, err
+		return nil, fmt.Errorf("mlxvpd failed after %d attempts: %w", mlxvpdMaxAttempts, err)
 	}
+	return parseVPDOutput(output, mlxvpdPatterns)
+}
 
-	// Parse the output for PN, SN and IDTAG
-	// The output format is tabular with columns: VPD-KEYWORD, DESCRIPTION, VALUE
-	// Example line: "  PN             Part Number             MCX623106AE-CDAT"
-	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+func (d *deviceDiscoveryUtils) getVPDViaMstvpd(pciAddr string) (*types.VPD, error) {
+	output, err := d.execInterface.Command("mstvpd", pciAddr).CombinedOutput()
+	log.Log.V(2).Info("command output", "command", "mstvpd", "output", string(output))
+	if err != nil {
+		return nil, fmt.Errorf("mstvpd failed: %w", err)
+	}
+	return parseVPDOutput(output, mstvpdPatterns)
+}
+
+// parseVPDOutput scans VPD tool output line-by-line, extracting the first
+// capture group of each matching regex. Returns an error if PN or SN is missing.
+func parseVPDOutput(output []byte, p vpdOutputPatterns) (*types.VPD, error) {
 	var partNumber, serialNumber, modelName string
 
-	// Compile regex patterns for each VPD field we care about
-	// Pattern: keyword + whitespace + description + whitespace + value (capture group)
-	pnRegex := regexp.MustCompile(`^\s*` + consts.PartNumberPrefix + `\s+` + consts.PartNumberDescription + `\s+(.+)$`)
-	snRegex := regexp.MustCompile(`^\s*` + consts.SerialNumberPrefix + `\s+` + consts.SerialNumberDescription + `\s+(.+)$`)
-	modelRegex := regexp.MustCompile(`^\s*` + consts.ModelNamePrefix + `\s+` + consts.ModelNameDescription + `\s+(.+)$`)
-
+	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 	for scanner.Scan() {
 		line := scanner.Text()
-
-		if matches := pnRegex.FindStringSubmatch(line); len(matches) > 1 {
-			partNumber = strings.TrimSpace(matches[1])
-		} else if matches := snRegex.FindStringSubmatch(line); len(matches) > 1 {
-			serialNumber = strings.TrimSpace(matches[1])
-		} else if matches := modelRegex.FindStringSubmatch(line); len(matches) > 1 {
-			modelName = strings.TrimSpace(matches[1])
+		if m := p.partNumber.FindStringSubmatch(line); len(m) > 1 {
+			partNumber = strings.TrimSpace(m[1])
+		} else if m := p.serialNumber.FindStringSubmatch(line); len(m) > 1 {
+			serialNumber = strings.TrimSpace(m[1])
+		} else if m := p.modelName.FindStringSubmatch(line); len(m) > 1 {
+			modelName = strings.TrimSpace(m[1])
 		}
 	}
-
 	if err := scanner.Err(); err != nil {
-		log.Log.Error(err, "GetPartAndSerialNumber(): Error reading mlxvpd output")
-		return nil, err
+		return nil, fmt.Errorf("reading VPD output: %w", err)
 	}
-
 	if partNumber == "" || serialNumber == "" {
-		return nil, fmt.Errorf("GetPartAndSerialNumber(): part number (%v) or serial number (%v) is empty", partNumber, serialNumber)
+		return nil, fmt.Errorf("VPD output missing part number (%q) or serial number (%q)", partNumber, serialNumber)
 	}
 
 	return &types.VPD{
