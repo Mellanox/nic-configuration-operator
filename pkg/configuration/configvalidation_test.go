@@ -406,6 +406,107 @@ var _ = Describe("ConfigValidationImpl", func() {
 			Expect(nvParams).To(HaveKeyWithValue("TEST_P1", "test"))
 			Expect(nvParams).To(HaveKeyWithValue("TEST_P2", "test"))
 		})
+		It("should emit link type and RoCE params for every port on a quad-port device", func() {
+			mockConfigurationUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
+
+			device := &v1alpha1.NicDevice{
+				Spec: v1alpha1.NicDeviceSpec{
+					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
+						Template: &v1alpha1.ConfigurationTemplateSpec{
+							NumVfs:   0,
+							LinkType: consts.Ethernet,
+							RoceOptimized: &v1alpha1.RoceOptimizedSpec{
+								Enabled: true,
+							},
+							RawNvConfig: []v1alpha1.NvConfigParam{
+								{Name: "CUSTOM_PARAM_P1", Value: "raw1"},
+								{Name: "CUSTOM_PARAM_P4", Value: "raw4"},
+								{Name: "CUSTOM_PARAM_P5", Value: "raw5"},
+								{Name: "CUSTOM_PARAM_NO_SUFFIX", Value: "rawN"},
+							},
+						},
+					},
+				},
+				Status: v1alpha1.NicDeviceStatus{
+					Ports: []v1alpha1.NicDevicePortSpec{
+						{PCI: "0000:03:00.0"},
+						{PCI: "0000:03:00.1"},
+						{PCI: "0000:03:00.2"},
+						{PCI: "0000:03:00.3"},
+					},
+				},
+			}
+
+			query := types.NewNvConfigQuery()
+			// Firmware exposes LINK_TYPE for all four ports.
+			query.DefaultConfig = map[string][]string{
+				"LINK_TYPE_P1": {"2"},
+				"LINK_TYPE_P2": {"2"},
+				"LINK_TYPE_P3": {"2"},
+				"LINK_TYPE_P4": {"2"},
+			}
+
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Link type emitted for every port with a firmware-declared slot.
+			for _, name := range []string{"LINK_TYPE_P1", "LINK_TYPE_P2", "LINK_TYPE_P3", "LINK_TYPE_P4"} {
+				Expect(nvParams).To(HaveKeyWithValue(name, consts.NvParamLinkTypeEthernet))
+			}
+
+			// RoCE optimization emitted for all four ports.
+			for _, name := range []string{"ROCE_CC_PRIO_MASK_P1", "ROCE_CC_PRIO_MASK_P2", "ROCE_CC_PRIO_MASK_P3", "ROCE_CC_PRIO_MASK_P4"} {
+				Expect(nvParams).To(HaveKeyWithValue(name, "255"))
+			}
+			for _, name := range []string{"CNP_DSCP_P1", "CNP_DSCP_P2", "CNP_DSCP_P3", "CNP_DSCP_P4"} {
+				Expect(nvParams).To(HaveKeyWithValue(name, "4"))
+			}
+			for _, name := range []string{"CNP_802P_PRIO_P1", "CNP_802P_PRIO_P2", "CNP_802P_PRIO_P3", "CNP_802P_PRIO_P4"} {
+				Expect(nvParams).To(HaveKeyWithValue(name, "6"))
+			}
+
+			// rawNvConfig: _P1..P4 and non-suffixed entries kept; _P5 dropped.
+			Expect(nvParams).To(HaveKeyWithValue("CUSTOM_PARAM_P1", "raw1"))
+			Expect(nvParams).To(HaveKeyWithValue("CUSTOM_PARAM_P4", "raw4"))
+			Expect(nvParams).To(HaveKeyWithValue("CUSTOM_PARAM_NO_SUFFIX", "rawN"))
+			Expect(nvParams).NotTo(HaveKey("CUSTOM_PARAM_P5"))
+		})
+		It("should skip LINK_TYPE_Pn for ports firmware does not declare a slot for", func() {
+			mockConfigurationUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
+
+			device := &v1alpha1.NicDevice{
+				Spec: v1alpha1.NicDeviceSpec{
+					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
+						Template: &v1alpha1.ConfigurationTemplateSpec{
+							NumVfs:   0,
+							LinkType: consts.Ethernet,
+						},
+					},
+				},
+				Status: v1alpha1.NicDeviceStatus{
+					Ports: []v1alpha1.NicDevicePortSpec{
+						{PCI: "0000:03:00.0"},
+						{PCI: "0000:03:00.1"},
+						{PCI: "0000:03:00.2"},
+						{PCI: "0000:03:00.3"},
+					},
+				},
+			}
+
+			query := types.NewNvConfigQuery()
+			// Firmware exposes only P1 and P3, not P2 or P4.
+			query.DefaultConfig = map[string][]string{
+				"LINK_TYPE_P1": {"2"},
+				"LINK_TYPE_P3": {"2"},
+			}
+
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(nvParams).To(HaveKeyWithValue("LINK_TYPE_P1", consts.NvParamLinkTypeEthernet))
+			Expect(nvParams).To(HaveKeyWithValue("LINK_TYPE_P3", consts.NvParamLinkTypeEthernet))
+			Expect(nvParams).NotTo(HaveKey("LINK_TYPE_P2"))
+			Expect(nvParams).NotTo(HaveKey("LINK_TYPE_P4"))
+		})
 		It("should report an error when LinkType cannot be changed and template differs from the actual status", func() {
 			mockConfigurationUtils.On("GetLinkType", mock.Anything).Return(consts.Ethernet)
 			mockConfigurationUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)

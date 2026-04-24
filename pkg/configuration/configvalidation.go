@@ -21,7 +21,6 @@ import (
 	"reflect"
 	"slices"
 	"strconv"
-	"strings"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/record"
@@ -85,7 +84,7 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 	desiredParameters := map[string]string{}
 
 	template := device.Spec.Configuration.Template
-	secondPortPresent := len(device.Status.Ports) > 1
+	portCount := len(device.Status.Ports)
 
 	desiredParameters[consts.SriovEnabledParam] = consts.NvParamFalse
 	desiredParameters[consts.SriovNumOfVfsParam] = "0"
@@ -98,10 +97,14 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 	_, canChangeLinkType := query.DefaultConfig[consts.LinkTypeP1Param]
 	if canChangeLinkType {
 		linkType := nvParamLinkTypeFromName(string(template.LinkType))
-		desiredParameters[consts.LinkTypeP1Param] = linkType
-		_, hasLinkTypeP2Param := query.DefaultConfig[consts.LinkTypeP2Param]
-		if secondPortPresent && hasLinkTypeP2Param {
-			desiredParameters[consts.LinkTypeP2Param] = linkType
+		// Emit LINK_TYPE_P<n> for every discovered port. Firmware may expose
+		// fewer slots than the device has ports (e.g. BF3 DPU mode), so gate
+		// each entry on a presence check in the query output.
+		for portIdx := 1; portIdx <= portCount; portIdx++ {
+			name := consts.PortParam(consts.LinkTypeParamBase, portIdx)
+			if _, ok := query.DefaultConfig[name]; ok {
+				desiredParameters[name] = linkType
+			}
 		}
 	} else {
 		desiredLinkType := string(device.Spec.Configuration.Template.LinkType)
@@ -161,25 +164,20 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 			return desiredParameters, err
 		}
 
-		desiredParameters[consts.RoceCcPrioMaskP1Param] = "255"
-		desiredParameters[consts.CnpDscpP1Param] = "4"
-		desiredParameters[consts.Cnp802pPrioP1Param] = "6"
-
-		if secondPortPresent {
-			desiredParameters[consts.RoceCcPrioMaskP2Param] = "255"
-			desiredParameters[consts.CnpDscpP2Param] = "4"
-			desiredParameters[consts.Cnp802pPrioP2Param] = "6"
+		// Apply RoCE optimization to every discovered port. Matches the
+		// historical P1/P2 behavior, which emits these params unconditionally.
+		for portIdx := 1; portIdx <= portCount; portIdx++ {
+			desiredParameters[consts.PortParam(consts.RoceCcPrioMaskParamBase, portIdx)] = "255"
+			desiredParameters[consts.PortParam(consts.CnpDscpParamBase, portIdx)] = "4"
+			desiredParameters[consts.PortParam(consts.Cnp802pPrioParamBase, portIdx)] = "6"
 		}
 
 		// qos settings are applied as runtime configuration
 	} else {
-		applyDefaultNvConfigValueIfExists(consts.RoceCcPrioMaskP1Param, desiredParameters, query)
-		applyDefaultNvConfigValueIfExists(consts.CnpDscpP1Param, desiredParameters, query)
-		applyDefaultNvConfigValueIfExists(consts.Cnp802pPrioP1Param, desiredParameters, query)
-		if secondPortPresent {
-			applyDefaultNvConfigValueIfExists(consts.RoceCcPrioMaskP2Param, desiredParameters, query)
-			applyDefaultNvConfigValueIfExists(consts.CnpDscpP2Param, desiredParameters, query)
-			applyDefaultNvConfigValueIfExists(consts.Cnp802pPrioP2Param, desiredParameters, query)
+		for portIdx := 1; portIdx <= portCount; portIdx++ {
+			applyDefaultNvConfigValueIfExists(consts.PortParam(consts.RoceCcPrioMaskParamBase, portIdx), desiredParameters, query)
+			applyDefaultNvConfigValueIfExists(consts.PortParam(consts.CnpDscpParamBase, portIdx), desiredParameters, query)
+			applyDefaultNvConfigValueIfExists(consts.PortParam(consts.Cnp802pPrioParamBase, portIdx), desiredParameters, query)
 		}
 	}
 
@@ -201,8 +199,8 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 		applyDefaultNvConfigValueIfExists(consts.AtsEnabledParam, desiredParameters, query)
 	}
 	for _, rawParam := range template.RawNvConfig {
-		// Ignore second port params if device has a single port
-		if strings.HasSuffix(rawParam.Name, consts.SecondPortPrefix) && !secondPortPresent {
+		// Drop _Pn params whose port is beyond the device's port count.
+		if n, ok := consts.PortSuffixNum(rawParam.Name); ok && n > portCount {
 			continue
 		}
 
