@@ -507,16 +507,16 @@ func (h configurationManager) queryNvConfigs(ctx context.Context, device *v1alph
 }
 
 // getRawNvConfigParams extracts rawNvConfig params from the device template,
-// filtering out _P2 suffixed params for single-port devices.
+// dropping _Pn params whose port index is beyond the device's port count.
 func getRawNvConfigParams(device *v1alpha1.NicDevice) map[string]string {
 	template := device.Spec.Configuration.Template
 	if template == nil || len(template.RawNvConfig) == 0 {
 		return nil
 	}
-	secondPortPresent := len(device.Status.Ports) > 1
+	portCount := len(device.Status.Ports)
 	params := make(map[string]string, len(template.RawNvConfig))
 	for _, rawParam := range template.RawNvConfig {
-		if strings.HasSuffix(rawParam.Name, consts.SecondPortPrefix) && !secondPortPresent {
+		if n, ok := consts.PortSuffixNum(rawParam.Name); ok && n > portCount {
 			continue
 		}
 		params[rawParam.Name] = rawParam.Value

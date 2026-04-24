@@ -15,6 +15,11 @@ limitations under the License.
 
 package consts
 
+import (
+	"strconv"
+	"strings"
+)
+
 const (
 	MellanoxVendor       = "15b3"
 	BlueField3DeviceID   = "a2dc"
@@ -95,6 +100,14 @@ const (
 	AdvancedPCISettingsParam = "ADVANCED_PCI_SETTINGS"
 	BF3OperationModeParam    = "INTERNAL_CPU_OFFLOAD_ENGINE"
 
+	// Base names for port-indexed nvconfig parameters. The firmware exposes
+	// one parameter per port as "<base>_P<n>" (n is 1-indexed). Use PortParam
+	// to construct the concrete name for a given port.
+	LinkTypeParamBase       = "LINK_TYPE"
+	RoceCcPrioMaskParamBase = "ROCE_CC_PRIO_MASK"
+	CnpDscpParamBase        = "CNP_DSCP"
+	Cnp802pPrioParamBase    = "CNP_802P_PRIO"
+
 	SecondPortPrefix = "P2"
 
 	EnvBaremetal = "Baremetal"
@@ -169,3 +182,30 @@ const (
 	// InterfaceNameSpecEmptyReason indicates the interface name template spec was removed
 	InterfaceNameSpecEmptyReason = "InterfaceNameSpecEmpty"
 )
+
+// PortParam returns the nvconfig parameter name for the given port-indexed
+// base, e.g. PortParam("LINK_TYPE", 3) -> "LINK_TYPE_P3". portNum is 1-indexed.
+func PortParam(base string, portNum int) string {
+	return base + "_P" + strconv.Itoa(portNum)
+}
+
+// PortSuffixNum parses a trailing "_P<n>" suffix (n >= 1, digits only) and
+// returns the port number. Returns (0, false) when the name does not carry
+// a port suffix (e.g. "SRIOV_EN", "MAX_ACC_OUT_READ").
+func PortSuffixNum(paramName string) (int, bool) {
+	idx := strings.LastIndex(paramName, "_P")
+	if idx < 0 || idx+2 >= len(paramName) {
+		return 0, false
+	}
+	digits := paramName[idx+2:]
+	for _, r := range digits {
+		if r < '0' || r > '9' {
+			return 0, false
+		}
+	}
+	n, err := strconv.Atoi(digits)
+	if err != nil || n < 1 {
+		return 0, false
+	}
+	return n, true
+}
