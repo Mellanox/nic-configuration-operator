@@ -107,15 +107,14 @@ func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *
 		return false, false, nil
 	}
 
-	nvConfigsForPorts, err := h.queryNvConfigs(ctx, device)
-	if err != nil {
-		log.Log.Error(err, "failed to query nv configs", "device", device.Name)
-		return false, false, err
-	}
-	firstPortPCIAddr := device.Status.Ports[0].PCI
-	firstPortConfig := nvConfigsForPorts[firstPortPCIAddr]
-
 	if device.Spec.Configuration.ResetToDefault {
+		// ResetToDefault needs every key for the reflect.DeepEqual compare in
+		// ValidateResetToDefault; pass nil for a full chip walk.
+		nvConfigsForPorts, err := h.queryNvConfigs(ctx, device, nil)
+		if err != nil {
+			log.Log.Error(err, "failed to query nv configs", "device", device.Name)
+			return false, false, err
+		}
 		resetNeeded := false
 		rebootNeeded := false
 		for _, nvConfig := range nvConfigsForPorts {
@@ -130,22 +129,32 @@ func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *
 		return resetNeeded, rebootNeeded, nil
 	}
 
-	// ConstructNvParamMapFromTemplate only uses the given nvConfig for a few default values, so we can use any port's nvConfig
-	desiredConfig, err := h.configValidation.ConstructNvParamMapFromTemplate(device, firstPortConfig)
+	desiredConfig, err := h.configValidation.ConstructNvParamMapFromTemplate(device)
 	if err != nil {
 		log.Log.Error(err, "failed to calculate desired nvconfig parameters", "device", device.Name)
 		return false, false, err
 	}
 
+	nvConfigsForPorts, err := h.queryNvConfigs(ctx, device, queryNamesForDesired(desiredConfig))
+	if err != nil {
+		log.Log.Error(err, "failed to query nv configs", "device", device.Name)
+		return false, false, err
+	}
+	firstPortConfig := nvConfigsForPorts[device.Status.Ports[0].PCI]
+
+	// Replace sentinel entries with the firmware's factory defaults. Must happen
+	// before the compare loop — sentinel strings are not valid mlxconfig values.
+	resolvedDesired := h.configValidation.ResolveFactoryDefaults(desiredConfig, firstPortConfig)
+
 	configUpdateNeeded := false
 	rebootNeeded := false
 
-	// If ADVANCED_PCI_SETTINGS are enabled in current config, unknown parameters are treated as spec error
-	// ADVANCED_PCI_SETTINGS param value is shared across all ports, so we can use any port's nvConfig for validation
+	// If ADVANCED_PCI_SETTINGS are enabled in current config, unknown parameters are treated as spec error.
+	// The param is always included in the scoped query (see queryNamesForDesired).
 	advancedPciSettingsEnabled := h.configValidation.AdvancedPCISettingsEnabled(firstPortConfig)
 
 	for _, nvConfig := range nvConfigsForPorts {
-		for parameter, desiredValue := range desiredConfig {
+		for parameter, desiredValue := range resolvedDesired {
 			currentValues, foundInCurrent := nvConfig.CurrentConfig[parameter]
 			nextValues, foundInNextBoot := nvConfig.NextBootConfig[parameter]
 			if advancedPciSettingsEnabled && !foundInCurrent {
@@ -184,7 +193,27 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 		return h.applySpectrumXNVConfiguration(ctx, device)
 	}
 
-	nvConfigsForPorts, err := h.queryNvConfigs(ctx, device)
+	if device.Spec.Configuration.ResetToDefault {
+		nvConfigsForPorts, err := h.queryNvConfigs(ctx, device, nil)
+		if err != nil {
+			log.Log.Error(err, "failed to query nv configs", "device", device.Name)
+			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+		}
+		firstPortPCIAddr := device.Status.Ports[0].PCI
+		return h.applyResetToDefault(device, firstPortPCIAddr, nvConfigsForPorts[firstPortPCIAddr])
+	}
+
+	if device.Spec.Configuration.Template == nil {
+		return &types.ConfigurationApplyResult{Status: types.ApplyStatusNothingToDo}, nil
+	}
+
+	desiredConfig, err := h.configValidation.ConstructNvParamMapFromTemplate(device)
+	if err != nil {
+		log.Log.Error(err, "failed to calculate desired nvconfig parameters", "device", device.Name)
+		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+	}
+
+	nvConfigsForPorts, err := h.queryNvConfigs(ctx, device, queryNamesForDesired(desiredConfig))
 	if err != nil {
 		log.Log.Error(err, "failed to query nv configs", "device", device.Name)
 		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
@@ -192,17 +221,14 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 	firstPortPCIAddr := device.Status.Ports[0].PCI
 	firstPortConfig := nvConfigsForPorts[firstPortPCIAddr]
 
-	if device.Spec.Configuration.ResetToDefault {
-		return h.applyResetToDefault(device, firstPortPCIAddr, firstPortConfig)
-	}
-
-	if device.Spec.Configuration.Template == nil {
-		return &types.ConfigurationApplyResult{Status: types.ApplyStatusNothingToDo}, nil
-	}
-
-	// if ADVANCED_PCI_SETTINGS == 0, not all nv config parameters are available for configuration
-	// we enable this parameter first to unlock them
-	if !h.configValidation.AdvancedPCISettingsEnabled(firstPortConfig) {
+	// Two-phase ADVANCED_PCI_SETTINGS unlock: if the template wants it enabled but
+	// the device currently has it disabled, params hidden behind it (e.g.
+	// MAX_ACC_OUT_READ) won't be settable in the same batch. Enable it first, do a
+	// soft FW reset (or defer to reboot), then re-query and continue the normal
+	// apply flow. Gated on both "desired wants it on" and "current has it off" so
+	// we don't trigger an unnecessary reset when the device is already unlocked.
+	if desiredConfig[consts.AdvancedPCISettingsParam] == consts.NvParamTrue &&
+		!h.configValidation.AdvancedPCISettingsEnabled(firstPortConfig) {
 		log.Log.V(2).Info("AdvancedPciSettings not enabled, fw reset required", "device", device.Name)
 		err := h.nvConfigUtils.SetNvConfigParameter(firstPortPCIAddr, consts.AdvancedPCISettingsParam, consts.NvParamTrue)
 		if err != nil {
@@ -214,17 +240,15 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 			err = h.ResetNicFirmware(ctx, device)
 			if err != nil {
 				log.Log.Error(err, "Failed to reset NIC firmware, reboot required to apply ADVANCED_PCI_SETTINGS", "device", device.Name)
-				// We try to perform FW reset after setting the ADVANCED_PCI_SETTINGS to save us a reboot
-				// However, if the soft FW reset fails for some reason, we need to perform a reboot to unlock
-				// all the nv config parameters
+				// Soft reset failed; fall back to a reboot to unlock the hidden params.
 				return &types.ConfigurationApplyResult{Status: types.ApplyStatusSuccess, RebootRequired: true}, nil
 			}
 		} else {
 			return &types.ConfigurationApplyResult{Status: types.ApplyStatusSuccess, RebootRequired: true}, nil
 		}
 
-		// Query nv config again, additional options could become available
-		nvConfigsForPorts, err = h.queryNvConfigs(ctx, device)
+		// Re-query scoped — previously-hidden params are now visible.
+		nvConfigsForPorts, err = h.queryNvConfigs(ctx, device, queryNamesForDesired(desiredConfig))
 		if err != nil {
 			log.Log.Error(err, "failed to query nv configs", "device", device.Name)
 			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
@@ -232,11 +256,8 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 		firstPortConfig = nvConfigsForPorts[firstPortPCIAddr]
 	}
 
-	desiredConfig, err := h.configValidation.ConstructNvParamMapFromTemplate(device, firstPortConfig)
-	if err != nil {
-		log.Log.Error(err, "failed to calculate desired nvconfig parameters", "device", device.Name)
-		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
-	}
+	// Resolve sentinel entries to the firmware's factory-default values.
+	resolvedDesired := h.configValidation.ResolveFactoryDefaults(desiredConfig, firstPortConfig)
 
 	anyParamsApplied := false
 	hasUnsupportedParams := false
@@ -244,14 +265,13 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 	for pciAddr, nvConfig := range nvConfigsForPorts {
 		supportedParams := map[string]string{}
 
-		for param, value := range desiredConfig {
+		for param, value := range resolvedDesired {
 			nextValues, found := nvConfig.NextBootConfig[param]
 			if !found {
 				log.Log.Info("Parameter not found in NextBootConfig, skipping", "device", device.Name, "param", param)
 				hasUnsupportedParams = true
 				continue
 			}
-
 			if !slices.Contains(nextValues, value) {
 				supportedParams[param] = value
 			}
@@ -493,17 +513,36 @@ func (h configurationManager) ResetNicFirmware(ctx context.Context, device *v1al
 	return nil
 }
 
-func (h configurationManager) queryNvConfigs(ctx context.Context, device *v1alpha1.NicDevice) (map[string]types.NvConfigQuery, error) {
+// queryNvConfigs queries nv config for every port on the device. Passing nil for
+// names triggers a full chip walk (needed by ResetToDefault's deep compare); a
+// non-nil slice scopes the query to just those names.
+func (h configurationManager) queryNvConfigs(ctx context.Context, device *v1alpha1.NicDevice, names []string) (map[string]types.NvConfigQuery, error) {
 	nvConfigs := make(map[string]types.NvConfigQuery)
 	for _, port := range device.Status.Ports {
 		pciAddr := port.PCI
-		nvConfig, err := h.nvConfigUtils.QueryNvConfig(ctx, pciAddr, nil)
+		nvConfig, err := h.nvConfigUtils.QueryNvConfig(ctx, pciAddr, names)
 		if err != nil {
 			return nil, err
 		}
 		nvConfigs[pciAddr] = nvConfig
 	}
 	return nvConfigs, nil
+}
+
+// queryNamesForDesired returns the set of NV-config parameter names to scope a
+// mlxconfig query to. Includes every key in the desired map (so validation can
+// compare current/next-boot against desired) plus ADVANCED_PCI_SETTINGS so the
+// unsupported-param gate in ValidateDeviceNvSpec keeps working regardless of
+// whether the desired map itself includes it.
+func queryNamesForDesired(desired map[string]string) []string {
+	names := make([]string, 0, len(desired)+1)
+	for k := range desired {
+		names = append(names, k)
+	}
+	if _, ok := desired[consts.AdvancedPCISettingsParam]; !ok {
+		names = append(names, consts.AdvancedPCISettingsParam)
+	}
+	return names
 }
 
 // getRawNvConfigParams extracts rawNvConfig params from the device template,
