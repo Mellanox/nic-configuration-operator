@@ -141,7 +141,7 @@ func (d *deviceDiscoveryUtils) GetVPD(pciAddr string) (*types.VPD, error) {
 
 	vpd, mstvpdErr := d.getVPDViaMstvpd(pciAddr)
 	if mstvpdErr != nil {
-		return nil, fmt.Errorf("both mlxvpd and mstvpd failed: mlxvpd: %w; mstvpd: %v", mlxvpdErr, mstvpdErr)
+		return nil, fmt.Errorf("both mlxvpd and mstvpd failed: mlxvpd: %w; mstvpd: %w", mlxvpdErr, mstvpdErr)
 	}
 	return vpd, nil
 }
