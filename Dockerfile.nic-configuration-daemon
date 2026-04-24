@@ -39,6 +39,10 @@ RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
     sed -i 's/^#\s*deb-src/deb-src/' /etc/apt/sources.list; \
     fi
 
+# Drop NVIDIA-internal apt sources baked into staging DOCA base images so the
+# build works from public CI (GitHub Actions). rshim then resolves from Ubuntu.
+RUN grep -rlE 'doca-repo-prod\.nvidia\.com' /etc/apt/ 2>/dev/null | xargs -r rm -f
+
 RUN apt-get update -y
 RUN apt-get install -y --no-install-recommends ${PACKAGES}
 RUN apt-get source ${PACKAGES}
