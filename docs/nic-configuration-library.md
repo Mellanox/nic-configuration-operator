@@ -193,8 +193,12 @@ Provides per-device DMS client lookup. This is the interface used by all consumi
 
 ```go
 type DMSManager interface {
-    // GetDMSClientBySerialNumber returns DMS client for a device
-    GetDMSClientBySerialNumber(serialNumber string) (DMSClient, error)
+    // GetDMSClientByPCIAddress returns the DMS client for a device identified by its
+    // PCI device address (Domain:Bus:Device, function stripped). This is unique
+    // per physical NIC even on systems where cards share a flashed serial number
+    // (e.g. HGX B300). Derive the key from device.Status.Ports[0].PCI via
+    // pkg/utils.PCIDeviceAddress.
+    GetDMSClientByPCIAddress(pciDeviceAddr string) (DMSClient, error)
 }
 ```
 
@@ -582,7 +586,7 @@ type NicDevice struct {
 type NicDeviceStatus struct {
     Node            string              // Node where device is located
     Type            string              // Device type (e.g., "ConnectX7")
-    SerialNumber    string              // Serial number (e.g., "MT2116X09299")
+    SerialNumber    string              // Serial number (e.g., "MT2116X09299"). Not guaranteed unique — embedded NICs on HGX B300 share a flashed SN; identify NICs by the PCI device address of Ports[0] instead.
     PartNumber      string              // Part number (e.g., "MCX713106AEHEA_QP1")
     PSID            string              // Product Serial ID (e.g., "MT_0000000221")
     FirmwareVersion string              // Installed firmware version (e.g., "22.31.1014")

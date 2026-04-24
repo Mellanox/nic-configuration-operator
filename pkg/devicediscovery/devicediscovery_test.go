@@ -191,10 +191,10 @@ var _ = Describe("DeviceDiscovery", func() {
 					},
 				}
 
-				Expect(devices).To(HaveKey("serial-number"))
-				Expect(devices["serial-number"].Status).To(Equal(expectedDeviceStatus))
+				Expect(devices).To(HaveKey("0000:00:00"))
+				Expect(devices["0000:00:00"].Status).To(Equal(expectedDeviceStatus))
 				// Verify that the returned device has the correct nodeName
-				Expect(devices["serial-number"].Status.Node).To(Equal("test-node"))
+				Expect(devices["0000:00:00"].Status.Node).To(Equal("test-node"))
 
 				mockUtils.AssertExpectations(GinkgoT())
 			})
@@ -203,6 +203,7 @@ var _ = Describe("DeviceDiscovery", func() {
 
 	Context("when discovering several mellanox device", func() {
 		BeforeEach(func() {
+			// Two distinct physical NICs at different PCI devices.
 			mockUtils.On("GetPCIDevices").Return([]*pci.Device{
 				{
 					Address: "0000:00:00.0",
@@ -211,7 +212,7 @@ var _ = Describe("DeviceDiscovery", func() {
 					Class:   &pcidb.Class{ID: "02"},
 				},
 				{
-					Address: "0000:00:00.1",
+					Address: "0000:01:00.0",
 					Vendor:  &pcidb.Vendor{ID: consts.MellanoxVendor},
 					Product: &pcidb.Product{ID: "test-id", Name: "Mellanox Device"},
 					Class:   &pcidb.Class{ID: "02"},
@@ -231,7 +232,7 @@ var _ = Describe("DeviceDiscovery", func() {
 			mockUtils.On("GetRDMADeviceName", "0000:00:00.0").
 				Return("mlx5_0")
 
-			mockUtils.On("IsSriovVF", "0000:00:00.1").Return(true)
+			mockUtils.On("IsSriovVF", "0000:01:00.0").Return(true)
 
 			devices, err := manager.DiscoverNicDevices()
 			Expect(err).NotTo(HaveOccurred())
@@ -254,8 +255,8 @@ var _ = Describe("DeviceDiscovery", func() {
 				},
 			}
 
-			Expect(devices).To(HaveKey("serial-number"))
-			Expect(devices["serial-number"].Status).To(Equal(expectedDeviceStatus))
+			Expect(devices).To(HaveKey("0000:00:00"))
+			Expect(devices["0000:00:00"].Status).To(Equal(expectedDeviceStatus))
 			mockUtils.AssertExpectations(GinkgoT())
 		})
 
@@ -271,9 +272,9 @@ var _ = Describe("DeviceDiscovery", func() {
 			mockUtils.On("GetRDMADeviceName", "0000:00:00.0").
 				Return("mlx5_0")
 
-			mockUtils.On("IsSriovVF", "0000:00:00.1").
+			mockUtils.On("IsSriovVF", "0000:01:00.0").
 				Return(false)
-			mockUtils.On("GetVPD", "0000:00:00.1").
+			mockUtils.On("GetVPD", "0000:01:00.0").
 				Return(nil, errors.New("serial number error"))
 
 			devices, err := manager.DiscoverNicDevices()
@@ -294,11 +295,11 @@ var _ = Describe("DeviceDiscovery", func() {
 			mockUtils.On("GetRDMADeviceName", "0000:00:00.0").
 				Return("mlx5_0")
 
-			mockUtils.On("IsSriovVF", "0000:00:00.1").
+			mockUtils.On("IsSriovVF", "0000:01:00.0").
 				Return(false)
-			mockUtils.On("GetVPD", "0000:00:00.1").
+			mockUtils.On("GetVPD", "0000:01:00.0").
 				Return(&types.VPD{PartNumber: "part-number", SerialNumber: "serial-number-2", ModelName: ""}, nil)
-			mockUtils.On("GetFirmwareVersionAndPSID", "0000:00:00.1").
+			mockUtils.On("GetFirmwareVersionAndPSID", "0000:01:00.0").
 				Return("", "", errors.New("firmware error"))
 
 			devices, err := manager.DiscoverNicDevices()
@@ -319,15 +320,15 @@ var _ = Describe("DeviceDiscovery", func() {
 			mockUtils.On("GetRDMADeviceName", "0000:00:00.0").
 				Return("mlx5_0")
 
-			mockUtils.On("IsSriovVF", "0000:00:00.1").
+			mockUtils.On("IsSriovVF", "0000:01:00.0").
 				Return(false)
-			mockUtils.On("GetVPD", "0000:00:00.1").
+			mockUtils.On("GetVPD", "0000:01:00.0").
 				Return(&types.VPD{PartNumber: "part-number", SerialNumber: "serial-number-2", ModelName: ""}, nil)
-			mockUtils.On("GetFirmwareVersionAndPSID", "0000:00:00.1").
+			mockUtils.On("GetFirmwareVersionAndPSID", "0000:01:00.0").
 				Return("fw-version", "psid", nil)
-			mockUtils.On("GetInterfaceName", "0000:00:00.1").
+			mockUtils.On("GetInterfaceName", "0000:01:00.0").
 				Return("eth1")
-			mockUtils.On("GetRDMADeviceName", "0000:00:00.1").
+			mockUtils.On("GetRDMADeviceName", "0000:01:00.0").
 				Return("mlx5_1")
 
 			devices, err := manager.DiscoverNicDevices()
@@ -364,16 +365,17 @@ var _ = Describe("DeviceDiscovery", func() {
 				DPU:             false,
 				Ports: []v1alpha1.NicDevicePortSpec{
 					{
-						PCI:              "0000:00:00.1",
+						PCI:              "0000:01:00.0",
 						NetworkInterface: "eth1",
 						RdmaInterface:    "mlx5_1",
 					},
 				},
 			}
 
-			Expect(devices).To(HaveKey("serial-number"))
-			Expect(devices["serial-number"].Status).To(Equal(expectedDeviceStatus1))
-			Expect(devices["serial-number-2"].Status).To(Equal(expectedDeviceStatus2))
+			Expect(devices).To(HaveKey("0000:00:00"))
+			Expect(devices["0000:00:00"].Status).To(Equal(expectedDeviceStatus1))
+			Expect(devices).To(HaveKey("0000:01:00"))
+			Expect(devices["0000:01:00"].Status).To(Equal(expectedDeviceStatus2))
 
 			mockUtils.AssertExpectations(GinkgoT())
 		})
@@ -445,10 +447,121 @@ var _ = Describe("DeviceDiscovery", func() {
 				},
 			}
 
-			Expect(devices).To(HaveKey("serial-number"))
-			Expect(devices[sameSerialNumber].Status).To(Equal(expectedDeviceStatus))
+			Expect(devices).To(HaveKey("0000:00:00"))
+			Expect(devices["0000:00:00"].Status).To(Equal(expectedDeviceStatus))
+			_ = sameSerialNumber // kept for readability of mock setup above
 
 			mockUtils.AssertExpectations(GinkgoT())
+		})
+	})
+
+	Context("when multiple NICs share the same flashed serial number (HGX B300)", func() {
+		It("should return one device per PCI device key, not collapse by SN", func() {
+			sharedSerial := "shared-sn"
+
+			mockUtils.On("GetPCIDevices").Return([]*pci.Device{
+				{
+					Address: "0000:3b:00.0",
+					Vendor:  &pcidb.Vendor{ID: consts.MellanoxVendor},
+					Product: &pcidb.Product{ID: "cx9", Name: "ConnectX-9"},
+					Class:   &pcidb.Class{ID: "02"},
+				},
+				{
+					Address: "0000:3c:00.0",
+					Vendor:  &pcidb.Vendor{ID: consts.MellanoxVendor},
+					Product: &pcidb.Product{ID: "cx9", Name: "ConnectX-9"},
+					Class:   &pcidb.Class{ID: "02"},
+				},
+			}, nil)
+
+			for _, addr := range []string{"0000:3b:00.0", "0000:3c:00.0"} {
+				mockUtils.On("IsSriovVF", addr).Return(false)
+				mockUtils.On("GetVPD", addr).
+					Return(&types.VPD{PartNumber: "part-number", SerialNumber: sharedSerial, ModelName: ""}, nil)
+				mockUtils.On("GetFirmwareVersionAndPSID", addr).Return("fw-version", "psid", nil)
+				mockUtils.On("GetInterfaceName", addr).Return("eth0")
+				mockUtils.On("GetRDMADeviceName", addr).Return("mlx5_0")
+			}
+
+			devices, err := manager.DiscoverNicDevices()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(devices).To(HaveLen(2))
+			Expect(devices).To(HaveKey("0000:3b:00"))
+			Expect(devices).To(HaveKey("0000:3c:00"))
+			Expect(devices["0000:3b:00"].Status.SerialNumber).To(Equal(sharedSerial))
+			Expect(devices["0000:3c:00"].Status.SerialNumber).To(Equal(sharedSerial))
+		})
+	})
+
+	Context("when a ConnectX-9 card exposes four PCI functions (2 eth + 2 IB)", func() {
+		It("should group all four functions into a single device with four ports", func() {
+			sn := "cx9-sn"
+			pciDevs := make([]*pci.Device, 0, 4)
+			for _, fn := range []string{"0", "1", "2", "3"} {
+				pciDevs = append(pciDevs, &pci.Device{
+					Address: "0001:03:00." + fn,
+					Vendor:  &pcidb.Vendor{ID: consts.MellanoxVendor},
+					Product: &pcidb.Product{ID: "cx9", Name: "ConnectX-9"},
+					Class:   &pcidb.Class{ID: "02"},
+				})
+			}
+			mockUtils.On("GetPCIDevices").Return(pciDevs, nil)
+
+			for _, fn := range []string{"0", "1", "2", "3"} {
+				addr := "0001:03:00." + fn
+				mockUtils.On("IsSriovVF", addr).Return(false)
+				mockUtils.On("GetVPD", addr).
+					Return(&types.VPD{PartNumber: "part-number", SerialNumber: sn, ModelName: ""}, nil)
+				mockUtils.On("GetInterfaceName", addr).Return("eth" + fn)
+				mockUtils.On("GetRDMADeviceName", addr).Return("mlx5_" + fn)
+			}
+			// FW/PSID only queried on first function.
+			mockUtils.On("GetFirmwareVersionAndPSID", "0001:03:00.0").Return("fw-version", "psid", nil)
+
+			devices, err := manager.DiscoverNicDevices()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(devices).To(HaveLen(1))
+			Expect(devices).To(HaveKey("0001:03:00"))
+			Expect(devices["0001:03:00"].Status.Ports).To(HaveLen(4))
+		})
+	})
+
+	Context("when two cards have the same bus:dev but different PCI domains", func() {
+		It("should return two distinct devices", func() {
+			mockUtils.On("GetPCIDevices").Return([]*pci.Device{
+				{
+					Address: "0001:03:00.0",
+					Vendor:  &pcidb.Vendor{ID: consts.MellanoxVendor},
+					Product: &pcidb.Product{ID: "cx9", Name: "ConnectX-9"},
+					Class:   &pcidb.Class{ID: "02"},
+				},
+				{
+					Address: "0004:03:00.0",
+					Vendor:  &pcidb.Vendor{ID: consts.MellanoxVendor},
+					Product: &pcidb.Product{ID: "cx9", Name: "ConnectX-9"},
+					Class:   &pcidb.Class{ID: "02"},
+				},
+			}, nil)
+
+			mockUtils.On("IsSriovVF", "0001:03:00.0").Return(false)
+			mockUtils.On("GetVPD", "0001:03:00.0").
+				Return(&types.VPD{PartNumber: "part-number", SerialNumber: "sn-a", ModelName: ""}, nil)
+			mockUtils.On("GetFirmwareVersionAndPSID", "0001:03:00.0").Return("fw-version", "psid", nil)
+			mockUtils.On("GetInterfaceName", "0001:03:00.0").Return("eth0")
+			mockUtils.On("GetRDMADeviceName", "0001:03:00.0").Return("mlx5_0")
+
+			mockUtils.On("IsSriovVF", "0004:03:00.0").Return(false)
+			mockUtils.On("GetVPD", "0004:03:00.0").
+				Return(&types.VPD{PartNumber: "part-number", SerialNumber: "sn-b", ModelName: ""}, nil)
+			mockUtils.On("GetFirmwareVersionAndPSID", "0004:03:00.0").Return("fw-version", "psid", nil)
+			mockUtils.On("GetInterfaceName", "0004:03:00.0").Return("eth1")
+			mockUtils.On("GetRDMADeviceName", "0004:03:00.0").Return("mlx5_1")
+
+			devices, err := manager.DiscoverNicDevices()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(devices).To(HaveLen(2))
+			Expect(devices).To(HaveKey("0001:03:00"))
+			Expect(devices).To(HaveKey("0004:03:00"))
 		})
 	})
 
@@ -474,10 +587,10 @@ var _ = Describe("DeviceDiscovery", func() {
 
 			manager := deviceDiscovery{utils: &mockUtils, nvConfigUtils: nvmmocks.NewNVConfigUtils(GinkgoT()), nodeName: "test-node"}
 
-			devicesBySerial, err := manager.DiscoverNicDevices()
+			devicesByPCI, err := manager.DiscoverNicDevices()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(devicesBySerial).To(HaveKey("serial-number"))
-			discoveredDevice := devicesBySerial["serial-number"]
+			Expect(devicesByPCI).To(HaveKey("0000:00:00"))
+			discoveredDevice := devicesByPCI["0000:00:00"]
 			Expect(discoveredDevice.Status.ModelName).To(Equal("NVIDIA ConnectX-8 C8180 HHHL SuperNIC"))
 			Expect(discoveredDevice.Status.SuperNIC).To(BeTrue())
 		})
@@ -509,9 +622,9 @@ var _ = Describe("DeviceDiscovery", func() {
 
 			manager := deviceDiscovery{utils: &mockUtils, nvConfigUtils: nvConfigUtilsMock, nodeName: "test-node"}
 
-			devicesBySerial, err := manager.DiscoverNicDevices()
+			devicesByPCI, err := manager.DiscoverNicDevices()
 			Expect(err).NotTo(HaveOccurred())
-			discoveredDevice := devicesBySerial["serial-number"]
+			discoveredDevice := devicesByPCI["0000:00:00"]
 			Expect(discoveredDevice.Status.DPU).To(BeTrue())
 		})
 

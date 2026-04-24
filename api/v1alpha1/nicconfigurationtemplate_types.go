@@ -26,7 +26,11 @@ type NicSelectorSpec struct {
 	// Array of PCI addresses to be selected, e.g. "0000:03:00.0"
 	// +kubebuilder:validation:items:Pattern=`^[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]$`
 	PciAddresses []string `json:"pciAddresses,omitempty"`
-	// Serial numbers of the NICs to be selected, e.g. MT2116X09299
+	// Serial numbers of the NICs to be selected, e.g. MT2116X09299. Note: serial numbers
+	// are not guaranteed unique — on systems with embedded NICs that share a flashed VPD
+	// image (e.g. HGX B300), multiple physical cards report the same serial, and this
+	// selector will match all of them. Use `pciAddresses` for precise per-card selection
+	// on such systems.
 	SerialNumbers []string `json:"serialNumbers,omitempty"`
 	// Part numbers of the NICs to be selected, e.g. MCX713106AEHEA_QP1
 	PartNumbers []string `json:"partNumbers,omitempty"`

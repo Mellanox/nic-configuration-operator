@@ -14,21 +14,21 @@ type DMSServer struct {
 	mock.Mock
 }
 
-// GetDMSClientBySerialNumber provides a mock function with given fields: serialNumber
-func (_m *DMSServer) GetDMSClientBySerialNumber(serialNumber string) (dms.DMSClient, error) {
-	ret := _m.Called(serialNumber)
+// GetDMSClientByPCIAddress provides a mock function with given fields: pciDeviceAddr
+func (_m *DMSServer) GetDMSClientByPCIAddress(pciDeviceAddr string) (dms.DMSClient, error) {
+	ret := _m.Called(pciDeviceAddr)
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetDMSClientBySerialNumber")
+		panic("no return value specified for GetDMSClientByPCIAddress")
 	}
 
 	var r0 dms.DMSClient
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string) (dms.DMSClient, error)); ok {
-		return rf(serialNumber)
+		return rf(pciDeviceAddr)
 	}
 	if rf, ok := ret.Get(0).(func(string) dms.DMSClient); ok {
-		r0 = rf(serialNumber)
+		r0 = rf(pciDeviceAddr)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(dms.DMSClient)
@@ -36,7 +36,7 @@ func (_m *DMSServer) GetDMSClientBySerialNumber(serialNumber string) (dms.DMSCli
 	}
 
 	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(serialNumber)
+		r1 = rf(pciDeviceAddr)
 	} else {
 		r1 = ret.Error(1)
 	}

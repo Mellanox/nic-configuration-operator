@@ -59,7 +59,12 @@ spec:
                       type: string
                     type: array
                   serialNumbers:
-                    description: Serial numbers of the NICs to be selected, e.g. MT2116X09299
+                    description: |-
+                      Serial numbers of the NICs to be selected, e.g. MT2116X09299. Note: serial numbers
+                      are not guaranteed unique — on systems with embedded NICs that share a flashed VPD
+                      image (e.g. HGX B300), multiple physical cards report the same serial, and this
+                      selector will match all of them. Use `pciAddresses` for precise per-card selection
+                      on such systems.
                     items:
                       type: string
                     type: array

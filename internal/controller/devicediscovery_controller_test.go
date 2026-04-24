@@ -75,17 +75,21 @@ var _ = Describe("DeviceDiscoveryController", func() {
 	})
 
 	Describe("getCRName", func() {
-		It("should return the correct CR name", func() {
-			name := deviceRegistry.getCRName("nic", "123456")
-			Expect(name).To(Equal("test-node-nic-123456"))
+		It("should sanitize colons and dots in the PCI device address", func() {
+			name := deviceRegistry.getCRName("nic", "0000:3b:00")
+			Expect(name).To(Equal("test-node-nic-0000-3b-00"))
 		})
 
-		It("should return the correct CR name for capitalized strings", func() {
-			name := deviceRegistry.getCRName("NIC", "123456")
-			Expect(name).To(Equal("test-node-nic-123456"))
+		It("should lowercase the device type and the PCI address", func() {
+			name := deviceRegistry.getCRName("NIC", "0000:3B:00")
+			Expect(name).To(Equal("test-node-nic-0000-3b-00"))
+		})
 
-			name = deviceRegistry.getCRName("nic", "SERIALNUMBER")
-			Expect(name).To(Equal("test-node-nic-serialnumber"))
+		It("should also sanitize a full BDF if one is passed", func() {
+			// The function arg is documented as the trimmed PCI device, but a caller
+			// could pass a full BDF — make sure both colons and dots are sanitized.
+			name := deviceRegistry.getCRName("nic", "0000:3b:00.0")
+			Expect(name).To(Equal("test-node-nic-0000-3b-00-0"))
 		})
 	})
 
@@ -106,7 +110,8 @@ var _ = Describe("DeviceDiscoveryController", func() {
 		Context("when there are existing NicDevice CRs", func() {
 			deviceType := "connectx6"
 			serialNumber := "123456"
-			deviceName := "test-node-connectx6-123456"
+			pciDevKey := "0000:3b:00"
+			deviceName := "test-node-connectx6-0000-3b-00"
 			BeforeEach(func() {
 				existingDevice := &v1alpha1.NicDevice{
 					ObjectMeta: metav1.ObjectMeta{
@@ -131,10 +136,10 @@ var _ = Describe("DeviceDiscoveryController", func() {
 				fwVersion := "test-fw-version"
 
 				deviceDiscovery.On("DiscoverNicDevices").Return(map[string]v1alpha1.NicDevice{
-					"123456": {
+					pciDevKey: {
 						Status: v1alpha1.NicDeviceStatus{
 							Node:            nodeName,
-							SerialNumber:    "123456",
+							SerialNumber:    serialNumber,
 							Type:            "connectx6",
 							Ports:           []v1alpha1.NicDevicePortSpec{{PCI: "0000:3b:00.0"}},
 							PartNumber:      partNumber,
@@ -188,13 +193,14 @@ var _ = Describe("DeviceDiscoveryController", func() {
 			})
 
 			It("should create new CRs for new devices", func() {
-				serialNumber := "new-serial-num"
+				newPciDevKey := "0000:81:00"
+				newSerial := "new-serial-num"
 
 				// Add a new device that does not have a CR representation
 				deviceDiscovery.On("DiscoverNicDevices").Return(map[string]v1alpha1.NicDevice{
-					serialNumber: {
+					newPciDevKey: {
 						Status: v1alpha1.NicDeviceStatus{
-							SerialNumber: serialNumber,
+							SerialNumber: newSerial,
 							Type:         deviceType,
 							Ports:        []v1alpha1.NicDevicePortSpec{{PCI: "0000:81:00.0"}},
 						},
@@ -207,18 +213,18 @@ var _ = Describe("DeviceDiscoveryController", func() {
 				Eventually(func() (string, error) {
 					device := &v1alpha1.NicDevice{}
 					err := k8sClient.Get(ctx, client.ObjectKey{
-						Name:      deviceRegistry.getCRName(deviceType, serialNumber),
+						Name:      deviceRegistry.getCRName(deviceType, newPciDevKey),
 						Namespace: namespaceName,
 					}, device)
 					if err != nil {
 						return "", nil
 					}
 					return device.Status.SerialNumber, err
-				}, timeout).Should(Equal(serialNumber))
+				}, timeout).Should(Equal(newSerial))
 
 				device := &v1alpha1.NicDevice{}
 				err = k8sClient.Get(ctx, client.ObjectKey{
-					Name:      deviceRegistry.getCRName(deviceType, serialNumber),
+					Name:      deviceRegistry.getCRName(deviceType, newPciDevKey),
 					Namespace: namespaceName,
 				}, device)
 				Expect(err).NotTo(HaveOccurred())

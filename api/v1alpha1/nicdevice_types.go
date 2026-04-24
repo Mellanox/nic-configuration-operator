@@ -74,7 +74,11 @@ type NicDeviceStatus struct {
 	Node string `json:"node"`
 	// Type of device, e.g. ConnectX7
 	Type string `json:"type"`
-	// Serial number of the device, e.g. MT2116X09299
+	// SerialNumber of the device, e.g. MT2116X09299. Informational only — not guaranteed
+	// unique across all cards on a host: on systems with embedded NICs sharing a flashed
+	// VPD image (e.g. HGX B300) multiple cards will report the same serial number. The
+	// operator identifies NICs uniquely by their PCI device address (the `pci` field on
+	// the first entry in `ports`, with the function digit stripped).
 	SerialNumber string `json:"serialNumber"`
 	// Part number of the device, e.g. MCX713106AEHEA_QP1
 	PartNumber string `json:"partNumber"`
