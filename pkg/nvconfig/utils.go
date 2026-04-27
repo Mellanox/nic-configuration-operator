@@ -157,9 +157,15 @@ func (h *nvConfigUtils) queryMLXConfig(ctx context.Context, query types.NvConfig
 	return nil
 }
 
-// QueryNvConfig queries nv config for a mellanox device and returns default, current and next boot configs
+// QueryNvConfig queries nv config for a mellanox device and returns default, current and next boot configs.
+//
+// When parameters is empty, runs a full chip walk (slow on BF3/BF4: hundreds of params).
+// When parameters is non-empty, runs one `mlxconfig query <name>` per name; a per-param
+// failure (e.g. FW doesn't expose that name) is logged at V(2) and skipped — the missing
+// name is simply absent from the returned maps, matching full-walk behavior for unsupported
+// params. This keeps a single bad name in the list from aborting the whole reconcile.
 func (h *nvConfigUtils) QueryNvConfig(ctx context.Context, pciAddr string, parameters []string) (types.NvConfigQuery, error) {
-	log.Log.Info("ConfigurationUtils.QueryNvConfig()", "pciAddr", pciAddr)
+	log.Log.Info("ConfigurationUtils.QueryNvConfig()", "pciAddr", pciAddr, "parameters", parameters)
 
 	query := types.NewNvConfigQuery()
 
@@ -169,13 +175,16 @@ func (h *nvConfigUtils) QueryNvConfig(ctx context.Context, pciAddr string, param
 			log.Log.Error(err, "Failed to parse mlxconfig query output", "device", pciAddr)
 			return query, err
 		}
-	} else {
-		for _, param := range parameters {
-			err := h.queryMLXConfig(ctx, query, pciAddr, param)
-			if err != nil {
-				log.Log.Error(err, "Failed to parse mlxconfig query output", "device", pciAddr, "parameter", param)
-				return query, err
-			}
+		return query, nil
+	}
+
+	for _, param := range parameters {
+		if err := h.queryMLXConfig(ctx, query, pciAddr, param); err != nil {
+			// Per-param error: treat as "param not supported by FW", skip it.
+			// The downstream comparison logic already handles missing names as
+			// "not supported" — see manager.go's NextBootConfig presence check.
+			log.Log.V(2).Info("mlxconfig query failed for parameter, skipping", "device", pciAddr, "parameter", param, "error", err.Error())
+			continue
 		}
 	}
 
