@@ -257,7 +257,7 @@ var _ = Describe("ConfigurationUtils", func() {
 
 			mockDMSManager := &mocks.DMSManager{}
 			mockDMSClient := &mocks.DMSClient{}
-			mockDMSManager.On("GetDMSClientBySerialNumber", "serialnumber").Return(mockDMSClient, nil)
+			mockDMSManager.On("GetDMSClientByPCIAddress", "0000:03:00").Return(mockDMSClient, nil)
 			mockDMSClient.On("GetQoSSettings", "enp3s0f0np0").Return(&v1alpha1.QosSpec{Trust: trust, PFC: pfc}, nil)
 
 			h := &configurationUtils{
@@ -281,7 +281,7 @@ var _ = Describe("ConfigurationUtils", func() {
 
 			mockDMSManager := &mocks.DMSManager{}
 			mockDMSClient := &mocks.DMSClient{}
-			mockDMSManager.On("GetDMSClientBySerialNumber", "serialnumber").Return(mockDMSClient, nil)
+			mockDMSManager.On("GetDMSClientByPCIAddress", "0000:03:00").Return(mockDMSClient, nil)
 			mockDMSClient.On("GetQoSSettings", "enp3s0f0np0").Return(&v1alpha1.QosSpec{}, nil)
 
 			h := &configurationUtils{

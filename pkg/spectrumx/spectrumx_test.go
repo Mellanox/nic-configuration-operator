@@ -202,7 +202,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 		}
 
 		beforeDevice()
-		dmsMgr.On("GetDMSClientBySerialNumber", device.Status.SerialNumber).Return(&dmsCli, nil).Maybe()
+		dmsMgr.On("GetDMSClientByPCIAddress", "0000:00:00").Return(&dmsCli, nil).Maybe()
 	})
 
 	Describe("GetBreakoutMlxConfig", func() {

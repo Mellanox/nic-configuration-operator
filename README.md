@@ -235,7 +235,7 @@ spec:
 ### NICDevice
 
 The NICDevice CRD is created automatically by the configuration daemon and represents a specific NVIDIA NIC on a specific K8s node.
-The name of the device combines the node name, device type and its serial number for easier tracking.
+The name of the device combines the node name, device type and its PCI device address (`Domain:Bus:Device`, with `:` and `.` replaced by `-`). PCI device address is used for uniqueness because serial numbers are not guaranteed unique on systems with embedded NICs that share a flashed VPD image (e.g. HGX B300).
 
 `FirmwareUpdateInProgress` status condition can be used for tracking the state of the FW validation/update on a specific device. If an error occurs during FW update, it will be reflected in this field.
 `ConfigUpdateInProgress` status condition can be used for tracking the state of the FW configuration update on a specific device. If an error occurs during FW configuration update, it will be reflected in this field.
@@ -248,7 +248,7 @@ for more information refer to [api-reference](docs/api-reference.md).
 apiVersion: configuration.net.nvidia.com/v1alpha1
 kind: NicDevice
 metadata:
-   name: co-node-25-101b-mt2232t13210
+   name: co-node-25-101b-0000-04-00
    namespace: nic-configuration-operator
 spec:
    firmware:

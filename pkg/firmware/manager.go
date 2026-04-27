@@ -385,7 +385,7 @@ func (f firmwareManager) getVersionFromFirmwareFile(device *v1alpha1.NicDevice, 
 
 // installBlueFieldFirmware installs firmware on a BlueField device via DMS
 func (f firmwareManager) installBlueFieldFirmware(ctx context.Context, device *v1alpha1.NicDevice, version string, fwFilePath string) error {
-	dmsClient, err := f.dmsManager.GetDMSClientBySerialNumber(device.Status.SerialNumber)
+	dmsClient, err := dms.GetDMSClientForDevice(f.dmsManager, device)
 	if err != nil {
 		log.Log.Error(err, "failed to get DMS client", "device", device.Name)
 		return err

@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
+	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
 
 const (
@@ -38,8 +39,20 @@ const (
 
 // DMSManager provides per-device DMS client lookup (used by all consumers)
 type DMSManager interface {
-	// GetDMSClientBySerialNumber returns the DMS client for a specific device identified by its serial number
-	GetDMSClientBySerialNumber(serialNumber string) (DMSClient, error)
+	// GetDMSClientByPCIAddress returns the DMS client for a device identified by its PCI
+	// device address (Domain:Bus:Device, function stripped). This is the NIC uniqueness
+	// key used throughout the operator; it remains unique on systems where multiple cards
+	// share a flashed serial number (e.g. embedded NICs on HGX B300).
+	GetDMSClientByPCIAddress(pciDeviceAddr string) (DMSClient, error)
+}
+
+// GetDMSClientForDevice is a convenience wrapper that derives the PCI device key
+// from device.Status.Ports[0].PCI and looks up the DMS client for it.
+func GetDMSClientForDevice(mgr DMSManager, device *v1alpha1.NicDevice) (DMSClient, error) {
+	if device == nil || len(device.Status.Ports) == 0 {
+		return nil, fmt.Errorf("device has no ports")
+	}
+	return mgr.GetDMSClientByPCIAddress(utils.PCIDeviceAddress(device.Status.Ports[0].PCI))
 }
 
 // DMSServer extends DMSManager with server lifecycle management
@@ -101,20 +114,20 @@ func NewExternalDMSManager(devices []v1alpha1.NicDevice, address string, authPar
 			authParams:    authParams,
 			execInterface: execUtils.New(),
 		}
-		clients[device.Status.SerialNumber] = client
+		clients[utils.PCIDeviceAddress(device.Status.Ports[0].PCI)] = client
 	}
 	return &externalDMSManager{clients: clients}
 }
 
-// GetDMSClientBySerialNumber returns the DMS client for a specific device identified by its serial number
-func (m *externalDMSManager) GetDMSClientBySerialNumber(serialNumber string) (DMSClient, error) {
-	log.Log.V(2).Info("GetDMSClientBySerialNumber", "serialNumber", serialNumber)
-	client, ok := m.clients[serialNumber]
+// GetDMSClientByPCIAddress returns the DMS client for a device identified by its PCI device address.
+func (m *externalDMSManager) GetDMSClientByPCIAddress(pciDeviceAddr string) (DMSClient, error) {
+	log.Log.V(2).Info("GetDMSClientByPCIAddress", "pciDeviceAddr", pciDeviceAddr)
+	client, ok := m.clients[pciDeviceAddr]
 	if !ok {
-		log.Log.V(2).Info("No DMS client found", "serialNumber", serialNumber)
-		return nil, fmt.Errorf("no DMS client found for device with serial number %s", serialNumber)
+		log.Log.V(2).Info("No DMS client found", "pciDeviceAddr", pciDeviceAddr)
+		return nil, fmt.Errorf("no DMS client found for device with PCI address %s", pciDeviceAddr)
 	}
-	log.Log.V(2).Info("Found DMS client", "serialNumber", serialNumber)
+	log.Log.V(2).Info("Found DMS client", "pciDeviceAddr", pciDeviceAddr)
 	return client, nil
 }
 
@@ -231,7 +244,7 @@ func (m *dmsServer) StartDMSServer(devices []v1alpha1.NicDevice) error {
 			authParams:    []string{"--insecure"},
 			execInterface: m.execInterface,
 		}
-		m.clients[device.Status.SerialNumber] = client
+		m.clients[utils.PCIDeviceAddress(device.Status.Ports[0].PCI)] = client
 	}
 
 	log.Log.Info("Started DMS server", "bind_address", bindAddress, "targetPCI", targetPCI, "clientCount", len(m.clients))
@@ -262,9 +275,9 @@ func (m *dmsServer) IsRunning() bool {
 	return m.running.Load()
 }
 
-// GetDMSClientBySerialNumber returns the DMS client for a specific device identified by its serial number
-func (m *dmsServer) GetDMSClientBySerialNumber(serialNumber string) (DMSClient, error) {
-	log.Log.V(2).Info("GetDMSClientBySerialNumber", "serialNumber", serialNumber)
+// GetDMSClientByPCIAddress returns the DMS client for a device identified by its PCI device address.
+func (m *dmsServer) GetDMSClientByPCIAddress(pciDeviceAddr string) (DMSClient, error) {
+	log.Log.V(2).Info("GetDMSClientByPCIAddress", "pciDeviceAddr", pciDeviceAddr)
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 
@@ -272,13 +285,13 @@ func (m *dmsServer) GetDMSClientBySerialNumber(serialNumber string) (DMSClient, 
 		return nil, fmt.Errorf("DMS server is not running")
 	}
 
-	client, ok := m.clients[serialNumber]
+	client, ok := m.clients[pciDeviceAddr]
 	if !ok {
-		log.Log.V(2).Info("No DMS client found", "serialNumber", serialNumber)
-		return nil, fmt.Errorf("no DMS client found for device with serial number %s", serialNumber)
+		log.Log.V(2).Info("No DMS client found", "pciDeviceAddr", pciDeviceAddr)
+		return nil, fmt.Errorf("no DMS client found for device with PCI address %s", pciDeviceAddr)
 	}
 
-	log.Log.V(2).Info("Found DMS client", "serialNumber", serialNumber)
+	log.Log.V(2).Info("Found DMS client", "pciDeviceAddr", pciDeviceAddr)
 	return client, nil
 }
 

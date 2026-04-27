@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/vishvananda/netlink"
 )
@@ -37,4 +38,18 @@ func GetPciAddressFromLink(link netlink.Link) (string, error) {
 	}
 	// The last element of the path is the PCI address
 	return filepath.Base(realPath), nil
+}
+
+// PCIDeviceAddress returns the Domain:Bus:Device portion of a PCI BDF,
+// stripping the trailing .Function. Returns the input unchanged if no
+// dot is present. Used as the NIC uniqueness key: all PCI functions
+// of one physical card share the same Domain:Bus:Device, so this
+// collapses multi-function NICs onto a single identifier while
+// remaining unique across cards (including embedded NICs that share
+// a flashed VPD image, e.g. on HGX B300).
+func PCIDeviceAddress(pciBDF string) string {
+	if i := strings.LastIndex(pciBDF, "."); i > 0 {
+		return pciBDF[:i]
+	}
+	return pciBDF
 }

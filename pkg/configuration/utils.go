@@ -160,7 +160,7 @@ func (h *configurationUtils) GetMaxReadRequestSize(pciAddr string) (int, error) 
 func (h *configurationUtils) GetQoSSettings(device *v1alpha1.NicDevice, interfaceName string) (*v1alpha1.QosSpec, error) {
 	log.Log.Info("ConfigurationUtils.GetTrustAndPFC()", "device", device.Name)
 
-	dmsClient, err := h.dmsManager.GetDMSClientBySerialNumber(device.Status.SerialNumber)
+	dmsClient, err := dms.GetDMSClientForDevice(h.dmsManager, device)
 	if err != nil {
 		log.Log.Error(err, "GetTrustAndPFC(): failed to get DMS client", "device", device.Name)
 		return nil, err
@@ -227,7 +227,7 @@ func (h *configurationUtils) SetMaxReadRequestSize(pciAddr string, maxReadReques
 func (h *configurationUtils) SetQoSSettings(device *v1alpha1.NicDevice, spec *v1alpha1.QosSpec) error {
 	log.Log.Info("ConfigurationUtils.SetTrustAndPFC()", "device", device.Name, "spec", spec)
 
-	dmsClient, err := h.dmsManager.GetDMSClientBySerialNumber(device.Status.SerialNumber)
+	dmsClient, err := dms.GetDMSClientForDevice(h.dmsManager, device)
 	if err != nil {
 		log.Log.Error(err, "SetTrustAndPFC(): failed to get DMS client", "device", device.Name)
 		return err

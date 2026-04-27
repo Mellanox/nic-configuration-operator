@@ -323,7 +323,7 @@ func (m *spectrumXConfigManager) RuntimeConfigApplied(device *v1alpha1.NicDevice
 		return false, fmt.Errorf("spectrumx config not found for version %s", spcXSpec.Version)
 	}
 
-	dmsClient, err := m.dmsManager.GetDMSClientBySerialNumber(device.Status.SerialNumber)
+	dmsClient, err := dms.GetDMSClientForDevice(m.dmsManager, device)
 	if err != nil {
 		log.Log.Error(err, "RuntimeConfigApplied(): failed to get DMS client", "device", device.Name)
 		return false, err
@@ -477,7 +477,7 @@ func (m *spectrumXConfigManager) ApplyRuntimeConfig(device *v1alpha1.NicDevice) 
 		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, fmt.Errorf("spectrumx config not found for version %s", spcXSpec.Version)
 	}
 
-	dmsClient, err := m.dmsManager.GetDMSClientBySerialNumber(device.Status.SerialNumber)
+	dmsClient, err := dms.GetDMSClientForDevice(m.dmsManager, device)
 	if err != nil {
 		log.Log.Error(err, "ApplyRuntimeConfig(): failed to get DMS client", "device", device.Name)
 		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err

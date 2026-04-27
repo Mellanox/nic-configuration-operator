@@ -488,7 +488,7 @@ var _ = Describe("FirmwareManager", func() {
 
 				fwUtilsMock.On("GetFirmwareVersionsFromDevice", pci).
 					Return("", "", errors.New("version check failed")).Once()
-				dmsManagerMock.On("GetDMSClientBySerialNumber", testSerial).Return(dmsClientMock, nil).Once()
+				dmsManagerMock.On("GetDMSClientByPCIAddress", "0000:3b:00").Return(dmsClientMock, nil).Once()
 				fwUtilsMock.On("EnsureDeviceBoundToMlx5Core", pci).Return(nil).Once()
 				dmsClientMock.On("InstallBFB", mock.Anything, fwVersion, expectedBFBPath).Return(nil).Once()
 
@@ -502,7 +502,7 @@ var _ = Describe("FirmwareManager", func() {
 
 				fwUtilsMock.On("GetFirmwareVersionsFromDevice", pci).
 					Return("", "", errors.New("version check failed")).Once()
-				dmsManagerMock.On("GetDMSClientBySerialNumber", testSerial).Return(dmsClientMock, nil).Once()
+				dmsManagerMock.On("GetDMSClientByPCIAddress", "0000:3b:00").Return(dmsClientMock, nil).Once()
 				fwUtilsMock.On("EnsureDeviceBoundToMlx5Core", pci).Return(nil).Once()
 				dmsClientMock.On("InstallBFB", mock.Anything, fwVersion, expectedBFBPath).Return(nil).Once()
 
@@ -518,7 +518,7 @@ var _ = Describe("FirmwareManager", func() {
 
 				fwUtilsMock.On("GetFirmwareVersionsFromDevice", pci).
 					Return("", "", errors.New("version check failed")).Once()
-				dmsManagerMock.On("GetDMSClientBySerialNumber", testSerial).Return(dmsClientMock, nil).Once()
+				dmsManagerMock.On("GetDMSClientByPCIAddress", "0000:3b:00").Return(dmsClientMock, nil).Once()
 				fwUtilsMock.On("EnsureDeviceBoundToMlx5Core", pci).Return(nil).Once()
 				fwUtilsMock.On("EnsureDeviceBoundToMlx5Core", secondPCI).Return(nil).Once()
 				dmsClientMock.On("InstallBFB", mock.Anything, fwVersion, expectedBFBPath).Return(nil).Once()
@@ -533,7 +533,7 @@ var _ = Describe("FirmwareManager", func() {
 
 				fwUtilsMock.On("GetFirmwareVersionsFromDevice", pci).
 					Return("", "", errors.New("version check failed")).Once()
-				dmsManagerMock.On("GetDMSClientBySerialNumber", testSerial).Return(dmsClientMock, nil).Once()
+				dmsManagerMock.On("GetDMSClientByPCIAddress", "0000:3b:00").Return(dmsClientMock, nil).Once()
 				fwUtilsMock.On("EnsureDeviceBoundToMlx5Core", pci).Return(bindErr).Once()
 				// InstallBFB must not be called if binding fails — no mock expectation set.
 
@@ -561,7 +561,7 @@ var _ = Describe("FirmwareManager", func() {
 
 				fwUtilsMock.On("GetFirmwareVersionsFromDevice", pci).
 					Return("", "", errors.New("version check failed")).Once()
-				dmsManagerMock.On("GetDMSClientBySerialNumber", testSerial).Return(nil, dmsError).Once()
+				dmsManagerMock.On("GetDMSClientByPCIAddress", "0000:3b:00").Return(nil, dmsError).Once()
 
 				_, err := manager.InstallFirmware(context.Background(), device, &types.FirmwareInstallOptions{Version: fwVersion, SkipReset: true})
 				Expect(err).To(HaveOccurred())
@@ -575,7 +575,7 @@ var _ = Describe("FirmwareManager", func() {
 
 				fwUtilsMock.On("GetFirmwareVersionsFromDevice", pci).
 					Return("", "", errors.New("version check failed")).Once()
-				dmsManagerMock.On("GetDMSClientBySerialNumber", testSerial).Return(dmsClientMock, nil).Once()
+				dmsManagerMock.On("GetDMSClientByPCIAddress", "0000:3b:00").Return(dmsClientMock, nil).Once()
 				fwUtilsMock.On("EnsureDeviceBoundToMlx5Core", pci).Return(nil).Once()
 				dmsClientMock.On("InstallBFB", mock.Anything, fwVersion, expectedBFBPath).Return(installError).Once()
 

@@ -30,7 +30,8 @@ import (
 )
 
 type DeviceDiscovery interface {
-	// DiscoverNicDevices discovers Nvidia NIC devices on the host and returns back a map of serial numbers to NicDevice objects
+	// DiscoverNicDevices discovers Nvidia NIC devices on the host and returns back a map of
+	// PCI device addresses (Domain:Bus:Device, function stripped) to NicDevice objects.
 	DiscoverNicDevices() (map[string]v1alpha1.NicDevice, error)
 }
 
@@ -41,7 +42,11 @@ type deviceDiscovery struct {
 	nodeName string
 }
 
-// DiscoverNicDevices uses host utils to discover Nvidia NIC devices on the host and returns back a map of serial numbers to NicDevice objects
+// DiscoverNicDevices uses host utils to discover Nvidia NIC devices on the host and returns back a map of
+// PCI device addresses (Domain:Bus:Device, function stripped) to NicDevice objects. PCI functions that share
+// the same Domain:Bus:Device are ports of the same physical NIC and are merged into one NicDevice. Keying
+// by PCI device address (rather than serial number) is required on systems where multiple cards share a
+// flashed VPD image (e.g. embedded NICs on HGX B300).
 func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, error) {
 	log.Log.Info("ConfigurationManager.DiscoverNicDevices()")
 
@@ -51,7 +56,6 @@ func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, er
 		return nil, err
 	}
 
-	// Intermediate map for grouping ports by serial number
 	statuses := make(map[string]v1alpha1.NicDeviceStatus)
 
 	for _, device := range pciDevices {
@@ -96,8 +100,8 @@ func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, er
 			continue
 		}
 
-		// Devices with the same serial number are ports of the same NIC, so grouping them
-		deviceStatus, ok := statuses[vpd.SerialNumber]
+		pciKey := utils.PCIDeviceAddress(device.Address)
+		deviceStatus, ok := statuses[pciKey]
 
 		if !ok {
 			firmwareVersion, psid, err := d.utils.GetFirmwareVersionAndPSID(device.Address)
@@ -137,8 +141,6 @@ func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, er
 			}
 
 			log.Log.Info("Discovered NIC device", "address", device.Address, "status", deviceStatus)
-
-			statuses[vpd.SerialNumber] = deviceStatus
 		}
 
 		networkInterface := d.utils.GetInterfaceName(device.Address)
@@ -150,13 +152,12 @@ func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, er
 			RdmaInterface:    rdmaInterface,
 		})
 
-		statuses[deviceStatus.SerialNumber] = deviceStatus
+		statuses[pciKey] = deviceStatus
 	}
 
-	// Wrap statuses into NicDevice objects
 	devices := make(map[string]v1alpha1.NicDevice, len(statuses))
-	for serial, status := range statuses {
-		devices[serial] = v1alpha1.NicDevice{
+	for pciKey, status := range statuses {
+		devices[pciKey] = v1alpha1.NicDevice{
 			Status: status,
 		}
 	}

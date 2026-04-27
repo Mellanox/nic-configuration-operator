@@ -29,6 +29,8 @@ spec:
     pciAddresses:
       - "0000:03:00.0"
       - “0000:04:00.0”
+    # Note: serial numbers are not guaranteed unique on systems with embedded NICs
+    # that share a flashed VPD image (e.g. HGX B300). Prefer pciAddresses there.
     serialNumbers:
       - "MT2116X09299"
     # partNumbers:

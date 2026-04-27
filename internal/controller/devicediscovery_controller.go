@@ -37,6 +37,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/pkg/devicediscovery"
 	"github.com/Mellanox/nic-configuration-operator/pkg/helper"
 	"github.com/Mellanox/nic-configuration-operator/pkg/host"
+	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
 
 var deviceDiscoveryReconcileTime = time.Minute * 5
@@ -52,9 +53,15 @@ type DeviceDiscoveryController struct {
 	namespace       string
 }
 
-// Constructs a unique CR name based on the device's type and serial number
-func (d *DeviceDiscoveryController) getCRName(deviceType string, serialNumber string) string {
-	return strings.ToLower(d.nodeName + "-" + deviceType + "-" + serialNumber)
+// crNameSanitizer replaces PCI-address punctuation (:, .) with DNS-1123-safe dashes.
+var crNameSanitizer = strings.NewReplacer(":", "-", ".", "-")
+
+// getCRName constructs a unique CR name based on the node name, device's type, and PCI
+// device address (Domain:Bus:Device). The `:` and `.` characters in the PCI address are
+// replaced with `-` so the resulting name is DNS-1123-compliant.
+// Example: node=co-node-25, deviceType=101b, pciDeviceAddr=0000:04:00 → co-node-25-101b-0000-04-00.
+func (d *DeviceDiscoveryController) getCRName(deviceType string, pciDeviceAddr string) string {
+	return strings.ToLower(d.nodeName + "-" + deviceType + "-" + crNameSanitizer.Replace(pciDeviceAddr))
 }
 
 func setInitialsConditionsForDevice(device *v1alpha1.NicDevice) {
@@ -134,7 +141,12 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 	}
 
 	for _, nicDeviceCR := range list.Items {
-		observedDevice, exists := observedDevices[nicDeviceCR.Status.SerialNumber]
+		if len(nicDeviceCR.Status.Ports) == 0 {
+			log.Log.V(2).Info("NicDevice CR has no ports, skipping reconciliation", "device", nicDeviceCR.Name)
+			continue
+		}
+		pciKey := utils.PCIDeviceAddress(nicDeviceCR.Status.Ports[0].PCI)
+		observedDevice, exists := observedDevices[pciKey]
 
 		if !exists {
 			log.Log.V(2).Info("device doesn't exist on the node anymore, deleting", "device", nicDeviceCR.Name)
@@ -173,13 +185,13 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 		}
 
 		// Device was processed, cleaning it from the map
-		delete(observedDevices, nicDeviceCR.Status.SerialNumber)
+		delete(observedDevices, pciKey)
 	}
 
 	// Remaining devices don't have CR representation, need to create a CR
-	for _, observedDevice := range observedDevices {
+	for pciKey, observedDevice := range observedDevices {
 		deviceStatus := observedDevice.Status
-		deviceName := d.getCRName(deviceStatus.Type, deviceStatus.SerialNumber)
+		deviceName := d.getCRName(deviceStatus.Type, pciKey)
 		device := &v1alpha1.NicDevice{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      deviceName,
@@ -193,16 +205,12 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 			continue
 		}
 		err = d.Create(ctx, device)
-		if err != nil {
-			log.Log.Error(err, "failed to create device", "device", device)
-			continue
-		}
-
 		if apierrors.IsAlreadyExists(err) {
-			// Device already exists but was not matched by SerialNumber, which means the status was not applied properly
+			// Device already exists but was not matched by PCI address, which means the status was not applied properly
+			// on a previous reconcile. Re-fetch so the status update below runs against the live object.
 			err = d.Get(ctx, types.NamespacedName{Name: device.Name, Namespace: device.Namespace}, device)
 			if err != nil {
-				log.Log.Error(err, "failed to get NicDevice obj", "device", device)
+				log.Log.Error(err, "failed to get existing NicDevice obj", "device", device)
 				continue
 			}
 		} else if err != nil {
