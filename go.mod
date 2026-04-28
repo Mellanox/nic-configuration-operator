@@ -11,7 +11,7 @@ require (
 	github.com/onsi/gomega v1.39.1
 	github.com/stretchr/testify v1.11.1
 	github.com/vishvananda/netlink v1.3.1
-	go.uber.org/zap v1.27.1
+	go.uber.org/zap v1.28.0
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.32.13
 	k8s.io/apimachinery v0.32.13
