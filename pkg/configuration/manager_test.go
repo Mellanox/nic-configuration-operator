@@ -1291,9 +1291,23 @@ var _ = Describe("ConfigurationManager", func() {
 				mockSpcXMgr.On("GetPostBreakoutMlxConfig", device).Return(nil, nil)
 				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, mock.Anything).Return(
 					types.NvConfigQuery{CurrentConfig: map[string][]string{"NUM_OF_PF": {"1"}}}, nil)
-				mockNVConfigUtils.On("SetNvConfigParametersBatch", pciAddress, breakoutParams, true).Return(nil)
+				mockNVConfigUtils.On("SetNvConfigParametersBatch", pciAddress, breakoutParams, false).Return(nil)
 
 				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.Status).To(Equal(types.ApplyStatusPartiallyApplied))
+				Expect(result.RebootRequired).To(BeTrue())
+			})
+
+			It("propagates WithDefault=true to mlxconfig in SpectrumX flow", func() {
+				breakoutParams := map[string]string{"NUM_OF_PF": "2"}
+				mockSpcXMgr.On("GetBreakoutMlxConfig", device).Return(breakoutParams, nil)
+				mockSpcXMgr.On("GetPostBreakoutMlxConfig", device).Return(nil, nil)
+				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, mock.Anything).Return(
+					types.NvConfigQuery{CurrentConfig: map[string][]string{"NUM_OF_PF": {"1"}}}, nil)
+				mockNVConfigUtils.On("SetNvConfigParametersBatch", pciAddress, breakoutParams, true).Return(nil)
+
+				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{WithDefault: true})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(result.Status).To(Equal(types.ApplyStatusPartiallyApplied))
 				Expect(result.RebootRequired).To(BeTrue())
@@ -1309,7 +1323,7 @@ var _ = Describe("ConfigurationManager", func() {
 				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, []string{"LINK_TYPE_P1"}).Return(
 					types.NvConfigQuery{CurrentConfig: map[string][]string{"LINK_TYPE_P1": {"1"}}}, nil)
 				merged := map[string]string{"NUM_OF_PF": "2", "LINK_TYPE_P1": "2"}
-				mockNVConfigUtils.On("SetNvConfigParametersBatch", pciAddress, merged, true).Return(nil)
+				mockNVConfigUtils.On("SetNvConfigParametersBatch", pciAddress, merged, false).Return(nil)
 
 				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
 				Expect(err).NotTo(HaveOccurred())
@@ -1338,7 +1352,7 @@ var _ = Describe("ConfigurationManager", func() {
 				mockSpcXMgr.On("GetPostBreakoutMlxConfig", device).Return(nil, nil)
 				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, mock.Anything).Return(
 					types.NvConfigQuery{CurrentConfig: map[string][]string{"NUM_OF_PF": {"1"}}}, nil)
-				mockNVConfigUtils.On("SetNvConfigParametersBatch", pciAddress, breakoutParams, true).Return(errors.New("set failed"))
+				mockNVConfigUtils.On("SetNvConfigParametersBatch", pciAddress, breakoutParams, false).Return(errors.New("set failed"))
 
 				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
 				Expect(err).To(HaveOccurred())
@@ -1360,7 +1374,7 @@ var _ = Describe("ConfigurationManager", func() {
 				})).Return(
 					types.NvConfigQuery{CurrentConfig: map[string][]string{"LINK_TYPE_P1": {"2"}, "CUSTOM_PARAM_P1": {"0"}}}, nil)
 				merged := map[string]string{"NUM_OF_PF": "2", "LINK_TYPE_P1": "2", "CUSTOM_PARAM_P1": "42"}
-				mockNVConfigUtils.On("SetNvConfigParametersBatch", pciAddress, merged, true).Return(nil)
+				mockNVConfigUtils.On("SetNvConfigParametersBatch", pciAddress, merged, false).Return(nil)
 
 				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
 				Expect(err).NotTo(HaveOccurred())
@@ -1383,7 +1397,7 @@ var _ = Describe("ConfigurationManager", func() {
 					types.NvConfigQuery{CurrentConfig: map[string][]string{"LINK_TYPE_P1": {"2"}}}, nil)
 				// The merged set should have rawNvConfig's value "1" for LINK_TYPE_P1
 				merged := map[string]string{"NUM_OF_PF": "2", "LINK_TYPE_P1": "1"}
-				mockNVConfigUtils.On("SetNvConfigParametersBatch", pciAddress, merged, true).Return(nil)
+				mockNVConfigUtils.On("SetNvConfigParametersBatch", pciAddress, merged, false).Return(nil)
 
 				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
 				Expect(err).NotTo(HaveOccurred())
@@ -1403,7 +1417,7 @@ var _ = Describe("ConfigurationManager", func() {
 				mergedBreakout := map[string]string{"NUM_OF_PF": "4"}
 				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, []string{"NUM_OF_PF"}).Return(
 					types.NvConfigQuery{CurrentConfig: map[string][]string{"NUM_OF_PF": {"2"}}}, nil)
-				mockNVConfigUtils.On("SetNvConfigParametersBatch", pciAddress, mergedBreakout, true).Return(nil)
+				mockNVConfigUtils.On("SetNvConfigParametersBatch", pciAddress, mergedBreakout, false).Return(nil)
 
 				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
 				Expect(err).NotTo(HaveOccurred())
@@ -1428,7 +1442,7 @@ var _ = Describe("ConfigurationManager", func() {
 				})).Return(
 					types.NvConfigQuery{CurrentConfig: map[string][]string{"LINK_TYPE_P1": {"2"}, "CUSTOM_PARAM_P1": {"0"}}}, nil)
 				merged := map[string]string{"NUM_OF_PF": "2", "LINK_TYPE_P1": "2", "CUSTOM_PARAM_P1": "42"}
-				mockNVConfigUtils.On("SetNvConfigParametersBatch", pciAddress, merged, true).Return(nil)
+				mockNVConfigUtils.On("SetNvConfigParametersBatch", pciAddress, merged, false).Return(nil)
 
 				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
 				Expect(err).NotTo(HaveOccurred())

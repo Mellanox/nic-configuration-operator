@@ -181,7 +181,7 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 	if device.Spec.Configuration.Template != nil &&
 		device.Spec.Configuration.Template.SpectrumXOptimized != nil &&
 		device.Spec.Configuration.Template.SpectrumXOptimized.Enabled {
-		return h.applySpectrumXNVConfiguration(ctx, device)
+		return h.applySpectrumXNVConfiguration(ctx, device, options)
 	}
 
 	nvConfigsForPorts, err := h.queryNvConfigs(ctx, device)
@@ -308,7 +308,7 @@ func (h configurationManager) checkMlxConfigMismatch(ctx context.Context, pci st
 }
 
 // applySpectrumXNVConfiguration handles the Spectrum-X NV configuration path (breakout + postBreakout)
-func (h configurationManager) applySpectrumXNVConfiguration(ctx context.Context, device *v1alpha1.NicDevice) (*types.ConfigurationApplyResult, error) {
+func (h configurationManager) applySpectrumXNVConfiguration(ctx context.Context, device *v1alpha1.NicDevice, options *types.ConfigurationOptions) (*types.ConfigurationApplyResult, error) {
 	pci := device.Status.Ports[0].PCI
 
 	breakoutParams, err := h.spectrumXConfigManager.GetBreakoutMlxConfig(device)
@@ -330,7 +330,7 @@ func (h configurationManager) applySpectrumXNVConfiguration(ctx context.Context,
 			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 		} else if mismatch {
 			log.Log.Info("applying breakout config", "device", device.Name)
-			if err := h.nvConfigUtils.SetNvConfigParametersBatch(pci, breakoutParams, true); err != nil {
+			if err := h.nvConfigUtils.SetNvConfigParametersBatch(pci, breakoutParams, options.WithDefault); err != nil {
 				return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 			}
 			log.Log.Info("breakout config applied, reboot required", "device", device.Name)
@@ -352,7 +352,7 @@ func (h configurationManager) applySpectrumXNVConfiguration(ctx context.Context,
 				merged[k] = v
 			}
 			log.Log.Info("applying postBreakout config", "device", device.Name)
-			if err := h.nvConfigUtils.SetNvConfigParametersBatch(pci, merged, true); err != nil {
+			if err := h.nvConfigUtils.SetNvConfigParametersBatch(pci, merged, options.WithDefault); err != nil {
 				return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 			}
 			log.Log.Info("postBreakout config applied, reboot required", "device", device.Name)
