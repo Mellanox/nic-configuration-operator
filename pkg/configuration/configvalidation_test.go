@@ -22,7 +22,6 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/stretchr/testify/mock"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
@@ -43,643 +42,230 @@ var _ = Describe("ConfigValidationImpl", func() {
 	})
 
 	Describe("ConstructNvParamMapFromTemplate", func() {
-		It("should return default values if optional config is disabled", func() {
-			device := &v1alpha1.NicDevice{
+		baseDevice := func(linkType v1alpha1.LinkTypeEnum, ports int) *v1alpha1.NicDevice {
+			portSpecs := make([]v1alpha1.NicDevicePortSpec, ports)
+			for i := 0; i < ports; i++ {
+				portSpecs[i] = v1alpha1.NicDevicePortSpec{PCI: fmt.Sprintf("0000:03:00.%d", i)}
+			}
+			return &v1alpha1.NicDevice{
 				Spec: v1alpha1.NicDeviceSpec{
 					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
 						Template: &v1alpha1.ConfigurationTemplateSpec{
 							NumVfs:   0,
-							LinkType: consts.Ethernet,
+							LinkType: linkType,
 						},
 					},
 				},
-				Status: v1alpha1.NicDeviceStatus{
-					Ports: []v1alpha1.NicDevicePortSpec{
-						{PCI: "0000:03:00.0"},
-						{PCI: "0000:03:00.1"},
-					},
-				},
+				Status: v1alpha1.NicDeviceStatus{Ports: portSpecs},
 			}
+		}
 
-			defaultValues := map[string][]string{
-				consts.RoceCcPrioMaskP1Param: {"testRoceCcP1"},
-				consts.CnpDscpP1Param:        {"testDscpP1"},
-				consts.Cnp802pPrioP1Param:    {"test802PrioP1"},
-				consts.RoceCcPrioMaskP2Param: {"testRoceCcP2"},
-				consts.CnpDscpP2Param:        {"testDscpP2"},
-				consts.Cnp802pPrioP2Param:    {"test802PrioP2"},
-				consts.AtsEnabledParam:       {"testAts"},
-			}
-			query := types.NewNvConfigQuery()
-			query.DefaultConfig = defaultValues
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
+		It("emits SRIOV, LINK_TYPE per port, and sentinels for disabled RoCE/Ats/MaxAcc", func() {
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(baseDevice(consts.Ethernet, 2))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(HaveKeyWithValue(consts.SriovEnabledParam, consts.NvParamFalse))
 			Expect(nvParams).To(HaveKeyWithValue(consts.SriovNumOfVfsParam, "0"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.RoceCcPrioMaskP1Param, "testRoceCcP1"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.CnpDscpP1Param, "testDscpP1"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.Cnp802pPrioP1Param, "test802PrioP1"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.RoceCcPrioMaskP2Param, "testRoceCcP2"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.CnpDscpP2Param, "testDscpP2"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.Cnp802pPrioP2Param, "test802PrioP2"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.AtsEnabledParam, "testAts"))
-		})
-
-		It("should check if dual-port device has LINK_TYPE_P2 param", func() {
-			device := &v1alpha1.NicDevice{
-				Spec: v1alpha1.NicDeviceSpec{
-					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
-						Template: &v1alpha1.ConfigurationTemplateSpec{
-							NumVfs:   0,
-							LinkType: consts.Ethernet,
-						},
-					},
-				},
-				Status: v1alpha1.NicDeviceStatus{
-					Ports: []v1alpha1.NicDevicePortSpec{
-						{PCI: "0000:03:00.0"},
-						{PCI: "0000:03:00.1"},
-					},
-				},
-			}
-
-			defaultValues := map[string][]string{
-				consts.LinkTypeP1Param: {"testLinkTypeP1"},
-			}
-			query := types.NewNvConfigQuery()
-			query.DefaultConfig = defaultValues
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
-			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(HaveKeyWithValue(consts.LinkTypeP1Param, consts.NvParamLinkTypeEthernet))
-			Expect(nvParams).ToNot(HaveKey(consts.LinkTypeP2Param))
+			Expect(nvParams).To(HaveKeyWithValue(consts.LinkTypeP2Param, consts.NvParamLinkTypeEthernet))
+			// Disabled optional features emit the factory-default sentinel so the
+			// resolver fills in the FW default at apply time — see ResolveFactoryDefaults.
+			for _, name := range []string{consts.RoceCcPrioMaskP1Param, consts.RoceCcPrioMaskP2Param,
+				consts.CnpDscpP1Param, consts.CnpDscpP2Param,
+				consts.Cnp802pPrioP1Param, consts.Cnp802pPrioP2Param,
+				consts.AtsEnabledParam, consts.MaxAccOutReadParam} {
+				Expect(nvParams).To(HaveKeyWithValue(name, consts.NvParamFactoryDefault))
+			}
+			// ADVANCED_PCI_SETTINGS is only emitted when MAX_ACC_OUT_READ has a concrete value.
+			Expect(nvParams).NotTo(HaveKey(consts.AdvancedPCISettingsParam))
 		})
 
-		It("should omit parameters for the second port if device is single port", func() {
-			device := &v1alpha1.NicDevice{
-				Spec: v1alpha1.NicDeviceSpec{
-					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
-						Template: &v1alpha1.ConfigurationTemplateSpec{
-							NumVfs:   0,
-							LinkType: consts.Ethernet,
-						},
-					},
-				},
-				Status: v1alpha1.NicDeviceStatus{
-					Ports: []v1alpha1.NicDevicePortSpec{
-						{PCI: "0000:03:00.0"},
-					},
-				},
-			}
-			defaultValues := map[string][]string{
-				consts.RoceCcPrioMaskP1Param: {"testRoceCcP1"},
-				consts.CnpDscpP1Param:        {"testDscpP1"},
-				consts.Cnp802pPrioP1Param:    {"test802PrioP1"},
-				consts.RoceCcPrioMaskP2Param: {"testRoceCcP2"},
-				consts.CnpDscpP2Param:        {"testDscpP2"},
-				consts.Cnp802pPrioP2Param:    {"test802PrioP2"},
-				consts.AtsEnabledParam:       {"testAts"},
-			}
-			query := types.NewNvConfigQuery()
-			query.DefaultConfig = defaultValues
+		It("emits SRIOV enabled values when NumVfs > 0", func() {
+			device := baseDevice(consts.Ethernet, 1)
+			device.Spec.Configuration.Template.NumVfs = 16
 
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(nvParams).To(HaveKeyWithValue(consts.SriovEnabledParam, consts.NvParamFalse))
-			Expect(nvParams).To(HaveKeyWithValue(consts.SriovNumOfVfsParam, "0"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.AtsEnabledParam, "testAts"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.RoceCcPrioMaskP1Param, "testRoceCcP1"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.CnpDscpP1Param, "testDscpP1"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.Cnp802pPrioP1Param, "test802PrioP1"))
-			Expect(nvParams).To(Not(HaveKey(consts.RoceCcPrioMaskP2Param)))
-			Expect(nvParams).To(Not(HaveKey(consts.CnpDscpP2Param)))
-			Expect(nvParams).To(Not(HaveKey(consts.Cnp802pPrioP2Param)))
+			Expect(nvParams).To(HaveKeyWithValue(consts.SriovEnabledParam, consts.NvParamTrue))
+			Expect(nvParams).To(HaveKeyWithValue(consts.SriovNumOfVfsParam, "16"))
 		})
 
-		It("should construct the correct nvparam map with optional optimizations enabled", func() {
-			mockConfigurationUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
-
-			device := &v1alpha1.NicDevice{
-				Spec: v1alpha1.NicDeviceSpec{
-					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
-						Template: &v1alpha1.ConfigurationTemplateSpec{
-							NumVfs:   0,
-							LinkType: consts.Ethernet,
-							PciPerformanceOptimized: &v1alpha1.PciPerformanceOptimizedSpec{
-								Enabled:        true,
-								MaxAccOutRead:  1337,
-								MaxReadRequest: 1339,
-							},
-							GpuDirectOptimized: &v1alpha1.GpuDirectOptimizedSpec{
-								Enabled: true,
-								Env:     consts.EnvBaremetal,
-							},
-							RoceOptimized: &v1alpha1.RoceOptimizedSpec{
-								Enabled: true,
-								Qos: &v1alpha1.QosSpec{
-									Trust: "testTrust",
-									PFC:   "testPFC",
-								},
-							},
-						},
-					},
-				},
-				Status: v1alpha1.NicDeviceStatus{
-					Ports: []v1alpha1.NicDevicePortSpec{
-						{PCI: "0000:03:00.0"},
-						{PCI: "0000:03:00.1"},
-					},
-				},
-			}
-
-			query := types.NewNvConfigQuery()
-
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
+		It("emits LINK_TYPE_Pn for every port unconditionally (no firmware gate)", func() {
+			// Four-port device; function must emit four LINK_TYPE entries regardless
+			// of what the firmware may or may not expose.
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(baseDevice(consts.Ethernet, 4))
 			Expect(err).NotTo(HaveOccurred())
-			Expect(nvParams).To(HaveKeyWithValue(consts.MaxAccOutReadParam, "1337"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.AtsEnabledParam, "0"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.RoceCcPrioMaskP1Param, "255"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.CnpDscpP1Param, "4"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.Cnp802pPrioP1Param, "6"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.RoceCcPrioMaskP2Param, "255"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.CnpDscpP2Param, "4"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.Cnp802pPrioP2Param, "6"))
-		})
-
-		It("should skip the MaxAccOutRead if the default is not 0", func() {
-			mockConfigurationUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
-
-			device := &v1alpha1.NicDevice{
-				Spec: v1alpha1.NicDeviceSpec{
-					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
-						Template: &v1alpha1.ConfigurationTemplateSpec{
-							NumVfs:   0,
-							LinkType: consts.Ethernet,
-							PciPerformanceOptimized: &v1alpha1.PciPerformanceOptimizedSpec{
-								Enabled: true,
-							},
-						},
-					},
-				},
-				Status: v1alpha1.NicDeviceStatus{
-					Ports: []v1alpha1.NicDevicePortSpec{
-						{PCI: "0000:03:00.0"},
-					},
-				},
-			}
-
-			defaultValues := map[string][]string{
-				consts.MaxAccOutReadParam: {"notZero"},
-			}
-			query := types.NewNvConfigQuery()
-			query.DefaultConfig = defaultValues
-
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(nvParams).NotTo(HaveKeyWithValue(consts.MaxAccOutReadParam, consts.NvParamZero))
-		})
-
-		It("should apply MaxAccOutRead if the default is 0", func() {
-			mockConfigurationUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
-
-			device := &v1alpha1.NicDevice{
-				Spec: v1alpha1.NicDeviceSpec{
-					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
-						Template: &v1alpha1.ConfigurationTemplateSpec{
-							NumVfs:   0,
-							LinkType: consts.Ethernet,
-							PciPerformanceOptimized: &v1alpha1.PciPerformanceOptimizedSpec{
-								Enabled: true,
-							},
-						},
-					},
-				},
-				Status: v1alpha1.NicDeviceStatus{
-					Ports: []v1alpha1.NicDevicePortSpec{
-						{PCI: "0000:03:00.0"},
-					},
-				},
-			}
-
-			defaultValues := map[string][]string{
-				consts.MaxAccOutReadParam: {consts.NvParamZero},
-			}
-			currentValues := map[string][]string{
-				consts.AdvancedPCISettingsParam: {consts.NvParamTrue},
-			}
-			query := types.NewNvConfigQuery()
-			query.DefaultConfig = defaultValues
-			query.CurrentConfig = currentValues
-
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(nvParams).To(HaveKeyWithValue(consts.MaxAccOutReadParam, consts.NvParamZero))
-		})
-
-		It("should not apply MaxAccOutRead if the default is unavailable", func() {
-			mockConfigurationUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
-
-			device := &v1alpha1.NicDevice{
-				Spec: v1alpha1.NicDeviceSpec{
-					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
-						Template: &v1alpha1.ConfigurationTemplateSpec{
-							NumVfs:   0,
-							LinkType: consts.Ethernet,
-							PciPerformanceOptimized: &v1alpha1.PciPerformanceOptimizedSpec{
-								Enabled: true,
-							},
-						},
-					},
-				},
-				Status: v1alpha1.NicDeviceStatus{
-					Ports: []v1alpha1.NicDevicePortSpec{
-						{PCI: "0000:03:00.0"},
-					},
-				},
-			}
-
-			// MAX_ACC_OUT_READ param is unavailable if ADVANCED_PCI_SETTINGS is disabled
-			query := types.NewNvConfigQuery()
-
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(nvParams).ToNot(HaveKeyWithValue(consts.MaxAccOutReadParam, consts.NvParamZero))
-		})
-
-		It("should return an error when GpuOptimized is enabled without PciPerformanceOptimized", func() {
-			mockConfigurationUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
-
-			device := &v1alpha1.NicDevice{
-				Spec: v1alpha1.NicDeviceSpec{
-					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
-						Template: &v1alpha1.ConfigurationTemplateSpec{
-							NumVfs:   0,
-							LinkType: consts.Ethernet,
-							GpuDirectOptimized: &v1alpha1.GpuDirectOptimizedSpec{
-								Enabled: true,
-								Env:     consts.EnvBaremetal,
-							},
-						},
-					},
-				},
-				Status: v1alpha1.NicDeviceStatus{
-					Ports: []v1alpha1.NicDevicePortSpec{
-						{PCI: "0000:03:00.0"},
-					},
-				},
-			}
-
-			query := types.NewNvConfigQuery()
-
-			_, err := validator.ConstructNvParamMapFromTemplate(device, query)
-			Expect(err).To(MatchError("incorrect spec: GpuDirectOptimized should only be enabled together with PciPerformanceOptimized"))
-		})
-		It("should ignore raw config for the second port if device is single port", func() {
-			mockConfigurationUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
-
-			device := &v1alpha1.NicDevice{
-				Spec: v1alpha1.NicDeviceSpec{
-					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
-						Template: &v1alpha1.ConfigurationTemplateSpec{
-							NumVfs:   0,
-							LinkType: consts.Ethernet,
-							RawNvConfig: []v1alpha1.NvConfigParam{
-								{
-									Name:  "TEST_P1",
-									Value: "test",
-								},
-								{
-									Name:  "TEST_P2",
-									Value: "test",
-								},
-							},
-						},
-					},
-				},
-				Status: v1alpha1.NicDeviceStatus{
-					Ports: []v1alpha1.NicDevicePortSpec{
-						{PCI: "0000:03:00.0"},
-					},
-				},
-			}
-
-			query := types.NewNvConfigQuery()
-
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(nvParams).To(HaveKeyWithValue("TEST_P1", "test"))
-			Expect(nvParams).NotTo(HaveKey("TEST_P2"))
-		})
-		It("should apply raw config for the second port if device is dual port", func() {
-			mockConfigurationUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
-
-			device := &v1alpha1.NicDevice{
-				Spec: v1alpha1.NicDeviceSpec{
-					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
-						Template: &v1alpha1.ConfigurationTemplateSpec{
-							NumVfs:   0,
-							LinkType: consts.Ethernet,
-							RawNvConfig: []v1alpha1.NvConfigParam{
-								{
-									Name:  "TEST_P1",
-									Value: "test",
-								},
-								{
-									Name:  "TEST_P2",
-									Value: "test",
-								},
-							},
-						},
-					},
-				},
-				Status: v1alpha1.NicDeviceStatus{
-					Ports: []v1alpha1.NicDevicePortSpec{
-						{PCI: "0000:03:00.0"},
-						{PCI: "0000:03:00.1"},
-					},
-				},
-			}
-
-			query := types.NewNvConfigQuery()
-
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(nvParams).To(HaveKeyWithValue("TEST_P1", "test"))
-			Expect(nvParams).To(HaveKeyWithValue("TEST_P2", "test"))
-		})
-		It("should emit link type and RoCE params for every port on a quad-port device", func() {
-			mockConfigurationUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
-
-			device := &v1alpha1.NicDevice{
-				Spec: v1alpha1.NicDeviceSpec{
-					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
-						Template: &v1alpha1.ConfigurationTemplateSpec{
-							NumVfs:   0,
-							LinkType: consts.Ethernet,
-							RoceOptimized: &v1alpha1.RoceOptimizedSpec{
-								Enabled: true,
-							},
-							RawNvConfig: []v1alpha1.NvConfigParam{
-								{Name: "CUSTOM_PARAM_P1", Value: "raw1"},
-								{Name: "CUSTOM_PARAM_P4", Value: "raw4"},
-								{Name: "CUSTOM_PARAM_P5", Value: "raw5"},
-								{Name: "CUSTOM_PARAM_NO_SUFFIX", Value: "rawN"},
-							},
-						},
-					},
-				},
-				Status: v1alpha1.NicDeviceStatus{
-					Ports: []v1alpha1.NicDevicePortSpec{
-						{PCI: "0000:03:00.0"},
-						{PCI: "0000:03:00.1"},
-						{PCI: "0000:03:00.2"},
-						{PCI: "0000:03:00.3"},
-					},
-				},
-			}
-
-			query := types.NewNvConfigQuery()
-			// Firmware exposes LINK_TYPE for all four ports.
-			query.DefaultConfig = map[string][]string{
-				"LINK_TYPE_P1": {"2"},
-				"LINK_TYPE_P2": {"2"},
-				"LINK_TYPE_P3": {"2"},
-				"LINK_TYPE_P4": {"2"},
-			}
-
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
-			Expect(err).NotTo(HaveOccurred())
-
-			// Link type emitted for every port with a firmware-declared slot.
 			for _, name := range []string{"LINK_TYPE_P1", "LINK_TYPE_P2", "LINK_TYPE_P3", "LINK_TYPE_P4"} {
 				Expect(nvParams).To(HaveKeyWithValue(name, consts.NvParamLinkTypeEthernet))
 			}
+		})
 
-			// RoCE optimization emitted for all four ports.
-			for _, name := range []string{"ROCE_CC_PRIO_MASK_P1", "ROCE_CC_PRIO_MASK_P2", "ROCE_CC_PRIO_MASK_P3", "ROCE_CC_PRIO_MASK_P4"} {
+		It("emits IB link type when template requests it", func() {
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(baseDevice(consts.Infiniband, 2))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(nvParams).To(HaveKeyWithValue(consts.LinkTypeP1Param, consts.NvParamLinkTypeInfiniband))
+			Expect(nvParams).To(HaveKeyWithValue(consts.LinkTypeP2Param, consts.NvParamLinkTypeInfiniband))
+		})
+
+		It("emits INTERNAL_CPU_OFFLOAD_ENGINE=NIC mode for BlueField devices", func() {
+			device := baseDevice(consts.Ethernet, 2)
+			device.Status.Type = consts.BlueField3DeviceID
+
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(nvParams).To(HaveKeyWithValue(consts.BF3OperationModeParam, consts.NvParamBF3NicMode))
+		})
+
+		It("does not emit INTERNAL_CPU_OFFLOAD_ENGINE for non-BlueField devices", func() {
+			device := baseDevice(consts.Ethernet, 2)
+			device.Status.Type = "1021" // ConnectX-7 device ID
+
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(nvParams).NotTo(HaveKey(consts.BF3OperationModeParam))
+		})
+
+		It("emits MAX_ACC_OUT_READ and ADVANCED_PCI_SETTINGS when PciPerf specifies a non-zero value", func() {
+			device := baseDevice(consts.Ethernet, 1)
+			device.Spec.Configuration.Template.PciPerformanceOptimized = &v1alpha1.PciPerformanceOptimizedSpec{
+				Enabled:       true,
+				MaxAccOutRead: 1337,
+			}
+
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(nvParams).To(HaveKeyWithValue(consts.MaxAccOutReadParam, "1337"))
+			// ADVANCED_PCI_SETTINGS=1 is included in the same batch so mlxconfig can
+			// unlock visibility of MAX_ACC_OUT_READ in one --with_default set call.
+			Expect(nvParams).To(HaveKeyWithValue(consts.AdvancedPCISettingsParam, consts.NvParamTrue))
+		})
+
+		It("emits sentinel for MAX_ACC_OUT_READ when PciPerf is enabled with auto (value 0)", func() {
+			device := baseDevice(consts.Ethernet, 1)
+			device.Spec.Configuration.Template.PciPerformanceOptimized = &v1alpha1.PciPerformanceOptimizedSpec{
+				Enabled: true,
+			}
+
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(nvParams).To(HaveKeyWithValue(consts.MaxAccOutReadParam, consts.NvParamFactoryDefault))
+			Expect(nvParams).NotTo(HaveKey(consts.AdvancedPCISettingsParam))
+		})
+
+		It("emits RoCE params per port when RoceOptimized is enabled", func() {
+			device := baseDevice(consts.Ethernet, 2)
+			device.Spec.Configuration.Template.RoceOptimized = &v1alpha1.RoceOptimizedSpec{Enabled: true}
+
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device)
+			Expect(err).NotTo(HaveOccurred())
+			for _, name := range []string{consts.RoceCcPrioMaskP1Param, consts.RoceCcPrioMaskP2Param} {
 				Expect(nvParams).To(HaveKeyWithValue(name, "255"))
 			}
-			for _, name := range []string{"CNP_DSCP_P1", "CNP_DSCP_P2", "CNP_DSCP_P3", "CNP_DSCP_P4"} {
+			for _, name := range []string{consts.CnpDscpP1Param, consts.CnpDscpP2Param} {
 				Expect(nvParams).To(HaveKeyWithValue(name, "4"))
 			}
-			for _, name := range []string{"CNP_802P_PRIO_P1", "CNP_802P_PRIO_P2", "CNP_802P_PRIO_P3", "CNP_802P_PRIO_P4"} {
+			for _, name := range []string{consts.Cnp802pPrioP1Param, consts.Cnp802pPrioP2Param} {
 				Expect(nvParams).To(HaveKeyWithValue(name, "6"))
 			}
-
-			// rawNvConfig: _P1..P4 and non-suffixed entries kept; _P5 dropped.
-			Expect(nvParams).To(HaveKeyWithValue("CUSTOM_PARAM_P1", "raw1"))
-			Expect(nvParams).To(HaveKeyWithValue("CUSTOM_PARAM_P4", "raw4"))
-			Expect(nvParams).To(HaveKeyWithValue("CUSTOM_PARAM_NO_SUFFIX", "rawN"))
-			Expect(nvParams).NotTo(HaveKey("CUSTOM_PARAM_P5"))
 		})
-		It("should skip LINK_TYPE_Pn for ports firmware does not declare a slot for", func() {
-			mockConfigurationUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
 
-			device := &v1alpha1.NicDevice{
-				Spec: v1alpha1.NicDeviceSpec{
-					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
-						Template: &v1alpha1.ConfigurationTemplateSpec{
-							NumVfs:   0,
-							LinkType: consts.Ethernet,
-						},
-					},
-				},
-				Status: v1alpha1.NicDeviceStatus{
-					Ports: []v1alpha1.NicDevicePortSpec{
-						{PCI: "0000:03:00.0"},
-						{PCI: "0000:03:00.1"},
-						{PCI: "0000:03:00.2"},
-						{PCI: "0000:03:00.3"},
-					},
-				},
+		It("emits ATS_ENABLED=0 when GpuDirectOptimized is enabled", func() {
+			device := baseDevice(consts.Ethernet, 1)
+			device.Spec.Configuration.Template.PciPerformanceOptimized = &v1alpha1.PciPerformanceOptimizedSpec{Enabled: true, MaxAccOutRead: 1}
+			device.Spec.Configuration.Template.GpuDirectOptimized = &v1alpha1.GpuDirectOptimizedSpec{
+				Enabled: true,
+				Env:     consts.EnvBaremetal,
 			}
 
-			query := types.NewNvConfigQuery()
-			// Firmware exposes only P1 and P3, not P2 or P4.
-			query.DefaultConfig = map[string][]string{
-				"LINK_TYPE_P1": {"2"},
-				"LINK_TYPE_P3": {"2"},
-			}
-
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(nvParams).To(HaveKeyWithValue("LINK_TYPE_P1", consts.NvParamLinkTypeEthernet))
-			Expect(nvParams).To(HaveKeyWithValue("LINK_TYPE_P3", consts.NvParamLinkTypeEthernet))
-			Expect(nvParams).NotTo(HaveKey("LINK_TYPE_P2"))
-			Expect(nvParams).NotTo(HaveKey("LINK_TYPE_P4"))
+			Expect(nvParams).To(HaveKeyWithValue(consts.AtsEnabledParam, consts.NvParamFalse))
 		})
-		It("should report an error when LinkType cannot be changed and template differs from the actual status", func() {
-			mockConfigurationUtils.On("GetLinkType", mock.Anything).Return(consts.Ethernet)
-			mockConfigurationUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
 
-			device := &v1alpha1.NicDevice{
-				Spec: v1alpha1.NicDeviceSpec{
-					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
-						Template: &v1alpha1.ConfigurationTemplateSpec{
-							NumVfs:   0,
-							LinkType: consts.Infiniband,
-							PciPerformanceOptimized: &v1alpha1.PciPerformanceOptimizedSpec{
-								Enabled: true,
-							},
-						},
-					},
-				},
-				Status: v1alpha1.NicDeviceStatus{
-					Ports: []v1alpha1.NicDevicePortSpec{
-						{
-							PCI:              "0000:03:00.0",
-							NetworkInterface: "enp3s0f0np0",
-						},
-						{
-							PCI:              "0000:03:00.1",
-							NetworkInterface: "enp3s0f1np1",
-						},
-					},
-				},
+		It("returns an error when GpuDirectOptimized is enabled without PciPerformanceOptimized", func() {
+			device := baseDevice(consts.Ethernet, 1)
+			device.Spec.Configuration.Template.GpuDirectOptimized = &v1alpha1.GpuDirectOptimizedSpec{
+				Enabled: true,
+				Env:     consts.EnvBaremetal,
 			}
 
-			query := types.NewNvConfigQuery()
-
-			_, err := validator.ConstructNvParamMapFromTemplate(device, query)
-			Expect(err).To(MatchError("incorrect spec: device does not support link type change, wrong link type provided in the template, should be: Ethernet"))
+			_, err := validator.ConstructNvParamMapFromTemplate(device)
+			Expect(err).To(MatchError("incorrect spec: GpuDirectOptimized should only be enabled together with PciPerformanceOptimized"))
 		})
-		It("should not report an error when LinkType can be changed and template differs from the actual status", func() {
-			mockConfigurationUtils.On("GetLinkType", mock.Anything).Return(consts.Ethernet)
-			mockConfigurationUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
 
-			device := &v1alpha1.NicDevice{
-				Spec: v1alpha1.NicDeviceSpec{
-					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
-						Template: &v1alpha1.ConfigurationTemplateSpec{
-							NumVfs:   0,
-							LinkType: consts.Infiniband,
-							PciPerformanceOptimized: &v1alpha1.PciPerformanceOptimizedSpec{
-								Enabled: true,
-							},
-						},
-					},
-				},
-				Status: v1alpha1.NicDeviceStatus{
-					Ports: []v1alpha1.NicDevicePortSpec{
-						{
-							PCI:              "0000:03:00.0",
-							NetworkInterface: "enp3s0f0np0",
-						},
-						{
-							PCI:              "0000:03:00.1",
-							NetworkInterface: "enp3s0f1np1",
-						},
-					},
-				},
-			}
+		It("returns an error when RoceOptimized is enabled with linkType Infiniband", func() {
+			device := baseDevice(consts.Infiniband, 1)
+			device.Spec.Configuration.Template.RoceOptimized = &v1alpha1.RoceOptimizedSpec{Enabled: true}
 
-			defaultValues := map[string][]string{
-				consts.LinkTypeP1Param: {consts.Ethernet},
-			}
-			query := types.NewNvConfigQuery()
-			query.DefaultConfig = defaultValues
-
-			_, err := validator.ConstructNvParamMapFromTemplate(device, query)
-			Expect(err).NotTo(HaveOccurred())
-		})
-		It("should not report an error when LinkType cannot be changed and template matches the actual status", func() {
-			mockConfigurationUtils.On("GetLinkType", mock.Anything).Return(consts.Infiniband)
-			mockConfigurationUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
-
-			device := &v1alpha1.NicDevice{
-				Spec: v1alpha1.NicDeviceSpec{
-					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
-						Template: &v1alpha1.ConfigurationTemplateSpec{
-							NumVfs:   0,
-							LinkType: consts.Infiniband,
-							PciPerformanceOptimized: &v1alpha1.PciPerformanceOptimizedSpec{
-								Enabled: true,
-							},
-						},
-					},
-				},
-				Status: v1alpha1.NicDeviceStatus{
-					Ports: []v1alpha1.NicDevicePortSpec{
-						{
-							PCI:              "0000:03:00.0",
-							NetworkInterface: "enp3s0f0np0",
-						},
-						{
-							PCI:              "0000:03:00.1",
-							NetworkInterface: "enp3s0f1np1",
-						},
-					},
-				},
-			}
-
-			query := types.NewNvConfigQuery()
-
-			_, err := validator.ConstructNvParamMapFromTemplate(device, query)
-			Expect(err).NotTo(HaveOccurred())
-		})
-		It("should return an error when RoceOptimized is enabled with linkType Infiniband", func() {
-			mockConfigurationUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
-
-			device := &v1alpha1.NicDevice{
-				Spec: v1alpha1.NicDeviceSpec{
-					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
-						Template: &v1alpha1.ConfigurationTemplateSpec{
-							NumVfs:   0,
-							LinkType: consts.Infiniband,
-							RoceOptimized: &v1alpha1.RoceOptimizedSpec{
-								Enabled: true,
-							},
-						},
-					},
-				},
-				Status: v1alpha1.NicDeviceStatus{
-					Ports: []v1alpha1.NicDevicePortSpec{
-						{PCI: "0000:03:00.0"},
-					},
-				},
-			}
-
-			query := types.NewNvConfigQuery()
-
-			_, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			_, err := validator.ConstructNvParamMapFromTemplate(device)
 			Expect(err).To(MatchError("incorrect spec: RoceOptimized settings can only be used with link type Ethernet"))
 		})
 
-		It("should take numeric values when both numeric values and string aliases are present in nv config query", func() {
-			device := &v1alpha1.NicDevice{
-				Spec: v1alpha1.NicDeviceSpec{
-					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
-						Template: &v1alpha1.ConfigurationTemplateSpec{
-							NumVfs:   0,
-							LinkType: consts.Ethernet,
-							PciPerformanceOptimized: &v1alpha1.PciPerformanceOptimizedSpec{
-								Enabled: true,
-							},
-						},
-					},
-				},
-				Status: v1alpha1.NicDeviceStatus{
-					Ports: []v1alpha1.NicDevicePortSpec{
-						{PCI: "0000:03:00.0"},
-						{PCI: "0000:03:00.1"},
-					},
-				},
+		It("passes rawNvConfig entries through and filters _Pn overrides beyond portCount", func() {
+			device := baseDevice(consts.Ethernet, 1)
+			device.Spec.Configuration.Template.RawNvConfig = []v1alpha1.NvConfigParam{
+				{Name: "TEST_P1", Value: "keep"},
+				{Name: "TEST_P2", Value: "drop"}, // beyond portCount
+				{Name: "GENERIC", Value: "keep"},
 			}
 
-			defaultValues := map[string][]string{
-				consts.MaxAccOutReadParam: {"testMaxAccOutRead", "0"},
-			}
-			currentValues := map[string][]string{
-				consts.AdvancedPCISettingsParam: {"testAdvancedPCISettings", "1"},
-			}
-			query := types.NewNvConfigQuery()
-			query.DefaultConfig = defaultValues
-			query.CurrentConfig = currentValues
-
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(nvParams).To(HaveKeyWithValue(consts.SriovEnabledParam, consts.NvParamFalse))
-			Expect(nvParams).To(HaveKeyWithValue(consts.SriovNumOfVfsParam, "0"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.MaxAccOutReadParam, "0"))
+			Expect(nvParams).To(HaveKeyWithValue("TEST_P1", "keep"))
+			Expect(nvParams).To(HaveKeyWithValue("GENERIC", "keep"))
+			Expect(nvParams).NotTo(HaveKey("TEST_P2"))
+		})
+	})
+
+	Describe("ResolveFactoryDefaults", func() {
+		It("replaces sentinels with the numeric default from DefaultConfig", func() {
+			desired := map[string]string{
+				consts.AtsEnabledParam:       consts.NvParamFactoryDefault,
+				consts.RoceCcPrioMaskP1Param: consts.NvParamFactoryDefault,
+			}
+			portConfig := types.NewNvConfigQuery()
+			// Bracketed values store [alias, numeric]; numeric slot is last.
+			portConfig.DefaultConfig[consts.AtsEnabledParam] = []string{"false", "0"}
+			portConfig.DefaultConfig[consts.RoceCcPrioMaskP1Param] = []string{"128"}
+
+			resolved := validator.ResolveFactoryDefaults(desired, portConfig)
+			Expect(resolved).To(HaveKeyWithValue(consts.AtsEnabledParam, "0"))
+			Expect(resolved).To(HaveKeyWithValue(consts.RoceCcPrioMaskP1Param, "128"))
+		})
+
+		It("passes concrete values through unchanged", func() {
+			desired := map[string]string{
+				consts.SriovEnabledParam:  consts.NvParamTrue,
+				consts.SriovNumOfVfsParam: "16",
+				consts.LinkTypeP1Param:    consts.NvParamLinkTypeEthernet,
+			}
+			portConfig := types.NewNvConfigQuery()
+
+			resolved := validator.ResolveFactoryDefaults(desired, portConfig)
+			Expect(resolved).To(Equal(desired))
+		})
+
+		It("drops sentinel entries whose names are not in DefaultConfig", func() {
+			desired := map[string]string{
+				consts.AtsEnabledParam:   consts.NvParamFactoryDefault,
+				consts.SriovEnabledParam: consts.NvParamFalse,
+			}
+			portConfig := types.NewNvConfigQuery()
+			// DefaultConfig does not contain AtsEnabledParam — FW doesn't expose it.
+
+			resolved := validator.ResolveFactoryDefaults(desired, portConfig)
+			Expect(resolved).NotTo(HaveKey(consts.AtsEnabledParam))
+			Expect(resolved).To(HaveKeyWithValue(consts.SriovEnabledParam, consts.NvParamFalse))
+		})
+
+		It("does not mutate the input map", func() {
+			desired := map[string]string{
+				consts.AtsEnabledParam: consts.NvParamFactoryDefault,
+			}
+			portConfig := types.NewNvConfigQuery()
+			portConfig.DefaultConfig[consts.AtsEnabledParam] = []string{"0"}
+
+			_ = validator.ResolveFactoryDefaults(desired, portConfig)
+			Expect(desired).To(HaveKeyWithValue(consts.AtsEnabledParam, consts.NvParamFactoryDefault))
 		})
 	})
 

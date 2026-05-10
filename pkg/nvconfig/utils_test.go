@@ -211,5 +211,127 @@ Configurations:                              Default         Current         Nex
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(Equal("mlxconfig error"))
 		})
+
+		It("issues one mlxconfig query per name in a scoped call and merges the results", func() {
+			cmdA := &execTesting.FakeCmd{}
+			cmdA.OutputScript = append(cmdA.OutputScript, func() ([]byte, []byte, error) {
+				return []byte(`
+Configurations:                              Default         Current         Next Boot
+         SRIOV_EN                            True(1)         True(1)         True(1)
+`), nil, nil
+			})
+			cmdB := &execTesting.FakeCmd{}
+			cmdB.OutputScript = append(cmdB.OutputScript, func() ([]byte, []byte, error) {
+				return []byte(`
+Configurations:                              Default         Current         Next Boot
+         NUM_OF_VFS                          0               0               0
+`), nil, nil
+			})
+
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(cmd string, args ...string) exec.Cmd {
+					Expect(cmd).To(Equal("mlxconfig"))
+					Expect(args).To(Equal([]string{"-d", pciAddress, "-e", "query", consts.SriovEnabledParam}))
+					return cmdA
+				},
+				func(cmd string, args ...string) exec.Cmd {
+					Expect(cmd).To(Equal("mlxconfig"))
+					Expect(args).To(Equal([]string{"-d", pciAddress, "-e", "query", consts.SriovNumOfVfsParam}))
+					return cmdB
+				},
+			}
+			h.execInterface = fakeExec
+
+			query, err := h.QueryNvConfig(context.TODO(), pciAddress,
+				[]string{consts.SriovEnabledParam, consts.SriovNumOfVfsParam})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(query.CurrentConfig).To(HaveKeyWithValue(consts.SriovEnabledParam, []string{"true", "1"}))
+			Expect(query.CurrentConfig).To(HaveKeyWithValue(consts.SriovNumOfVfsParam, []string{"0"}))
+		})
+
+		It("skips per-param errors and returns the successfully-queried names", func() {
+			// First param succeeds, second param errors (FW doesn't expose it),
+			// third param succeeds. QueryNvConfig should log+skip the middle one
+			// and still return a populated query for the other two.
+			cmdOK1 := &execTesting.FakeCmd{}
+			cmdOK1.OutputScript = append(cmdOK1.OutputScript, func() ([]byte, []byte, error) {
+				return []byte(`
+Configurations:                              Default         Current         Next Boot
+         SRIOV_EN                            True(1)         True(1)         True(1)
+`), nil, nil
+			})
+			cmdErr := &execTesting.FakeCmd{}
+			cmdErr.OutputScript = append(cmdErr.OutputScript, func() ([]byte, []byte, error) {
+				return []byte("mlxconfig: parameter UNSUPPORTED_PARAM is not supported"), nil,
+					fmt.Errorf("exit status 1")
+			})
+			cmdOK2 := &execTesting.FakeCmd{}
+			cmdOK2.OutputScript = append(cmdOK2.OutputScript, func() ([]byte, []byte, error) {
+				return []byte(`
+Configurations:                              Default         Current         Next Boot
+         NUM_OF_VFS                          0               0               0
+`), nil, nil
+			})
+
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(cmd string, args ...string) exec.Cmd {
+					Expect(args).To(ContainElement(consts.SriovEnabledParam))
+					return cmdOK1
+				},
+				func(cmd string, args ...string) exec.Cmd {
+					Expect(args).To(ContainElement("UNSUPPORTED_PARAM"))
+					return cmdErr
+				},
+				func(cmd string, args ...string) exec.Cmd {
+					Expect(args).To(ContainElement(consts.SriovNumOfVfsParam))
+					return cmdOK2
+				},
+			}
+			h.execInterface = fakeExec
+
+			query, err := h.QueryNvConfig(context.TODO(), pciAddress,
+				[]string{consts.SriovEnabledParam, "UNSUPPORTED_PARAM", consts.SriovNumOfVfsParam})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(query.CurrentConfig).To(HaveKey(consts.SriovEnabledParam))
+			Expect(query.CurrentConfig).NotTo(HaveKey("UNSUPPORTED_PARAM"))
+			Expect(query.CurrentConfig).To(HaveKey(consts.SriovNumOfVfsParam))
+		})
+
+		It("expands array values within a scoped query via recursion", func() {
+			// First: scoped call for ESWITCH_HAIRPIN_DESCRIPTORS returns an Array marker.
+			// Recursion then fires a follow-up query ESWITCH_HAIRPIN_DESCRIPTORS[0..7].
+			cmdArr := &execTesting.FakeCmd{}
+			cmdArr.OutputScript = append(cmdArr.OutputScript, func() ([]byte, []byte, error) {
+				return []byte(`
+Configurations:                              Default         Current         Next Boot
+         ESWITCH_HAIRPIN_DESCRIPTORS         Array[0..7]     Array[0..7]     Array[0..7]
+`), nil, nil
+			})
+			cmdExpand := &execTesting.FakeCmd{}
+			cmdExpand.OutputScript = append(cmdExpand.OutputScript, func() ([]byte, []byte, error) {
+				return []byte(`
+Configurations:                              Default         Current         Next Boot
+         ESWITCH_HAIRPIN_DESCRIPTORS[0]      128             128             128
+         ESWITCH_HAIRPIN_DESCRIPTORS[1]      128             128             128
+`), nil, nil
+			})
+
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(cmd string, args ...string) exec.Cmd {
+					Expect(args).To(Equal([]string{"-d", pciAddress, "-e", "query", "ESWITCH_HAIRPIN_DESCRIPTORS"}))
+					return cmdArr
+				},
+				func(cmd string, args ...string) exec.Cmd {
+					Expect(args).To(Equal([]string{"-d", pciAddress, "-e", "query", "ESWITCH_HAIRPIN_DESCRIPTORS[0..7]"}))
+					return cmdExpand
+				},
+			}
+			h.execInterface = fakeExec
+
+			query, err := h.QueryNvConfig(context.TODO(), pciAddress, []string{"ESWITCH_HAIRPIN_DESCRIPTORS"})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(query.CurrentConfig).To(HaveKeyWithValue("ESWITCH_HAIRPIN_DESCRIPTORS[0]", []string{"128"}))
+			Expect(query.CurrentConfig).To(HaveKeyWithValue("ESWITCH_HAIRPIN_DESCRIPTORS[1]", []string{"128"}))
+		})
 	})
 })

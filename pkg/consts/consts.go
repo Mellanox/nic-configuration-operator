@@ -85,6 +85,14 @@ const (
 	NvParamBF3DpuMode         = "0"
 	NvParamBF3NicMode         = "1"
 
+	// NvParamFactoryDefault is a sentinel used in ConstructNvParamMapFromTemplate's
+	// output to mean "this parameter should match the firmware's factory default."
+	// The resolver ResolveFactoryDefaults replaces it with the DefaultConfig value
+	// from a scoped mlxconfig query before the compare/apply loop runs. The literal
+	// string is intentionally not a valid numeric value so it can't collide with
+	// anything returned by mlxconfig.
+	NvParamFactoryDefault = "<factory-default>"
+
 	SriovEnabledParam        = "SRIOV_EN"
 	SriovNumOfVfsParam       = "NUM_OF_VFS"
 	LinkTypeP1Param          = "LINK_TYPE_P1"

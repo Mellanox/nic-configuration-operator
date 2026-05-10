@@ -16,26 +16,32 @@ limitations under the License.
 package configuration
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
 	"slices"
 	"strconv"
 
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
+	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
 
 type configValidation interface {
-	// ConstructNvParamMapFromTemplate translates a configuration template into a set of nvconfig parameters
-	// operates under the assumption that spec validation was already carried out
-	ConstructNvParamMapFromTemplate(
-		device *v1alpha1.NicDevice, nvConfigQuery types.NvConfigQuery) (map[string]string, error)
+	// ConstructNvParamMapFromTemplate translates a configuration template into a set of
+	// nvconfig parameters. Returns only what the spec explicitly asks to set — no
+	// "resurrected" defaults. Callers apply the returned map with --with_default so
+	// unmanaged params are normalized to factory default.
+	// Operates under the assumption that spec validation was already carried out.
+	ConstructNvParamMapFromTemplate(device *v1alpha1.NicDevice) (map[string]string, error)
+	// ResolveFactoryDefaults replaces sentinel (consts.NvParamFactoryDefault) entries
+	// in `desired` with the firmware's factory default from `portConfig.DefaultConfig`,
+	// returning a new map. Entries whose names aren't in DefaultConfig are dropped.
+	// Callers MUST invoke this after queryNvConfigs and before the compare/apply loop.
+	ResolveFactoryDefaults(desired map[string]string, portConfig types.NvConfigQuery) map[string]string
 	// ValidateResetToDefault checks if device's nv config has been reset to default in current and next boots
 	// returns bool - need to perform reset
 	// returns bool - reboot required
@@ -67,20 +73,25 @@ func nvParamLinkTypeFromName(linkType string) string {
 	}
 }
 
-func applyDefaultNvConfigValueIfExists(
-	paramName string, desiredParameters map[string]string, query types.NvConfigQuery) {
-	defaultValues, found := query.DefaultConfig[paramName]
-	// Default values might not yet be available if ENABLE_PCI_OPTIMIZATIONS is disabled
-	if found {
-		// Take the default numeric value
-		desiredParameters[paramName] = defaultValues[len(defaultValues)-1]
-	}
-}
-
-// ConstructNvParamMapFromTemplate translates a configuration template into a set of nvconfig parameters
-// operates under the assumption that spec validation was already carried out
-func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
-	device *v1alpha1.NicDevice, query types.NvConfigQuery) (map[string]string, error) {
+// ConstructNvParamMapFromTemplate translates a configuration template into the full
+// set of NV-config parameters this operator manages for the device. The returned map
+// is what we ask mlxconfig to write after sentinel resolution. Every managed param
+// appears either as a concrete value OR as the sentinel `consts.NvParamFactoryDefault`
+// meaning "this parameter should be at the firmware's factory default" — callers MUST
+// run the result through `ResolveFactoryDefaults` against a scoped mlxconfig query
+// before the compare/apply loop.
+//
+// This function is intentionally query-independent: it decides what's managed based on
+// spec + port count alone. Sentinels are how we keep former-feature params (e.g. RoCE
+// params after RoceOptimized goes false) in scope so the scoped query picks them up
+// and drift is detected.
+//
+// For BF devices we always emit INTERNAL_CPU_OFFLOAD_ENGINE=NIC mode — applying a
+// NicConfigurationTemplate to a BF implies NIC mode by design; DPU mode is out of
+// scope for this operator.
+//
+// Operates under the assumption that spec-level sanity validation was already done.
+func (v *configValidationImpl) ConstructNvParamMapFromTemplate(device *v1alpha1.NicDevice) (map[string]string, error) {
 	desiredParameters := map[string]string{}
 
 	template := device.Spec.Configuration.Template
@@ -93,67 +104,29 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 		desiredParameters[consts.SriovNumOfVfsParam] = strconv.Itoa(template.NumVfs)
 	}
 
-	// Link type change is not allowed on some devices
-	_, canChangeLinkType := query.DefaultConfig[consts.LinkTypeP1Param]
-	if canChangeLinkType {
-		linkType := nvParamLinkTypeFromName(string(template.LinkType))
-		// Emit LINK_TYPE_P<n> for every discovered port. Firmware may expose
-		// fewer slots than the device has ports (e.g. BF3 DPU mode), so gate
-		// each entry on a presence check in the query output.
-		for portIdx := 1; portIdx <= portCount; portIdx++ {
-			name := consts.PortParam(consts.LinkTypeParamBase, portIdx)
-			if _, ok := query.DefaultConfig[name]; ok {
-				desiredParameters[name] = linkType
-			}
-		}
-	} else {
-		desiredLinkType := string(device.Spec.Configuration.Template.LinkType)
-
-		for _, port := range device.Status.Ports {
-			if port.NetworkInterface != "" && v.utils.GetLinkType(port.NetworkInterface) != desiredLinkType {
-				err := types.IncorrectSpecError(
-					fmt.Sprintf(
-						"device does not support link type change, wrong link type provided in the template, should be: %s",
-						v.utils.GetLinkType(port.NetworkInterface)))
-				log.Log.Error(err, "incorrect spec", "device", device.Name)
-				return desiredParameters, err
-			}
-		}
+	// Emit LINK_TYPE_P<n> for every discovered port. mlxconfig rejects the set on
+	// devices that don't support link type change, surfacing a clear error upstream.
+	linkType := nvParamLinkTypeFromName(string(template.LinkType))
+	for portIdx := 1; portIdx <= portCount; portIdx++ {
+		desiredParameters[consts.PortParam(consts.LinkTypeParamBase, portIdx)] = linkType
 	}
 
-	if template.PciPerformanceOptimized != nil && template.PciPerformanceOptimized.Enabled {
-		if template.PciPerformanceOptimized.MaxAccOutRead != 0 {
-			desiredParameters[consts.MaxAccOutReadParam] = strconv.Itoa(template.PciPerformanceOptimized.MaxAccOutRead)
-		} else {
-			// MAX_ACC_OUT_READ parameter is hidden if ADVANCED_PCI_SETTINGS is disabled
-			if v.AdvancedPCISettingsEnabled(query) {
-				values, found := query.DefaultConfig[consts.MaxAccOutReadParam]
-				if !found {
-					err := types.IncorrectSpecError(
-						"Device does not support pci performance nv config parameters")
-					log.Log.Error(err, "incorrect spec", "device", device.Name, "parameter", consts.MaxAccOutReadParam)
-					return desiredParameters, err
-				}
+	// BF device implies NIC mode. Applies to BF2/BF3/BF4 — see utils.IsBlueFieldDevice.
+	if utils.IsBlueFieldDevice(device.Status.Type) {
+		desiredParameters[consts.BF3OperationModeParam] = consts.NvParamBF3NicMode
+	}
 
-				maxAccOutReadParamDefaultValue := values[len(values)-1]
-
-				// According to the PRM, setting MAX_ACC_OUT_READ to zero enables the auto mode,
-				// which applies the best suitable optimizations.
-				// However, there is a bug in certain FW versions, where the zero value is not available.
-				// In this case, until the fix is available, skipping this parameter and emitting a warning
-				if maxAccOutReadParamDefaultValue == consts.NvParamZero {
-					applyDefaultNvConfigValueIfExists(consts.MaxAccOutReadParam, desiredParameters, query)
-				} else {
-					warning := fmt.Sprintf("%s nv config parameter does not work properly on this version of FW, skipping it", consts.MaxAccOutReadParam)
-					if v.eventRecorder != nil {
-						v.eventRecorder.Event(device, v1.EventTypeWarning, "FirmwareError", warning)
-					}
-					log.Log.Error(errors.New(warning), "skipping parameter", "device", device.Name, "fw version", device.Status.FirmwareVersion)
-				}
-			}
-		}
-
-		// maxReadRequest is applied as runtime configuration
+	// PciPerformanceOptimized: only emit MAX_ACC_OUT_READ when the user asked for a
+	// specific non-zero value (explicit). Otherwise (disabled or auto/0) treat it as
+	// "should be at factory default" via the sentinel. ADVANCED_PCI_SETTINGS is only
+	// forced on when we need the hidden param visible for a concrete value.
+	if template.PciPerformanceOptimized != nil &&
+		template.PciPerformanceOptimized.Enabled &&
+		template.PciPerformanceOptimized.MaxAccOutRead != 0 {
+		desiredParameters[consts.AdvancedPCISettingsParam] = consts.NvParamTrue
+		desiredParameters[consts.MaxAccOutReadParam] = strconv.Itoa(template.PciPerformanceOptimized.MaxAccOutRead)
+	} else {
+		desiredParameters[consts.MaxAccOutReadParam] = consts.NvParamFactoryDefault
 	}
 
 	if template.RoceOptimized != nil && template.RoceOptimized.Enabled {
@@ -164,20 +137,22 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 			return desiredParameters, err
 		}
 
-		// Apply RoCE optimization to every discovered port. Matches the
-		// historical P1/P2 behavior, which emits these params unconditionally.
+		// Apply RoCE optimization to every discovered port.
 		for portIdx := 1; portIdx <= portCount; portIdx++ {
 			desiredParameters[consts.PortParam(consts.RoceCcPrioMaskParamBase, portIdx)] = "255"
 			desiredParameters[consts.PortParam(consts.CnpDscpParamBase, portIdx)] = "4"
 			desiredParameters[consts.PortParam(consts.Cnp802pPrioParamBase, portIdx)] = "6"
 		}
 
-		// qos settings are applied as runtime configuration
+		// qos settings are applied as runtime configuration.
 	} else {
+		// RoCE disabled → emit the sentinel for every port so the resolver replaces
+		// it with the FW default. This ensures cleanup when the user previously had
+		// RoCE enabled and then disabled it.
 		for portIdx := 1; portIdx <= portCount; portIdx++ {
-			applyDefaultNvConfigValueIfExists(consts.PortParam(consts.RoceCcPrioMaskParamBase, portIdx), desiredParameters, query)
-			applyDefaultNvConfigValueIfExists(consts.PortParam(consts.CnpDscpParamBase, portIdx), desiredParameters, query)
-			applyDefaultNvConfigValueIfExists(consts.PortParam(consts.Cnp802pPrioParamBase, portIdx), desiredParameters, query)
+			desiredParameters[consts.PortParam(consts.RoceCcPrioMaskParamBase, portIdx)] = consts.NvParamFactoryDefault
+			desiredParameters[consts.PortParam(consts.CnpDscpParamBase, portIdx)] = consts.NvParamFactoryDefault
+			desiredParameters[consts.PortParam(consts.Cnp802pPrioParamBase, portIdx)] = consts.NvParamFactoryDefault
 		}
 	}
 
@@ -196,18 +171,53 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 			return desiredParameters, err
 		}
 	} else {
-		applyDefaultNvConfigValueIfExists(consts.AtsEnabledParam, desiredParameters, query)
+		// GpuDirect disabled → ATS_ENABLED should be at FW default.
+		desiredParameters[consts.AtsEnabledParam] = consts.NvParamFactoryDefault
 	}
+
 	for _, rawParam := range template.RawNvConfig {
 		// Drop _Pn params whose port is beyond the device's port count.
 		if n, ok := consts.PortSuffixNum(rawParam.Name); ok && n > portCount {
 			continue
 		}
-
 		desiredParameters[rawParam.Name] = rawParam.Value
 	}
 
 	return desiredParameters, nil
+}
+
+// ResolveFactoryDefaults materializes sentinel-valued entries in `desired` against
+// the firmware's DefaultConfig from a scoped mlxconfig query, returning a new map.
+// Entries whose value is `consts.NvParamFactoryDefault` are replaced with the
+// numeric default value. Entries whose names don't appear in `portConfig.DefaultConfig`
+// are dropped (firmware doesn't expose the param — matches the existing "unsupported
+// param" tolerance in manager.go). Concrete values pass through unchanged.
+//
+// Callers MUST call this method after `queryNvConfigs` and before the compare/apply
+// loop — sentinels are not a valid mlxconfig value and will be rejected by the
+// firmware if leaked to `SetNvConfigParametersBatch`.
+func (v *configValidationImpl) ResolveFactoryDefaults(
+	desired map[string]string, portConfig types.NvConfigQuery,
+) map[string]string {
+	resolved := make(map[string]string, len(desired))
+	for name, value := range desired {
+		if value != consts.NvParamFactoryDefault {
+			resolved[name] = value
+			continue
+		}
+		defaults, found := portConfig.DefaultConfig[name]
+		if !found || len(defaults) == 0 {
+			// FW doesn't expose this param. Drop from desired so the compare loop
+			// doesn't count it as drift; downstream "param not supported" handling
+			// picks it up if ADVANCED_PCI_SETTINGS is enabled.
+			log.Log.V(2).Info("sentinel not resolvable, dropping from desired", "param", name)
+			continue
+		}
+		// DefaultConfig stores [alias, numeric] for bracketed values or [numeric] for
+		// plain scalars; the numeric slot is always the last element.
+		resolved[name] = defaults[len(defaults)-1]
+	}
+	return resolved
 }
 
 // ValidateResetToDefault checks if device's nv config has been reset to default in current and next boots
@@ -218,10 +228,6 @@ func (v *configValidationImpl) ValidateResetToDefault(nvConfig types.NvConfigQue
 	// ResetToDefault requires us to set ADVANCED_PCI_SETTINGS=true, which is not a default value
 	// Deleting this key from maps so that it doesn't interfere with comparisons
 	delete(nvConfig.DefaultConfig, consts.AdvancedPCISettingsParam)
-	// We want to retain the BF3 operation mode after reset, so not taking it into consideration
-	delete(nvConfig.DefaultConfig, consts.BF3OperationModeParam)
-	delete(nvConfig.CurrentConfig, consts.BF3OperationModeParam)
-	delete(nvConfig.NextBootConfig, consts.BF3OperationModeParam)
 
 	alreadyResetInCurrent := false
 	willResetInNextBoot := false
