@@ -20,8 +20,6 @@ include:
       job_prefix: pulse-scan-oss-operator-ubuntu
       nspect_id: $NSPECT_ID
       container_image: $DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG-ubuntu
-      enable_override: true
-      program_version: $NSPECT_RELEASE_VERSION
       stage: pulse-scan-oss
       tags: [os/linux, type/docker]
       rules:
@@ -34,8 +32,6 @@ include:
       job_prefix: pulse-scan-oss-daemon-ubuntu
       nspect_id: $NSPECT_ID
       container_image: $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG-ubuntu
-      enable_override: true
-      program_version: $NSPECT_RELEASE_VERSION
       stage: pulse-scan-oss
       tags: [os/linux, type/docker]
       rules:
@@ -48,8 +44,6 @@ include:
       job_prefix: pulse-scan-oss-operator-rhel
       nspect_id: $NSPECT_ID
       container_image: $DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG-rhel
-      enable_override: true
-      program_version: $NSPECT_RELEASE_VERSION
       stage: pulse-scan-oss
       tags: [os/linux, type/docker]
       rules:
@@ -62,8 +56,6 @@ include:
       job_prefix: pulse-scan-oss-daemon-rhel
       nspect_id: $NSPECT_ID
       container_image: $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG-rhel
-      enable_override: true
-      program_version: $NSPECT_RELEASE_VERSION
       stage: pulse-scan-oss
       tags: [os/linux, type/docker]
       rules:
