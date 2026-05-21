@@ -18,12 +18,9 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"maps"
 	"os"
-	"path/filepath"
 	"slices"
-	"strings"
 
 	maintenanceoperator "github.com/Mellanox/maintenance-operator/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -48,7 +45,6 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 	"github.com/Mellanox/nic-configuration-operator/pkg/nvconfig"
 	"github.com/Mellanox/nic-configuration-operator/pkg/spectrumx"
-	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 	"github.com/Mellanox/nic-configuration-operator/pkg/udev"
 )
 
@@ -108,12 +104,6 @@ func main() {
 	// Initialize DMS server
 	dmsServer := dms.NewDMSServer()
 
-	spectrumXConfigs, err := initSpectrumXConfigs()
-	if err != nil {
-		log.Log.Error(err, "failed to init spectrum-x configs")
-		os.Exit(1)
-	}
-
 	// Start DMS server for all discovered devices
 	devices, err := deviceDiscovery.DiscoverNicDevices()
 	if err != nil {
@@ -133,7 +123,7 @@ func main() {
 		}
 	}()
 
-	spectrumXConfigManager := spectrumx.NewSpectrumXConfigManager(dmsServer, spectrumXConfigs)
+	spectrumXConfigManager := spectrumx.NewSpectrumXConfigManager(dmsServer, nil)
 	configurationManager := configuration.NewConfigurationManager(
 		eventRecorder, dmsServer, nvConfigUtils, spectrumXConfigManager)
 	maintenanceManager := maintenance.New(mgr.GetClient(), hostUtils, nodeName, namespace)
@@ -214,30 +204,4 @@ func initNicFwMap(namespace string) error {
 	}
 
 	return nil
-}
-
-func initSpectrumXConfigs() (map[string]*types.SpectrumXConfig, error) {
-	log.Log.V(2).Info("initSpectrumXConfigs(): reading spectrum-x configs")
-	spectrumXConfigs := make(map[string]*types.SpectrumXConfig)
-	entries, err := os.ReadDir("/bindata/spectrum-x")
-	if err != nil {
-		return nil, fmt.Errorf("failed to read spectrum-x directory: %w", err)
-	}
-	for _, file := range entries {
-		if file.IsDir() {
-			continue
-		}
-
-		log.Log.V(2).Info("initSpectrumXConfigs(): loading spectrum-x config", "file", file.Name())
-		config, err := types.LoadSpectrumXConfig("/bindata/spectrum-x/" + file.Name())
-		if err != nil {
-			return nil, fmt.Errorf("failed to load spectrum-x config: %w", err)
-		}
-
-		configName := strings.TrimSuffix(file.Name(), filepath.Ext(file.Name()))
-		spectrumXConfigs[configName] = config
-		log.Log.V(2).Info("initSpectrumXConfigs(): added spectrum-x config", "configName", configName)
-	}
-
-	return spectrumXConfigs, nil
 }
