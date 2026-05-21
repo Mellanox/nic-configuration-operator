@@ -16,76 +16,79 @@ limitations under the License.
 package types
 
 import (
+	"os"
 	"path/filepath"
-	"runtime"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
-func repoRootFromThisFile() string {
-	_, thisFile, _, _ := runtime.Caller(0)
-	pkgDir := filepath.Dir(thisFile)
-	return filepath.Dir(filepath.Dir(pkgDir))
-}
+const spectrumXTestYAML = `
+useSoftwareCCAlgorithm: true
+docaCCVersion: "1.0"
+mlxConfig:
+  swplb:
+    "1023":
+      breakout:
+        2:
+          NUM_OF_PF: "2"
+          NUM_OF_PLANES_P1: "0"
+        4:
+          NUM_OF_PF: "4"
+      postBreakout:
+        LINK_TYPE_P1: "2"
+        SRIOV_EN: "1"
+runtimeConfig:
+  roce: []
+  adaptiveRouting:
+    - name: ar_enabled
+      mlxconfig: ROCE_ADAPTIVE_ROUTING_EN
+      value: "1"
+  congestionControl:
+    - name: cc_enabled
+      mlxconfig: ROCE_CC_PRIO_MASK_P1
+      value: "0xff"
+  interPacketGap:
+    pureL3:
+      - name: ipg_pureL3
+        mlxconfig: IPG_PURE_L3
+        value: "1"
+    l3EVPN:
+      - name: ipg_l3evpn
+        mlxconfig: IPG_L3_EVPN
+        value: "1"
+`
 
 var _ = Describe("LoadSpectrumXConfig", func() {
-	It("parses RA2.2.yaml and populates fields", func() {
-		configPath := filepath.Join(repoRootFromThisFile(), "bindata", "spectrum-x", "RA2.2.yaml")
+	It("parses an inline YAML payload and populates fields", func() {
+		dir := GinkgoT().TempDir()
+		configPath := filepath.Join(dir, "test.yaml")
+		Expect(os.WriteFile(configPath, []byte(spectrumXTestYAML), 0o600)).To(Succeed())
 
 		cfg, err := LoadSpectrumXConfig(configPath)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(cfg).ToNot(BeNil())
 
-		// Check mlxConfig structure
 		Expect(cfg.MlxConfig).To(HaveKey("swplb"))
-		Expect(cfg.MlxConfig).To(HaveKey("hwplb"))
-		Expect(cfg.MlxConfig).To(HaveKey("uniplane"))
-		Expect(cfg.MlxConfig).To(HaveKey("none"))
+		swplb := cfg.MlxConfig["swplb"]["1023"]
+		Expect(swplb.Breakout).To(HaveKey(2))
+		Expect(swplb.Breakout).To(HaveKey(4))
+		Expect(swplb.Breakout[2]).To(HaveKeyWithValue("NUM_OF_PF", "2"))
+		Expect(swplb.Breakout[2]).To(HaveKeyWithValue("NUM_OF_PLANES_P1", "0"))
+		Expect(swplb.PostBreakout).To(HaveKeyWithValue("LINK_TYPE_P1", "2"))
+		Expect(swplb.PostBreakout).To(HaveKeyWithValue("SRIOV_EN", "1"))
 
-		// Check CX8 swplb breakout
-		cx8Swplb := cfg.MlxConfig["swplb"]["1023"]
-		Expect(cx8Swplb.Breakout).To(HaveKey(2))
-		Expect(cx8Swplb.Breakout).To(HaveKey(4))
-		Expect(cx8Swplb.Breakout[2]).To(HaveKeyWithValue("NUM_OF_PF", "2"))
-		Expect(cx8Swplb.Breakout[2]).To(HaveKeyWithValue("NUM_OF_PLANES_P1", "0"))
-
-		// Check BF3 swplb breakout
-		bf3Swplb := cfg.MlxConfig["swplb"]["a2dc"]
-		Expect(bf3Swplb.Breakout).To(HaveKey(2))
-		Expect(bf3Swplb.Breakout[2]).To(HaveKeyWithValue("NUM_OF_PF", "2"))
-
-		// Check postBreakout
-		Expect(cx8Swplb.PostBreakout).To(HaveKeyWithValue("LINK_TYPE_P1", "2"))
-		Expect(cx8Swplb.PostBreakout).To(HaveKeyWithValue("SRIOV_EN", "1"))
-		Expect(bf3Swplb.PostBreakout).To(HaveKeyWithValue("INTERNAL_CPU_MODEL", "1"))
-
-		// Check CX9 swplb breakout (same config as CX8)
-		cx9Swplb := cfg.MlxConfig["swplb"]["1025"]
-		Expect(cx9Swplb.Breakout).To(HaveKey(2))
-		Expect(cx9Swplb.Breakout).To(HaveKey(4))
-		Expect(cx9Swplb.Breakout[2]).To(HaveKeyWithValue("NUM_OF_PF", "2"))
-		Expect(cx9Swplb.PostBreakout).To(HaveKeyWithValue("LINK_TYPE_P1", "2"))
-
-		// Check hwplb CX8 and CX9
-		Expect(cfg.MlxConfig["hwplb"]).To(HaveKey("1023"))
-		Expect(cfg.MlxConfig["hwplb"]).To(HaveKey("1025"))
-		cx8Hwplb := cfg.MlxConfig["hwplb"]["1023"]
-		Expect(cx8Hwplb.Breakout[2]).To(HaveKeyWithValue("NUM_OF_PLANES_P1", "2"))
-		Expect(cx8Hwplb.PostBreakout).To(HaveKeyWithValue("FLEX_PARSER_PROFILE_ENABLE", "10"))
-		cx9Hwplb := cfg.MlxConfig["hwplb"]["1025"]
-		Expect(cx9Hwplb.Breakout[2]).To(HaveKeyWithValue("NUM_OF_PLANES_P1", "2"))
-		Expect(cx9Hwplb.PostBreakout).To(HaveKeyWithValue("FLEX_PARSER_PROFILE_ENABLE", "10"))
-
-		// Check CX9 uniplane and none
-		Expect(cfg.MlxConfig["uniplane"]).To(HaveKey("1025"))
-		Expect(cfg.MlxConfig["none"]).To(HaveKey("1025"))
-
-		// Check runtime config
 		Expect(cfg.UseSoftwareCCAlgorithm).To(BeTrue())
+		Expect(cfg.DocaCCVersion).To(Equal("1.0"))
 		Expect(cfg.RuntimeConfig.AdaptiveRouting).ToNot(BeEmpty())
+		Expect(cfg.RuntimeConfig.AdaptiveRouting[0].Name).To(Equal("ar_enabled"))
 		Expect(cfg.RuntimeConfig.CongestionControl).ToNot(BeEmpty())
-		Expect(cfg.RuntimeConfig.InterPacketGap.PureL3[0].Name).ToNot(BeEmpty())
-		Expect(cfg.RuntimeConfig.InterPacketGap.L3EVPN[0].Name).ToNot(BeEmpty())
+		Expect(cfg.RuntimeConfig.InterPacketGap.PureL3[0].Name).To(Equal("ipg_pureL3"))
+		Expect(cfg.RuntimeConfig.InterPacketGap.L3EVPN[0].Name).To(Equal("ipg_l3evpn"))
+	})
+
+	It("returns an error when the file does not exist", func() {
+		_, err := LoadSpectrumXConfig(filepath.Join(GinkgoT().TempDir(), "missing.yaml"))
+		Expect(err).To(HaveOccurred())
 	})
 })

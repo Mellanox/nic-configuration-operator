@@ -84,9 +84,6 @@ COPY --from=builder /workspace/build/nic-configuration-daemon .
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Copy bindata directory to the root directory where the binary runs
-COPY bindata /bindata
-
 # Copy sources to the container
 COPY . /workspace
 
