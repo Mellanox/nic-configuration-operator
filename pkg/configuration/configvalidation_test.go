@@ -1364,7 +1364,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 
 				mockConfigurationUtils.On("GetMaxReadRequestSize", mock.Anything).Return(desired.MaxReadRequestSize, nil)
 				mockConfigurationUtils.On("GetQoSSettings", device, mock.Anything).Return(desired.Qos, nil)
-				mockConfigurationUtils.On("GetPauseFrames", mock.Anything).Return(false, nil)
+				mockConfigurationUtils.On("GetPauseFrames", mock.Anything).Return(false, false, nil)
 
 				applied, err = validator.RuntimeConfigApplied(device)
 				Expect(err).NotTo(HaveOccurred())
@@ -1376,7 +1376,20 @@ var _ = Describe("ConfigValidationImpl", func() {
 
 				mockConfigurationUtils.On("GetMaxReadRequestSize", mock.Anything).Return(desired.MaxReadRequestSize, nil)
 				mockConfigurationUtils.On("GetQoSSettings", device, mock.Anything).Return(desired.Qos, nil)
-				mockConfigurationUtils.On("GetPauseFrames", "interface0").Return(true, nil)
+				mockConfigurationUtils.On("GetPauseFrames", "interface0").Return(true, true, nil)
+
+				applied, err = validator.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeFalse())
+			})
+
+			It("should return false when one pause frame direction drifts", func() {
+				device.Spec.Configuration.Template.RoceOptimized.Qos.PauseFrames.Enabled = true
+				desired := validator.CalculateDesiredRuntimeConfig(device)
+
+				mockConfigurationUtils.On("GetMaxReadRequestSize", mock.Anything).Return(desired.MaxReadRequestSize, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, mock.Anything).Return(desired.Qos, nil)
+				mockConfigurationUtils.On("GetPauseFrames", "interface0").Return(true, false, nil)
 
 				applied, err = validator.RuntimeConfigApplied(device)
 				Expect(err).NotTo(HaveOccurred())

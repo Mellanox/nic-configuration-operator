@@ -71,8 +71,8 @@ type ConfigurationUtils interface {
 	// SetECNEnabled enables/disables ECN for roce_rp and roce_np on a given priority
 	SetECNEnabled(interfaceName string, priority int, rp bool, np bool) error
 
-	// GetPauseFrames returns whether global pause frames are enabled
-	GetPauseFrames(interfaceName string) (bool, error)
+	// GetPauseFrames returns whether global pause frames are enabled for RX and TX
+	GetPauseFrames(interfaceName string) (rx bool, tx bool, err error)
 	// SetPauseFrames enables/disables global pause frames (autoneg, rx, tx)
 	SetPauseFrames(interfaceName string, enabled bool) error
 
@@ -280,29 +280,12 @@ func (h *configurationUtils) SetQoSSettings(device *v1alpha1.NicDevice, spec *v1
 	return nil
 }
 
-// nsenterWithFlags wraps a command with nsenter using the specified namespace flags.
-func (h *configurationUtils) nsenterWithFlags(nsFlags []string, args ...string) execUtils.Cmd {
-	fullArgs := append([]string{"-t", "1"}, nsFlags...)
-	fullArgs = append(fullArgs, "--")
-	fullArgs = append(fullArgs, args...)
-	return h.execInterface.Command("nsenter", fullArgs...)
-}
-
-// nsenterCommand wraps a command with nsenter to run in the host's network namespace.
-func (h *configurationUtils) nsenterCommand(args ...string) execUtils.Cmd {
-	return h.nsenterWithFlags([]string{"-n"}, args...)
-}
-
-// nsenterMountNetCommand wraps a command with nsenter to run in the host's mount and network namespaces.
-// Required for accessing host sysfs paths (e.g. /sys/class/net/...).
-func (h *configurationUtils) nsenterMountNetCommand(args ...string) execUtils.Cmd {
-	return h.nsenterWithFlags([]string{"-m", "-n"}, args...)
-}
+// Runtime tools run in the Helm-installed daemon, which uses hostNetwork and mounts host /sys at /sys.
 
 // GetRoceMode returns the current RoCE mode (1 or 2)
 func (h *configurationUtils) GetRoceMode(interfaceName string) (int, error) {
 	log.Log.V(2).Info("ConfigurationUtils.GetRoceMode()", "interface", interfaceName)
-	cmd := h.nsenterCommand("cma_roce_mode", "-d", interfaceName)
+	cmd := h.execInterface.Command("cma_roce_mode", "-d", interfaceName)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Log.Error(err, "GetRoceMode(): failed to run cma_roce_mode", "interface", interfaceName)
@@ -324,7 +307,7 @@ func (h *configurationUtils) GetRoceMode(interfaceName string) (int, error) {
 // SetRoceMode sets the RoCE mode (1 or 2)
 func (h *configurationUtils) SetRoceMode(interfaceName string, mode int) error {
 	log.Log.Info("ConfigurationUtils.SetRoceMode()", "interface", interfaceName, "mode", mode)
-	cmd := h.nsenterCommand("cma_roce_mode", "-d", interfaceName, "-m", strconv.Itoa(mode))
+	cmd := h.execInterface.Command("cma_roce_mode", "-d", interfaceName, "-m", strconv.Itoa(mode))
 	_, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Log.Error(err, "SetRoceMode(): failed to run cma_roce_mode", "interface", interfaceName, "mode", mode)
@@ -336,7 +319,7 @@ func (h *configurationUtils) SetRoceMode(interfaceName string, mode int) error {
 // GetCableLen returns the configured cable length
 func (h *configurationUtils) GetCableLen(interfaceName string) (int, error) {
 	log.Log.V(2).Info("ConfigurationUtils.GetCableLen()", "interface", interfaceName)
-	cmd := h.nsenterCommand("mlnx_qos", "-i", interfaceName)
+	cmd := h.execInterface.Command("mlnx_qos", "-i", interfaceName)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Log.Error(err, "GetCableLen(): failed to run mlnx_qos", "interface", interfaceName)
@@ -356,7 +339,7 @@ func (h *configurationUtils) GetCableLen(interfaceName string) (int, error) {
 // SetCableLen sets the cable length
 func (h *configurationUtils) SetCableLen(interfaceName string, length int) error {
 	log.Log.Info("ConfigurationUtils.SetCableLen()", "interface", interfaceName, "length", length)
-	cmd := h.nsenterCommand("mlnx_qos", "-i", interfaceName, fmt.Sprintf("--cable_len=%d", length))
+	cmd := h.execInterface.Command("mlnx_qos", "-i", interfaceName, fmt.Sprintf("--cable_len=%d", length))
 	_, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Log.Error(err, "SetCableLen(): failed to run mlnx_qos", "interface", interfaceName, "length", length)
@@ -376,7 +359,7 @@ func (h *configurationUtils) GetECNEnabled(interfaceName string, priority int) (
 	log.Log.V(2).Info("ConfigurationUtils.GetECNEnabled()", "interface", interfaceName, "priority", priority)
 
 	readECN := func(direction string) (bool, error) {
-		cmd := h.nsenterMountNetCommand("cat", ecnSysfsPath(interfaceName, direction, priority))
+		cmd := h.execInterface.Command("cat", ecnSysfsPath(interfaceName, direction, priority))
 		data, err := cmd.CombinedOutput()
 		if err != nil {
 			return false, fmt.Errorf("failed to read ECN %s: %v", direction, err)
@@ -404,7 +387,7 @@ func (h *configurationUtils) SetECNEnabled(interfaceName string, priority int, r
 		if enabled {
 			val = "1"
 		}
-		cmd := h.nsenterMountNetCommand("tee", ecnSysfsPath(interfaceName, direction, priority))
+		cmd := h.execInterface.Command("tee", ecnSysfsPath(interfaceName, direction, priority))
 		cmd.SetStdin(strings.NewReader(val))
 		if _, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("failed to write ECN %s: %v", direction, err)
@@ -418,19 +401,18 @@ func (h *configurationUtils) SetECNEnabled(interfaceName string, priority int, r
 	return writeECN("roce_np", np)
 }
 
-// GetPauseFrames returns whether global pause frames are enabled (both RX and TX are on)
-func (h *configurationUtils) GetPauseFrames(interfaceName string) (bool, error) {
+// GetPauseFrames returns whether global pause frames are enabled for RX and TX.
+func (h *configurationUtils) GetPauseFrames(interfaceName string) (bool, bool, error) {
 	log.Log.V(2).Info("ConfigurationUtils.GetPauseFrames()", "interface", interfaceName)
-	cmd := h.nsenterCommand("ethtool", "-a", interfaceName)
+	cmd := h.execInterface.Command("ethtool", "-a", interfaceName)
 	output, err := cmd.CombinedOutput()
 	if err != nil && len(output) == 0 {
 		log.Log.Error(err, "GetPauseFrames(): failed to run ethtool -a", "interface", interfaceName)
-		return false, err
+		return false, false, err
 	}
 	lines := strings.Split(string(output), "\n")
-	// Only check RX and TX — autoneg may be unsupported (always off) on some drivers (e.g. mlx5),
+	// Only check RX and TX; autoneg may be unsupported (always off) on some drivers (e.g. mlx5),
 	// which would cause an infinite re-apply loop if included in the check.
-	// Track each independently to avoid false positives from partial output.
 	rxFound, txFound := false, false
 	rxOn, txOn := false, false
 	for _, line := range lines {
@@ -444,18 +426,16 @@ func (h *configurationUtils) GetPauseFrames(interfaceName string) (bool, error) 
 		}
 	}
 	if !rxFound || !txFound {
-		return false, fmt.Errorf("RX/TX pause frame status not found in ethtool -a output for %s", interfaceName)
+		return false, false, fmt.Errorf("RX/TX pause frame status not found in ethtool -a output for %s", interfaceName)
 	}
-	// Use || so that a partial state (e.g. rx=off, tx=on) is treated as "enabled",
-	// ensuring Enabled=false triggers a full disable even from a partial state.
-	return rxOn || txOn, nil
+	return rxOn, txOn, nil
 }
 
 // SetPauseFrames enables/disables global pause frames
 func (h *configurationUtils) SetPauseFrames(interfaceName string, enabled bool) error {
 	log.Log.Info("ConfigurationUtils.SetPauseFrames()", "interface", interfaceName, "enabled", enabled)
 	state := boolToOnOff(enabled)
-	cmd := h.nsenterCommand("ethtool", "-A", interfaceName, "autoneg", state, "rx", state, "tx", state)
+	cmd := h.execInterface.Command("ethtool", "-A", interfaceName, "autoneg", state, "rx", state, "tx", state)
 	output, err := cmd.CombinedOutput()
 	if err != nil && len(output) == 0 {
 		log.Log.Error(err, "SetPauseFrames(): failed to run ethtool -A", "interface", interfaceName)
@@ -471,7 +451,7 @@ func (h *configurationUtils) SetPauseFrames(interfaceName string, enabled bool) 
 // GetRingSize returns the current rx and tx ring buffer sizes
 func (h *configurationUtils) GetRingSize(interfaceName string) (int, int, error) {
 	log.Log.V(2).Info("ConfigurationUtils.GetRingSize()", "interface", interfaceName)
-	cmd := h.nsenterCommand("ethtool", "-g", interfaceName)
+	cmd := h.execInterface.Command("ethtool", "-g", interfaceName)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Log.Error(err, "GetRingSize(): failed to run ethtool -g", "interface", interfaceName)
@@ -525,14 +505,14 @@ func (h *configurationUtils) SetRingSize(interfaceName string, rx int, tx int) e
 	if rx == 0 && tx == 0 {
 		return nil
 	}
-	args := []string{"ethtool", "-G", interfaceName}
+	args := []string{"-G", interfaceName}
 	if rx != 0 {
 		args = append(args, "rx", strconv.Itoa(rx))
 	}
 	if tx != 0 {
 		args = append(args, "tx", strconv.Itoa(tx))
 	}
-	cmd := h.nsenterCommand(args...)
+	cmd := h.execInterface.Command("ethtool", args...)
 	_, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Log.Error(err, "SetRingSize(): failed to run ethtool -G", "interface", interfaceName)
@@ -544,11 +524,11 @@ func (h *configurationUtils) SetRingSize(interfaceName string, rx int, tx int) e
 // GetCombinedChannels returns the current number of combined channels
 func (h *configurationUtils) GetCombinedChannels(interfaceName string) (int, error) {
 	log.Log.V(2).Info("ConfigurationUtils.GetCombinedChannels()", "interface", interfaceName)
-	cmd := h.nsenterCommand("ethtool", "-l", interfaceName)
+	cmd := h.execInterface.Command("ethtool", "-l", interfaceName)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// ethtool -l may fail (with or without error output) on drivers that don't support channel config
-		log.Log.V(2).Info("GetCombinedChannels(): ethtool -l failed, driver may not support it", "interface", interfaceName, "err", err)
+		log.Log.V(2).Info("GetCombinedChannels(): ethtool -l failed, driver may not support it", "interface", interfaceName, "err", err, "output", string(output))
 		return 0, nil
 	}
 	// Parse "Current hardware settings" section
@@ -571,18 +551,18 @@ func (h *configurationUtils) GetCombinedChannels(interfaceName string) (int, err
 	}
 	if !inCurrent {
 		// Treat unexpected output format the same as tool failure — driver may not support it
-		log.Log.V(2).Info("GetCombinedChannels(): current hardware settings not found in ethtool -l output, driver may not support it", "interface", interfaceName)
+		log.Log.V(2).Info("GetCombinedChannels(): current hardware settings not found in ethtool -l output, driver may not support it", "interface", interfaceName, "output", string(output))
 		return 0, nil
 	}
 	// Combined channels may not be exposed by all drivers; return 0 to let the caller decide
-	log.Log.V(2).Info("GetCombinedChannels(): combined channels not found in ethtool output, driver may not support it", "interface", interfaceName)
+	log.Log.V(2).Info("GetCombinedChannels(): combined channels not found in ethtool output, driver may not support it", "interface", interfaceName, "output", string(output))
 	return 0, nil
 }
 
 // SetCombinedChannels sets the number of combined channels
 func (h *configurationUtils) SetCombinedChannels(interfaceName string, channels int) error {
 	log.Log.Info("ConfigurationUtils.SetCombinedChannels()", "interface", interfaceName, "channels", channels)
-	cmd := h.nsenterCommand("ethtool", "-L", interfaceName, "combined", strconv.Itoa(channels))
+	cmd := h.execInterface.Command("ethtool", "-L", interfaceName, "combined", strconv.Itoa(channels))
 	_, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Log.Error(err, "SetCombinedChannels(): failed to run ethtool -L", "interface", interfaceName)
@@ -594,7 +574,7 @@ func (h *configurationUtils) SetCombinedChannels(interfaceName string, channels 
 // GetLRO returns whether Large Receive Offload is enabled
 func (h *configurationUtils) GetLRO(interfaceName string) (bool, error) {
 	log.Log.V(2).Info("ConfigurationUtils.GetLRO()", "interface", interfaceName)
-	cmd := h.nsenterCommand("ethtool", "-k", interfaceName)
+	cmd := h.execInterface.Command("ethtool", "-k", interfaceName)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Log.Error(err, "GetLRO(): failed to run ethtool -k", "interface", interfaceName)
@@ -613,7 +593,7 @@ func (h *configurationUtils) GetLRO(interfaceName string) (bool, error) {
 // SetLRO enables/disables Large Receive Offload
 func (h *configurationUtils) SetLRO(interfaceName string, enabled bool) error {
 	log.Log.Info("ConfigurationUtils.SetLRO()", "interface", interfaceName, "enabled", enabled)
-	cmd := h.nsenterCommand("ethtool", "-K", interfaceName, "lro", boolToOnOff(enabled))
+	cmd := h.execInterface.Command("ethtool", "-K", interfaceName, "lro", boolToOnOff(enabled))
 	_, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Log.Error(err, "SetLRO(): failed to run ethtool -K", "interface", interfaceName)

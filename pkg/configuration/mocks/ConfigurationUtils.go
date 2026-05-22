@@ -296,14 +296,15 @@ func (_m *ConfigurationUtils) SetECNEnabled(interfaceName string, priority int, 
 }
 
 // GetPauseFrames provides a mock function with given fields: interfaceName
-func (_m *ConfigurationUtils) GetPauseFrames(interfaceName string) (bool, error) {
+func (_m *ConfigurationUtils) GetPauseFrames(interfaceName string) (bool, bool, error) {
 	ret := _m.Called(interfaceName)
 	if len(ret) == 0 {
 		panic("no return value specified for GetPauseFrames")
 	}
 	var r0 bool
-	var r1 error
-	if rf, ok := ret.Get(0).(func(string) (bool, error)); ok {
+	var r1 bool
+	var r2 error
+	if rf, ok := ret.Get(0).(func(string) (bool, bool, error)); ok {
 		return rf(interfaceName)
 	}
 	if rf, ok := ret.Get(0).(func(string) bool); ok {
@@ -311,12 +312,17 @@ func (_m *ConfigurationUtils) GetPauseFrames(interfaceName string) (bool, error)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
-	if rf, ok := ret.Get(1).(func(string) error); ok {
+	if rf, ok := ret.Get(1).(func(string) bool); ok {
 		r1 = rf(interfaceName)
 	} else {
-		r1 = ret.Error(1)
+		r1 = ret.Get(1).(bool)
 	}
-	return r0, r1
+	if rf, ok := ret.Get(2).(func(string) error); ok {
+		r2 = rf(interfaceName)
+	} else {
+		r2 = ret.Error(2)
+	}
+	return r0, r1, r2
 }
 
 // SetPauseFrames provides a mock function with given fields: interfaceName, enabled

@@ -291,12 +291,12 @@ func (v *configValidationImpl) validatePortExtendedQoS(iface, deviceName string,
 	}
 
 	if qos.PauseFrames != nil {
-		actual, err := v.utils.GetPauseFrames(iface)
+		rx, tx, err := v.utils.GetPauseFrames(iface)
 		if err != nil {
 			log.Log.Error(err, "can't validate pauseFrames", "device", deviceName)
 			return false, err
 		}
-		if actual != qos.PauseFrames.Enabled {
+		if rx != qos.PauseFrames.Enabled || tx != qos.PauseFrames.Enabled {
 			return false, nil
 		}
 	}
