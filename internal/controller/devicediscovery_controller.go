@@ -17,6 +17,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -115,7 +116,20 @@ func setFwConfigConditionsForDevice(device *v1alpha1.NicDevice, recommendedFirmw
 // reconcile reconciles the devices on the host by comparing the observed devices with the existing NicDevice custom resources (CRs).
 // It deletes CRs that do not represent observed devices, updates the CRs if the status of the device changes,
 // and creates new CRs for devices that do not have a CR representation.
-func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
+//
+// Per-device errors (Create/Update/Delete/SetOwnerReference on individual CRs) are always logged.
+// If perDeviceErrs is non-nil, they are also appended to it so callers can surface them — used by
+// --discovery-only mode where a single best-effort pass must report incomplete CR state. When nil,
+// per-device errors are swallowed (preserves the periodic reconcile loop's tolerance for transient
+// failures between ticks).
+func (d *DeviceDiscoveryController) reconcile(ctx context.Context, perDeviceErrs *[]error) error {
+	trackErr := func(err error, what string, name string) {
+		log.Log.Error(err, what, "device", name)
+		if perDeviceErrs != nil {
+			*perDeviceErrs = append(*perDeviceErrs, fmt.Errorf("%s %s: %w", what, name, err))
+		}
+	}
+
 	observedDevices, err := d.deviceDiscovery.DiscoverNicDevices()
 	if err != nil {
 		return err
@@ -151,9 +165,8 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 		if !exists {
 			log.Log.V(2).Info("device doesn't exist on the node anymore, deleting", "device", nicDeviceCR.Name)
 			// Need to delete this CR, it doesn't represent the observedDevice on host anymore
-			err = d.Delete(ctx, &nicDeviceCR)
-			if err != nil {
-				log.Log.Error(err, "failed  to delete NicDevice CR", "device", nicDeviceCR.Name)
+			if err := d.Delete(ctx, &nicDeviceCR); err != nil {
+				trackErr(err, "failed to delete NicDevice CR", nicDeviceCR.Name)
 			}
 
 			continue
@@ -163,9 +176,8 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 
 		if changed := d.updateFwCondition(&nicDeviceCR); changed {
 			log.Log.V(2).Info("FirmwareConfigMatch condition changed, updating device", "nicDeviceCR", nicDeviceCR)
-			err = d.Client.Status().Update(ctx, &nicDeviceCR)
-			if err != nil {
-				log.Log.Error(err, "failed to update FirmwareConfigMatchCondition", "device", nicDeviceCR.Name)
+			if err := d.Client.Status().Update(ctx, &nicDeviceCR); err != nil {
+				trackErr(err, "failed to update FirmwareConfigMatchCondition", nicDeviceCR.Name)
 				continue
 			}
 		}
@@ -178,9 +190,8 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 			// Status of the device changes, need to update the CR
 			nicDeviceCR.Status = observedDeviceStatus
 
-			err := d.Client.Status().Update(ctx, &nicDeviceCR)
-			if err != nil {
-				log.Log.Error(err, "failed to update NicDevice CR status", "device", nicDeviceCR.Name)
+			if err := d.Client.Status().Update(ctx, &nicDeviceCR); err != nil {
+				trackErr(err, "failed to update NicDevice CR status", nicDeviceCR.Name)
 			}
 		}
 
@@ -199,22 +210,20 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 			},
 		}
 
-		err := controllerutil.SetOwnerReference(node, device, d.Scheme())
-		if err != nil {
-			log.Log.Error(err, "failed to set owner reference for device", "device", device)
+		if err := controllerutil.SetOwnerReference(node, device, d.Scheme()); err != nil {
+			trackErr(err, "failed to set owner reference for device", device.Name)
 			continue
 		}
-		err = d.Create(ctx, device)
+		err := d.Create(ctx, device)
 		if apierrors.IsAlreadyExists(err) {
 			// Device already exists but was not matched by PCI address, which means the status was not applied properly
 			// on a previous reconcile. Re-fetch so the status update below runs against the live object.
-			err = d.Get(ctx, types.NamespacedName{Name: device.Name, Namespace: device.Namespace}, device)
-			if err != nil {
-				log.Log.Error(err, "failed to get existing NicDevice obj", "device", device)
+			if err := d.Get(ctx, types.NamespacedName{Name: device.Name, Namespace: device.Namespace}, device); err != nil {
+				trackErr(err, "failed to get existing NicDevice obj", device.Name)
 				continue
 			}
 		} else if err != nil {
-			log.Log.Error(err, "failed to create NicDevice obj", "device", device)
+			trackErr(err, "failed to create NicDevice obj", device.Name)
 			continue
 		}
 
@@ -224,9 +233,8 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 
 		d.updateFwCondition(device)
 		log.Log.V(2).Info("updated device", "device", device)
-		err = d.Client.Status().Update(ctx, device)
-		if err != nil {
-			log.Log.Error(err, "failed to update FirmwareConfigMatchCondition", "device", device.Name)
+		if err := d.Client.Status().Update(ctx, device); err != nil {
+			trackErr(err, "failed to update NicDevice CR status", device.Name)
 			continue
 		}
 	}
@@ -254,7 +262,8 @@ func (d *DeviceDiscoveryController) Start(ctx context.Context) error {
 	retryChan := make(chan struct{}, 1) // Channel to trigger immediate retries
 
 	runReconcile := func() {
-		err := d.reconcile(ctx)
+		// Periodic mode tolerates per-device errors between ticks; pass nil so they're only logged.
+		err := d.reconcile(ctx, nil)
 		if err != nil {
 			log.Log.Error(err, "failed to run reconcile, requeueing")
 			// Retry the request if there's an error
@@ -277,6 +286,32 @@ OUTER:
 	}
 
 	return nil
+}
+
+// RunOnce performs a single device discovery + NicDevice CR sync cycle and returns.
+// Used by the daemon's --discovery-only mode (full sync semantics: creates new CRs,
+// updates changed status, deletes CRs for devices no longer present on the node).
+//
+// Unlike the periodic reconcile loop, RunOnce surfaces per-device errors via the returned
+// error (joined with errors.Join) so the caller's retry can re-attempt incomplete CRs.
+// Returns nil only if every observed device's CR sync succeeded.
+func (d *DeviceDiscoveryController) RunOnce(ctx context.Context) error {
+	var perDeviceErrs []error
+	if err := d.reconcile(ctx, &perDeviceErrs); err != nil {
+		return err
+	}
+	if len(perDeviceErrs) > 0 {
+		return fmt.Errorf("%d per-device error(s) during reconcile: %w", len(perDeviceErrs), errors.Join(perDeviceErrs...))
+	}
+	return nil
+}
+
+// RunUntilSuccess calls RunOnce until it succeeds or maxAttempts is exhausted,
+// waiting interval between attempts. Returns nil on success, or the last error
+// wrapped with the attempt count after maxAttempts failures. Returns ctx.Err()
+// if the context is cancelled during a wait between attempts.
+func (d *DeviceDiscoveryController) RunUntilSuccess(ctx context.Context, maxAttempts int, interval time.Duration) error {
+	return retryUntilSuccess(ctx, maxAttempts, interval, d.RunOnce)
 }
 
 // NewDeviceDiscoveryController creates a new instance of DeviceDiscoveryController with the specified parameters.

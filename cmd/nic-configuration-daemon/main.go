@@ -17,10 +17,13 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"maps"
 	"os"
 	"slices"
+	"time"
 
 	maintenanceoperator "github.com/Mellanox/maintenance-operator/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -54,6 +57,8 @@ var (
 
 func main() {
 	ncolog.BindFlags(flag.CommandLine)
+	discoveryOnly := flag.Bool("discovery-only", false,
+		"Run device discovery once, write NicDevice CRs, and exit. Disables all reconciliation.")
 	flag.Parse()
 	ncolog.InitLog()
 
@@ -100,6 +105,11 @@ func main() {
 	nvConfigUtils := nvconfig.NewNVConfigUtils()
 
 	deviceDiscovery := devicediscovery.NewDeviceDiscovery(nodeName, nvConfigUtils)
+
+	if *discoveryOnly {
+		runDiscoveryOnce(mgr, deviceDiscovery, hostUtils, nodeName, namespace)
+		return
+	}
 
 	// Initialize DMS server
 	dmsServer := dms.NewDMSServer()
@@ -204,4 +214,65 @@ func initNicFwMap(namespace string) error {
 	}
 
 	return nil
+}
+
+// runDiscoveryOnce performs a single NIC discovery + NicDevice CR sync cycle and exits.
+// It uses the manager only for its cached client and field index; no reconcilers are
+// registered. On any error it exits with status 1; on success it returns and the
+// caller exits with status 0.
+func runDiscoveryOnce(mgr ctrl.Manager, dd devicediscovery.DeviceDiscovery,
+	hu host.HostUtils, nodeName, namespace string) {
+
+	ddCtrl := controller.NewDeviceDiscoveryController(mgr.GetClient(), dd, hu, nodeName, namespace)
+
+	ctx, cancel := context.WithCancel(ctrl.SetupSignalHandler())
+	defer cancel()
+
+	// Same index the normal path registers; lifted here so the discovery-only path is self-contained.
+	if err := mgr.GetCache().IndexField(ctx, &v1alpha1.NicDevice{}, "status.node", func(o client.Object) []string {
+		return []string{o.(*v1alpha1.NicDevice).Status.Node}
+	}); err != nil {
+		log.Log.Error(err, "failed to index field for cache")
+		os.Exit(1)
+	}
+
+	mgrErr := make(chan error, 1)
+	go func() { mgrErr <- mgr.Start(ctx) }()
+
+	if !mgr.GetCache().WaitForCacheSync(ctx) {
+		// WaitForCacheSync returns false on genuine sync failure and on ctx
+		// cancellation (e.g. SIGTERM). Check ctx.Err() before we call cancel()
+		// so we can tell them apart.
+		if ctx.Err() != nil {
+			<-mgrErr
+			log.Log.Info("interrupted before cache sync, exiting")
+			return
+		}
+		log.Log.Error(nil, "cache sync failed")
+		cancel()
+		<-mgrErr
+		os.Exit(1)
+	}
+
+	const (
+		discoveryMaxAttempts   = 10
+		discoveryRetryInterval = 5 * time.Second
+	)
+	if err := ddCtrl.RunUntilSuccess(ctx, discoveryMaxAttempts, discoveryRetryInterval); err != nil {
+		cancel()
+		<-mgrErr
+		if errors.Is(err, context.Canceled) {
+			log.Log.Info("interrupted during device discovery, exiting")
+			return
+		}
+		log.Log.Error(err, "device discovery failed")
+		os.Exit(1)
+	}
+
+	cancel()
+	if err := <-mgrErr; err != nil && !errors.Is(err, context.Canceled) {
+		log.Log.Error(err, "manager exited with error")
+		os.Exit(1)
+	}
+	log.Log.Info("device discovery complete, exiting")
 }
