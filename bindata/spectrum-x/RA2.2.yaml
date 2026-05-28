@@ -561,19 +561,19 @@ runtimeConfig:
       dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=3]/config/value
       valueType: int
     - name: Additive Increase Step Size
-      value: 36
+      value: 96
       dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=4]/config/value
       valueType: int
     - name: High Additive Increase Step Size
-      value: 1200
+      value: 1700
       dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=5]/config/value
       valueType: int
     - name: High Additive Increase Interval Period
-      value: 7000000
+      value: 200000
       dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=6]/config/value
       valueType: int
     - name: ZTR_CC_CONGESTION_DELAY_THRESHOLD
-      value: 15000
+      value: 13000
       dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=7]/config/value
       valueType: int
     - name: Maximum Queuing Delay
@@ -593,7 +593,7 @@ runtimeConfig:
       dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=11]/config/value
       valueType: int
     - name: Transmit Rate Decrement Step
-      value: 0
+      value: 1
       dmsPath: /interfaces/interface/nvidia/cc/slot[id=0]/param[id=12]/config/value
       valueType: int
     - name: Fixed Transmission Rate
