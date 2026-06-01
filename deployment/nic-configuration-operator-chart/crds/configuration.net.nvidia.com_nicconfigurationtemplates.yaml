@@ -92,6 +92,14 @@ spec:
               template:
                 description: Configuration template to be applied to matching devices
                 properties:
+                  force:
+                    default: false
+                    description: |-
+                      Force passes `--force` to mlxconfig set commands. When set, the daemon
+                      applies the nv config batch and set_system_conf with --force, letting
+                      mlxconfig accept a batch it would otherwise refuse due to implicit
+                      parameter dependencies.
+                    type: boolean
                   gpuDirectOptimized:
                     description: GPU Direct optimization settings
                     properties:
@@ -106,11 +114,27 @@ spec:
                     - env
                     type: object
                   linkType:
-                    description: LinkType to be configured, Ethernet|Infiniband
+                    description: |-
+                      LinkType to be configured, Ethernet|Infiniband. Required unless networkBay is configured;
+                      for Network Bay the link type is governed by the system configuration and must not be set.
                     enum:
                     - Ethernet
                     - Infiniband
                     type: string
+                  networkBay:
+                    description: NetworkBay configures a ConnectX-9 Network Bay card
+                      (per-ASIC set_system_conf). Allowed only for ConnectX-9 (nicType
+                      1025).
+                    properties:
+                      conf:
+                        description: |-
+                          Conf is the <conf_name> argument passed to `mlxconfig set_system_conf`.
+                          The per-ASIC index is appended automatically by the daemon based on the
+                          device's detected Network Bay ASIC index, e.g. set_system_conf <conf>[0].
+                        type: string
+                    required:
+                    - conf
+                    type: object
                   numVfs:
                     description: Number of VFs to be configured
                     type: integer
@@ -248,18 +272,23 @@ spec:
                         || (self.multiplaneMode == ''none'' && self.numberOfPlanes
                         == 1)'
                 required:
-                - linkType
                 - numVfs
                 type: object
                 x-kubernetes-validations:
                 - message: spectrumXOptimized can be enabled only when linkType=='Ethernet'
-                    and numVfs==1
+                    (or unset for Network Bay) and numVfs==1
                   rule: '!(has(self.spectrumXOptimized) && self.spectrumXOptimized.enabled)
-                    || (self.linkType == ''Ethernet'' && self.numVfs == 1)'
+                    || ((!has(self.linkType) || self.linkType == ''Ethernet'') &&
+                    self.numVfs == 1)'
                 - message: spectrumXOptimized includes RoCE optimizations, so separate
                     roceOptimized section must not be enabled
                   rule: '!(has(self.spectrumXOptimized) && self.spectrumXOptimized.enabled)
                     || !(has(self.roceOptimized) && self.roceOptimized.enabled)'
+                - message: linkType is required unless networkBay is configured
+                  rule: has(self.networkBay) || has(self.linkType)
+                - message: linkType must not be set when networkBay is configured
+                    (the Network Bay link type is governed by the system configuration)
+                  rule: '!has(self.networkBay) || !has(self.linkType)'
             required:
             - nicSelector
             - template
@@ -276,9 +305,70 @@ spec:
                 || self.template.spectrumXOptimized.multiplaneMode != ''hwplb'' ||
                 self.nicSelector.nicType == ''1023'' || self.nicSelector.nicType ==
                 ''1025'''
+            - message: networkBay can only be configured for ConnectX-9 (NicType 1025)
+              rule: '!has(self.template.networkBay) || self.nicSelector.nicType ==
+                ''1025'''
           status:
             description: Defines the observed state of NicConfigurationTemplate
             properties:
+              conditions:
+                description: Conditions observed for this template, e.g. a Network
+                  Bay pairing imbalance on a node
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
               nicDevices:
                 description: NicDevice CRs matching this configuration / firmware
                   template

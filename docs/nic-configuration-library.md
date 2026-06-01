@@ -166,8 +166,14 @@ func NewConfigurationManager(
 1. **Query** current NV config via `nvConfigUtils.QueryNvConfig()`
 2. **Diff** desired vs current parameters
 3. **ADVANCED_PCI_SETTINGS unlock** — automatically enabled before applying other configs (reboot may be required to unlock additional parameters)
-4. **Batch set** via `nvConfigUtils.SetNvConfigParametersBatch()` — single `mlxconfig set` call
-5. **Optional reset** — `mlxfwreset` unless `ConfigurationOptions.SkipReset=true`
+4. **Batch set** via `nvConfigUtils.SetNvConfigParametersBatch()` — single `mlxconfig set` call (`--force` added when `ConfigurationOptions.Force=true`)
+5. **Network Bay `set_system_conf`** — for ConnectX-9 Network Bay devices (`template.networkBay` set and `status.networkBay` detected), the per-ASIC `set_system_conf <conf>[<asic>]` is layered on top via `nvConfigUtils.ValidateSystemConf()` / `SetSystemConf()` after the regular (or Spectrum-X) nv config converges; a change requires a reboot
+6. **Optional reset** — `mlxfwreset` unless `ConfigurationOptions.SkipReset=true`
+
+**`ConfigurationOptions`:**
+- `SkipReset` — skip `mlxfwreset` after applying NV config
+- `WithDefault` — add `--with_default` to `mlxconfig set`
+- `Force` — add `--force` to `mlxconfig set` and `set_system_conf` (lets mlxconfig accept a batch it would otherwise refuse due to implicit parameter dependencies)
 
 #### Runtime Configuration Flow
 
@@ -354,10 +360,19 @@ type NVConfigUtils interface {
     // SetNvConfigParametersBatch sets multiple parameters in single mlxconfig call
     // params: map of paramName → paramValue
     // withDefault: add --with_default flag
-    SetNvConfigParametersBatch(pciAddr string, params map[string]string, withDefault bool) error
+    // force: add --force flag
+    SetNvConfigParametersBatch(pciAddr string, params map[string]string, withDefault bool, force bool) error
 
     // ResetNvConfig resets NIC's NV config to defaults
     ResetNvConfig(pciAddr string) error
+
+    // SetSystemConf applies a ConnectX-9 Network Bay system configuration for a single ASIC via
+    // `mlxconfig -d <pci> -y [--force] set_system_conf <conf>[<asic>]` (persistent, reboot-required)
+    SetSystemConf(ctx context.Context, pciAddr string, conf string, asic int, force bool) error
+
+    // ValidateSystemConf reports whether the device matches the named system configuration via
+    // `mlxconfig -d <pci> -y validate_system_conf <conf>[<asic>]`
+    ValidateSystemConf(ctx context.Context, pciAddr string, conf string, asic int) (bool, error)
 }
 ```
 
@@ -368,9 +383,16 @@ func NewNVConfigUtils() NVConfigUtils
 
 **Batch command format:**
 ```
-mlxconfig -d <pci> --yes [--with_default] set PARAM1=VAL1 PARAM2=VAL2 ...
+mlxconfig -d <pci> --yes [--with_default] [--force] set PARAM1=VAL1 PARAM2=VAL2 ...
 ```
 Parameter names are sorted for deterministic command generation.
+
+**System conf command format (ConnectX-9 Network Bay):**
+```
+mlxconfig -d <pci> -y [--force] set_system_conf <conf>[<asic>]
+mlxconfig -d <pci> -y validate_system_conf <conf>[<asic>]
+```
+`ValidateSystemConf` parses the trailing `Result:` line (`MATCHES` vs `does NOT match`).
 
 ---
 

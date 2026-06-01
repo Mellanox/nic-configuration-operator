@@ -94,4 +94,5 @@ type FirmwareInstallOptions struct {
 type ConfigurationOptions struct {
 	SkipReset   bool // Skip mlxfwreset after NV config apply
 	WithDefault bool // Add --with_default flag to mlxconfig set
+	Force       bool // Add --force flag to mlxconfig set / set_system_conf
 }

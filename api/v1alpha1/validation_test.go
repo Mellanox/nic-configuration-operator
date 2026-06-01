@@ -180,6 +180,48 @@ var _ = Describe("NicConfigurationTemplate CEL validation", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
+	Context("NetworkBay validation", func() {
+		It("allows networkBay for ConnectX-9 (NicType 1025) with linkType unset", func() {
+			obj := newNicConfigurationTemplate("bay-allow-1025", "", 0, nil)
+			obj.Spec.NicSelector.NicType = nicTypeConnectX9
+			obj.Spec.Template.NetworkBay = &NetworkBaySpec{Conf: "3"}
+			Expect(k8sClient.Create(ctx, obj)).To(Succeed())
+		})
+
+		It("rejects networkBay for non-ConnectX-9 NicType", func() {
+			obj := newNicConfigurationTemplate("bay-reject-cx8", "", 0, nil)
+			obj.Spec.NicSelector.NicType = nicTypeConnectX8
+			obj.Spec.Template.NetworkBay = &NetworkBaySpec{Conf: "3"}
+			err := k8sClient.Create(ctx, obj)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("networkBay can only be configured for ConnectX-9 (NicType 1025)"))
+		})
+
+		It("rejects networkBay when linkType is also set", func() {
+			obj := newNicConfigurationTemplate("bay-reject-linktype", "Ethernet", 0, nil)
+			obj.Spec.NicSelector.NicType = nicTypeConnectX9
+			obj.Spec.Template.NetworkBay = &NetworkBaySpec{Conf: "3"}
+			err := k8sClient.Create(ctx, obj)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("linkType must not be set when networkBay is configured"))
+		})
+
+		It("rejects a template without networkBay and without linkType", func() {
+			obj := newNicConfigurationTemplate("no-linktype-no-bay", "", 8, nil)
+			obj.Spec.NicSelector.NicType = nicTypeConnectX9
+			err := k8sClient.Create(ctx, obj)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("linkType is required unless networkBay is configured"))
+		})
+
+		It("allows networkBay together with spectrumXOptimized on ConnectX-9 (linkType unset)", func() {
+			obj := newNicConfigurationTemplate("bay-allow-with-spcx", "", 1, &SpectrumXOptimizedSpec{Enabled: true, Version: "RA2.0"})
+			obj.Spec.NicSelector.NicType = nicTypeConnectX9
+			obj.Spec.Template.NetworkBay = &NetworkBaySpec{Conf: "3"}
+			Expect(k8sClient.Create(ctx, obj)).To(Succeed())
+		})
+	})
+
 	// Tests for MultiplaneMode and NumberOfPlanes validation rules
 	Context("MultiplaneMode and NumberOfPlanes validation", func() {
 		It("allows MultiplaneMode=none with numberOfPlanes=1", func() {

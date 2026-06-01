@@ -124,6 +124,15 @@ func (t *nicFirmwareTemplate) updateStatus(ctx context.Context, client client.Cl
 	return client.Status().Update(ctx, &t.template)
 }
 
+// networkBayRequested is always false for firmware templates: Network Bay is a NIC configuration concern.
+func (t *nicFirmwareTemplate) networkBayRequested() bool {
+	return false
+}
+
+func (t *nicFirmwareTemplate) getObject() client.Object {
+	return &t.template
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *NicFirmwareTemplateReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.EventRecorder = mgr.GetEventRecorderFor("NicFirmwareTemplateReconciler")

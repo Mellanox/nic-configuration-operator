@@ -22,11 +22,14 @@ import (
 	"strings"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
+	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 )
 
 type clearDeviceSpecFunc = func(device *v1alpha1.NicDevice)
@@ -39,6 +42,11 @@ type nicTemplate interface {
 	// returns true if device's spec was updated
 	applyToDevice(device *v1alpha1.NicDevice) bool
 	updateStatus(ctx context.Context, client client.Client) error
+	// networkBayRequested reports whether the template configures a ConnectX-9 Network Bay,
+	// which triggers the whole-bay matching constraint. Only NicConfigurationTemplate can.
+	networkBayRequested() bool
+	// getObject returns the underlying template object, used to emit events against it.
+	getObject() client.Object
 }
 
 func matchDevicesToTemplates(ctx context.Context, client client.Client, recorder record.EventRecorder, templates []nicTemplate, clearDeviceSpec clearDeviceSpecFunc) error {
@@ -61,6 +69,15 @@ func matchDevicesToTemplates(ctx context.Context, client client.Client, recorder
 	nodeMap := map[string]*v1.Node{}
 	for _, node := range nodeList.Items {
 		nodeMap[node.Name] = &node
+	}
+
+	// Precompute, per Network Bay template, the set of nodes whose matched devices do not form
+	// whole bays (see §7). Devices on a rejected node must not receive the template's spec.
+	bayRejectedNodes := map[string]map[string]string{} // templateName -> nodeName -> reason
+	for _, template := range templates {
+		if template.networkBayRequested() {
+			bayRejectedNodes[template.getName()] = computeNetworkBayRejectedNodes(template, templates, deviceList.Items, nodeMap)
+		}
 	}
 
 	for _, device := range deviceList.Items {
@@ -112,6 +129,20 @@ func matchDevicesToTemplates(ctx context.Context, client client.Client, recorder
 		} else {
 			matchingTemplate := matchingTemplates[0]
 
+			// Network Bay templates must match a whole bay on a node. If this device's node was
+			// rejected, do not apply the spec — clear it and surface the imbalance instead.
+			if rejected, ok := bayRejectedNodes[matchingTemplate.getName()]; ok {
+				if reason, isRejected := rejected[device.Status.Node]; isRejected {
+					log.Log.Info("Network Bay template does not match a whole bay on node, rejecting device",
+						"device", device.Name, "node", device.Status.Node, "reason", reason)
+					dropDeviceFromStatus(device.Name, matchingTemplate)
+					if err := handleNetworkBayImbalance(ctx, client, &device, reason, clearDeviceSpec); err != nil {
+						return err
+					}
+					continue
+				}
+			}
+
 			status := matchingTemplate.getStatus()
 			if !slices.Contains(status.NicDevices, device.Name) {
 				status.NicDevices = append(status.NicDevices, device.Name)
@@ -125,10 +156,180 @@ func matchDevicesToTemplates(ctx context.Context, client client.Client, recorder
 					return err
 				}
 			}
+
+			// If this device was previously rejected for a Network Bay imbalance that has since
+			// resolved (e.g. the sibling ASIC finished discovery), clear the stale device condition.
+			if matchingTemplate.networkBayRequested() {
+				if err := clearNetworkBayImbalanceCondition(ctx, client, &device); err != nil {
+					return err
+				}
+			}
 		}
 	}
 
+	// Surface the aggregate Network Bay pairing status on each bay template (event + condition).
+	for _, template := range templates {
+		if !template.networkBayRequested() {
+			continue
+		}
+		setNetworkBayTemplateCondition(recorder, template, bayRejectedNodes[template.getName()])
+	}
+
 	return nil
+}
+
+// computeNetworkBayRejectedNodes returns, for a Network Bay template, the nodes whose
+// selector-matching devices do not form whole bays, mapped to a human-readable reason.
+// allTemplates is the full set of configuration templates: a device that also matches another
+// template will be cleared by the multi-template conflict handler, so its sibling must not be
+// configured on its own — such a node is rejected to keep the bay atomic.
+func computeNetworkBayRejectedNodes(template nicTemplate, allTemplates []nicTemplate, devices []v1alpha1.NicDevice, nodeMap map[string]*v1.Node) map[string]string {
+	devicesByNode := map[string][]*v1alpha1.NicDevice{}
+	conflictedNodes := map[string]bool{}
+	for i := range devices {
+		device := &devices[i]
+		node, ok := nodeMap[device.Status.Node]
+		if !ok {
+			continue
+		}
+		if !deviceMatchesConfigurationTemplateSelectors(device, template, node) {
+			continue
+		}
+		devicesByNode[device.Status.Node] = append(devicesByNode[device.Status.Node], device)
+		// A device matching this bay template AND another template is a multi-template conflict:
+		// the main matching loop will clear its spec, so it will never receive the bay config.
+		if countMatchingTemplates(device, allTemplates, node) > 1 {
+			conflictedNodes[device.Status.Node] = true
+		}
+	}
+
+	rejected := map[string]string{}
+	for nodeName, nodeDevices := range devicesByNode {
+		if conflictedNodes[nodeName] {
+			rejected[nodeName] = "one or more matched devices also match another configuration template; the Network Bay cannot be configured atomically"
+			continue
+		}
+		if reason := networkBayImbalanceReason(nodeDevices); reason != "" {
+			rejected[nodeName] = reason
+		}
+	}
+	return rejected
+}
+
+// countMatchingTemplates returns how many of the given templates select the device on its node.
+func countMatchingTemplates(device *v1alpha1.NicDevice, templates []nicTemplate, node *v1.Node) int {
+	count := 0
+	for _, template := range templates {
+		if deviceMatchesConfigurationTemplateSelectors(device, template, node) {
+			count++
+		}
+	}
+	return count
+}
+
+// networkBayImbalanceReason validates that the matched devices on a node form whole Network Bays:
+// an even count, every device detected as part of a bay, and serial numbers partitioning into
+// pairs of exactly two. Returns "" when the set is valid, or a reason string otherwise.
+func networkBayImbalanceReason(devices []*v1alpha1.NicDevice) string {
+	if len(devices)%2 != 0 {
+		return fmt.Sprintf("matched an odd number of devices (%d); a Network Bay template must match whole bays (pairs)", len(devices))
+	}
+
+	bySerial := map[string]int{}
+	for _, device := range devices {
+		if device.Status.NetworkBay == nil {
+			return fmt.Sprintf("device %s is not part of a Network Bay card but was matched by a Network Bay template", device.Name)
+		}
+		bySerial[device.Status.SerialNumber]++
+	}
+
+	for serial, count := range bySerial {
+		if count != 2 {
+			return fmt.Sprintf("serial number %s matched %d devices, expected exactly 2 (one Network Bay pair)", serial, count)
+		}
+	}
+
+	return ""
+}
+
+// handleNetworkBayImbalance clears the rejected device's spec and records a per-device condition
+// describing why the Network Bay template was not applied.
+func handleNetworkBayImbalance(ctx context.Context, client client.Client, device *v1alpha1.NicDevice, reason string, clearDeviceSpec clearDeviceSpecFunc) error {
+	clearDeviceSpec(device)
+	if err := client.Update(ctx, device); err != nil {
+		log.Log.Error(err, "Failed to clear spec for Network Bay imbalanced device", "device", device.Name)
+		return err
+	}
+
+	meta.SetStatusCondition(&device.Status.Conditions, metav1.Condition{
+		Type:               consts.NetworkBayCondition,
+		Status:             metav1.ConditionFalse,
+		Reason:             consts.NetworkBayImbalanceReason,
+		ObservedGeneration: device.Generation,
+		Message:            reason,
+	})
+	if err := client.Status().Update(ctx, device); err != nil {
+		log.Log.Error(err, "Failed to update Network Bay condition for device", "device", device.Name)
+		return err
+	}
+	return nil
+}
+
+// clearNetworkBayImbalanceCondition transitions a device's NetworkBayPairing condition to True once
+// a previously-flagged imbalance has resolved. It is a no-op for devices that never carried the
+// condition, so healthy devices are not churned with status writes.
+func clearNetworkBayImbalanceCondition(ctx context.Context, client client.Client, device *v1alpha1.NicDevice) error {
+	existing := meta.FindStatusCondition(device.Status.Conditions, consts.NetworkBayCondition)
+	if existing == nil || existing.Status == metav1.ConditionTrue {
+		return nil
+	}
+
+	meta.SetStatusCondition(&device.Status.Conditions, metav1.Condition{
+		Type:               consts.NetworkBayCondition,
+		Status:             metav1.ConditionTrue,
+		Reason:             consts.NetworkBayBalancedReason,
+		ObservedGeneration: device.Generation,
+		Message:            "device is part of a complete Network Bay",
+	})
+	if err := client.Status().Update(ctx, device); err != nil {
+		log.Log.Error(err, "Failed to clear Network Bay condition for device", "device", device.Name)
+		return err
+	}
+	return nil
+}
+
+// setNetworkBayTemplateCondition records the aggregate Network Bay pairing status on the template:
+// a False condition (and Warning event on transition) listing offending nodes when any node was
+// rejected, or a True condition when all matched bays are whole.
+func setNetworkBayTemplateCondition(recorder record.EventRecorder, template nicTemplate, rejectedNodes map[string]string) {
+	status := template.getStatus()
+
+	var condition metav1.Condition
+	if len(rejectedNodes) == 0 {
+		condition = metav1.Condition{
+			Type:    consts.NetworkBayCondition,
+			Status:  metav1.ConditionTrue,
+			Reason:  consts.NetworkBayBalancedReason,
+			Message: "all matched Network Bay cards are configured as whole bays",
+		}
+	} else {
+		messages := make([]string, 0, len(rejectedNodes))
+		for node, reason := range rejectedNodes {
+			messages = append(messages, fmt.Sprintf("node %s: %s", node, reason))
+		}
+		slices.Sort(messages)
+		condition = metav1.Condition{
+			Type:    consts.NetworkBayCondition,
+			Status:  metav1.ConditionFalse,
+			Reason:  consts.NetworkBayImbalanceReason,
+			Message: strings.Join(messages, "; "),
+		}
+	}
+
+	changed := meta.SetStatusCondition(&status.Conditions, condition)
+	if changed && condition.Status == metav1.ConditionFalse {
+		recorder.Event(template.getObject(), v1.EventTypeWarning, consts.NetworkBayImbalanceReason, condition.Message)
+	}
 }
 
 func dropDeviceFromStatus(deviceName string, template nicTemplate) {

@@ -148,6 +148,14 @@ func (t *nicConfigurationTemplate) updateStatus(ctx context.Context, client clie
 	return client.Status().Update(ctx, &t.template)
 }
 
+func (t *nicConfigurationTemplate) networkBayRequested() bool {
+	return t.template.Spec.Template != nil && t.template.Spec.Template.NetworkBay != nil
+}
+
+func (t *nicConfigurationTemplate) getObject() client.Object {
+	return &t.template
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *NicConfigurationTemplateReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.EventRecorder = mgr.GetEventRecorderFor("NicConfigurationTemplateReconciler")

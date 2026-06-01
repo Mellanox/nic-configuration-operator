@@ -93,30 +93,35 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 		desiredParameters[consts.SriovNumOfVfsParam] = strconv.Itoa(template.NumVfs)
 	}
 
-	// Link type change is not allowed on some devices
-	_, canChangeLinkType := query.DefaultConfig[consts.LinkTypeP1Param]
-	if canChangeLinkType {
-		linkType := nvParamLinkTypeFromName(string(template.LinkType))
-		// Emit LINK_TYPE_P<n> for every discovered port. Firmware may expose
-		// fewer slots than the device has ports (e.g. BF3 DPU mode), so gate
-		// each entry on a presence check in the query output.
-		for portIdx := 1; portIdx <= portCount; portIdx++ {
-			name := consts.PortParam(consts.LinkTypeParamBase, portIdx)
-			if _, ok := query.DefaultConfig[name]; ok {
-				desiredParameters[name] = linkType
+	// Link type is only managed when the template specifies it. For Network Bay devices the
+	// template must not set linkType (enforced by CEL); the link type is owned by set_system_conf,
+	// so the operator must not emit LINK_TYPE_P* here or it would fight the system configuration.
+	if template.LinkType != "" {
+		// Link type change is not allowed on some devices
+		_, canChangeLinkType := query.DefaultConfig[consts.LinkTypeP1Param]
+		if canChangeLinkType {
+			linkType := nvParamLinkTypeFromName(string(template.LinkType))
+			// Emit LINK_TYPE_P<n> for every discovered port. Firmware may expose
+			// fewer slots than the device has ports (e.g. BF3 DPU mode), so gate
+			// each entry on a presence check in the query output.
+			for portIdx := 1; portIdx <= portCount; portIdx++ {
+				name := consts.PortParam(consts.LinkTypeParamBase, portIdx)
+				if _, ok := query.DefaultConfig[name]; ok {
+					desiredParameters[name] = linkType
+				}
 			}
-		}
-	} else {
-		desiredLinkType := string(device.Spec.Configuration.Template.LinkType)
+		} else {
+			desiredLinkType := string(device.Spec.Configuration.Template.LinkType)
 
-		for _, port := range device.Status.Ports {
-			if port.NetworkInterface != "" && v.utils.GetLinkType(port.NetworkInterface) != desiredLinkType {
-				err := types.IncorrectSpecError(
-					fmt.Sprintf(
-						"device does not support link type change, wrong link type provided in the template, should be: %s",
-						v.utils.GetLinkType(port.NetworkInterface)))
-				log.Log.Error(err, "incorrect spec", "device", device.Name)
-				return desiredParameters, err
+			for _, port := range device.Status.Ports {
+				if port.NetworkInterface != "" && v.utils.GetLinkType(port.NetworkInterface) != desiredLinkType {
+					err := types.IncorrectSpecError(
+						fmt.Sprintf(
+							"device does not support link type change, wrong link type provided in the template, should be: %s",
+							v.utils.GetLinkType(port.NetworkInterface)))
+					log.Log.Error(err, "incorrect spec", "device", device.Name)
+					return desiredParameters, err
+				}
 			}
 		}
 	}

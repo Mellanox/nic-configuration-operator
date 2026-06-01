@@ -94,8 +94,23 @@ type NicDeviceStatus struct {
 	SuperNIC bool `json:"superNIC"`
 	// List of ports for the device
 	Ports []NicDevicePortSpec `json:"ports"`
+	// NetworkBay holds ConnectX-9 Network Bay ("orchid") identity for the device.
+	// Set only when the device is detected as part of a Network Bay card.
+	// +optional
+	NetworkBay *NicDeviceNetworkBayStatus `json:"networkBay,omitempty"`
 	// List of conditions observed for the device
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// NicDeviceNetworkBayStatus holds the ConnectX-9 Network Bay identity of a device.
+type NicDeviceNetworkBayStatus struct {
+	// Asic is the orchid ASIC index (0 or 1) inferred from the MGIR.ga register field.
+	Asic int `json:"asic"`
+	// PeerPCI is the PCI address of the sibling ASIC in the same Network Bay card
+	// (the other device sharing this device's serial number). Empty if the peer
+	// could not be resolved.
+	// +optional
+	PeerPCI string `json:"peerPci,omitempty"`
 }
 
 //+kubebuilder:object:root=true

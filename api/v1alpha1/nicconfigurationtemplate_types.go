@@ -115,17 +115,31 @@ type NvConfigParam struct {
 	Value string `json:"value"`
 }
 
+// NetworkBaySpec configures a ConnectX-9 Network Bay ("orchid") card. A Network Bay
+// card exposes two CX9 ASICs as two PCI endpoints that share a single OSFP cage and
+// must be configured as a pair. Allowed only when nicSelector.nicType == "1025"
+// (ConnectX-9), enforced by CEL on NicConfigurationTemplateSpec.
+type NetworkBaySpec struct {
+	// Conf is the <conf_name> argument passed to `mlxconfig set_system_conf`.
+	// The per-ASIC index is appended automatically by the daemon based on the
+	// device's detected Network Bay ASIC index, e.g. set_system_conf <conf>[0].
+	Conf string `json:"conf"`
+}
+
 // ConfigurationTemplateSpec is a set of configurations for the NICs
-// +kubebuilder:validation:XValidation:rule="!(has(self.spectrumXOptimized) && self.spectrumXOptimized.enabled) || (self.linkType == 'Ethernet' && self.numVfs == 1)",message="spectrumXOptimized can be enabled only when linkType=='Ethernet' and numVfs==1"
+// +kubebuilder:validation:XValidation:rule="!(has(self.spectrumXOptimized) && self.spectrumXOptimized.enabled) || ((!has(self.linkType) || self.linkType == 'Ethernet') && self.numVfs == 1)",message="spectrumXOptimized can be enabled only when linkType=='Ethernet' (or unset for Network Bay) and numVfs==1"
 // +kubebuilder:validation:XValidation:rule="!(has(self.spectrumXOptimized) && self.spectrumXOptimized.enabled) || !(has(self.roceOptimized) && self.roceOptimized.enabled)",message="spectrumXOptimized includes RoCE optimizations, so separate roceOptimized section must not be enabled"
+// +kubebuilder:validation:XValidation:rule="has(self.networkBay) || has(self.linkType)",message="linkType is required unless networkBay is configured"
+// +kubebuilder:validation:XValidation:rule="!has(self.networkBay) || !has(self.linkType)",message="linkType must not be set when networkBay is configured (the Network Bay link type is governed by the system configuration)"
 type ConfigurationTemplateSpec struct {
 	// Number of VFs to be configured
 	// +required
 	NumVfs int `json:"numVfs"`
-	// LinkType to be configured, Ethernet|Infiniband
+	// LinkType to be configured, Ethernet|Infiniband. Required unless networkBay is configured;
+	// for Network Bay the link type is governed by the system configuration and must not be set.
 	// +kubebuilder:validation:Enum=Ethernet;Infiniband
-	// +required
-	LinkType LinkTypeEnum `json:"linkType"`
+	// +optional
+	LinkType LinkTypeEnum `json:"linkType,omitempty"`
 	// PCI performance optimization settings
 	PciPerformanceOptimized *PciPerformanceOptimizedSpec `json:"pciPerformanceOptimized,omitempty"`
 	// RoCE optimization settings
@@ -134,13 +148,24 @@ type ConfigurationTemplateSpec struct {
 	GpuDirectOptimized *GpuDirectOptimizedSpec `json:"gpuDirectOptimized,omitempty"`
 	// Spectrum-X optimization settings. Works only with linkType==Ethernet && numVfs==1. RawNvConfig parameters, if provided, are merged as overrides on top of Spectrum-X calculated params.
 	SpectrumXOptimized *SpectrumXOptimizedSpec `json:"spectrumXOptimized,omitempty"`
+	// NetworkBay configures a ConnectX-9 Network Bay card (per-ASIC set_system_conf). Allowed only for ConnectX-9 (nicType 1025).
+	// +optional
+	NetworkBay *NetworkBaySpec `json:"networkBay,omitempty"`
 	// List of arbitrary nv config parameters
 	RawNvConfig []NvConfigParam `json:"rawNvConfig,omitempty"`
+	// Force passes `--force` to mlxconfig set commands. When set, the daemon
+	// applies the nv config batch and set_system_conf with --force, letting
+	// mlxconfig accept a batch it would otherwise refuse due to implicit
+	// parameter dependencies.
+	// +optional
+	// +kubebuilder:default:=false
+	Force bool `json:"force,omitempty"`
 }
 
 // NicConfigurationTemplateSpec defines the desired state of NicConfigurationTemplate
 // +kubebuilder:validation:XValidation:rule="!(has(self.template.spectrumXOptimized) && self.template.spectrumXOptimized.enabled) || (self.nicSelector.nicType == '1023' || self.nicSelector.nicType == '1025' || self.nicSelector.nicType == 'a2dc')",message="spectrumXOptimized can be enabled only for ConnectX-8, ConnectX-9 or BlueField-3 SuperNICs"
 // +kubebuilder:validation:XValidation:rule="!has(self.template.spectrumXOptimized) || !has(self.template.spectrumXOptimized.multiplaneMode) || self.template.spectrumXOptimized.multiplaneMode != 'hwplb' || self.nicSelector.nicType == '1023' || self.nicSelector.nicType == '1025'",message="hwplb MultiplaneMode can only be enabled for ConnectX-8 (NicType 1023) or ConnectX-9 (NicType 1025)"
+// +kubebuilder:validation:XValidation:rule="!has(self.template.networkBay) || self.nicSelector.nicType == '1025'",message="networkBay can only be configured for ConnectX-9 (NicType 1025)"
 type NicConfigurationTemplateSpec struct {
 	// NodeSelector contains labels required on the node. When empty, the template will be applied to matching devices on all nodes.
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
@@ -166,6 +191,8 @@ type NicConfigurationTemplateSpec struct {
 type NicTemplateStatus struct {
 	// NicDevice CRs matching this configuration / firmware template
 	NicDevices []string `json:"nicDevices,omitempty"`
+	// Conditions observed for this template, e.g. a Network Bay pairing imbalance on a node
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 //+kubebuilder:object:root=true

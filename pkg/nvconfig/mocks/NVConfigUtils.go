@@ -79,22 +79,68 @@ func (_m *NVConfigUtils) SetNvConfigParameter(pciAddr string, paramName string, 
 	return r0
 }
 
-// SetNvConfigParametersBatch provides a mock function with given fields: pciAddr, params, withDefault
-func (_m *NVConfigUtils) SetNvConfigParametersBatch(pciAddr string, params map[string]string, withDefault bool) error {
-	ret := _m.Called(pciAddr, params, withDefault)
+// SetNvConfigParametersBatch provides a mock function with given fields: pciAddr, params, withDefault, force
+func (_m *NVConfigUtils) SetNvConfigParametersBatch(pciAddr string, params map[string]string, withDefault bool, force bool) error {
+	ret := _m.Called(pciAddr, params, withDefault, force)
 
 	if len(ret) == 0 {
 		panic("no return value specified for SetNvConfigParametersBatch")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, map[string]string, bool) error); ok {
-		r0 = rf(pciAddr, params, withDefault)
+	if rf, ok := ret.Get(0).(func(string, map[string]string, bool, bool) error); ok {
+		r0 = rf(pciAddr, params, withDefault, force)
 	} else {
 		r0 = ret.Error(0)
 	}
 
 	return r0
+}
+
+// SetSystemConf provides a mock function with given fields: ctx, pciAddr, conf, asic, force
+func (_m *NVConfigUtils) SetSystemConf(ctx context.Context, pciAddr string, conf string, asic int, force bool) error {
+	ret := _m.Called(ctx, pciAddr, conf, asic, force)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetSystemConf")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, int, bool) error); ok {
+		r0 = rf(ctx, pciAddr, conf, asic, force)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// ValidateSystemConf provides a mock function with given fields: ctx, pciAddr, conf, asic
+func (_m *NVConfigUtils) ValidateSystemConf(ctx context.Context, pciAddr string, conf string, asic int) (bool, error) {
+	ret := _m.Called(ctx, pciAddr, conf, asic)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ValidateSystemConf")
+	}
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, int) (bool, error)); ok {
+		return rf(ctx, pciAddr, conf, asic)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, int) bool); ok {
+		r0 = rf(ctx, pciAddr, conf, asic)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, int) error); ok {
+		r1 = rf(ctx, pciAddr, conf, asic)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // NewNVConfigUtils creates a new instance of NVConfigUtils. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

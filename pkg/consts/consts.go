@@ -26,6 +26,8 @@ const (
 	BlueField3LxDeviceID = "a2d9"
 	BlueField2DeviceID   = "a2d6"
 	BlueField4DeviceID   = "a2df"
+	// ConnectX9DeviceID is the device/nic type of ConnectX-9, used to gate Network Bay detection.
+	ConnectX9DeviceID = "1025"
 
 	Ethernet   = "Ethernet"
 	Infiniband = "Infiniband"
@@ -181,6 +183,13 @@ const (
 	InterfaceNameMismatchReason = "InterfaceNameMismatch"
 	// InterfaceNameSpecEmptyReason indicates the interface name template spec was removed
 	InterfaceNameSpecEmptyReason = "InterfaceNameSpecEmpty"
+
+	// NetworkBayCondition is the condition type tracking Network Bay pairing on a device / template
+	NetworkBayCondition = "NetworkBayPairing"
+	// NetworkBayImbalanceReason indicates a networkBay template did not match a whole Network Bay on a node
+	NetworkBayImbalanceReason = "NetworkBayImbalance"
+	// NetworkBayBalancedReason indicates a networkBay template matched whole Network Bays (healthy state)
+	NetworkBayBalancedReason = "NetworkBayBalanced"
 )
 
 // PortParam returns the nvconfig parameter name for the given port-indexed
