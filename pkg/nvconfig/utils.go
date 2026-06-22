@@ -42,9 +42,17 @@ type NVConfigUtils interface {
 	// SetNvConfigParameter sets a nv config parameter for a mellanox device
 	SetNvConfigParameter(pciAddr string, paramName string, paramValue string) error
 	// SetNvConfigParametersBatch sets multiple nv config parameters for a mellanox device in a single mlxconfig call
-	SetNvConfigParametersBatch(pciAddr string, params map[string]string, withDefault bool) error
+	// When force is true, --force is passed to mlxconfig so it accepts a batch it would otherwise refuse
+	// due to implicit parameter dependencies.
+	SetNvConfigParametersBatch(pciAddr string, params map[string]string, withDefault bool, force bool) error
 	// ResetNvConfig resets NIC's nv config
 	ResetNvConfig(pciAddr string) error
+	// SetSystemConf applies a ConnectX-9 Network Bay system configuration for a single ASIC via
+	// `mlxconfig -d <pci> -y [--force] set_system_conf <conf>[<asic>]`. Persistent, reboot-required.
+	SetSystemConf(ctx context.Context, pciAddr string, conf string, asic int, force bool) error
+	// ValidateSystemConf reports whether the device's applied configuration matches the named system
+	// configuration for the given ASIC via `mlxconfig -d <pci> -y validate_system_conf <conf>[<asic>]`.
+	ValidateSystemConf(ctx context.Context, pciAddr string, conf string, asic int) (bool, error)
 }
 
 type nvConfigUtils struct {
@@ -196,8 +204,8 @@ func (h *nvConfigUtils) SetNvConfigParameter(pciAddr string, paramName string, p
 }
 
 // SetNvConfigParametersBatch sets multiple nv config parameters for a mellanox device in a single mlxconfig call
-func (h *nvConfigUtils) SetNvConfigParametersBatch(pciAddr string, params map[string]string, withDefault bool) error {
-	log.Log.Info("ConfigurationUtils.SetNvConfigParametersBatch()", "pciAddr", pciAddr, "params", params, "withDefault", withDefault)
+func (h *nvConfigUtils) SetNvConfigParametersBatch(pciAddr string, params map[string]string, withDefault bool, force bool) error {
+	log.Log.Info("ConfigurationUtils.SetNvConfigParametersBatch()", "pciAddr", pciAddr, "params", params, "withDefault", withDefault, "force", force)
 
 	if len(params) == 0 {
 		return nil
@@ -219,6 +227,9 @@ func (h *nvConfigUtils) SetNvConfigParametersBatch(pciAddr string, params map[st
 	if withDefault {
 		args = append(args, "--with_default")
 	}
+	if force {
+		args = append(args, "--force")
+	}
 	args = append(args, "set")
 	args = append(args, paramArgs...)
 
@@ -229,6 +240,79 @@ func (h *nvConfigUtils) SetNvConfigParametersBatch(pciAddr string, params map[st
 		return err
 	}
 	return nil
+}
+
+// systemConfToken builds the `<conf>[<asic>]` argument for set/validate_system_conf, e.g. conf3[0].
+func systemConfToken(conf string, asic int) string {
+	return fmt.Sprintf("%s[%d]", conf, asic)
+}
+
+// SetSystemConf applies a ConnectX-9 Network Bay system configuration for a single ASIC.
+func (h *nvConfigUtils) SetSystemConf(ctx context.Context, pciAddr string, conf string, asic int, force bool) error {
+	log.Log.Info("ConfigurationUtils.SetSystemConf()", "pciAddr", pciAddr, "conf", conf, "asic", asic, "force", force)
+
+	args := []string{"-d", pciAddr, "-y"}
+	if force {
+		args = append(args, "--force")
+	}
+	args = append(args, "set_system_conf", systemConfToken(conf, asic))
+
+	output, err := h.execInterface.CommandContext(ctx, "mlxconfig", args...).CombinedOutput()
+	log.Log.V(2).Info("command output", "command", "mlxconfig set_system_conf", "pciAddr", pciAddr, "output", string(output))
+	if err != nil {
+		log.Log.Error(err, "SetSystemConf(): Failed to run mlxconfig", "pciAddr", pciAddr)
+		return err
+	}
+	return nil
+}
+
+// ValidateSystemConf reports whether the device's applied configuration matches the named system conf.
+func (h *nvConfigUtils) ValidateSystemConf(ctx context.Context, pciAddr string, conf string, asic int) (bool, error) {
+	log.Log.Info("ConfigurationUtils.ValidateSystemConf()", "pciAddr", pciAddr, "conf", conf, "asic", asic)
+
+	args := []string{"-d", pciAddr, "-y", "validate_system_conf", systemConfToken(conf, asic)}
+	output, err := h.execInterface.CommandContext(ctx, "mlxconfig", args...).CombinedOutput()
+	log.Log.V(2).Info("command output", "command", "mlxconfig validate_system_conf", "pciAddr", pciAddr, "output", string(output))
+
+	// mlxconfig validate_system_conf exits non-zero (e.g. 3) when the device configuration does
+	// NOT match the system conf — that is a valid result, not a command failure. Treat the parsed
+	// "Result:" line as authoritative regardless of exit code, and only surface the command error
+	// when no result line could be parsed (i.e. mlxconfig genuinely failed to run).
+	matches, parseErr := parseValidateSystemConf(output)
+	if parseErr != nil {
+		if err != nil {
+			log.Log.Error(err, "ValidateSystemConf(): Failed to run mlxconfig", "pciAddr", pciAddr)
+			return false, err
+		}
+		return false, parseErr
+	}
+
+	log.Log.Info("ValidateSystemConf() result", "pciAddr", pciAddr, "conf", conf, "asic", asic, "matches", matches)
+	return matches, nil
+}
+
+// parseValidateSystemConf parses the trailing `Result:` line of validate_system_conf output.
+// Sample output lines (see design doc §8):
+//
+//	Result: Device configuration MATCHES the system configuration.
+//	Result: Device configuration does NOT match the system configuration.
+//
+// The "does NOT match" substring is checked first so it can never be mistaken for a match.
+func parseValidateSystemConf(output []byte) (bool, error) {
+	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "Result:") {
+			continue
+		}
+		if strings.Contains(line, "does NOT match") {
+			return false, nil
+		}
+		if strings.Contains(line, "MATCHES") {
+			return true, nil
+		}
+	}
+	return false, fmt.Errorf("could not parse validate_system_conf output: %q", string(output))
 }
 
 // ResetNvConfig resets NIC's nv config

@@ -72,39 +72,7 @@ func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *
 	log.Log.Info("configurationManager.ValidateDeviceNvSpec", "device", device.Name)
 
 	if device.Spec.Configuration.Template != nil && device.Spec.Configuration.Template.SpectrumXOptimized != nil && device.Spec.Configuration.Template.SpectrumXOptimized.Enabled {
-		pci := device.Status.Ports[0].PCI
-
-		breakoutParams, err := h.spectrumXConfigManager.GetBreakoutMlxConfig(device)
-		if err != nil {
-			return false, false, err
-		}
-		postBreakoutParams, err := h.spectrumXConfigManager.GetPostBreakoutMlxConfig(device)
-		if err != nil {
-			return false, false, err
-		}
-		// Merge rawNvConfig overrides into the appropriate phase:
-		// params that overlap with breakout go into breakout, the rest into postBreakout
-		postBreakoutParams = mergeRawNvConfigIntoPhases(device, breakoutParams, postBreakoutParams)
-
-		if len(breakoutParams) > 0 {
-			if mismatch, err := h.checkMlxConfigMismatch(ctx, pci, breakoutParams); err != nil {
-				return false, false, err
-			} else if mismatch {
-				log.Log.V(2).Info("breakout config not applied, update and reboot required", "device", device.Name)
-				return true, true, nil
-			}
-		}
-
-		if len(postBreakoutParams) > 0 {
-			if mismatch, err := h.checkMlxConfigMismatch(ctx, pci, postBreakoutParams); err != nil {
-				return false, false, err
-			} else if mismatch {
-				log.Log.V(2).Info("postBreakout config not applied, update and reboot required", "device", device.Name)
-				return true, true, nil
-			}
-		}
-
-		return false, false, nil
+		return h.validateSpectrumXNvSpec(ctx, device)
 	}
 
 	nvConfigsForPorts, err := h.queryNvConfigs(ctx, device)
@@ -165,6 +133,16 @@ func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *
 		}
 	}
 
+	// Layer Network Bay system_conf validation on top of the regular nv config validation.
+	systemConfMismatch, err := h.systemConfMismatch(ctx, device)
+	if err != nil {
+		return false, false, err
+	}
+	if systemConfMismatch {
+		configUpdateNeeded = true
+		rebootNeeded = true
+	}
+
 	return configUpdateNeeded, rebootNeeded, nil
 }
 
@@ -181,7 +159,13 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 	if device.Spec.Configuration.Template != nil &&
 		device.Spec.Configuration.Template.SpectrumXOptimized != nil &&
 		device.Spec.Configuration.Template.SpectrumXOptimized.Enabled {
-		return h.applySpectrumXNVConfiguration(ctx, device, options)
+		result, err := h.applySpectrumXNVConfiguration(ctx, device, options)
+		if err != nil || result.Status != types.ApplyStatusNothingToDo {
+			return result, err
+		}
+		// SpectrumX nv config has fully converged; layer Network Bay system_conf on top.
+		// applySystemConf is a no-op (NothingToDo) for non-Network-Bay devices.
+		return h.applySystemConf(ctx, device, options)
 	}
 
 	nvConfigsForPorts, err := h.queryNvConfigs(ctx, device)
@@ -263,7 +247,7 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 
 		log.Log.V(2).Info("applying nv config to device", "device", device.Name, "config", supportedParams)
 
-		err = h.nvConfigUtils.SetNvConfigParametersBatch(pciAddr, supportedParams, options.WithDefault)
+		err = h.nvConfigUtils.SetNvConfigParametersBatch(pciAddr, supportedParams, options.WithDefault, options.Force)
 		if err != nil {
 			log.Log.Error(err, "Failed to apply nv config parameters", "device", device.Name, "params", supportedParams)
 			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
@@ -271,7 +255,14 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 		anyParamsApplied = true
 	}
 
-	if !anyParamsApplied && !hasUnsupportedParams {
+	// Layer Network Bay system_conf on top of the regular nv config apply (no-op for non-bay devices).
+	systemConfResult, err := h.applySystemConf(ctx, device, options)
+	if err != nil {
+		return systemConfResult, err
+	}
+	systemConfApplied := systemConfResult.RebootRequired
+
+	if !anyParamsApplied && !hasUnsupportedParams && !systemConfApplied {
 		return &types.ConfigurationApplyResult{Status: types.ApplyStatusNothingToDo}, nil
 	}
 
@@ -282,7 +273,7 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 		status = types.ApplyStatusPartiallyApplied
 	}
 
-	return &types.ConfigurationApplyResult{Status: status, RebootRequired: anyParamsApplied}, nil
+	return &types.ConfigurationApplyResult{Status: status, RebootRequired: anyParamsApplied || systemConfApplied}, nil
 }
 
 // checkMlxConfigMismatch queries mlxconfig for the given params and returns true if any value doesn't match.
@@ -330,7 +321,9 @@ func (h configurationManager) applySpectrumXNVConfiguration(ctx context.Context,
 			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 		} else if mismatch {
 			log.Log.Info("applying breakout config", "device", device.Name)
-			if err := h.nvConfigUtils.SetNvConfigParametersBatch(pci, breakoutParams, options.WithDefault); err != nil {
+			// SpectrumX breakout/postBreakout apply is intentionally left unchanged (force=false);
+			// the SpectrumX flow is reworked in a separate FR.
+			if err := h.nvConfigUtils.SetNvConfigParametersBatch(pci, breakoutParams, options.WithDefault, false); err != nil {
 				return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 			}
 			log.Log.Info("breakout config applied, reboot required", "device", device.Name)
@@ -352,7 +345,7 @@ func (h configurationManager) applySpectrumXNVConfiguration(ctx context.Context,
 				merged[k] = v
 			}
 			log.Log.Info("applying postBreakout config", "device", device.Name)
-			if err := h.nvConfigUtils.SetNvConfigParametersBatch(pci, merged, options.WithDefault); err != nil {
+			if err := h.nvConfigUtils.SetNvConfigParametersBatch(pci, merged, options.WithDefault, false); err != nil {
 				return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 			}
 			log.Log.Info("postBreakout config applied, reboot required", "device", device.Name)
@@ -491,6 +484,112 @@ func (h configurationManager) ResetNicFirmware(ctx context.Context, device *v1al
 	}
 
 	return nil
+}
+
+// validateSpectrumXNvSpec validates the Spectrum-X nv config (breakout + postBreakout) and, once it
+// has converged, the Network Bay system_conf. The Spectrum-X validation itself is unchanged.
+func (h configurationManager) validateSpectrumXNvSpec(ctx context.Context, device *v1alpha1.NicDevice) (bool, bool, error) {
+	pci := device.Status.Ports[0].PCI
+
+	breakoutParams, err := h.spectrumXConfigManager.GetBreakoutMlxConfig(device)
+	if err != nil {
+		return false, false, err
+	}
+	postBreakoutParams, err := h.spectrumXConfigManager.GetPostBreakoutMlxConfig(device)
+	if err != nil {
+		return false, false, err
+	}
+	// Merge rawNvConfig overrides into the appropriate phase:
+	// params that overlap with breakout go into breakout, the rest into postBreakout
+	postBreakoutParams = mergeRawNvConfigIntoPhases(device, breakoutParams, postBreakoutParams)
+
+	if len(breakoutParams) > 0 {
+		if mismatch, err := h.checkMlxConfigMismatch(ctx, pci, breakoutParams); err != nil {
+			return false, false, err
+		} else if mismatch {
+			log.Log.V(2).Info("breakout config not applied, update and reboot required", "device", device.Name)
+			return true, true, nil
+		}
+	}
+
+	if len(postBreakoutParams) > 0 {
+		if mismatch, err := h.checkMlxConfigMismatch(ctx, pci, postBreakoutParams); err != nil {
+			return false, false, err
+		} else if mismatch {
+			log.Log.V(2).Info("postBreakout config not applied, update and reboot required", "device", device.Name)
+			return true, true, nil
+		}
+	}
+
+	// SpectrumX nv config is fully applied; layer Network Bay system_conf validation on top.
+	systemConfMismatch, err := h.systemConfMismatch(ctx, device)
+	if err != nil {
+		return false, false, err
+	}
+	if systemConfMismatch {
+		return true, true, nil
+	}
+
+	return false, false, nil
+}
+
+// hasNetworkBaySpec reports whether the device has a Network Bay template configured AND was
+// detected as part of a Network Bay card. Both are required to apply / validate set_system_conf.
+func hasNetworkBaySpec(device *v1alpha1.NicDevice) bool {
+	return device.Spec.Configuration != nil &&
+		device.Spec.Configuration.Template != nil &&
+		device.Spec.Configuration.Template.NetworkBay != nil &&
+		device.Status.NetworkBay != nil &&
+		len(device.Status.Ports) > 0
+}
+
+// systemConfMismatch returns true if the device's applied configuration does not match the
+// requested Network Bay system_conf. Returns false for non-Network-Bay devices.
+func (h configurationManager) systemConfMismatch(ctx context.Context, device *v1alpha1.NicDevice) (bool, error) {
+	if !hasNetworkBaySpec(device) {
+		return false, nil
+	}
+
+	conf := device.Spec.Configuration.Template.NetworkBay.Conf
+	asic := device.Status.NetworkBay.Asic
+	pci := device.Status.Ports[0].PCI
+
+	matches, err := h.nvConfigUtils.ValidateSystemConf(ctx, pci, conf, asic)
+	if err != nil {
+		log.Log.Error(err, "failed to validate system_conf", "device", device.Name)
+		return false, err
+	}
+	return !matches, nil
+}
+
+// applySystemConf applies the requested Network Bay system_conf for the device's ASIC if it is not
+// already applied. It is a no-op (ApplyStatusNothingToDo) for non-Network-Bay devices. set_system_conf
+// is persistent and reboot-required, so a successful apply reports RebootRequired.
+func (h configurationManager) applySystemConf(ctx context.Context, device *v1alpha1.NicDevice, options *types.ConfigurationOptions) (*types.ConfigurationApplyResult, error) {
+	if !hasNetworkBaySpec(device) {
+		return &types.ConfigurationApplyResult{Status: types.ApplyStatusNothingToDo}, nil
+	}
+
+	conf := device.Spec.Configuration.Template.NetworkBay.Conf
+	asic := device.Status.NetworkBay.Asic
+	pci := device.Status.Ports[0].PCI
+
+	matches, err := h.nvConfigUtils.ValidateSystemConf(ctx, pci, conf, asic)
+	if err != nil {
+		log.Log.Error(err, "failed to validate system_conf", "device", device.Name)
+		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+	}
+	if matches {
+		return &types.ConfigurationApplyResult{Status: types.ApplyStatusNothingToDo}, nil
+	}
+
+	log.Log.Info("applying Network Bay system_conf", "device", device.Name, "conf", conf, "asic", asic)
+	if err := h.nvConfigUtils.SetSystemConf(ctx, pci, conf, asic, options.Force); err != nil {
+		log.Log.Error(err, "failed to apply system_conf", "device", device.Name)
+		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+	}
+
+	return &types.ConfigurationApplyResult{Status: types.ApplyStatusSuccess, RebootRequired: true}, nil
 }
 
 func (h configurationManager) queryNvConfigs(ctx context.Context, device *v1alpha1.NicDevice) (map[string]types.NvConfigQuery, error) {

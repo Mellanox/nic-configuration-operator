@@ -58,6 +58,14 @@ spec:
                     description: Configuration template applied from the NicConfigurationTemplate
                       CR
                     properties:
+                      force:
+                        default: false
+                        description: |-
+                          Force passes `--force` to mlxconfig set commands. When set, the daemon
+                          applies the nv config batch and set_system_conf with --force, letting
+                          mlxconfig accept a batch it would otherwise refuse due to implicit
+                          parameter dependencies.
+                        type: boolean
                       gpuDirectOptimized:
                         description: GPU Direct optimization settings
                         properties:
@@ -72,11 +80,27 @@ spec:
                         - env
                         type: object
                       linkType:
-                        description: LinkType to be configured, Ethernet|Infiniband
+                        description: |-
+                          LinkType to be configured, Ethernet|Infiniband. Required unless networkBay is configured;
+                          for Network Bay the link type is governed by the system configuration and must not be set.
                         enum:
                         - Ethernet
                         - Infiniband
                         type: string
+                      networkBay:
+                        description: NetworkBay configures a ConnectX-9 Network Bay
+                          card (per-ASIC set_system_conf). Allowed only for ConnectX-9
+                          (nicType 1025).
+                        properties:
+                          conf:
+                            description: |-
+                              Conf is the <conf_name> argument passed to `mlxconfig set_system_conf`.
+                              The per-ASIC index is appended automatically by the daemon based on the
+                              device's detected Network Bay ASIC index, e.g. set_system_conf <conf>[0].
+                            type: string
+                        required:
+                        - conf
+                        type: object
                       numVfs:
                         description: Number of VFs to be configured
                         type: integer
@@ -215,18 +239,23 @@ spec:
                             || self.version == ''RA2.0'') || (self.multiplaneMode
                             == ''none'' && self.numberOfPlanes == 1)'
                     required:
-                    - linkType
                     - numVfs
                     type: object
                     x-kubernetes-validations:
                     - message: spectrumXOptimized can be enabled only when linkType=='Ethernet'
-                        and numVfs==1
+                        (or unset for Network Bay) and numVfs==1
                       rule: '!(has(self.spectrumXOptimized) && self.spectrumXOptimized.enabled)
-                        || (self.linkType == ''Ethernet'' && self.numVfs == 1)'
+                        || ((!has(self.linkType) || self.linkType == ''Ethernet'')
+                        && self.numVfs == 1)'
                     - message: spectrumXOptimized includes RoCE optimizations, so
                         separate roceOptimized section must not be enabled
                       rule: '!(has(self.spectrumXOptimized) && self.spectrumXOptimized.enabled)
                         || !(has(self.roceOptimized) && self.roceOptimized.enabled)'
+                    - message: linkType is required unless networkBay is configured
+                      rule: has(self.networkBay) || has(self.linkType)
+                    - message: linkType must not be set when networkBay is configured
+                        (the Network Bay link type is governed by the system configuration)
+                      rule: '!has(self.networkBay) || !has(self.linkType)'
                 type: object
               firmware:
                 description: Firmware specifies the fw upgrade policy requested by
@@ -349,6 +378,24 @@ spec:
                 description: ModelName is the model name of the device, e.g. ConnectX-6
                   or BlueField-3
                 type: string
+              networkBay:
+                description: |-
+                  NetworkBay holds ConnectX-9 Network Bay ("orchid") identity for the device.
+                  Set only when the device is detected as part of a Network Bay card.
+                properties:
+                  asic:
+                    description: Asic is the orchid ASIC index (0 or 1) inferred from
+                      the MGIR.ga register field.
+                    type: integer
+                  peerPci:
+                    description: |-
+                      PeerPCI is the PCI address of the sibling ASIC in the same Network Bay card
+                      (the other device sharing this device's serial number). Empty if the peer
+                      could not be resolved.
+                    type: string
+                required:
+                - asic
+                type: object
               node:
                 description: Node where the device is located
                 type: string

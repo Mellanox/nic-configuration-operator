@@ -152,8 +152,21 @@ func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, er
 			RdmaInterface:    rdmaInterface,
 		})
 
+		// ConnectX-9 Network Bay ("orchid") detection. Orchid-ness is a fixed hardware
+		// property, so detect it once when the device is first seen. The two ASICs of a
+		// bay enumerate as separate PCI devices, so this runs per device.
+		if !ok && device.Product.ID == consts.ConnectX9DeviceID {
+			if asic, isOrchid := d.utils.GetNetworkBayASIC(device.Address); isOrchid {
+				deviceStatus.NetworkBay = &v1alpha1.NicDeviceNetworkBayStatus{Asic: asic}
+			}
+		}
+
 		statuses[pciKey] = deviceStatus
 	}
+
+	// Pair Network Bay siblings by serial number: the two ASICs of one orchid card share a
+	// serial number. For each pair, record the other ASIC's PCI address as PeerPCI.
+	pairNetworkBayDevices(statuses)
 
 	devices := make(map[string]v1alpha1.NicDevice, len(statuses))
 	for pciKey, status := range statuses {
@@ -165,6 +178,35 @@ func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, er
 	log.Log.V(2).Info("Found devices", "devices", devices)
 
 	return devices, nil
+}
+
+// pairNetworkBayDevices resolves PeerPCI for ConnectX-9 Network Bay siblings. The two ASICs of a
+// single orchid card share a serial number; this groups orchid device statuses by serial and, for
+// each group of exactly two, sets each device's NetworkBay.PeerPCI to the other's first-port PCI.
+// Groups that are not exactly two (e.g. a serial reused across cards, or only one ASIC discovered)
+// are left with PeerPCI unset. NetworkBay is a pointer, so mutating through it updates the stored
+// status in place.
+func pairNetworkBayDevices(statuses map[string]v1alpha1.NicDeviceStatus) {
+	bySerial := make(map[string][]string)
+	for key, status := range statuses {
+		if status.NetworkBay != nil {
+			bySerial[status.SerialNumber] = append(bySerial[status.SerialNumber], key)
+		}
+	}
+
+	for serial, keys := range bySerial {
+		if len(keys) != 2 {
+			log.Log.Info("Network Bay device group does not contain exactly two ASICs, leaving PeerPCI unset",
+				"serialNumber", serial, "count", len(keys))
+			continue
+		}
+		a, b := statuses[keys[0]], statuses[keys[1]]
+		if len(a.Ports) == 0 || len(b.Ports) == 0 {
+			continue
+		}
+		a.NetworkBay.PeerPCI = b.Ports[0].PCI
+		b.NetworkBay.PeerPCI = a.Ports[0].PCI
+	}
 }
 
 func NewDeviceDiscovery(nodeName string, nvConfigUtils nvconfig.NVConfigUtils) DeviceDiscovery {

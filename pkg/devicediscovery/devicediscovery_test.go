@@ -381,6 +381,69 @@ var _ = Describe("DeviceDiscovery", func() {
 		})
 	})
 
+	Context("when discovering ConnectX-9 Network Bay (orchid) devices", func() {
+		// stageCX9 sets up the common per-device discovery mock expectations for a CX9 device.
+		stageCX9 := func(pci, serial, iface, rdma string) {
+			mockUtils.On("IsSriovVF", pci).Return(false)
+			mockUtils.On("GetVPD", pci).
+				Return(&types.VPD{PartNumber: "part-number", SerialNumber: serial, ModelName: ""}, nil)
+			mockUtils.On("GetFirmwareVersionAndPSID", pci).Return("fw-version", "psid", nil)
+			mockUtils.On("GetInterfaceName", pci).Return(iface)
+			mockUtils.On("GetRDMADeviceName", pci).Return(rdma)
+		}
+
+		cx9Devices := func() []*pci.Device {
+			return []*pci.Device{
+				{
+					Address: "0000:0b:00.0",
+					Vendor:  &pcidb.Vendor{ID: consts.MellanoxVendor},
+					Product: &pcidb.Product{ID: consts.ConnectX9DeviceID, Name: "ConnectX-9"},
+					Class:   &pcidb.Class{ID: "02"},
+				},
+				{
+					Address: "0000:0e:00.0",
+					Vendor:  &pcidb.Vendor{ID: consts.MellanoxVendor},
+					Product: &pcidb.Product{ID: consts.ConnectX9DeviceID, Name: "ConnectX-9"},
+					Class:   &pcidb.Class{ID: "02"},
+				},
+			}
+		}
+
+		It("sets ASIC index and pairs PeerPCI for two orchid ASICs sharing a serial", func() {
+			mockUtils.On("GetPCIDevices").Return(cx9Devices(), nil)
+			stageCX9("0000:0b:00.0", "orchid-serial", "eth0", "mlx5_0")
+			stageCX9("0000:0e:00.0", "orchid-serial", "eth1", "mlx5_1")
+			mockUtils.On("GetNetworkBayASIC", "0000:0b:00.0").Return(0, true)
+			mockUtils.On("GetNetworkBayASIC", "0000:0e:00.0").Return(1, true)
+
+			devices, err := manager.DiscoverNicDevices()
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(devices["0000:0b:00"].Status.NetworkBay).To(Equal(&v1alpha1.NicDeviceNetworkBayStatus{Asic: 0, PeerPCI: "0000:0e:00.0"}))
+			Expect(devices["0000:0e:00"].Status.NetworkBay).To(Equal(&v1alpha1.NicDeviceNetworkBayStatus{Asic: 1, PeerPCI: "0000:0b:00.0"}))
+		})
+
+		It("leaves NetworkBay nil for a standalone (non-orchid) CX9", func() {
+			mockUtils.On("GetPCIDevices").Return(cx9Devices()[:1], nil)
+			stageCX9("0000:0b:00.0", "standalone-serial", "eth0", "mlx5_0")
+			mockUtils.On("GetNetworkBayASIC", "0000:0b:00.0").Return(0, false)
+
+			devices, err := manager.DiscoverNicDevices()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(devices["0000:0b:00"].Status.NetworkBay).To(BeNil())
+		})
+
+		It("leaves PeerPCI empty when only one ASIC of a bay is discovered", func() {
+			mockUtils.On("GetPCIDevices").Return(cx9Devices()[:1], nil)
+			stageCX9("0000:0b:00.0", "lonely-serial", "eth0", "mlx5_0")
+			mockUtils.On("GetNetworkBayASIC", "0000:0b:00.0").Return(0, true)
+
+			devices, err := manager.DiscoverNicDevices()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(devices["0000:0b:00"].Status.NetworkBay).To(Equal(&v1alpha1.NicDeviceNetworkBayStatus{Asic: 0, PeerPCI: ""}))
+		})
+	})
+
 	Context("when discovering two ports of a single NIC", func() {
 		It("should combine them into a single device with two ports", func() {
 			sameSerialNumber := "serial-number"

@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -87,6 +88,13 @@ type DeviceDiscoveryUtils interface {
 
 	// IsZeroTrust uses mlxprivhost tool to check if the device is in zero-trust mode
 	IsZeroTrust(pciAddr string) (bool, error)
+
+	// GetNetworkBayASIC reports whether the device is part of a ConnectX-9 Network Bay
+	// ("orchid") card and, if so, its ASIC index (0 or 1). It reads the MGIR register's
+	// ga / ga_valid fields via mlxreg. isOrchid is false when the device is a standalone
+	// CX9 (ga_valid == 0) or when mlxreg is unavailable / its output cannot be parsed.
+	// This never returns an error: detection failures must not block device discovery.
+	GetNetworkBayASIC(pciAddr string) (asic int, isOrchid bool)
 }
 
 type deviceDiscoveryUtils struct {
@@ -295,6 +303,65 @@ func (d *deviceDiscoveryUtils) IsZeroTrust(pciAddr string) (bool, error) {
 	}
 
 	return false, fmt.Errorf("IsZeroTrustDevice(): failed to parse mlxprivhost output")
+}
+
+// GetNetworkBayASIC reports whether the device is part of a ConnectX-9 Network Bay card and,
+// if so, its ASIC index. See the interface doc for semantics.
+func (d *deviceDiscoveryUtils) GetNetworkBayASIC(pciAddr string) (int, bool) {
+	log.Log.Info("HostUtils.GetNetworkBayASIC()", "pciAddr", pciAddr)
+
+	output, err := d.execInterface.Command("mlxreg", "-d", pciAddr, "--reg_name", "MGIR", "-g").CombinedOutput()
+	log.Log.V(2).Info("command output", "command", "mlxreg", "pciAddr", pciAddr, "output", string(output))
+	if err != nil {
+		// mlxreg may be unavailable or the register unsupported on non-orchid hardware.
+		// Per design, log and skip silently — never block device discovery.
+		log.Log.V(1).Info("GetNetworkBayASIC(): mlxreg failed, treating device as non-orchid", "pciAddr", pciAddr, "error", err.Error())
+		return 0, false
+	}
+
+	gaValid, ga, ok := parseMGIRGa(output)
+	if !ok {
+		log.Log.V(1).Info("GetNetworkBayASIC(): could not parse MGIR ga/ga_valid, treating device as non-orchid", "pciAddr", pciAddr)
+		return 0, false
+	}
+	if !gaValid {
+		// ga_valid == 0 → device is a standalone CX9, not part of a Network Bay.
+		return 0, false
+	}
+	return ga, true
+}
+
+// mgirFieldRegex matches a `<key> | 0x<hex>` line from `mlxreg --reg_name MGIR -g` output.
+var mgirFieldRegex = regexp.MustCompile(`^\s*(\w+)\s*\|\s*0x([0-9a-fA-F]+)\s*$`)
+
+// parseMGIRGa extracts the ga and ga_valid fields from MGIR register dump output.
+// Returns gaValid (ga_valid != 0), ga (numeric value), and ok=true only when both
+// fields were found and parsed.
+func parseMGIRGa(output []byte) (gaValid bool, ga int, ok bool) {
+	var foundGa, foundGaValid bool
+	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+	for scanner.Scan() {
+		m := mgirFieldRegex.FindStringSubmatch(scanner.Text())
+		if len(m) != 3 {
+			continue
+		}
+		// ga / ga_valid are small flag fields; parse with bitSize 32 so the int conversion
+		// below cannot overflow on 32-bit platforms (an out-of-range value fails to parse
+		// and is simply skipped).
+		val, err := strconv.ParseInt(m[2], 16, 32)
+		if err != nil {
+			continue
+		}
+		switch m[1] {
+		case "ga":
+			ga = int(val)
+			foundGa = true
+		case "ga_valid":
+			gaValid = val != 0
+			foundGaValid = true
+		}
+	}
+	return gaValid, ga, foundGa && foundGaValid
 }
 
 // isPhysicalPort checks if a network interface under a PCI device is a physical port (PF uplink)

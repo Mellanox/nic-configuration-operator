@@ -554,4 +554,71 @@ var _ = Describe("HostUtils", func() {
 			Expect(names).To(BeNil())
 		})
 	})
+
+	Describe("parseMGIRGa", func() {
+		It("parses orchid ASIC #0", func() {
+			output := "ga_valid | 0x00000001\nga       | 0x00000000\n"
+			gaValid, ga, ok := parseMGIRGa([]byte(output))
+			Expect(ok).To(BeTrue())
+			Expect(gaValid).To(BeTrue())
+			Expect(ga).To(Equal(0))
+		})
+
+		It("parses orchid ASIC #1", func() {
+			output := "ga_valid | 0x00000001\nga       | 0x00000001\n"
+			gaValid, ga, ok := parseMGIRGa([]byte(output))
+			Expect(ok).To(BeTrue())
+			Expect(gaValid).To(BeTrue())
+			Expect(ga).To(Equal(1))
+		})
+
+		It("reports non-orchid when ga_valid is 0", func() {
+			output := "ga_valid | 0x00000000\nga       | 0x00000000\n"
+			gaValid, _, ok := parseMGIRGa([]byte(output))
+			Expect(ok).To(BeTrue())
+			Expect(gaValid).To(BeFalse())
+		})
+
+		It("reports not-ok when fields are missing", func() {
+			_, _, ok := parseMGIRGa([]byte("some unrelated output\n"))
+			Expect(ok).To(BeFalse())
+		})
+	})
+
+	Describe("GetNetworkBayASIC", func() {
+		newUtils := func(output []byte, cmdErr error) *deviceDiscoveryUtils {
+			fakeExec := &execTesting.FakeExec{}
+			cmd := &execTesting.FakeCmd{}
+			cmd.CombinedOutputScript = append(cmd.CombinedOutputScript, func() ([]byte, []byte, error) {
+				return output, nil, cmdErr
+			})
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(name string, args ...string) exec.Cmd {
+					Expect(name).To(Equal("mlxreg"))
+					Expect(args).To(Equal([]string{"-d", pciAddress, "--reg_name", "MGIR", "-g"}))
+					return cmd
+				},
+			}
+			return &deviceDiscoveryUtils{execInterface: fakeExec}
+		}
+
+		It("returns the ASIC index for an orchid device", func() {
+			h := newUtils([]byte("ga_valid | 0x00000001\nga | 0x00000001\n"), nil)
+			asic, isOrchid := h.GetNetworkBayASIC(pciAddress)
+			Expect(isOrchid).To(BeTrue())
+			Expect(asic).To(Equal(1))
+		})
+
+		It("returns not-orchid when ga_valid is 0", func() {
+			h := newUtils([]byte("ga_valid | 0x00000000\nga | 0x00000000\n"), nil)
+			_, isOrchid := h.GetNetworkBayASIC(pciAddress)
+			Expect(isOrchid).To(BeFalse())
+		})
+
+		It("returns not-orchid when mlxreg fails", func() {
+			h := newUtils([]byte("error"), errors.New("mlxreg not found"))
+			_, isOrchid := h.GetNetworkBayASIC(pciAddress)
+			Expect(isOrchid).To(BeFalse())
+		})
+	})
 })

@@ -616,7 +616,12 @@ func (r *NicDeviceReconciler) applyNvConfig(ctx context.Context, status *nicDevi
 		return nil
 	}
 
-	result, err := r.ConfigurationManager.ApplyNVConfiguration(ctx, status.device, &types.ConfigurationOptions{SkipReset: true})
+	options := &types.ConfigurationOptions{SkipReset: true}
+	if status.device.Spec.Configuration.Template != nil {
+		options.Force = status.device.Spec.Configuration.Template.Force
+	}
+
+	result, err := r.ConfigurationManager.ApplyNVConfiguration(ctx, status.device, options)
 	if err != nil {
 		if types.IsIncorrectSpecError(err) {
 			updateErr := r.updateConfigInProgressStatusCondition(ctx, status.device, consts.IncorrectSpecReason, metav1.ConditionFalse, err.Error())

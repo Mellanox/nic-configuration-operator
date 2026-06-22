@@ -27,6 +27,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -376,5 +377,119 @@ var _ = Describe("NicConfigurationTemplate Controller", func() {
 		Consistently(getDeviceSpecTemplate(ctx, deviceName, namespaceName, k8sClient), time.Second).Should(BeNil())
 		Eventually(getMatchedDevicesFromStatus(ctx, template1.Name, template1.Namespace, k8sClient)).Should(BeEmpty())
 		Eventually(getMatchedDevicesFromStatus(ctx, template2.Name, template2.Namespace, k8sClient)).Should(BeEmpty())
+	})
+
+	Context("Network Bay pairing", func() {
+		newBayTemplate := func() *v1alpha1.NicConfigurationTemplate {
+			return &v1alpha1.NicConfigurationTemplate{
+				ObjectMeta: metav1.ObjectMeta{Name: templateName, Namespace: namespaceName},
+				Spec: v1alpha1.NicConfigurationTemplateSpec{
+					NicSelector: &v1alpha1.NicSelectorSpec{NicType: consts.ConnectX9DeviceID},
+					Template: &v1alpha1.ConfigurationTemplateSpec{
+						NumVfs:     0,
+						NetworkBay: &v1alpha1.NetworkBaySpec{Conf: "3"},
+					},
+				},
+			}
+		}
+
+		createBayDevice := func(name, pci, serial string, asic int) *v1alpha1.NicDevice {
+			device := &v1alpha1.NicDevice{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespaceName}}
+			Expect(k8sClient.Create(ctx, device)).To(Succeed())
+			device.Status = v1alpha1.NicDeviceStatus{
+				Node:         nodeName,
+				Type:         consts.ConnectX9DeviceID,
+				SerialNumber: serial,
+				Ports:        []v1alpha1.NicDevicePortSpec{{PCI: pci}},
+				NetworkBay:   &v1alpha1.NicDeviceNetworkBayStatus{Asic: asic},
+			}
+			Expect(k8sClient.Status().Update(ctx, device)).To(Succeed())
+			return device
+		}
+
+		networkBayConditionStatus := func(name string) func() (metav1.ConditionStatus, error) {
+			return func() (metav1.ConditionStatus, error) {
+				device := &v1alpha1.NicDevice{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespaceName}, device); err != nil {
+					return "", err
+				}
+				cond := meta.FindStatusCondition(device.Status.Conditions, consts.NetworkBayCondition)
+				if cond == nil {
+					return "", nil
+				}
+				return cond.Status, nil
+			}
+		}
+
+		It("applies the template to both ASICs of a whole bay", func() {
+			template := newBayTemplate()
+			Expect(k8sClient.Create(ctx, template)).To(Succeed())
+
+			device1 := createBayDevice("bay-a", "0000:0b:00.0", "baySerial", 0)
+			device2 := createBayDevice("bay-b", "0000:0e:00.0", "baySerial", 1)
+
+			Eventually(getDeviceSpecTemplate(ctx, device1.Name, namespaceName, k8sClient)).WithTimeout(time.Minute).Should(Equal(template.Spec.Template))
+			Eventually(getDeviceSpecTemplate(ctx, device2.Name, namespaceName, k8sClient)).Should(Equal(template.Spec.Template))
+			Eventually(getMatchedDevicesFromStatus(ctx, template.Name, template.Namespace, k8sClient)).Should(Equal([]string{device1.Name, device2.Name}))
+		})
+
+		It("rejects a node whose matched devices do not pair by serial number", func() {
+			template := newBayTemplate()
+			Expect(k8sClient.Create(ctx, template)).To(Succeed())
+
+			device1 := createBayDevice("bay-c", "0000:0b:00.0", "serialA", 0)
+			device2 := createBayDevice("bay-d", "0000:0e:00.0", "serialB", 1)
+
+			Consistently(getDeviceSpecTemplate(ctx, device1.Name, namespaceName, k8sClient), time.Second).Should(BeNil())
+			Consistently(getDeviceSpecTemplate(ctx, device2.Name, namespaceName, k8sClient), time.Second).Should(BeNil())
+			Eventually(networkBayConditionStatus(device1.Name)).WithTimeout(time.Minute).Should(Equal(metav1.ConditionFalse))
+			Eventually(getMatchedDevicesFromStatus(ctx, template.Name, template.Namespace, k8sClient)).Should(BeEmpty())
+		})
+
+		It("rejects the whole bay when one ASIC is in a multi-template conflict", func() {
+			// A bay template that selects both ASICs by NIC type.
+			template := newBayTemplate()
+			Expect(k8sClient.Create(ctx, template)).To(Succeed())
+
+			// A second, overlapping template that selects only the second ASIC by PCI address,
+			// putting that ASIC into a multi-template conflict (its spec gets cleared).
+			conflicting := &v1alpha1.NicConfigurationTemplate{
+				ObjectMeta: metav1.ObjectMeta{Name: "conflicting-template", Namespace: namespaceName},
+				Spec: v1alpha1.NicConfigurationTemplateSpec{
+					NicSelector: &v1alpha1.NicSelectorSpec{
+						NicType:      consts.ConnectX9DeviceID,
+						PciAddresses: []string{"0000:0e:00.0"},
+					},
+					Template: &v1alpha1.ConfigurationTemplateSpec{NumVfs: 0, LinkType: consts.Ethernet},
+				},
+			}
+			Expect(k8sClient.Create(ctx, conflicting)).To(Succeed())
+
+			device1 := createBayDevice("bay-g", "0000:0b:00.0", "conflictSerial", 0)
+			device2 := createBayDevice("bay-h", "0000:0e:00.0", "conflictSerial", 1)
+
+			// Neither ASIC may be configured: device2 is in conflict, so the bay is not atomic and
+			// device1 (its sibling) must not receive the bay config on its own.
+			Consistently(getDeviceSpecTemplate(ctx, device1.Name, namespaceName, k8sClient), time.Second).Should(BeNil())
+			Consistently(getDeviceSpecTemplate(ctx, device2.Name, namespaceName, k8sClient), time.Second).Should(BeNil())
+			Eventually(networkBayConditionStatus(device1.Name)).WithTimeout(time.Minute).Should(Equal(metav1.ConditionFalse))
+			Eventually(getMatchedDevicesFromStatus(ctx, template.Name, template.Namespace, k8sClient)).Should(BeEmpty())
+		})
+
+		It("clears the device imbalance condition once the bay becomes whole", func() {
+			template := newBayTemplate()
+			Expect(k8sClient.Create(ctx, template)).To(Succeed())
+
+			// Only one ASIC discovered first — the bay is incomplete and the device is rejected.
+			device1 := createBayDevice("bay-e", "0000:0b:00.0", "resolveSerial", 0)
+			Eventually(networkBayConditionStatus(device1.Name)).WithTimeout(time.Minute).Should(Equal(metav1.ConditionFalse))
+
+			// Sibling ASIC finishes discovery — the bay is now whole.
+			device2 := createBayDevice("bay-f", "0000:0e:00.0", "resolveSerial", 1)
+
+			Eventually(getDeviceSpecTemplate(ctx, device1.Name, namespaceName, k8sClient)).WithTimeout(time.Minute).Should(Equal(template.Spec.Template))
+			Eventually(getDeviceSpecTemplate(ctx, device2.Name, namespaceName, k8sClient)).Should(Equal(template.Spec.Template))
+			Eventually(networkBayConditionStatus(device1.Name)).WithTimeout(time.Minute).Should(Equal(metav1.ConditionTrue))
+		})
 	})
 })

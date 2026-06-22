@@ -114,6 +114,37 @@ var _ = Describe("ConfigValidationImpl", func() {
 			Expect(nvParams).ToNot(HaveKey(consts.LinkTypeP2Param))
 		})
 
+		It("should not emit LINK_TYPE params when linkType is unset (Network Bay)", func() {
+			device := &v1alpha1.NicDevice{
+				Spec: v1alpha1.NicDeviceSpec{
+					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
+						Template: &v1alpha1.ConfigurationTemplateSpec{
+							NumVfs:     0,
+							NetworkBay: &v1alpha1.NetworkBaySpec{Conf: "3"},
+						},
+					},
+				},
+				Status: v1alpha1.NicDeviceStatus{
+					Ports: []v1alpha1.NicDevicePortSpec{
+						{PCI: "0000:0b:00.0"},
+						{PCI: "0000:0b:00.1"},
+					},
+				},
+			}
+
+			// Firmware exposes LINK_TYPE slots, but the template does not set linkType, so the
+			// operator must not emit LINK_TYPE_P* (set_system_conf owns the link type).
+			query := types.NewNvConfigQuery()
+			query.DefaultConfig = map[string][]string{
+				consts.LinkTypeP1Param: {"2"},
+				consts.LinkTypeP2Param: {"2"},
+			}
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(nvParams).ToNot(HaveKey(consts.LinkTypeP1Param))
+			Expect(nvParams).ToNot(HaveKey(consts.LinkTypeP2Param))
+		})
+
 		It("should omit parameters for the second port if device is single port", func() {
 			device := &v1alpha1.NicDevice{
 				Spec: v1alpha1.NicDeviceSpec{
