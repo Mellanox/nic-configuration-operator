@@ -92,3 +92,23 @@ var _ = Describe("LoadSpectrumXConfig", func() {
 		Expect(err).To(HaveOccurred())
 	})
 })
+
+var _ = Describe("ParseSpectrumXConfig", func() {
+	It("parses raw YAML bytes and populates fields", func() {
+		cfg, err := ParseSpectrumXConfig([]byte(spectrumXTestYAML))
+		Expect(err).ToNot(HaveOccurred())
+		Expect(cfg).ToNot(BeNil())
+
+		Expect(cfg.MlxConfig).To(HaveKey("swplb"))
+		swplb := cfg.MlxConfig["swplb"]["1023"]
+		Expect(swplb.Breakout).To(HaveKey(2))
+		Expect(swplb.PostBreakout).To(HaveKeyWithValue("SRIOV_EN", "1"))
+		Expect(cfg.UseSoftwareCCAlgorithm).To(BeTrue())
+		Expect(cfg.DocaCCVersion).To(Equal("1.0"))
+	})
+
+	It("returns an error on malformed YAML", func() {
+		_, err := ParseSpectrumXConfig([]byte("mlxConfig: [this is: not valid"))
+		Expect(err).To(HaveOccurred())
+	})
+})

@@ -199,6 +199,16 @@ func (_m *SpectrumXManager) RuntimeConfigApplied(device *v1alpha1.NicDevice) (bo
 	return r0, r1
 }
 
+// SetConfig provides a mock function with given fields: version, config
+func (_m *SpectrumXManager) SetConfig(version string, config *types.SpectrumXConfig) {
+	_m.Called(version, config)
+}
+
+// RemoveConfig provides a mock function with given fields: version
+func (_m *SpectrumXManager) RemoveConfig(version string) {
+	_m.Called(version)
+}
+
 // NewSpectrumXManager creates a new instance of SpectrumXManager. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewSpectrumXManager(t interface {

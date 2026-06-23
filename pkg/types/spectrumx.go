@@ -64,19 +64,25 @@ type ConfigurationParameter struct {
 	HwplbFirstPortOnly bool   `yaml:"hwplbFirstPortOnly,omitempty"`
 }
 
-func LoadSpectrumXConfig(configPath string) (*SpectrumXConfig, error) {
+// ParseSpectrumXConfig unmarshals a SpectrumXConfig from raw YAML bytes.
+// Used to load profiles delivered via in-cluster ConfigMaps.
+func ParseSpectrumXConfig(data []byte) (*SpectrumXConfig, error) {
 	spectrumXConfig := &SpectrumXConfig{}
-
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil, err
-	}
 
 	if err := yaml.Unmarshal(data, spectrumXConfig); err != nil {
 		return nil, err
 	}
 
 	return spectrumXConfig, nil
+}
+
+func LoadSpectrumXConfig(configPath string) (*SpectrumXConfig, error) {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, err
+	}
+
+	return ParseSpectrumXConfig(data)
 }
 
 const ValuesDoNotMatchErrorPrefix = "values do not match"

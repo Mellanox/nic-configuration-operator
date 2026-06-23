@@ -67,9 +67,18 @@ type SpectrumXManager interface {
 	// GetCCTerminationChannel returns a read-only channel that receives the RDMA interface name
 	// when a DOCA SPC-X CC process terminates unexpectedly after startup
 	GetCCTerminationChannel() <-chan string
+	// SetConfig upserts the Spectrum-X profile for the given version (e.g. "RA2.0").
+	// Called by the SpectrumXProfileReconciler when a profile ConfigMap is created/updated.
+	SetConfig(version string, config *types.SpectrumXConfig)
+	// RemoveConfig removes the Spectrum-X profile for the given version.
+	// Called by the SpectrumXProfileReconciler when a profile ConfigMap is deleted.
+	RemoveConfig(version string)
 }
 
 type spectrumXConfigManager struct {
+	// configMutex guards spectrumXConfigs, which is mutated at runtime by the
+	// SpectrumXProfileReconciler while being read from reconcile goroutines.
+	configMutex      sync.RWMutex
 	spectrumXConfigs map[string]*types.SpectrumXConfig
 	dmsManager       dms.DMSManager
 	execInterface    execUtils.Interface
@@ -112,10 +121,32 @@ func filterParameters(params []types.ConfigurationParameter, deviceType string, 
 	return filtered
 }
 
+// getConfig returns the SpectrumXConfig for a version under a read lock.
+func (m *spectrumXConfigManager) getConfig(version string) (*types.SpectrumXConfig, bool) {
+	m.configMutex.RLock()
+	defer m.configMutex.RUnlock()
+	config, ok := m.spectrumXConfigs[version]
+	return config, ok
+}
+
+// SetConfig upserts the Spectrum-X profile for the given version.
+func (m *spectrumXConfigManager) SetConfig(version string, config *types.SpectrumXConfig) {
+	m.configMutex.Lock()
+	defer m.configMutex.Unlock()
+	m.spectrumXConfigs[version] = config
+}
+
+// RemoveConfig removes the Spectrum-X profile for the given version.
+func (m *spectrumXConfigManager) RemoveConfig(version string) {
+	m.configMutex.Lock()
+	defer m.configMutex.Unlock()
+	delete(m.spectrumXConfigs, version)
+}
+
 // getDesiredConfig looks up the SpectrumXConfig for the device's version
 func (m *spectrumXConfigManager) getDesiredConfig(device *v1alpha1.NicDevice) (*types.SpectrumXConfig, error) {
 	version := device.Spec.Configuration.Template.SpectrumXOptimized.Version
-	config, ok := m.spectrumXConfigs[version]
+	config, ok := m.getConfig(version)
 	if !ok {
 		return nil, fmt.Errorf("spectrum-x config version %s not found", version)
 	}
@@ -318,7 +349,7 @@ func (m *spectrumXConfigManager) RuntimeConfigApplied(device *v1alpha1.NicDevice
 	log.Log.Info("SpectrumXConfigManager.RuntimeConfigApplied()", "device", device.Name)
 
 	spcXSpec := device.Spec.Configuration.Template.SpectrumXOptimized
-	desiredConfig, found := m.spectrumXConfigs[spcXSpec.Version]
+	desiredConfig, found := m.getConfig(spcXSpec.Version)
 	if !found {
 		return false, fmt.Errorf("spectrumx config not found for version %s", spcXSpec.Version)
 	}
@@ -472,7 +503,7 @@ func (m *spectrumXConfigManager) RuntimeConfigApplied(device *v1alpha1.NicDevice
 // ApplyRuntimeConfig applies the desired Spectrum-X runtime spec to the device
 func (m *spectrumXConfigManager) ApplyRuntimeConfig(device *v1alpha1.NicDevice) (*types.RuntimeConfigurationApplyResult, error) {
 	spcXSpec := device.Spec.Configuration.Template.SpectrumXOptimized
-	desiredConfig, found := m.spectrumXConfigs[spcXSpec.Version]
+	desiredConfig, found := m.getConfig(spcXSpec.Version)
 	if !found {
 		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, fmt.Errorf("spectrumx config not found for version %s", spcXSpec.Version)
 	}
@@ -634,7 +665,7 @@ func (m *spectrumXConfigManager) GetDocaCCTargetVersion(device *v1alpha1.NicDevi
 	}
 
 	spcXVersion := device.Spec.Configuration.Template.SpectrumXOptimized.Version
-	config, found := m.spectrumXConfigs[spcXVersion]
+	config, found := m.getConfig(spcXVersion)
 	if !found {
 		return "", fmt.Errorf("spectrumx config not found for version %s", spcXVersion)
 	}
@@ -730,6 +761,11 @@ func (m *spectrumXConfigManager) GetCCTerminationChannel() <-chan string {
 }
 
 func NewSpectrumXConfigManager(dmsManager dms.DMSManager, spectrumXConfigs map[string]*types.SpectrumXConfig) SpectrumXManager {
+	// Ensure the map is always usable so SetConfig is safe even when started with no configs
+	// (the operator daemon loads profiles at runtime from ConfigMaps via SetConfig).
+	if spectrumXConfigs == nil {
+		spectrumXConfigs = map[string]*types.SpectrumXConfig{}
+	}
 	return &spectrumXConfigManager{
 		dmsManager:        dmsManager,
 		spectrumXConfigs:  spectrumXConfigs,
