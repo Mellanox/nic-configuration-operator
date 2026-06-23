@@ -120,10 +120,17 @@ const (
 	HostPath = "/host"
 
 	SupportedNicFirmwareConfigmap = "nic-configuration-operator-supported-nic-firmware"
-	Mlx5ModuleVersionPath         = "/sys/bus/pci/drivers/mlx5_core/module/version"
-	Mlx5CoreDriverName            = "mlx5_core"
-	PCIDevicesSysfsPath           = "/sys/bus/pci/devices"
-	Mlx5CoreDriverBindPath        = "/sys/bus/pci/drivers/mlx5_core/bind"
+
+	// SpectrumXProfileLabel selects ConfigMaps that carry a Spectrum-X profile.
+	// Presence of the key selects the ConfigMap; its value is ignored.
+	SpectrumXProfileLabel = "network.nvidia.com/operator.nic-configuration.spectrum-x-profile"
+	// SpectrumXProfileConfigMapDataKey is the ConfigMap Data key holding the SpectrumXConfig YAML.
+	// The ConfigMap name is used as the Spectrum-X version key (template.spectrumXOptimized.version).
+	SpectrumXProfileConfigMapDataKey = "profile"
+	Mlx5ModuleVersionPath            = "/sys/bus/pci/drivers/mlx5_core/module/version"
+	Mlx5CoreDriverName               = "mlx5_core"
+	PCIDevicesSysfsPath              = "/sys/bus/pci/devices"
+	Mlx5CoreDriverBindPath           = "/sys/bus/pci/drivers/mlx5_core/bind"
 
 	FwConfigNotAppliedAfterRebootErrorMsg = "firmware configuration failed to apply after reboot"
 

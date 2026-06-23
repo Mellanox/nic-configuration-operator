@@ -23,11 +23,15 @@ import (
 	"slices"
 
 	maintenanceoperator "github.com/Mellanox/maintenance-operator/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/selection"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -61,11 +65,28 @@ func main() {
 	utilruntime.Must(maintenanceoperator.AddToScheme(scheme))
 	utilruntime.Must(v1alpha1.AddToScheme(scheme))
 
+	// Restrict the cached ConfigMap informer to objects carrying the Spectrum-X profile label
+	// (any value), so the daemon doesn't watch/cache every ConfigMap in the cluster. The
+	// firmware-map ConfigMap is read via a raw client (helper.InitNicFwMapFromConfigMap), not
+	// the cached client, so this narrowing is safe.
+	spectrumXProfileReq, err := labels.NewRequirement(consts.SpectrumXProfileLabel, selection.Exists, nil)
+	if err != nil {
+		log.Log.Error(err, "unable to build spectrum-x profile label selector")
+		os.Exit(1)
+	}
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
 		// Setting bind address to 0 disables the health probe / metrics server
 		HealthProbeBindAddress: "0",
 		Metrics:                metricsserver.Options{BindAddress: "0"},
+		Cache: cache.Options{
+			ByObject: map[client.Object]cache.ByObject{
+				&corev1.ConfigMap{}: {
+					Label: labels.NewSelector().Add(*spectrumXProfileReq),
+				},
+			},
+		},
 	})
 	if err != nil {
 		log.Log.Error(err, "unable to create manager")
@@ -171,6 +192,16 @@ func main() {
 	}
 	if err = nicInterfaceNameTemplateReconciler.SetupWithManager(mgr); err != nil {
 		log.Log.Error(err, "unable to create controller", "controller", "NicInterfaceNameTemplateReconciler")
+		os.Exit(1)
+	}
+
+	spectrumXProfileReconciler := &controller.SpectrumXProfileReconciler{
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		SpectrumXManager: spectrumXConfigManager,
+	}
+	if err = spectrumXProfileReconciler.SetupWithManager(mgr); err != nil {
+		log.Log.Error(err, "unable to create controller", "controller", "SpectrumXProfileReconciler")
 		os.Exit(1)
 	}
 
