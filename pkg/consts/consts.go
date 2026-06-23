@@ -158,6 +158,9 @@ const (
 	TrustModeDscp = "dscp"
 	TrustModePfc  = "pfc"
 
+	RoceModeV1 = 1
+	RoceModeV2 = 2
+
 	OverlayNone = "none"
 	OverlayL3   = "l3"
 

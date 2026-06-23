@@ -32,33 +32,21 @@ func (_m *ConfigValidation) AdvancedPCISettingsEnabled(nvConfig types.NvConfigQu
 }
 
 // CalculateDesiredRuntimeConfig provides a mock function with given fields: device
-func (_m *ConfigValidation) CalculateDesiredRuntimeConfig(device *v1alpha1.NicDevice) (int, *v1alpha1.QosSpec) {
+func (_m *ConfigValidation) CalculateDesiredRuntimeConfig(device *v1alpha1.NicDevice) types.DesiredRuntimeConfig {
 	ret := _m.Called(device)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CalculateDesiredRuntimeConfig")
 	}
 
-	var r0 int
-	var r1 *v1alpha1.QosSpec
-	if rf, ok := ret.Get(0).(func(*v1alpha1.NicDevice) (int, *v1alpha1.QosSpec)); ok {
-		return rf(device)
-	}
-	if rf, ok := ret.Get(0).(func(*v1alpha1.NicDevice) int); ok {
+	var r0 types.DesiredRuntimeConfig
+	if rf, ok := ret.Get(0).(func(*v1alpha1.NicDevice) types.DesiredRuntimeConfig); ok {
 		r0 = rf(device)
 	} else {
-		r0 = ret.Get(0).(int)
+		r0 = ret.Get(0).(types.DesiredRuntimeConfig)
 	}
 
-	if rf, ok := ret.Get(1).(func(*v1alpha1.NicDevice) *v1alpha1.QosSpec); ok {
-		r1 = rf(device)
-	} else {
-		if ret.Get(1) != nil {
-			r1 = ret.Get(1).(*v1alpha1.QosSpec)
-		}
-	}
-
-	return r0, r1
+	return r0
 }
 
 // ConstructNvParamMapFromTemplate provides a mock function with given fields: device, nvConfigQuery

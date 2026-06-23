@@ -370,4 +370,42 @@ var _ = Describe("ConfigurationUtils", func() {
 			})
 		})
 	})
+	Describe("GetPauseFrames", func() {
+		var (
+			h        *configurationUtils
+			fakeExec *execTesting.FakeExec
+		)
+
+		BeforeEach(func() {
+			fakeExec = &execTesting.FakeExec{}
+
+			h = &configurationUtils{
+				execInterface: fakeExec,
+			}
+		})
+
+		It("should return RX and TX pause frame state independently", func() {
+			ethtoolOutput := `
+Pause parameters for eth0:
+Autonegotiate:	off
+RX:		on
+TX:		off
+`
+			fakeCmd := &execTesting.FakeCmd{}
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
+				return []byte(ethtoolOutput), nil, nil
+			})
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				Expect(cmd).To(Equal("ethtool"))
+				Expect(args).To(Equal([]string{"-a", "eth0"}))
+				return fakeCmd
+			})
+
+			rx, tx, err := h.GetPauseFrames("eth0")
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(rx).To(BeTrue())
+			Expect(tx).To(BeFalse())
+		})
+	})
 })
