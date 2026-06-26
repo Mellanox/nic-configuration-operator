@@ -123,12 +123,10 @@ type GpuDirectOptimizedSpec struct {
 // SpectrumXOptimizedSpec enables Spectrum-X specific optimizations
 // +kubebuilder:validation:XValidation:rule="!has(self.multiplaneMode) || !has(self.numberOfPlanes) || self.multiplaneMode != 'none' || self.numberOfPlanes == 1",message="when MultiplaneMode is none, numberOfPlanes must be 1"
 // +kubebuilder:validation:XValidation:rule="!has(self.multiplaneMode) || !has(self.numberOfPlanes) || self.multiplaneMode == 'none' || self.numberOfPlanes != 1",message="when MultiplaneMode is not none, numberOfPlanes must not be 1"
-// +kubebuilder:validation:XValidation:rule="!has(self.version) || !has(self.multiplaneMode) || !has(self.numberOfPlanes) || !(self.version == 'RA1.3' || self.version == 'RA2.0') || (self.multiplaneMode == 'none' && self.numberOfPlanes == 1)",message="when Version is RA1.3 or RA2.0, MultiplaneMode must be none and numberOfPlanes must be 1"
 type SpectrumXOptimizedSpec struct {
 	// Optimize Spectrum X
 	Enabled bool `json:"enabled"`
-	// Version of the Spectrum-X architecture to optimize for
-	// +kubebuilder:validation:Enum=RA1.3;RA2.0;RA2.1;RA2.2
+	// Version of the Spectrum-X architecture to optimize for. Should match the name of the config map with Spectrum-X profile 
 	// +required
 	Version string `json:"version"`
 	// Overlay mode to be configured

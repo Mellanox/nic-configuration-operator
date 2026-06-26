@@ -276,12 +276,8 @@ spec:
                             type: string
                           version:
                             description: Version of the Spectrum-X architecture to
-                              optimize for
-                            enum:
-                            - RA1.3
-                            - RA2.0
-                            - RA2.1
-                            - RA2.2
+                              optimize for. Should match the name of the config map
+                              with Spectrum-X profile
                             type: string
                         required:
                         - enabled
@@ -298,12 +294,6 @@ spec:
                           rule: '!has(self.multiplaneMode) || !has(self.numberOfPlanes)
                             || self.multiplaneMode == ''none'' || self.numberOfPlanes
                             != 1'
-                        - message: when Version is RA1.3 or RA2.0, MultiplaneMode
-                            must be none and numberOfPlanes must be 1
-                          rule: '!has(self.version) || !has(self.multiplaneMode) ||
-                            !has(self.numberOfPlanes) || !(self.version == ''RA1.3''
-                            || self.version == ''RA2.0'') || (self.multiplaneMode
-                            == ''none'' && self.numberOfPlanes == 1)'
                     required:
                     - numVfs
                     type: object
