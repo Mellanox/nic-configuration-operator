@@ -316,103 +316,13 @@ var _ = Describe("NicConfigurationTemplate CEL validation", func() {
 		})
 	})
 
-	// Tests for Version-specific MultiplaneMode restrictions
-	Context("Version-specific MultiplaneMode validation", func() {
-		It("allows Version=RA1.3 with MultiplaneMode=none and numberOfPlanes=1", func() {
-			obj := newNicConfigurationTemplate("spcx-ra13-none-1", "Ethernet", 1, &SpectrumXOptimizedSpec{
+	Context("custom profile name validation", func() {
+		It("allows a custom Spectrum-X profile name", func() {
+			obj := newNicConfigurationTemplate("spcx-custom-profile", "Ethernet", 1, &SpectrumXOptimizedSpec{
 				Enabled:        true,
-				Version:        "RA1.3",
-				MultiplaneMode: "none",
-				NumberOfPlanes: 1,
-			})
-			Expect(k8sClient.Create(ctx, obj)).To(Succeed())
-		})
-
-		It("rejects Version=RA1.3 with MultiplaneMode=swplb", func() {
-			obj := newNicConfigurationTemplate("spcx-ra13-swplb", "Ethernet", 1, &SpectrumXOptimizedSpec{
-				Enabled:        true,
-				Version:        "RA1.3",
+				Version:        "custom-profile",
 				MultiplaneMode: "swplb",
 				NumberOfPlanes: 2,
-			})
-			err := k8sClient.Create(ctx, obj)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("when Version is RA1.3 or RA2.0, MultiplaneMode must be none and numberOfPlanes must be 1"))
-		})
-
-		It("rejects Version=RA1.3 with MultiplaneMode=none but numberOfPlanes=2", func() {
-			obj := newNicConfigurationTemplate("spcx-ra13-none-2", "Ethernet", 1, &SpectrumXOptimizedSpec{
-				Enabled:        true,
-				Version:        "RA1.3",
-				MultiplaneMode: "none",
-				NumberOfPlanes: 2,
-			})
-			err := k8sClient.Create(ctx, obj)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("when Version is RA1.3 or RA2.0, MultiplaneMode must be none and numberOfPlanes must be 1"))
-		})
-
-		It("allows Version=RA2.0 with MultiplaneMode=none and numberOfPlanes=1", func() {
-			obj := newNicConfigurationTemplate("spcx-ra20-none-1", "Ethernet", 1, &SpectrumXOptimizedSpec{
-				Enabled:        true,
-				Version:        "RA2.0",
-				MultiplaneMode: "none",
-				NumberOfPlanes: 1,
-			})
-			Expect(k8sClient.Create(ctx, obj)).To(Succeed())
-		})
-
-		It("rejects Version=RA2.0 with MultiplaneMode=hwplb", func() {
-			obj := newNicConfigurationTemplate("spcx-ra20-hwplb", "Ethernet", 1, &SpectrumXOptimizedSpec{
-				Enabled:        true,
-				Version:        "RA2.0",
-				MultiplaneMode: "hwplb",
-				NumberOfPlanes: 4,
-			})
-			err := k8sClient.Create(ctx, obj)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("when Version is RA1.3 or RA2.0, MultiplaneMode must be none and numberOfPlanes must be 1"))
-		})
-
-		It("rejects Version=RA2.0 with MultiplaneMode=uniplane", func() {
-			obj := newNicConfigurationTemplate("spcx-ra20-uniplane", "Ethernet", 1, &SpectrumXOptimizedSpec{
-				Enabled:        true,
-				Version:        "RA2.0",
-				MultiplaneMode: "uniplane",
-				NumberOfPlanes: 2,
-			})
-			err := k8sClient.Create(ctx, obj)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("when Version is RA1.3 or RA2.0, MultiplaneMode must be none and numberOfPlanes must be 1"))
-		})
-
-		It("allows Version=RA2.1 with MultiplaneMode=swplb and numberOfPlanes=2", func() {
-			obj := newNicConfigurationTemplate("spcx-ra21-swplb-2", "Ethernet", 1, &SpectrumXOptimizedSpec{
-				Enabled:        true,
-				Version:        "RA2.1",
-				MultiplaneMode: "swplb",
-				NumberOfPlanes: 2,
-			})
-			Expect(k8sClient.Create(ctx, obj)).To(Succeed())
-		})
-
-		It("allows Version=RA2.1 with MultiplaneMode=hwplb and numberOfPlanes=4", func() {
-			obj := newNicConfigurationTemplate("spcx-ra21-hwplb-4", "Ethernet", 1, &SpectrumXOptimizedSpec{
-				Enabled:        true,
-				Version:        "RA2.1",
-				MultiplaneMode: "hwplb",
-				NumberOfPlanes: 4,
-			})
-			obj.Spec.NicSelector.NicType = nicTypeConnectX8
-			Expect(k8sClient.Create(ctx, obj)).To(Succeed())
-		})
-
-		It("allows Version=RA2.1 with MultiplaneMode=none and numberOfPlanes=1", func() {
-			obj := newNicConfigurationTemplate("spcx-ra21-none-1", "Ethernet", 1, &SpectrumXOptimizedSpec{
-				Enabled:        true,
-				Version:        "RA2.1",
-				MultiplaneMode: "none",
-				NumberOfPlanes: 1,
 			})
 			Expect(k8sClient.Create(ctx, obj)).To(Succeed())
 		})
