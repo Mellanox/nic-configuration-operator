@@ -55,6 +55,46 @@ type NVConfigUtils interface {
 	ValidateSystemConf(ctx context.Context, pciAddr string, conf string, asic int) (bool, error)
 }
 
+// SystemConfValidator is an optional extension of NVConfigUtils exposing the per-param results of
+// validate_system_conf. It is kept separate from NVConfigUtils so adding it does not break source
+// compatibility for existing library consumers that implement NVConfigUtils themselves; callers
+// type-assert for it and fall back when it is absent. NewNVConfigUtils() returns a value that satisfies it.
+type SystemConfValidator interface {
+	// ValidateSystemConfDetailed runs `validate_system_conf` and returns the per-param OK/MISMATCH
+	// results plus the skipped params, instead of collapsing to a single match bit. Callers that allow
+	// explicit overrides (e.g. rawNvConfig / Spectrum-X) on top of a named system conf use this to decide
+	// whether a reported mismatch is an intentional override or real drift requiring re-apply.
+	ValidateSystemConfDetailed(ctx context.Context, pciAddr string, conf string, asic int) (*SystemConfValidationResult, error)
+}
+
+// SystemConfEntry is a single per-param result line from `mlxconfig validate_system_conf`.
+type SystemConfEntry struct {
+	// Param is the nv config parameter name, e.g. "NUM_OF_PF" or "MODULE_SPLIT_M0[0]".
+	Param string
+	// Status is "OK" or "MISMATCH".
+	Status string
+	// Expected is the value the system conf expects. Populated for MISMATCH rows only.
+	Expected string
+	// Actual is the value currently on the device. Populated for both OK and MISMATCH rows.
+	Actual string
+}
+
+// SystemConfValidationResult is the parsed output of `mlxconfig validate_system_conf`.
+type SystemConfValidationResult struct {
+	// Entries holds the OK and MISMATCH rows in source order.
+	Entries []SystemConfEntry
+	// Skipped lists params under "SKIPPED (failed to query):" — informational, not drift.
+	Skipped []string
+	// Matches mirrors the trailing `Result:` line (true == device matches the system conf).
+	Matches bool
+}
+
+// Status values for SystemConfEntry.Status.
+const (
+	SystemConfStatusOK       = "OK"
+	SystemConfStatusMismatch = "MISMATCH"
+)
+
 type nvConfigUtils struct {
 	execInterface execUtils.Interface
 }
@@ -267,8 +307,18 @@ func (h *nvConfigUtils) SetSystemConf(ctx context.Context, pciAddr string, conf 
 }
 
 // ValidateSystemConf reports whether the device's applied configuration matches the named system conf.
+// It is a thin wrapper over ValidateSystemConfDetailed, retained for callers that only need the match bit.
 func (h *nvConfigUtils) ValidateSystemConf(ctx context.Context, pciAddr string, conf string, asic int) (bool, error) {
-	log.Log.Info("ConfigurationUtils.ValidateSystemConf()", "pciAddr", pciAddr, "conf", conf, "asic", asic)
+	result, err := h.ValidateSystemConfDetailed(ctx, pciAddr, conf, asic)
+	if err != nil {
+		return false, err
+	}
+	return result.Matches, nil
+}
+
+// ValidateSystemConfDetailed runs validate_system_conf and returns the per-param results.
+func (h *nvConfigUtils) ValidateSystemConfDetailed(ctx context.Context, pciAddr string, conf string, asic int) (*SystemConfValidationResult, error) {
+	log.Log.Info("ConfigurationUtils.ValidateSystemConfDetailed()", "pciAddr", pciAddr, "conf", conf, "asic", asic)
 
 	args := []string{"-d", pciAddr, "-y", "validate_system_conf", systemConfToken(conf, asic)}
 	output, err := h.execInterface.CommandContext(ctx, "mlxconfig", args...).CombinedOutput()
@@ -276,43 +326,123 @@ func (h *nvConfigUtils) ValidateSystemConf(ctx context.Context, pciAddr string, 
 
 	// mlxconfig validate_system_conf exits non-zero (e.g. 3) when the device configuration does
 	// NOT match the system conf — that is a valid result, not a command failure. Treat the parsed
-	// "Result:" line as authoritative regardless of exit code, and only surface the command error
-	// when no result line could be parsed (i.e. mlxconfig genuinely failed to run).
-	matches, parseErr := parseValidateSystemConf(output)
+	// output as authoritative regardless of exit code, and only surface the command error when the
+	// output couldn't be parsed at all (i.e. mlxconfig genuinely failed to run).
+	result, resultLineFound, parseErr := parseValidateSystemConfDetailed(output)
 	if parseErr != nil {
 		if err != nil {
-			log.Log.Error(err, "ValidateSystemConf(): Failed to run mlxconfig", "pciAddr", pciAddr)
-			return false, err
+			log.Log.Error(err, "ValidateSystemConfDetailed(): Failed to run mlxconfig", "pciAddr", pciAddr)
+			return nil, err
 		}
-		return false, parseErr
+		return nil, parseErr
+	}
+	// No trailing "Result:" line means mlxconfig did not finish (e.g. it was killed or errored mid-output).
+	// In that case the parsed rows are partial, so we must not trust a derived match bit — surface the
+	// command error instead of reporting a (possibly false) match from incomplete data.
+	if !resultLineFound && err != nil {
+		log.Log.Error(err, "ValidateSystemConfDetailed(): incomplete validate_system_conf output", "pciAddr", pciAddr)
+		return nil, err
 	}
 
-	log.Log.Info("ValidateSystemConf() result", "pciAddr", pciAddr, "conf", conf, "asic", asic, "matches", matches)
-	return matches, nil
+	log.Log.Info("ValidateSystemConfDetailed() result", "pciAddr", pciAddr, "conf", conf, "asic", asic, "matches", result.Matches)
+	return result, nil
 }
 
-// parseValidateSystemConf parses the trailing `Result:` line of validate_system_conf output.
-// Sample output lines (see design doc §8):
+// parseValidateSystemConfDetailed parses the full per-param output of validate_system_conf.
+// Sample output (mismatch case):
 //
-//	Result: Device configuration MATCHES the system configuration.
+//	Validating system configuration 'conf3[1]' on device 0001:03:00.0
+//	------------------------------------------------------------------------
+//	  MISMATCH: BOARD_CONFIGURATION_MODE	Expected: 0	Actual: 1
+//	  OK:       MODULE_SPLIT_M0[8] = 0xFF
+//	  SKIPPED (failed to query):
+//	    - MODULE_SPLIT_M1[0]
+//	------------------------------------------------------------------------
 //	Result: Device configuration does NOT match the system configuration.
 //
-// The "does NOT match" substring is checked first so it can never be mistaken for a match.
-func parseValidateSystemConf(output []byte) (bool, error) {
+// Matches comes from the trailing Result line when present; otherwise it is derived from the
+// absence of MISMATCH rows. The second return value reports whether a "Result:" line was seen, so
+// callers can distinguish a complete parse from partial output. An output with neither a Result line
+// nor any parsed rows is an error.
+func parseValidateSystemConfDetailed(output []byte) (*SystemConfValidationResult, bool, error) {
+	result := &SystemConfValidationResult{}
+	foundResult := false
+	inSkipped := false
+
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if !strings.HasPrefix(line, "Result:") {
+		if line == "" || strings.HasPrefix(line, "---") {
+			inSkipped = false
 			continue
 		}
-		if strings.Contains(line, "does NOT match") {
-			return false, nil
-		}
-		if strings.Contains(line, "MATCHES") {
-			return true, nil
+
+		switch {
+		case strings.HasPrefix(line, "Result:"):
+			inSkipped = false
+			foundResult = true
+			// "does NOT match" is checked first so it can never be mistaken for a match.
+			if strings.Contains(line, "does NOT match") {
+				result.Matches = false
+			} else if strings.Contains(line, "MATCHES") {
+				result.Matches = true
+			}
+		case strings.HasPrefix(line, "SKIPPED"):
+			inSkipped = true
+		case inSkipped && strings.HasPrefix(line, "-"):
+			param := strings.TrimSpace(strings.TrimPrefix(line, "-"))
+			if param != "" {
+				result.Skipped = append(result.Skipped, param)
+			}
+		case strings.HasPrefix(line, "OK:"):
+			inSkipped = false
+			rest := strings.TrimSpace(strings.TrimPrefix(line, "OK:"))
+			// Expected shape is "KEY = VALUE"; keep the entry even if "=" is absent (malformed line)
+			// so it is still counted and surfaced rather than silently dropped.
+			param, actual := rest, ""
+			if idx := strings.Index(rest, "="); idx >= 0 {
+				param = strings.TrimSpace(rest[:idx])
+				actual = strings.TrimSpace(rest[idx+1:])
+			}
+			result.Entries = append(result.Entries, SystemConfEntry{Param: param, Status: SystemConfStatusOK, Actual: actual})
+		case strings.HasPrefix(line, "MISMATCH:"):
+			inSkipped = false
+			rest := strings.TrimSpace(strings.TrimPrefix(line, "MISMATCH:"))
+			fields := strings.Fields(rest)
+			if len(fields) == 0 {
+				continue
+			}
+			entry := SystemConfEntry{Param: fields[0], Status: SystemConfStatusMismatch}
+			for i := 0; i < len(fields)-1; i++ {
+				switch fields[i] {
+				case "Expected:":
+					entry.Expected = fields[i+1]
+				case "Actual:":
+					entry.Actual = fields[i+1]
+				}
+			}
+			result.Entries = append(result.Entries, entry)
+		default:
+			// Any other line (e.g. the "Validating system configuration ..." header) ends a SKIPPED block.
+			inSkipped = false
 		}
 	}
-	return false, fmt.Errorf("could not parse validate_system_conf output: %q", string(output))
+
+	if !foundResult {
+		if len(result.Entries) == 0 && len(result.Skipped) == 0 {
+			return nil, false, fmt.Errorf("could not parse validate_system_conf output: %q", string(output))
+		}
+		// No Result line: derive the match bit from the parsed rows (caller decides whether to trust it).
+		result.Matches = true
+		for _, e := range result.Entries {
+			if e.Status == SystemConfStatusMismatch {
+				result.Matches = false
+				break
+			}
+		}
+	}
+
+	return result, foundResult, nil
 }
 
 // ResetNvConfig resets NIC's nv config

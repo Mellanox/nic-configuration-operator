@@ -35,7 +35,8 @@ ConfigurationTemplateSpec is a set of configurations for the NICs
 <tr>
 <td><code>linkType</code><br />
 <em><a href="#LinkTypeEnum">LinkTypeEnum</a></em></td>
-<td><p>LinkType to be configured, Ethernet|Infiniband</p></td>
+<td><em>(Optional)</em>
+<p>LinkType to be configured, Ethernet|Infiniband. Required unless networkBay is configured; for Network Bay the link type is governed by the system configuration and must not be set.</p></td>
 </tr>
 <tr>
 <td><code>pciPerformanceOptimized</code><br />
@@ -53,14 +54,64 @@ ConfigurationTemplateSpec is a set of configurations for the NICs
 <td><p>GPU Direct optimization settings</p></td>
 </tr>
 <tr>
+<td><code>runtimePerformanceOptimized</code><br />
+<em><a href="#RuntimePerformanceOptimizedSpec">RuntimePerformanceOptimizedSpec</a></em></td>
+<td><p>Runtime NIC performance tuning (ring buffers, channels, LRO) applied via ethtool</p></td>
+</tr>
+<tr>
 <td><code>spectrumXOptimized</code><br />
 <em><a href="#SpectrumXOptimizedSpec">SpectrumXOptimizedSpec</a></em></td>
-<td><p>Spectrum-X optimization settings. Works only with linkType==Ethernet &amp;&amp; numVfs==0. Other optimizations must be skipped or disabled. RawNvConfig must be empty.</p></td>
+<td><p>Spectrum-X optimization settings. Works only with linkType==Ethernet &amp;&amp; numVfs==1. RawNvConfig parameters, if provided, are merged as overrides on top of Spectrum-X calculated
+params.</p></td>
+</tr>
+<tr>
+<td><code>networkBay</code><br />
+<em><a href="#NetworkBaySpec">NetworkBaySpec</a></em></td>
+<td><em>(Optional)</em>
+<p>NetworkBay configures a ConnectX-9 Network Bay card (per-ASIC set_system_conf). Allowed only for ConnectX-9 (nicType 1025).</p></td>
 </tr>
 <tr>
 <td><code>rawNvConfig</code><br />
 <em><a href="#NvConfigParam">[]NvConfigParam</a></em></td>
 <td><p>List of arbitrary nv config parameters</p></td>
+</tr>
+<tr>
+<td><code>force</code><br />
+<em>bool</em></td>
+<td><em>(Optional)</em>
+<p>Force passes <code>--force</code> to mlxconfig set commands. When set, the daemon applies the nv config batch and set_system_conf with –force, letting mlxconfig accept a batch it would otherwise
+refuse due to implicit parameter dependencies.</p></td>
+</tr>
+</tbody>
+</table>
+
+### ECNSpec
+
+(*Appears on:*[QosSpec](#QosSpec))
+
+ECNSpec specifies Explicit Congestion Notification settings
+
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>enabled</code><br />
+<em>bool</em></td>
+<td><p>Enable ECN on the specified priority</p></td>
+</tr>
+<tr>
+<td><code>priority</code><br />
+<em>int</em></td>
+<td><p>Traffic class / priority to enable ECN on (0-7)</p></td>
 </tr>
 </tbody>
 </table>
@@ -132,6 +183,34 @@ GpuDirectOptimizedSpec specifies GPU Direct optimization settings
 (*Appears on:*[ConfigurationTemplateSpec](#ConfigurationTemplateSpec))
 
 LinkTypeEnum described the link type (Ethernet / Infiniband)
+
+### NetworkBaySpec
+
+(*Appears on:*[ConfigurationTemplateSpec](#ConfigurationTemplateSpec))
+
+NetworkBaySpec configures a ConnectX-9 Network Bay (“orchid”) card. A Network Bay card exposes two CX9 ASICs as two PCI endpoints that share a single OSFP cage and must be configured as a pair.
+Allowed only when nicSelector.nicType == “1025” (ConnectX-9), enforced by CEL on NicConfigurationTemplateSpec.
+
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>conf</code><br />
+<em>string</em></td>
+<td><p>Conf is the argument passed to <code>mlxconfig set_system_conf</code>. The per-ASIC index is appended automatically by the daemon based on the device’s detected Network Bay ASIC index, e.g.
+set_system_conf [0].</p></td>
+</tr>
+</tbody>
+</table>
 
 ### NicConfigurationTemplate
 
@@ -366,17 +445,44 @@ for each PF - Mstconfig -d set ADVANCED_PCI_SETTINGS=1 * Node reboot - Applies n
 <tr>
 <td><code>rdmaDevicePrefix</code><br />
 <em>string</em></td>
-<td><p>— Parameters from the NicInterfaceNameTemplate CR — RdmaDevicePrefix specifies the prefix for the rdma device name</p></td>
+<td><p>— Parameters from the NicInterfaceNameTemplate CR — RdmaDevicePrefix specifies the prefix for the rdma device name. Empty means RDMA naming is skipped.</p></td>
 </tr>
 <tr>
 <td><code>netDevicePrefix</code><br />
 <em>string</em></td>
 <td><p>NetDevicePrefix specifies the prefix for the net device name</p></td>
 </tr>
+</tbody>
+</table>
+
+### NicDeviceNetworkBayStatus
+
+(*Appears on:*[NicDeviceStatus](#NicDeviceStatus))
+
+NicDeviceNetworkBayStatus holds the ConnectX-9 Network Bay identity of a device.
+
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
 <tr>
-<td><code>railPciAddresses</code><br />
-<em>[][]string</em></td>
-<td><p>RailPciAddresses defines the PCI address to rail mapping and order</p></td>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>asic</code><br />
+<em>int</em></td>
+<td><p>Asic is the orchid ASIC index (0 or 1) inferred from the MGIR.ga register field.</p></td>
+</tr>
+<tr>
+<td><code>peerPci</code><br />
+<em>string</em></td>
+<td><em>(Optional)</em>
+<p>PeerPCI is the PCI address of the sibling ASIC in the same Network Bay card (the other device sharing this device’s serial number). Empty if the peer could not be resolved.</p></td>
 </tr>
 </tbody>
 </table>
@@ -484,7 +590,9 @@ NicDeviceStatus defines the observed state of NicDevice
 <tr>
 <td><code>serialNumber</code><br />
 <em>string</em></td>
-<td><p>Serial number of the device, e.g. MT2116X09299</p></td>
+<td><p>SerialNumber of the device, e.g. MT2116X09299. Informational only — not guaranteed unique across all cards on a host: on systems with embedded NICs sharing a flashed VPD image (e.g. HGX B300)
+multiple cards will report the same serial number. The operator identifies NICs uniquely by their PCI device address (the <code>pci</code> field on the first entry in <code>ports</code>, with the
+function digit stripped).</p></td>
 </tr>
 <tr>
 <td><code>partNumber</code><br />
@@ -520,6 +628,12 @@ NicDeviceStatus defines the observed state of NicDevice
 <td><code>ports</code><br />
 <em><a href="#NicDevicePortSpec">[]NicDevicePortSpec</a></em></td>
 <td><p>List of ports for the device</p></td>
+</tr>
+<tr>
+<td><code>networkBay</code><br />
+<em><a href="#NicDeviceNetworkBayStatus">NicDeviceNetworkBayStatus</a></em></td>
+<td><em>(Optional)</em>
+<p>NetworkBay holds ConnectX-9 Network Bay (“orchid”) identity for the device. Set only when the device is detected as part of a Network Bay card.</p></td>
 </tr>
 <tr>
 <td><code>conditions</code><br />
@@ -814,8 +928,10 @@ NicInterfaceNameTemplate is the Schema for the nicinterfacenametemplates API
 <tr>
 <td><code>rdmaDevicePrefix</code><br />
 <em>string</em></td>
-<td><p>RdmaDevicePrefix specifies the prefix for the rdma device name %nic_id%, %plane_id% and %rail_id% placeholders can be used to construct the device name %nic_id% is the index of the NIC in the
-flattened list of NICs %plane_id% is the index of the plane of the specific NIC %rail_id% is the index of the rail where the given NIC belongs to</p></td>
+<td><em>(Optional)</em>
+<p>RdmaDevicePrefix specifies the prefix for the rdma device name. When empty, no RDMA udev rules are generated and RDMA device naming is skipped. %nic_id%, %plane_id% and %rail_id% placeholders can
+be used to construct the device name %nic_id% is the index of the NIC in the flattened list of NICs %plane_id% is the index of the plane of the specific NIC %rail_id% is the index of the rail where
+the given NIC belongs to</p></td>
 </tr>
 <tr>
 <td><code>netDevicePrefix</code><br />
@@ -871,8 +987,10 @@ NicInterfaceNameTemplateSpec defines the desired state of NicInterfaceNameTempla
 <tr>
 <td><code>rdmaDevicePrefix</code><br />
 <em>string</em></td>
-<td><p>RdmaDevicePrefix specifies the prefix for the rdma device name %nic_id%, %plane_id% and %rail_id% placeholders can be used to construct the device name %nic_id% is the index of the NIC in the
-flattened list of NICs %plane_id% is the index of the plane of the specific NIC %rail_id% is the index of the rail where the given NIC belongs to</p></td>
+<td><em>(Optional)</em>
+<p>RdmaDevicePrefix specifies the prefix for the rdma device name. When empty, no RDMA udev rules are generated and RDMA device naming is skipped. %nic_id%, %plane_id% and %rail_id% placeholders can
+be used to construct the device name %nic_id% is the index of the NIC in the flattened list of NICs %plane_id% is the index of the plane of the specific NIC %rail_id% is the index of the rail where
+the given NIC belongs to</p></td>
 </tr>
 <tr>
 <td><code>netDevicePrefix</code><br />
@@ -927,7 +1045,8 @@ NicSelectorSpec is a desired configuration for NICs
 <tr>
 <td><code>serialNumbers</code><br />
 <em>[]string</em></td>
-<td><p>Serial numbers of the NICs to be selected, e.g. MT2116X09299</p></td>
+<td><p>Serial numbers of the NICs to be selected, e.g. MT2116X09299. Note: serial numbers are not guaranteed unique — on systems with embedded NICs that share a flashed VPD image (e.g. HGX B300),
+multiple physical cards report the same serial, and this selector will match all of them. Use <code>pciAddresses</code> for precise per-card selection on such systems.</p></td>
 </tr>
 <tr>
 <td><code>partNumbers</code><br />
@@ -960,6 +1079,11 @@ NicTemplateStatus defines the observed state of NicConfigurationTemplate and Nic
 <em>[]string</em></td>
 <td><p>NicDevice CRs matching this configuration / firmware template</p></td>
 </tr>
+<tr>
+<td><code>conditions</code><br />
+<em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta">[]Kubernetes meta/v1.Condition</a></em></td>
+<td><p>Conditions observed for this template, e.g. a Network Bay pairing imbalance on a node</p></td>
+</tr>
 </tbody>
 </table>
 
@@ -988,6 +1112,32 @@ NicTemplateStatus defines the observed state of NicConfigurationTemplate and Nic
 <td><code>value</code><br />
 <em>string</em></td>
 <td><p>Value of the arbitrary nvconfig parameter</p></td>
+</tr>
+</tbody>
+</table>
+
+### PauseFramesSpec
+
+(*Appears on:*[QosSpec](#QosSpec))
+
+PauseFramesSpec specifies global pause frame settings
+
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>enabled</code><br />
+<em>bool</em></td>
+<td><p>Enable global pause frames (autoneg, rx, tx). Set to false to disable all pause frames (recommended when PFC is used).</p></td>
 </tr>
 </tbody>
 </table>
@@ -1049,7 +1199,7 @@ QosSpec specifies Quality of Service settings
 <tr>
 <td><code>trust</code><br />
 <em>string</em></td>
-<td><p>Trust mode for QoS settings, e.g. trust-dscp</p></td>
+<td><p>Trust mode for QoS settings, e.g. dscp</p></td>
 </tr>
 <tr>
 <td><code>pfc</code><br />
@@ -1060,6 +1210,21 @@ QosSpec specifies Quality of Service settings
 <td><code>tos</code><br />
 <em>int</em></td>
 <td><p>8-bit value for type of service</p></td>
+</tr>
+<tr>
+<td><code>cableLen</code><br />
+<em>int</em></td>
+<td><p>Cable length in meters, used for ECN buffer threshold calculation</p></td>
+</tr>
+<tr>
+<td><code>ecn</code><br />
+<em><a href="#ECNSpec">ECNSpec</a></em></td>
+<td><p>ECN (Explicit Congestion Notification) settings</p></td>
+</tr>
+<tr>
+<td><code>pauseFrames</code><br />
+<em><a href="#PauseFramesSpec">PauseFramesSpec</a></em></td>
+<td><p>Global pause frame settings (disable when using PFC)</p></td>
 </tr>
 </tbody>
 </table>
@@ -1092,6 +1257,57 @@ RoceOptimizedSpec specifies RoCE optimization settings
 <em><a href="#QosSpec">QosSpec</a></em></td>
 <td><p>Quality of Service settings</p></td>
 </tr>
+<tr>
+<td><code>roceMode</code><br />
+<em>int</em></td>
+<td><p>RoCE mode: 1 for RoCE v1, 2 for RoCE v2. Only effective when roceOptimized.enabled is true.</p></td>
+</tr>
+</tbody>
+</table>
+
+### RuntimePerformanceOptimizedSpec
+
+(*Appears on:*[ConfigurationTemplateSpec](#ConfigurationTemplateSpec))
+
+RuntimePerformanceOptimizedSpec specifies runtime NIC performance tuning applied via ethtool
+
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>enabled</code><br />
+<em>bool</em></td>
+<td><p>Enable runtime performance optimization</p></td>
+</tr>
+<tr>
+<td><code>rxRingSize</code><br />
+<em>int</em></td>
+<td><p>RX ring buffer size (ethtool -G rx)</p></td>
+</tr>
+<tr>
+<td><code>txRingSize</code><br />
+<em>int</em></td>
+<td><p>TX ring buffer size (ethtool -G tx)</p></td>
+</tr>
+<tr>
+<td><code>combinedChannels</code><br />
+<em>int</em></td>
+<td><p>Number of combined channels (ethtool -L combined)</p></td>
+</tr>
+<tr>
+<td><code>lro</code><br />
+<em>bool</em></td>
+<td><p>Enable Large Receive Offload (ethtool -K lro)</p></td>
+</tr>
 </tbody>
 </table>
 
@@ -1121,7 +1337,7 @@ SpectrumXOptimizedSpec enables Spectrum-X specific optimizations
 <tr>
 <td><code>version</code><br />
 <em>string</em></td>
-<td><p>Version of the Spectrum-X architecture to optimize for</p></td>
+<td><p>Version of the Spectrum-X architecture to optimize for. Should match the name of the config map with Spectrum-X profile</p></td>
 </tr>
 <tr>
 <td><code>overlay</code><br />
@@ -1146,4 +1362,4 @@ SpectrumXOptimizedSpec enables Spectrum-X specific optimizations
 
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-*Generated with `gen-crd-api-reference-docs` on git commit `838c249`.*
+*Generated with `gen-crd-api-reference-docs` on git commit `f6d99ae`.*

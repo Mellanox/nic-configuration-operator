@@ -220,33 +220,109 @@ Configurations:                              Default         Current         Nex
 		})
 	})
 
-	Describe("parseValidateSystemConf", func() {
-		It("returns true on a MATCHES result line", func() {
-			output := `Validating system configuration 'conf16[0]' on device 000e:01:00.0
+	Describe("parseValidateSystemConfDetailed", func() {
+		It("parses an all-OK MATCHES output with skipped params", func() {
+			output := `Validating system configuration 'conf6[1]' on device 0001:03:00.0
 ------------------------------------------------------------------------
-  OK:       BOARD_CONFIGURATION_MODE = 2
+  OK:       BOARD_CONFIGURATION_MODE = 1
+  OK:       MODULE_SPLIT_M0[0] = 0x1
+  OK:       LINK_TYPE_P1 = IB
+  OK:       NUM_OF_PLANES_P1 = 4
+  OK:       NUM_OF_PF = 1
+  SKIPPED (failed to query):
+    - MODULE_SPLIT_M1[0]
+    - MODULE_SPLIT_M1[1]
 ------------------------------------------------------------------------
 Result: Device configuration MATCHES the system configuration.
 `
-			matches, err := parseValidateSystemConf([]byte(output))
+			result, _, err := parseValidateSystemConfDetailed([]byte(output))
 			Expect(err).ToNot(HaveOccurred())
-			Expect(matches).To(BeTrue())
+			Expect(result.Matches).To(BeTrue())
+			Expect(result.Entries).To(HaveLen(5))
+			for _, e := range result.Entries {
+				Expect(e.Status).To(Equal(SystemConfStatusOK))
+			}
+			Expect(result.Entries[2]).To(Equal(SystemConfEntry{Param: "LINK_TYPE_P1", Status: SystemConfStatusOK, Actual: "IB"}))
+			Expect(result.Skipped).To(Equal([]string{"MODULE_SPLIT_M1[0]", "MODULE_SPLIT_M1[1]"}))
 		})
 
-		It("returns false on a does NOT match result line", func() {
-			output := `Validating system configuration 'conf3[0]' on device 000e:01:00.0
+		It("parses a mixed MISMATCH/OK output and reports does NOT match", func() {
+			output := `Validating system configuration 'conf3[1]' on device 0001:03:00.0
 ------------------------------------------------------------------------
-  MISMATCH: BOARD_CONFIGURATION_MODE	Expected: 0	Actual: 2
+  MISMATCH: BOARD_CONFIGURATION_MODE	Expected: 0	Actual: 1
+  MISMATCH: MODULE_SPLIT_M0[4]	Expected: 0x1	Actual: 0xFF
+  OK:       MODULE_SPLIT_M0[8] = 0xFF
+  MISMATCH: LINK_TYPE_P1	Expected: ETH	Actual: IB
+  MISMATCH: NUM_OF_PF	Expected: 4	Actual: 1
+  SKIPPED (failed to query):
+    - MODULE_SPLIT_M1[0]
+    - LINK_TYPE_P2
 ------------------------------------------------------------------------
 Result: Device configuration does NOT match the system configuration.
 `
-			matches, err := parseValidateSystemConf([]byte(output))
+			result, _, err := parseValidateSystemConfDetailed([]byte(output))
 			Expect(err).ToNot(HaveOccurred())
-			Expect(matches).To(BeFalse())
+			Expect(result.Matches).To(BeFalse())
+
+			mismatches := map[string]SystemConfEntry{}
+			okCount := 0
+			for _, e := range result.Entries {
+				switch e.Status {
+				case SystemConfStatusMismatch:
+					mismatches[e.Param] = e
+				case SystemConfStatusOK:
+					okCount++
+				}
+			}
+			Expect(okCount).To(Equal(1))
+			Expect(mismatches).To(HaveLen(4))
+			Expect(mismatches["BOARD_CONFIGURATION_MODE"]).To(Equal(SystemConfEntry{Param: "BOARD_CONFIGURATION_MODE", Status: SystemConfStatusMismatch, Expected: "0", Actual: "1"}))
+			Expect(mismatches["LINK_TYPE_P1"]).To(Equal(SystemConfEntry{Param: "LINK_TYPE_P1", Status: SystemConfStatusMismatch, Expected: "ETH", Actual: "IB"}))
+			Expect(mismatches["NUM_OF_PF"].Expected).To(Equal("4"))
+			Expect(result.Skipped).To(ConsistOf("MODULE_SPLIT_M1[0]", "LINK_TYPE_P2"))
 		})
 
-		It("returns an error when no Result line is present", func() {
-			_, err := parseValidateSystemConf([]byte("some unexpected output"))
+		It("derives Matches from rows when no Result line is present", func() {
+			output := `  OK:       NUM_OF_PF = 1
+  MISMATCH: LINK_TYPE_P1	Expected: ETH	Actual: IB
+`
+			result, resultFound, err := parseValidateSystemConfDetailed([]byte(output))
+			Expect(err).ToNot(HaveOccurred())
+			Expect(resultFound).To(BeFalse())
+			Expect(result.Matches).To(BeFalse())
+			Expect(result.Entries).To(HaveLen(2))
+		})
+
+		It("reports resultLineFound=true when a Result line is present", func() {
+			output := `  OK:       NUM_OF_PF = 1
+Result: Device configuration MATCHES the system configuration.
+`
+			_, resultFound, err := parseValidateSystemConfDetailed([]byte(output))
+			Expect(err).ToNot(HaveOccurred())
+			Expect(resultFound).To(BeTrue())
+		})
+
+		It("keeps an OK entry even when the '=' is absent", func() {
+			result, _, err := parseValidateSystemConfDetailed([]byte("  OK:       NUM_OF_PF\nResult: Device configuration MATCHES the system configuration.\n"))
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result.Entries).To(HaveLen(1))
+			Expect(result.Entries[0].Param).To(Equal("NUM_OF_PF"))
+		})
+
+		It("does not mis-classify a header line after a SKIPPED block as a skipped param", func() {
+			output := `  SKIPPED (failed to query):
+    - MODULE_SPLIT_M1[0]
+Validating system configuration 'conf3[1]' on device 0001:03:00.1
+    - SHOULD_NOT_BE_SKIPPED
+Result: Device configuration does NOT match the system configuration.
+`
+			result, _, err := parseValidateSystemConfDetailed([]byte(output))
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result.Skipped).To(Equal([]string{"MODULE_SPLIT_M1[0]"}))
+		})
+
+		It("returns an error when the output cannot be parsed", func() {
+			_, _, err := parseValidateSystemConfDetailed([]byte("some unexpected output"))
 			Expect(err).To(HaveOccurred())
 		})
 	})
