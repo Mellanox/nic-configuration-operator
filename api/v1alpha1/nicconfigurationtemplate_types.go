@@ -150,8 +150,10 @@ type SpectrumXOptimizedSpec struct {
 
 type NvConfigParam struct {
 	// Name of the arbitrary nvconfig parameter
+	// +kubebuilder:validation:MaxLength=64
 	Name string `json:"name"`
 	// Value of the arbitrary nvconfig parameter
+	// +kubebuilder:validation:MaxLength=128
 	Value string `json:"value"`
 }
 
@@ -171,6 +173,7 @@ type NetworkBaySpec struct {
 // +kubebuilder:validation:XValidation:rule="!(has(self.spectrumXOptimized) && self.spectrumXOptimized.enabled) || !(has(self.roceOptimized) && self.roceOptimized.enabled)",message="spectrumXOptimized includes RoCE optimizations, so separate roceOptimized section must not be enabled"
 // +kubebuilder:validation:XValidation:rule="has(self.networkBay) || has(self.linkType)",message="linkType is required unless networkBay is configured"
 // +kubebuilder:validation:XValidation:rule="!has(self.networkBay) || !has(self.linkType)",message="linkType must not be set when networkBay is configured (the Network Bay link type is governed by the system configuration)"
+// +kubebuilder:validation:XValidation:rule="!has(self.rawNvConfig) || self.rawNvConfig.all(p, !p.name.matches('.*[[][0-9]+[.][.][0-9]+[]].*'))",message="rawNvConfig parameter names must not use index-range syntax like NAME[0..3]; list each index explicitly (NAME[0], NAME[1], ...)"
 type ConfigurationTemplateSpec struct {
 	// Number of VFs to be configured
 	// +required
@@ -194,6 +197,7 @@ type ConfigurationTemplateSpec struct {
 	// +optional
 	NetworkBay *NetworkBaySpec `json:"networkBay,omitempty"`
 	// List of arbitrary nv config parameters
+	// +kubebuilder:validation:MaxItems=128
 	RawNvConfig []NvConfigParam `json:"rawNvConfig,omitempty"`
 	// Force passes `--force` to mlxconfig set commands. When set, the daemon
 	// applies the nv config batch and set_system_conf with --force, letting

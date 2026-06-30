@@ -626,3 +626,13 @@ func newConfigurationUtils(dmsManager dms.DMSManager) ConfigurationUtils {
 		dmsManager:    dmsManager,
 	}
 }
+
+// mergeParams copies src into dst, with src winning on key collisions. Callers merge layers in
+// increasing priority order so the highest-priority layer is applied last. nv param keys are always
+// concrete (e.g. "MODULE_SPLIT_M0[2]"); rawNvConfig range syntax like "NAME[0..3]" is rejected by CEL
+// validation on the CRD, and Spectrum-X/template params only ever emit concrete keys.
+func mergeParams(dst, src map[string]string) {
+	for k, v := range src {
+		dst[k] = v
+	}
+}

@@ -409,3 +409,20 @@ TX:		off
 		})
 	})
 })
+
+var _ = Describe("mergeParams", func() {
+	It("copies src into dst with src winning on key collisions", func() {
+		dst := map[string]string{"NUM_OF_PF": "1", "KEEP": "x"}
+		mergeParams(dst, map[string]string{"NUM_OF_PF": "8", "MODULE_SPLIT_M0[2]": "0x1"})
+		Expect(dst).To(Equal(map[string]string{
+			"NUM_OF_PF": "8", "KEEP": "x", "MODULE_SPLIT_M0[2]": "0x1",
+		}))
+	})
+
+	It("is a no-op for a nil or empty src", func() {
+		dst := map[string]string{"A": "1"}
+		mergeParams(dst, nil)
+		mergeParams(dst, map[string]string{})
+		Expect(dst).To(Equal(map[string]string{"A": "1"}))
+	})
+})

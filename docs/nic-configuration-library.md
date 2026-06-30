@@ -164,11 +164,10 @@ func NewConfigurationManager(
 #### NV Configuration Flow
 
 1. **Query** current NV config via `nvConfigUtils.QueryNvConfig()`
-2. **Diff** desired vs current parameters
-3. **ADVANCED_PCI_SETTINGS unlock** — automatically enabled before applying other configs (reboot may be required to unlock additional parameters)
-4. **Batch set** via `nvConfigUtils.SetNvConfigParametersBatch()` — single `mlxconfig set` call (`--force` added when `ConfigurationOptions.Force=true`)
-5. **Network Bay `set_system_conf`** — for ConnectX-9 Network Bay devices (`template.networkBay` set and `status.networkBay` detected), the per-ASIC `set_system_conf <conf>[<asic>]` is layered on top via `nvConfigUtils.ValidateSystemConf()` / `SetSystemConf()` after the regular (or Spectrum-X) nv config converges; a change requires a reboot
-6. **Optional reset** — `mlxfwreset` unless `ConfigurationOptions.SkipReset=true`
+2. **Network Bay `set_system_conf` (baseline, applied first)** — for ConnectX-9 Network Bay devices (`template.networkBay` set and `status.networkBay` detected), the per-ASIC `set_system_conf <conf>[<asic>]` is applied **before** the regular / Spectrum-X params so those layer on top of it (override priority: `rawNvConfig` > Spectrum-X > system_conf). Drift is detected per-param via `nvconfig.ValidateSystemConf()`, which returns the overall match bit plus the names of the mismatched params; the manager ignores MISMATCH rows for params owned by a higher-priority layer (matched by exact per-index key — `rawNvConfig` index-range syntax like `MODULE_SPLIT_M0[0..3]` is rejected by CRD validation, so keys are always concrete); a change requires a reboot. Skipped for devices with `ResetToDefault`
+3. **Diff** desired vs current parameters. Params not present in the device's next-boot config are unsupported on this device (e.g. hidden because `ADVANCED_PCI_SETTINGS` is off) and are skipped — the operator does **not** auto-manage `ADVANCED_PCI_SETTINGS`; drive it explicitly via `template.rawNvConfig` if needed
+4. **Batch set** via `nvConfigUtils.SetNvConfigParametersBatch()` — single `mlxconfig set` call (`--force` added when `ConfigurationOptions.Force=true`). Apply reports `ApplyStatusPartiallyApplied` when any desired param was skipped as unsupported
+5. **Optional reset** — `mlxfwreset` unless `ConfigurationOptions.SkipReset=true`
 
 **`ConfigurationOptions`:**
 - `SkipReset` — skip `mlxfwreset` after applying NV config
@@ -370,9 +369,10 @@ type NVConfigUtils interface {
     // `mlxconfig -d <pci> -y [--force] set_system_conf <conf>[<asic>]` (persistent, reboot-required)
     SetSystemConf(ctx context.Context, pciAddr string, conf string, asic int, force bool) error
 
-    // ValidateSystemConf reports whether the device matches the named system configuration via
-    // `mlxconfig -d <pci> -y validate_system_conf <conf>[<asic>]`
-    ValidateSystemConf(ctx context.Context, pciAddr string, conf string, asic int) (bool, error)
+    // ValidateSystemConf runs `mlxconfig -d <pci> -y validate_system_conf <conf>[<asic>]` and returns
+    // the overall match bit plus the names of the mismatched params (the MISMATCH rows), so callers can
+    // decide which mismatches are intentional overrides rather than drift.
+    ValidateSystemConf(ctx context.Context, pciAddr string, conf string, asic int) (bool, []string, error)
 }
 ```
 
@@ -392,7 +392,7 @@ Parameter names are sorted for deterministic command generation.
 mlxconfig -d <pci> -y [--force] set_system_conf <conf>[<asic>]
 mlxconfig -d <pci> -y validate_system_conf <conf>[<asic>]
 ```
-`ValidateSystemConf` parses the trailing `Result:` line (`MATCHES` vs `does NOT match`).
+`ValidateSystemConf` parses the per-param `OK:` / `MISMATCH:` rows plus the `SKIPPED (failed to query:)` list and the trailing `Result:` line, returning the overall match bit and the mismatched param names. The configuration manager uses the mismatched names to treat MISMATCH rows for `rawNvConfig`- or Spectrum-X-owned params as intentional overrides (priority `rawNvConfig` > Spectrum-X > system_conf) rather than drift.
 
 ---
 
