@@ -19,7 +19,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"slices"
 	"strconv"
 
 	v1 "k8s.io/api/core/v1"
@@ -41,8 +40,6 @@ type configValidation interface {
 	// returns bool - reboot required
 	// returns error - if an error occurred during validation
 	ValidateResetToDefault(nvConfig types.NvConfigQuery) (bool, bool, error)
-	// AdvancedPCISettingsEnabled returns true if ADVANCED_PCI_SETTINGS param is enabled for current config
-	AdvancedPCISettingsEnabled(nvConfig types.NvConfigQuery) bool
 	// RuntimeConfigApplied checks if desired runtime config is applied
 	RuntimeConfigApplied(device *v1alpha1.NicDevice) (bool, error)
 	// CalculateDesiredRuntimeConfig returns desired values for runtime config
@@ -68,7 +65,7 @@ func nvParamLinkTypeFromName(linkType string) string {
 func applyDefaultNvConfigValueIfExists(
 	paramName string, desiredParameters map[string]string, query types.NvConfigQuery) {
 	defaultValues, found := query.DefaultConfig[paramName]
-	// Default values might not yet be available if ENABLE_PCI_OPTIMIZATIONS is disabled
+	// The param's default may be absent if it is hidden on this device (e.g. ADVANCED_PCI_SETTINGS off).
 	if found {
 		// Take the default numeric value
 		desiredParameters[paramName] = defaultValues[len(defaultValues)-1]
@@ -127,32 +124,24 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 	if template.PciPerformanceOptimized != nil && template.PciPerformanceOptimized.Enabled {
 		if template.PciPerformanceOptimized.MaxAccOutRead != 0 {
 			desiredParameters[consts.MaxAccOutReadParam] = strconv.Itoa(template.PciPerformanceOptimized.MaxAccOutRead)
-		} else {
-			// MAX_ACC_OUT_READ parameter is hidden if ADVANCED_PCI_SETTINGS is disabled
-			if v.AdvancedPCISettingsEnabled(query) {
-				values, found := query.DefaultConfig[consts.MaxAccOutReadParam]
-				if !found {
-					err := types.IncorrectSpecError(
-						"Device does not support pci performance nv config parameters")
-					log.Log.Error(err, "incorrect spec", "device", device.Name, "parameter", consts.MaxAccOutReadParam)
-					return desiredParameters, err
-				}
+		} else if values, found := query.DefaultConfig[consts.MaxAccOutReadParam]; found {
+			// MAX_ACC_OUT_READ is hidden when ADVANCED_PCI_SETTINGS is off. If the default is not
+			// in DefaultConfig the param is unsupported on this device — skip it silently and let
+			// the apply path report ApplyStatusPartiallyApplied if any other params still need work.
+			maxAccOutReadParamDefaultValue := values[len(values)-1]
 
-				maxAccOutReadParamDefaultValue := values[len(values)-1]
-
-				// According to the PRM, setting MAX_ACC_OUT_READ to zero enables the auto mode,
-				// which applies the best suitable optimizations.
-				// However, there is a bug in certain FW versions, where the zero value is not available.
-				// In this case, until the fix is available, skipping this parameter and emitting a warning
-				if maxAccOutReadParamDefaultValue == consts.NvParamZero {
-					applyDefaultNvConfigValueIfExists(consts.MaxAccOutReadParam, desiredParameters, query)
-				} else {
-					warning := fmt.Sprintf("%s nv config parameter does not work properly on this version of FW, skipping it", consts.MaxAccOutReadParam)
-					if v.eventRecorder != nil {
-						v.eventRecorder.Event(device, v1.EventTypeWarning, "FirmwareError", warning)
-					}
-					log.Log.Error(errors.New(warning), "skipping parameter", "device", device.Name, "fw version", device.Status.FirmwareVersion)
+			// According to the PRM, setting MAX_ACC_OUT_READ to zero enables the auto mode,
+			// which applies the best suitable optimizations.
+			// However, there is a bug in certain FW versions, where the zero value is not available.
+			// In this case, until the fix is available, skipping this parameter and emitting a warning
+			if maxAccOutReadParamDefaultValue == consts.NvParamZero {
+				applyDefaultNvConfigValueIfExists(consts.MaxAccOutReadParam, desiredParameters, query)
+			} else {
+				warning := fmt.Sprintf("%s nv config parameter does not work properly on this version of FW, skipping it", consts.MaxAccOutReadParam)
+				if v.eventRecorder != nil {
+					v.eventRecorder.Event(device, v1.EventTypeWarning, "FirmwareError", warning)
 				}
+				log.Log.Error(errors.New(warning), "skipping parameter", "device", device.Name, "fw version", device.Status.FirmwareVersion)
 			}
 		}
 
@@ -218,38 +207,13 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 // returns bool - reboot required
 // returns error - if an error occurred during validation
 func (v *configValidationImpl) ValidateResetToDefault(nvConfig types.NvConfigQuery) (bool, bool, error) {
-	// ResetToDefault requires us to set ADVANCED_PCI_SETTINGS=true, which is not a default value
-	// Deleting this key from maps so that it doesn't interfere with comparisons
-	delete(nvConfig.DefaultConfig, consts.AdvancedPCISettingsParam)
 	// We want to retain the BF3 operation mode after reset, so not taking it into consideration
 	delete(nvConfig.DefaultConfig, consts.BF3OperationModeParam)
 	delete(nvConfig.CurrentConfig, consts.BF3OperationModeParam)
 	delete(nvConfig.NextBootConfig, consts.BF3OperationModeParam)
 
-	alreadyResetInCurrent := false
-	willResetInNextBoot := false
-
-	advancedPciSettingsEnabledInCurrentConfig := false
-	if values, found := nvConfig.CurrentConfig[consts.AdvancedPCISettingsParam]; found && slices.Contains(values, consts.NvParamTrue) {
-		advancedPciSettingsEnabledInCurrentConfig = true
-	}
-	if advancedPciSettingsEnabledInCurrentConfig {
-		delete(nvConfig.CurrentConfig, consts.AdvancedPCISettingsParam)
-		if reflect.DeepEqual(nvConfig.CurrentConfig, nvConfig.DefaultConfig) {
-			alreadyResetInCurrent = true
-		}
-	}
-
-	advancedPciSettingsEnabledInNextBootConfig := false
-	if values, found := nvConfig.NextBootConfig[consts.AdvancedPCISettingsParam]; found && slices.Contains(values, consts.NvParamTrue) {
-		advancedPciSettingsEnabledInNextBootConfig = true
-	}
-	if advancedPciSettingsEnabledInNextBootConfig {
-		delete(nvConfig.NextBootConfig, consts.AdvancedPCISettingsParam)
-		if reflect.DeepEqual(nvConfig.NextBootConfig, nvConfig.DefaultConfig) {
-			willResetInNextBoot = true
-		}
-	}
+	alreadyResetInCurrent := reflect.DeepEqual(nvConfig.CurrentConfig, nvConfig.DefaultConfig)
+	willResetInNextBoot := reflect.DeepEqual(nvConfig.NextBootConfig, nvConfig.DefaultConfig)
 
 	// Reset complete, nothing to do for now
 	if alreadyResetInCurrent && willResetInNextBoot {
@@ -261,14 +225,6 @@ func (v *configValidationImpl) ValidateResetToDefault(nvConfig types.NvConfigQue
 	}
 	// Reset required
 	return true, true, nil
-}
-
-// AdvancedPCISettingsEnabled returns true if ADVANCED_PCI_SETTINGS param is enabled for current config
-func (v *configValidationImpl) AdvancedPCISettingsEnabled(nvConfig types.NvConfigQuery) bool {
-	if values, found := nvConfig.CurrentConfig[consts.AdvancedPCISettingsParam]; found && slices.Contains(values, consts.NvParamTrue) {
-		return true
-	}
-	return false
 }
 
 // validatePortExtendedQoS validates per-port extended QoS settings (CableLen, ECN, PauseFrames)

@@ -95,7 +95,7 @@ func (_m *ConfigurationManager) ResetNicFirmware(ctx context.Context, device *v1
 }
 
 // ValidateDeviceNvSpec provides a mock function with given fields: ctx, device
-func (_m *ConfigurationManager) ValidateDeviceNvSpec(ctx context.Context, device *v1alpha1.NicDevice) (bool, bool, error) {
+func (_m *ConfigurationManager) ValidateDeviceNvSpec(ctx context.Context, device *v1alpha1.NicDevice) (bool, bool, []string, error) {
 	ret := _m.Called(ctx, device)
 
 	if len(ret) == 0 {
@@ -104,8 +104,9 @@ func (_m *ConfigurationManager) ValidateDeviceNvSpec(ctx context.Context, device
 
 	var r0 bool
 	var r1 bool
-	var r2 error
-	if rf, ok := ret.Get(0).(func(context.Context, *v1alpha1.NicDevice) (bool, bool, error)); ok {
+	var r2 []string
+	var r3 error
+	if rf, ok := ret.Get(0).(func(context.Context, *v1alpha1.NicDevice) (bool, bool, []string, error)); ok {
 		return rf(ctx, device)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *v1alpha1.NicDevice) bool); ok {
@@ -120,13 +121,21 @@ func (_m *ConfigurationManager) ValidateDeviceNvSpec(ctx context.Context, device
 		r1 = ret.Get(1).(bool)
 	}
 
-	if rf, ok := ret.Get(2).(func(context.Context, *v1alpha1.NicDevice) error); ok {
+	if rf, ok := ret.Get(2).(func(context.Context, *v1alpha1.NicDevice) []string); ok {
 		r2 = rf(ctx, device)
 	} else {
-		r2 = ret.Error(2)
+		if ret.Get(2) != nil {
+			r2 = ret.Get(2).([]string)
+		}
 	}
 
-	return r0, r1, r2
+	if rf, ok := ret.Get(3).(func(context.Context, *v1alpha1.NicDevice) error); ok {
+		r3 = rf(ctx, device)
+	} else {
+		r3 = ret.Error(3)
+	}
+
+	return r0, r1, r2, r3
 }
 
 // NewConfigurationManager creates a new instance of ConfigurationManager. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -87,6 +88,9 @@ type nicDeviceConfigurationStatus struct {
 	requestedFirmwareVersion     string
 	nvConfigUpdateRequired       bool
 	rebootRequired               bool
+	// unsupportedNvParams lists desired nv params that are hidden on this device (absent from
+	// NextBootConfig). Surfaces as PartiallyApplied in the ConfigUpdateInProgress condition.
+	unsupportedNvParams []string
 }
 
 // Reconcile reconciles the NicConfigurationTemplate object
@@ -558,7 +562,13 @@ func (r *NicDeviceReconciler) applyRuntimeConfig(ctx context.Context, status *ni
 		return err
 	}
 
-	err = r.updateConfigInProgressStatusCondition(ctx, status.device, consts.UpdateSuccessfulReason, metav1.ConditionFalse, "")
+	reason := consts.UpdateSuccessfulReason
+	message := ""
+	if len(status.unsupportedNvParams) > 0 {
+		reason = consts.PartiallyAppliedReason
+		message = fmt.Sprintf(consts.PartiallyAppliedMessageFmt, strings.Join(status.unsupportedNvParams, ", "))
+	}
+	err = r.updateConfigInProgressStatusCondition(ctx, status.device, reason, metav1.ConditionFalse, message)
 	if err != nil {
 		return err
 	}
@@ -669,8 +679,8 @@ func (r *NicDeviceReconciler) handleConfigurationSpecValidation(ctx context.Cont
 		return nil
 	}
 
-	nvConfigUpdateRequired, rebootRequired, err := r.ConfigurationManager.ValidateDeviceNvSpec(ctx, status.device)
-	log.Log.V(2).Info("nv spec validation complete for device", "device", status.device.Name, "nvConfigUpdateRequired", nvConfigUpdateRequired, "rebootRequired", rebootRequired)
+	nvConfigUpdateRequired, rebootRequired, unsupportedNvParams, err := r.ConfigurationManager.ValidateDeviceNvSpec(ctx, status.device)
+	log.Log.V(2).Info("nv spec validation complete for device", "device", status.device.Name, "nvConfigUpdateRequired", nvConfigUpdateRequired, "rebootRequired", rebootRequired, "unsupportedNvParams", unsupportedNvParams)
 	if err != nil {
 		log.Log.Error(err, "failed to validate spec for device", "device", status.device.Name)
 		if types.IsIncorrectSpecError(err) {
@@ -690,6 +700,7 @@ func (r *NicDeviceReconciler) handleConfigurationSpecValidation(ctx context.Cont
 
 	status.nvConfigUpdateRequired = nvConfigUpdateRequired
 	status.rebootRequired = rebootRequired
+	status.unsupportedNvParams = unsupportedNvParams
 
 	if nvConfigUpdateRequired {
 		log.Log.V(2).Info("update started for device", "device", status.device.Name)

@@ -18,7 +18,6 @@ package configuration
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -80,7 +79,7 @@ var _ = Describe("ConfigurationManager", func() {
 					mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, []string(nil)).
 						Return(types.NewNvConfigQuery(), queryErr)
 
-					configUpdate, reboot, err := manager.ValidateDeviceNvSpec(ctx, device)
+					configUpdate, reboot, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 					Expect(configUpdate).To(BeFalse())
 					Expect(reboot).To(BeFalse())
 					Expect(err).To(MatchError(queryErr))
@@ -106,7 +105,7 @@ var _ = Describe("ConfigurationManager", func() {
 					mockConfigValidation.On("ValidateResetToDefault", nvConfig).
 						Return(true, false, nil)
 
-					configUpdate, reboot, err := manager.ValidateDeviceNvSpec(ctx, device)
+					configUpdate, reboot, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 					Expect(configUpdate).To(BeTrue())
 					Expect(reboot).To(BeFalse())
 					Expect(err).To(BeNil())
@@ -128,7 +127,7 @@ var _ = Describe("ConfigurationManager", func() {
 					mockConfigValidation.On("ValidateResetToDefault", nvConfig).
 						Return(false, false, validationErr)
 
-					configUpdate, reboot, err := manager.ValidateDeviceNvSpec(ctx, device)
+					configUpdate, reboot, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 					Expect(configUpdate).To(BeFalse())
 					Expect(reboot).To(BeFalse())
 					Expect(err).To(MatchError(validationErr))
@@ -152,7 +151,7 @@ var _ = Describe("ConfigurationManager", func() {
 					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
 						Return(nil, constructErr)
 
-					configUpdate, reboot, err := manager.ValidateDeviceNvSpec(ctx, device)
+					configUpdate, reboot, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 					Expect(configUpdate).To(BeFalse())
 					Expect(reboot).To(BeFalse())
 					Expect(err).To(MatchError(constructErr))
@@ -176,10 +175,8 @@ var _ = Describe("ConfigurationManager", func() {
 						Return(nvConfig, nil)
 					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
 						Return(desiredConfig, nil)
-					mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig).
-						Return(false)
 
-					configUpdate, reboot, err := manager.ValidateDeviceNvSpec(ctx, device)
+					configUpdate, reboot, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 					Expect(configUpdate).To(BeFalse())
 					Expect(reboot).To(BeFalse())
 					Expect(err).To(BeNil())
@@ -203,10 +200,8 @@ var _ = Describe("ConfigurationManager", func() {
 						Return(nvConfig, nil)
 					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
 						Return(desiredConfig, nil)
-					mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig).
-						Return(false)
 
-					configUpdate, reboot, err := manager.ValidateDeviceNvSpec(ctx, device)
+					configUpdate, reboot, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 					Expect(configUpdate).To(BeFalse())
 					Expect(reboot).To(BeTrue())
 					Expect(err).To(BeNil())
@@ -230,10 +225,8 @@ var _ = Describe("ConfigurationManager", func() {
 						Return(nvConfig, nil)
 					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
 						Return(desiredConfig, nil)
-					mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig).
-						Return(false)
 
-					configUpdate, reboot, err := manager.ValidateDeviceNvSpec(ctx, device)
+					configUpdate, reboot, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 					Expect(configUpdate).To(BeTrue())
 					Expect(reboot).To(BeTrue())
 					Expect(err).To(BeNil())
@@ -243,8 +236,8 @@ var _ = Describe("ConfigurationManager", func() {
 				})
 			})
 
-			Context("when AdvancedPCISettingsEnabled is true and a parameter is missing in CurrentConfig", func() {
-				It("should return an IncorrectSpecError", func() {
+			Context("when a desired param is missing from CurrentConfig but present in NextBootConfig", func() {
+				It("should return false, true, nil (reboot only)", func() {
 					nvConfig := types.NvConfigQuery{
 						CurrentConfig:  map[string][]string{"param2": {"value2"}},
 						NextBootConfig: map[string][]string{"param1": {"value1"}, "param2": {"value2"}},
@@ -256,16 +249,61 @@ var _ = Describe("ConfigurationManager", func() {
 						Return(nvConfig, nil)
 					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
 						Return(desiredConfig, nil)
-					mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig).
-						Return(true)
 
-					expectedErr := types.IncorrectSpecError(
-						fmt.Sprintf("Parameter %s unsupported for device %s", "param1", device.Name))
+					configUpdate, reboot, _, err := manager.ValidateDeviceNvSpec(ctx, device)
+					Expect(configUpdate).To(BeFalse())
+					Expect(reboot).To(BeTrue())
+					Expect(err).To(BeNil())
 
-					configUpdate, reboot, err := manager.ValidateDeviceNvSpec(ctx, device)
+					mockNVConfigUtils.AssertExpectations(GinkgoT())
+					mockConfigValidation.AssertExpectations(GinkgoT())
+				})
+			})
+
+			Context("when a desired param is missing from NextBootConfig (unsupported)", func() {
+				It("should treat it as unsupported, skip it, and surface the param name", func() {
+					nvConfig := types.NvConfigQuery{
+						CurrentConfig:  map[string][]string{"param2": {"value2"}},
+						NextBootConfig: map[string][]string{"param2": {"value2"}},
+						DefaultConfig:  map[string][]string{"param2": {"default2"}},
+					}
+					// param1 is hidden on this device (e.g. ADVANCED_PCI_SETTINGS off)
+					desiredConfig := map[string]string{"param1": "value1", "param2": "value2"}
+
+					mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, []string(nil)).
+						Return(nvConfig, nil)
+					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
+						Return(desiredConfig, nil)
+
+					configUpdate, reboot, unsupported, err := manager.ValidateDeviceNvSpec(ctx, device)
 					Expect(configUpdate).To(BeFalse())
 					Expect(reboot).To(BeFalse())
-					Expect(err).To(MatchError(expectedErr))
+					Expect(unsupported).To(Equal([]string{"param1"}))
+					Expect(err).To(BeNil())
+
+					mockNVConfigUtils.AssertExpectations(GinkgoT())
+					mockConfigValidation.AssertExpectations(GinkgoT())
+				})
+
+				It("still flags mismatched supported params as configUpdateNeeded and reports unsupported ones", func() {
+					nvConfig := types.NvConfigQuery{
+						CurrentConfig:  map[string][]string{"param2": {"oldValue2"}},
+						NextBootConfig: map[string][]string{"param2": {"oldValue2"}},
+						DefaultConfig:  map[string][]string{"param2": {"default2"}},
+					}
+					// param1 is unsupported; param2 needs to change
+					desiredConfig := map[string]string{"param1": "value1", "param2": "value2"}
+
+					mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, []string(nil)).
+						Return(nvConfig, nil)
+					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
+						Return(desiredConfig, nil)
+
+					configUpdate, reboot, unsupported, err := manager.ValidateDeviceNvSpec(ctx, device)
+					Expect(configUpdate).To(BeTrue())
+					Expect(reboot).To(BeTrue())
+					Expect(unsupported).To(Equal([]string{"param1"}))
+					Expect(err).To(BeNil())
 
 					mockNVConfigUtils.AssertExpectations(GinkgoT())
 					mockConfigValidation.AssertExpectations(GinkgoT())
@@ -285,10 +323,8 @@ var _ = Describe("ConfigurationManager", func() {
 						Return(nvConfig, nil)
 					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
 						Return(desiredConfig, nil)
-					mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig).
-						Return(true)
 
-					configUpdate, reboot, err := manager.ValidateDeviceNvSpec(ctx, device)
+					configUpdate, reboot, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 					Expect(configUpdate).To(BeFalse())
 					Expect(reboot).To(BeFalse())
 					Expect(err).To(BeNil())
@@ -308,10 +344,8 @@ var _ = Describe("ConfigurationManager", func() {
 						Return(nvConfig, nil)
 					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
 						Return(desiredConfig, nil)
-					mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig).
-						Return(true)
 
-					configUpdate, reboot, err := manager.ValidateDeviceNvSpec(ctx, device)
+					configUpdate, reboot, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 					Expect(configUpdate).To(BeFalse())
 					Expect(reboot).To(BeFalse())
 					Expect(err).To(BeNil())
@@ -331,10 +365,8 @@ var _ = Describe("ConfigurationManager", func() {
 						Return(nvConfig, nil)
 					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
 						Return(desiredConfig, nil)
-					mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig).
-						Return(true)
 
-					configUpdate, reboot, err := manager.ValidateDeviceNvSpec(ctx, device)
+					configUpdate, reboot, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 					Expect(configUpdate).To(BeTrue())
 					Expect(reboot).To(BeTrue())
 					Expect(err).To(BeNil())
@@ -349,7 +381,7 @@ var _ = Describe("ConfigurationManager", func() {
 					// two ports
 					device.Status.Ports = []v1alpha1.NicDevicePortSpec{{PCI: pciAddress}, {PCI: pciAddress2}}
 
-					// First port config (used for ConstructNvParamMapFromTemplate and AdvancedPCISettingsEnabled)
+					// First port config (used for ConstructNvParamMapFromTemplate)
 					nvConfig0 := types.NvConfigQuery{
 						CurrentConfig:  map[string][]string{"TRACER_ENABLED": {"1"}},
 						NextBootConfig: map[string][]string{"TRACER_ENABLED": {"1"}},
@@ -365,9 +397,8 @@ var _ = Describe("ConfigurationManager", func() {
 					mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, []string(nil)).Return(nvConfig0, nil)
 					mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress2, []string(nil)).Return(nvConfig1, nil)
 					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig0).Return(map[string]string{"TRACER_ENABLED": "1"}, nil)
-					mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig0).Return(false)
 
-					configUpdate, reboot, err := manager.ValidateDeviceNvSpec(ctx, device)
+					configUpdate, reboot, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 					Expect(err).To(BeNil())
 					Expect(configUpdate).To(BeFalse())
 					Expect(reboot).To(BeTrue())
@@ -393,9 +424,8 @@ var _ = Describe("ConfigurationManager", func() {
 					mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, []string(nil)).Return(nvConfig0, nil)
 					mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress2, []string(nil)).Return(nvConfig1, nil)
 					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig0).Return(map[string]string{"TRACER_ENABLED": "1"}, nil)
-					mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig0).Return(false)
 
-					configUpdate, reboot, err := manager.ValidateDeviceNvSpec(ctx, device)
+					configUpdate, reboot, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 					Expect(err).To(BeNil())
 					Expect(configUpdate).To(BeTrue())
 					Expect(reboot).To(BeTrue())
@@ -404,7 +434,7 @@ var _ = Describe("ConfigurationManager", func() {
 					mockConfigValidation.AssertExpectations(GinkgoT())
 				})
 
-				It("returns IncorrectSpecError when advanced enabled and a port misses param in current", func() {
+				It("requires reboot when a port misses param in current but matches next boot", func() {
 					device.Status.Ports = []v1alpha1.NicDevicePortSpec{{PCI: pciAddress}, {PCI: pciAddress2}}
 
 					nvConfig0 := types.NvConfigQuery{
@@ -421,12 +451,11 @@ var _ = Describe("ConfigurationManager", func() {
 					mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, []string(nil)).Return(nvConfig0, nil)
 					mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress2, []string(nil)).Return(nvConfig1, nil)
 					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig0).Return(map[string]string{"TRACER_ENABLED": "1"}, nil)
-					mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig0).Return(true)
 
-					configUpdate, reboot, err := manager.ValidateDeviceNvSpec(ctx, device)
+					configUpdate, reboot, _, err := manager.ValidateDeviceNvSpec(ctx, device)
+					Expect(err).To(BeNil())
 					Expect(configUpdate).To(BeFalse())
-					Expect(reboot).To(BeFalse())
-					Expect(types.IsIncorrectSpecError(err)).To(BeTrue())
+					Expect(reboot).To(BeTrue())
 
 					mockNVConfigUtils.AssertExpectations(GinkgoT())
 					mockConfigValidation.AssertExpectations(GinkgoT())
@@ -476,7 +505,7 @@ var _ = Describe("ConfigurationManager", func() {
 					device.Spec.Configuration.ResetToDefault = true
 				})
 
-				It("should reset NV config and set AdvancedPCISettings parameter successfully", func() {
+				It("should reset NV config successfully on a non-BF3 device", func() {
 					nvConfig := types.NvConfigQuery{
 						CurrentConfig:  map[string][]string{"param1": {"value1"}},
 						NextBootConfig: map[string][]string{"param1": {"value1"}},
@@ -486,10 +515,8 @@ var _ = Describe("ConfigurationManager", func() {
 						Return(nvConfig, nil)
 
 					mockNV.On("ResetNvConfig", pciAddress).Return(nil)
-					mockNV.
-						On("SetNvConfigParameter", pciAddress, consts.AdvancedPCISettingsParam, consts.NvParamTrue).
-						Return(nil)
 					mockNV.AssertNotCalled(GinkgoT(), "SetNvConfigParameter", pciAddress, consts.BF3OperationModeParam, mock.Anything)
+					mockNV.AssertNotCalled(GinkgoT(), "SetNvConfigParameter", pciAddress, consts.AdvancedPCISettingsParam, mock.Anything)
 
 					result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
 					Expect(result.RebootRequired).To(BeTrue())
@@ -509,12 +536,10 @@ var _ = Describe("ConfigurationManager", func() {
 
 					mockNV.On("ResetNvConfig", pciAddress).Return(nil)
 					mockNV.
-						On("SetNvConfigParameter", pciAddress, consts.AdvancedPCISettingsParam, consts.NvParamTrue).
-						Return(nil)
-					mockNV.
 						On("SetNvConfigParameter", pciAddress, consts.BF3OperationModeParam, consts.NvParamBF3NicMode).
 						Return(nil)
 					mockNV.AssertNotCalled(GinkgoT(), "SetNvConfigParameter", pciAddress, consts.BF3OperationModeParam, consts.NvParamBF3DpuMode)
+					mockNV.AssertNotCalled(GinkgoT(), "SetNvConfigParameter", pciAddress, consts.AdvancedPCISettingsParam, mock.Anything)
 
 					result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
 					Expect(result.RebootRequired).To(BeTrue())
@@ -542,11 +567,11 @@ var _ = Describe("ConfigurationManager", func() {
 					mockNV.AssertExpectations(GinkgoT())
 				})
 
-				It("should return error if SetNvConfigParameter fails", func() {
+				It("should return error if BF3 mode restore fails", func() {
 					nvConfig := types.NvConfigQuery{
-						CurrentConfig:  map[string][]string{"param1": {"value1"}},
-						NextBootConfig: map[string][]string{"param1": {"value1"}},
-						DefaultConfig:  map[string][]string{"param1": {"default1"}},
+						CurrentConfig:  map[string][]string{consts.BF3OperationModeParam: {consts.NvParamBF3NicMode}},
+						NextBootConfig: map[string][]string{consts.BF3OperationModeParam: {consts.NvParamBF3DpuMode}},
+						DefaultConfig:  map[string][]string{consts.BF3OperationModeParam: {consts.NvParamBF3DpuMode}},
 					}
 					mockNV.On("QueryNvConfig", ctx, pciAddress, []string(nil)).
 						Return(nvConfig, nil)
@@ -554,7 +579,7 @@ var _ = Describe("ConfigurationManager", func() {
 					mockNV.On("ResetNvConfig", pciAddress).Return(nil)
 					setParamErr := errors.New("failed to set nv config parameter")
 					mockNV.
-						On("SetNvConfigParameter", pciAddress, consts.AdvancedPCISettingsParam, consts.NvParamTrue).
+						On("SetNvConfigParameter", pciAddress, consts.BF3OperationModeParam, consts.NvParamBF3NicMode).
 						Return(setParamErr)
 
 					result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
@@ -579,110 +604,7 @@ var _ = Describe("ConfigurationManager", func() {
 					})
 				})
 
-				Context("when AdvancedPCISettingsEnabled is false", func() {
-					It("should set AdvancedPCISettingsParam and reset NIC firmware successfully", func() {
-						nvConfig := types.NvConfigQuery{
-							CurrentConfig:  map[string][]string{"param1": {"value1"}},
-							NextBootConfig: map[string][]string{"param1": {"value1"}},
-							DefaultConfig:  map[string][]string{"param1": {"default1"}},
-						}
-						desiredConfig := map[string]string{"param1": "value1"}
-
-						mockNV.On("QueryNvConfig", ctx, pciAddress, []string(nil)).
-							Return(nvConfig, nil)
-						mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig).
-							Return(false)
-						mockNV.
-							On("SetNvConfigParameter", pciAddress, consts.AdvancedPCISettingsParam, consts.NvParamTrue).
-							Return(nil)
-						mockHostUtils.On("ResetNicFirmware", mock.Anything, pciAddress).
-							Return(nil)
-						mockNV.On("QueryNvConfig", ctx, pciAddress, []string(nil)).
-							Return(nvConfig, nil)
-						mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
-							Return(desiredConfig, nil)
-
-						result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
-						Expect(result.RebootRequired).To(BeFalse())
-						Expect(err).To(BeNil())
-
-						mockNV.AssertExpectations(GinkgoT())
-						mockConfigValidation.AssertExpectations(GinkgoT())
-					})
-
-					It("should return error if SetNvConfigParameter fails", func() {
-						nvConfig := types.NvConfigQuery{
-							CurrentConfig:  map[string][]string{"param1": {"value1"}},
-							NextBootConfig: map[string][]string{"param1": {"value1"}},
-							DefaultConfig:  map[string][]string{"param1": {"default1"}},
-						}
-						mockNV.On("QueryNvConfig", ctx, pciAddress, []string(nil)).Return(nvConfig, nil)
-						mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig).
-							Return(false)
-						setParamErr := errors.New("failed to set nv config parameter")
-						mockNV.
-							On("SetNvConfigParameter", pciAddress, consts.AdvancedPCISettingsParam, consts.NvParamTrue).
-							Return(setParamErr)
-
-						result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
-						Expect(result.RebootRequired).To(BeFalse())
-						Expect(err).To(MatchError(setParamErr))
-
-						mockNV.AssertExpectations(GinkgoT())
-						mockConfigValidation.AssertExpectations(GinkgoT())
-					})
-
-					It("should request reboot if ResetNicFirmware fails", func() {
-						nvConfig := types.NvConfigQuery{
-							CurrentConfig:  map[string][]string{"param1": {"value1"}},
-							NextBootConfig: map[string][]string{"param1": {"value1"}},
-							DefaultConfig:  map[string][]string{"param1": {"default1"}},
-						}
-						mockNV.On("QueryNvConfig", ctx, pciAddress, []string(nil)).Return(nvConfig, nil)
-						mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig).
-							Return(false)
-						mockNV.On("SetNvConfigParameter", pciAddress, consts.AdvancedPCISettingsParam, consts.NvParamTrue).
-							Return(nil)
-						resetFirmwareErr := errors.New("failed to reset NIC firmware")
-						mockHostUtils.On("ResetNicFirmware", mock.Anything, pciAddress).Return(resetFirmwareErr)
-
-						result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
-						Expect(result.RebootRequired).To(BeTrue())
-						Expect(err).To(BeNil())
-
-						mockNV.AssertExpectations(GinkgoT())
-						mockConfigValidation.AssertExpectations(GinkgoT())
-					})
-
-					It("should return error if second QueryNvConfig fails", func() {
-						nvConfig := types.NvConfigQuery{
-							CurrentConfig:  map[string][]string{"param1": {"value1"}},
-							NextBootConfig: map[string][]string{"param1": {"value1"}},
-							DefaultConfig:  map[string][]string{"param1": {"default1"}},
-						}
-
-						mockNV.On("QueryNvConfig", ctx, pciAddress, []string(nil)).
-							Return(nvConfig, nil).Times(1)
-						mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig).
-							Return(false)
-						mockNV.On("SetNvConfigParameter", pciAddress, consts.AdvancedPCISettingsParam, consts.NvParamTrue).
-							Return(nil)
-						mockHostUtils.On("ResetNicFirmware", mock.Anything, pciAddress).
-							Return(nil)
-						secondQueryErr := errors.New("failed to query nv config again")
-						mockNV.On("QueryNvConfig", ctx, pciAddress, []string(nil)).
-							Return(types.NewNvConfigQuery(), secondQueryErr)
-
-						result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
-						Expect(result.RebootRequired).To(BeFalse())
-						Expect(err).To(MatchError(secondQueryErr))
-
-						mockNV.AssertExpectations(GinkgoT())
-						mockConfigValidation.AssertExpectations(GinkgoT())
-					})
-				})
-
-				Context("when AdvancedPCISettingsEnabled is true", func() {
+				Context("when applying the desired template config", func() {
 					It("should construct desiredConfig and apply no changes if desiredConfig matches NextBootConfig", func() {
 						nvConfig := types.NvConfigQuery{
 							CurrentConfig:  map[string][]string{"param1": {"value1"}},
@@ -693,8 +615,6 @@ var _ = Describe("ConfigurationManager", func() {
 
 						mockNV.On("QueryNvConfig", ctx, pciAddress, []string(nil)).
 							Return(nvConfig, nil)
-						mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig).
-							Return(true)
 						mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
 							Return(desiredConfig, nil)
 
@@ -716,8 +636,6 @@ var _ = Describe("ConfigurationManager", func() {
 
 						mockNV.On("QueryNvConfig", ctx, pciAddress, []string(nil)).
 							Return(nvConfig, nil)
-						mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig).
-							Return(true)
 						mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
 							Return(desiredConfig, nil)
 						mockNV.On("SetNvConfigParametersBatch", pciAddress, map[string]string{"param1": "value2"}, false, false).
@@ -741,8 +659,6 @@ var _ = Describe("ConfigurationManager", func() {
 
 						mockNV.On("QueryNvConfig", ctx, pciAddress, []string(nil)).
 							Return(nvConfig, nil)
-						mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig).
-							Return(true)
 						mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
 							Return(nil, constructErr)
 
@@ -764,8 +680,6 @@ var _ = Describe("ConfigurationManager", func() {
 
 						mockNV.On("QueryNvConfig", ctx, pciAddress, []string(nil)).
 							Return(nvConfig, nil)
-						mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig).
-							Return(true)
 						mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
 							Return(desiredConfig, nil)
 
@@ -788,8 +702,6 @@ var _ = Describe("ConfigurationManager", func() {
 
 						mockNV.On("QueryNvConfig", ctx, pciAddress, []string(nil)).
 							Return(nvConfig, nil)
-						mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig).
-							Return(true)
 						mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
 							Return(desiredConfig, nil)
 						setParamErr := errors.New("failed to set param1")
@@ -823,7 +735,6 @@ var _ = Describe("ConfigurationManager", func() {
 
 						mockNV.On("QueryNvConfig", ctx, pciAddress, []string(nil)).Return(nvConfig0, nil)
 						mockNV.On("QueryNvConfig", ctx, pciAddress2, []string(nil)).Return(nvConfig1, nil)
-						mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig0).Return(true)
 						mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig0).Return(map[string]string{"TRACER_ENABLED": "1"}, nil)
 						// Only port2 should be updated
 						mockNV.On("SetNvConfigParametersBatch", pciAddress2, map[string]string{"TRACER_ENABLED": "1"}, false, false).Return(nil)
@@ -852,7 +763,6 @@ var _ = Describe("ConfigurationManager", func() {
 
 						mockNV.On("QueryNvConfig", ctx, pciAddress, []string(nil)).Return(nvConfig0, nil)
 						mockNV.On("QueryNvConfig", ctx, pciAddress2, []string(nil)).Return(nvConfig1, nil)
-						mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig0).Return(true)
 						mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig0).Return(map[string]string{"TRACER_ENABLED": "1"}, nil)
 
 						result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
@@ -877,8 +787,6 @@ var _ = Describe("ConfigurationManager", func() {
 
 					mockNV.On("QueryNvConfig", ctx, pciAddress, []string(nil)).
 						Return(nvConfig, nil)
-					mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig).
-						Return(true)
 					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
 						Return(desiredConfig, nil)
 					mockNV.On("SetNvConfigParametersBatch", pciAddress, map[string]string{"param1": "newValue3", "param2": "newValue3"}, false, false).
@@ -904,8 +812,6 @@ var _ = Describe("ConfigurationManager", func() {
 
 					mockNV.On("QueryNvConfig", ctx, pciAddress, []string(nil)).
 						Return(nvConfig, nil)
-					mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig).
-						Return(true)
 					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
 						Return(desiredConfig, nil)
 
@@ -1308,7 +1214,7 @@ var _ = Describe("ConfigurationManager", func() {
 				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, mock.Anything).Return(
 					types.NvConfigQuery{CurrentConfig: map[string][]string{"NUM_OF_PF": {"1"}, "NUM_OF_PLANES_P1": {"0"}}}, nil)
 
-				updateNeeded, rebootNeeded, err := manager.ValidateDeviceNvSpec(ctx, device)
+				updateNeeded, rebootNeeded, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(updateNeeded).To(BeTrue())
 				Expect(rebootNeeded).To(BeTrue())
@@ -1324,7 +1230,7 @@ var _ = Describe("ConfigurationManager", func() {
 				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, []string{"LINK_TYPE_P1"}).Return(
 					types.NvConfigQuery{CurrentConfig: map[string][]string{"LINK_TYPE_P1": {"1"}}}, nil)
 
-				updateNeeded, rebootNeeded, err := manager.ValidateDeviceNvSpec(ctx, device)
+				updateNeeded, rebootNeeded, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(updateNeeded).To(BeTrue())
 				Expect(rebootNeeded).To(BeTrue())
@@ -1340,7 +1246,7 @@ var _ = Describe("ConfigurationManager", func() {
 				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, []string{"LINK_TYPE_P1"}).Return(
 					types.NvConfigQuery{CurrentConfig: map[string][]string{"LINK_TYPE_P1": {"2"}}}, nil)
 
-				updateNeeded, rebootNeeded, err := manager.ValidateDeviceNvSpec(ctx, device)
+				updateNeeded, rebootNeeded, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(updateNeeded).To(BeFalse())
 				Expect(rebootNeeded).To(BeFalse())
@@ -1349,7 +1255,7 @@ var _ = Describe("ConfigurationManager", func() {
 			It("returns error when GetBreakoutMlxConfig fails", func() {
 				mockSpcXMgr.On("GetBreakoutMlxConfig", device).Return(nil, errors.New("config not found"))
 
-				_, _, err := manager.ValidateDeviceNvSpec(ctx, device)
+				_, _, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("config not found"))
 			})
@@ -1361,7 +1267,7 @@ var _ = Describe("ConfigurationManager", func() {
 				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, mock.Anything).Return(
 					types.NvConfigQuery{}, errors.New("query failed"))
 
-				_, _, err := manager.ValidateDeviceNvSpec(ctx, device)
+				_, _, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("query failed"))
 			})
@@ -1373,7 +1279,7 @@ var _ = Describe("ConfigurationManager", func() {
 				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, []string{"LINK_TYPE_P1"}).Return(
 					types.NvConfigQuery{CurrentConfig: map[string][]string{"LINK_TYPE_P1": {"1"}}}, nil)
 
-				updateNeeded, rebootNeeded, err := manager.ValidateDeviceNvSpec(ctx, device)
+				updateNeeded, rebootNeeded, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(updateNeeded).To(BeTrue())
 				Expect(rebootNeeded).To(BeTrue())
@@ -1394,7 +1300,7 @@ var _ = Describe("ConfigurationManager", func() {
 				})).Return(
 					types.NvConfigQuery{CurrentConfig: map[string][]string{"LINK_TYPE_P1": {"2"}, "CUSTOM_PARAM_P1": {"0"}}}, nil)
 
-				updateNeeded, rebootNeeded, err := manager.ValidateDeviceNvSpec(ctx, device)
+				updateNeeded, rebootNeeded, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(updateNeeded).To(BeTrue())
 				Expect(rebootNeeded).To(BeTrue())
@@ -1415,7 +1321,7 @@ var _ = Describe("ConfigurationManager", func() {
 				})).Return(
 					types.NvConfigQuery{CurrentConfig: map[string][]string{"LINK_TYPE_P1": {"2"}, "CUSTOM_PARAM_P1": {"42"}}}, nil)
 
-				updateNeeded, rebootNeeded, err := manager.ValidateDeviceNvSpec(ctx, device)
+				updateNeeded, rebootNeeded, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(updateNeeded).To(BeFalse())
 				Expect(rebootNeeded).To(BeFalse())
@@ -1436,7 +1342,7 @@ var _ = Describe("ConfigurationManager", func() {
 				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, []string{"LINK_TYPE_P1"}).Return(
 					types.NvConfigQuery{CurrentConfig: map[string][]string{"LINK_TYPE_P1": {"1"}}}, nil)
 
-				updateNeeded, rebootNeeded, err := manager.ValidateDeviceNvSpec(ctx, device)
+				updateNeeded, rebootNeeded, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(updateNeeded).To(BeFalse())
 				Expect(rebootNeeded).To(BeFalse())
@@ -1456,7 +1362,7 @@ var _ = Describe("ConfigurationManager", func() {
 				mockNVConfigUtils.On("QueryNvConfig", ctx, pciAddress, []string{"NUM_OF_PF"}).Return(
 					types.NvConfigQuery{CurrentConfig: map[string][]string{"NUM_OF_PF": {"2"}}}, nil)
 
-				updateNeeded, rebootNeeded, err := manager.ValidateDeviceNvSpec(ctx, device)
+				updateNeeded, rebootNeeded, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(updateNeeded).To(BeTrue())
 				Expect(rebootNeeded).To(BeTrue())
@@ -1677,12 +1583,11 @@ var _ = Describe("ConfigurationManager", func() {
 		Describe("ValidateDeviceNvSpec", func() {
 			It("requires update+reboot when system_conf does not match", func() {
 				mockNV.On("QueryNvConfig", ctx, pciAddress, []string(nil)).Return(nvConfig, nil)
-				mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig).Return(true)
 				mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
 					Return(map[string]string{}, nil)
 				mockNV.On("ValidateSystemConf", ctx, pciAddress, "conf3", 0).Return(false, nil)
 
-				configUpdate, reboot, err := manager.ValidateDeviceNvSpec(ctx, device)
+				configUpdate, reboot, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(configUpdate).To(BeTrue())
 				Expect(reboot).To(BeTrue())
@@ -1690,12 +1595,11 @@ var _ = Describe("ConfigurationManager", func() {
 
 			It("requires nothing when both regular config and system_conf match", func() {
 				mockNV.On("QueryNvConfig", ctx, pciAddress, []string(nil)).Return(nvConfig, nil)
-				mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig).Return(true)
 				mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
 					Return(map[string]string{}, nil)
 				mockNV.On("ValidateSystemConf", ctx, pciAddress, "conf3", 0).Return(true, nil)
 
-				configUpdate, reboot, err := manager.ValidateDeviceNvSpec(ctx, device)
+				configUpdate, reboot, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(configUpdate).To(BeFalse())
 				Expect(reboot).To(BeFalse())
@@ -1705,7 +1609,6 @@ var _ = Describe("ConfigurationManager", func() {
 		Describe("ApplyNVConfiguration", func() {
 			It("applies set_system_conf and requires reboot when it does not match", func() {
 				mockNV.On("QueryNvConfig", ctx, pciAddress, []string(nil)).Return(nvConfig, nil)
-				mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig).Return(true)
 				mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
 					Return(map[string]string{}, nil)
 				mockNV.On("ValidateSystemConf", ctx, pciAddress, "conf3", 0).Return(false, nil)
@@ -1719,7 +1622,6 @@ var _ = Describe("ConfigurationManager", func() {
 
 			It("passes --force to set_system_conf when Force is set", func() {
 				mockNV.On("QueryNvConfig", ctx, pciAddress, []string(nil)).Return(nvConfig, nil)
-				mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig).Return(true)
 				mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
 					Return(map[string]string{}, nil)
 				mockNV.On("ValidateSystemConf", ctx, pciAddress, "conf3", 0).Return(false, nil)
@@ -1732,7 +1634,6 @@ var _ = Describe("ConfigurationManager", func() {
 
 			It("does nothing when system_conf already matches and no regular params change", func() {
 				mockNV.On("QueryNvConfig", ctx, pciAddress, []string(nil)).Return(nvConfig, nil)
-				mockConfigValidation.On("AdvancedPCISettingsEnabled", nvConfig).Return(true)
 				mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
 					Return(map[string]string{}, nil)
 				mockNV.On("ValidateSystemConf", ctx, pciAddress, "conf3", 0).Return(true, nil)

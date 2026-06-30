@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 
 	"k8s.io/client-go/tools/record"
@@ -37,8 +38,11 @@ type ConfigurationManager interface {
 	// ValidateDeviceNvSpec will validate device's non-volatile spec against already applied configuration on the host
 	// returns bool - nv config update required
 	// returns bool - reboot required
+	// returns []string - sorted, deduped param names that are part of the desired spec but hidden on
+	//   the device (absent from NextBootConfig). These cannot be applied and surface as PartiallyApplied
+	//   in the final ConfigUpdateInProgress condition.
 	// returns error - there are errors in device's spec
-	ValidateDeviceNvSpec(ctx context.Context, device *v1alpha1.NicDevice) (bool, bool, error)
+	ValidateDeviceNvSpec(ctx context.Context, device *v1alpha1.NicDevice) (bool, bool, []string, error)
 	// ApplyNVConfiguration calculates device's missing nv spec configuration and applies it to the device on the host
 	// returns *ConfigurationApplyResult - result of the apply operation
 	// returns error - there were errors while applying nv configuration
@@ -64,21 +68,23 @@ type configurationManager struct {
 // ValidateDeviceNvSpec will validate device's non-volatile spec against already applied configuration on the host
 // returns bool - nv config update required
 // returns bool - reboot required
+// returns []string - desired params that are hidden on the device (absent from NextBootConfig); sorted, deduped
 // returns error - there are errors in device's spec
 // if fully matches in current and next config, returns false, false
 // if fully matched next but not current, returns false, true
 // if not fully matched next boot, returns true, true
-func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *v1alpha1.NicDevice) (bool, bool, error) {
+func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *v1alpha1.NicDevice) (bool, bool, []string, error) {
 	log.Log.Info("configurationManager.ValidateDeviceNvSpec", "device", device.Name)
 
 	if device.Spec.Configuration.Template != nil && device.Spec.Configuration.Template.SpectrumXOptimized != nil && device.Spec.Configuration.Template.SpectrumXOptimized.Enabled {
-		return h.validateSpectrumXNvSpec(ctx, device)
+		configUpdate, reboot, err := h.validateSpectrumXNvSpec(ctx, device)
+		return configUpdate, reboot, nil, err
 	}
 
 	nvConfigsForPorts, err := h.queryNvConfigs(ctx, device)
 	if err != nil {
 		log.Log.Error(err, "failed to query nv configs", "device", device.Name)
-		return false, false, err
+		return false, false, nil, err
 	}
 	firstPortPCIAddr := device.Status.Ports[0].PCI
 	firstPortConfig := nvConfigsForPorts[firstPortPCIAddr]
@@ -90,44 +96,45 @@ func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *
 			resetNeededForPort, rebootNeededForPort, err := h.configValidation.ValidateResetToDefault(nvConfig)
 			if err != nil {
 				log.Log.Error(err, "failed to validate reset to default", "device", device.Name)
-				return false, false, err
+				return false, false, nil, err
 			}
 			resetNeeded = resetNeeded || resetNeededForPort
 			rebootNeeded = rebootNeeded || rebootNeededForPort
 		}
-		return resetNeeded, rebootNeeded, nil
+		return resetNeeded, rebootNeeded, nil, nil
 	}
 
 	// ConstructNvParamMapFromTemplate only uses the given nvConfig for a few default values, so we can use any port's nvConfig
 	desiredConfig, err := h.configValidation.ConstructNvParamMapFromTemplate(device, firstPortConfig)
 	if err != nil {
 		log.Log.Error(err, "failed to calculate desired nvconfig parameters", "device", device.Name)
-		return false, false, err
+		return false, false, nil, err
 	}
 
 	configUpdateNeeded := false
 	rebootNeeded := false
-
-	// If ADVANCED_PCI_SETTINGS are enabled in current config, unknown parameters are treated as spec error
-	// ADVANCED_PCI_SETTINGS param value is shared across all ports, so we can use any port's nvConfig for validation
-	advancedPciSettingsEnabled := h.configValidation.AdvancedPCISettingsEnabled(firstPortConfig)
+	unsupportedSet := map[string]struct{}{}
 
 	for _, nvConfig := range nvConfigsForPorts {
 		for parameter, desiredValue := range desiredConfig {
-			currentValues, foundInCurrent := nvConfig.CurrentConfig[parameter]
 			nextValues, foundInNextBoot := nvConfig.NextBootConfig[parameter]
-			if advancedPciSettingsEnabled && !foundInCurrent {
-				err = types.IncorrectSpecError(fmt.Sprintf("Parameter %s unsupported for device %s", parameter, device.Name))
-				log.Log.Error(err, "can't set nv config parameter for device")
-				return false, false, err
+			if !foundInNextBoot {
+				// Param unsupported on this device (e.g. hidden because ADVANCED_PCI_SETTINGS is off,
+				// or the variant simply doesn't expose it). Apply skips the same param and reports
+				// ApplyStatusPartiallyApplied; record it here so the controller can surface
+				// PartiallyApplied even when nothing else needs to change.
+				log.Log.V(2).Info("Parameter not in NextBootConfig, treating as unsupported",
+					"device", device.Name, "param", parameter)
+				unsupportedSet[parameter] = struct{}{}
+				continue
 			}
-
-			if foundInNextBoot && slices.Contains(nextValues, strings.ToLower(desiredValue)) {
-				if !foundInCurrent || !slices.Contains(currentValues, strings.ToLower(desiredValue)) {
-					rebootNeeded = true
-				}
-			} else {
+			if !slices.Contains(nextValues, strings.ToLower(desiredValue)) {
 				configUpdateNeeded = true
+				rebootNeeded = true
+				continue
+			}
+			currentValues, foundInCurrent := nvConfig.CurrentConfig[parameter]
+			if !foundInCurrent || !slices.Contains(currentValues, strings.ToLower(desiredValue)) {
 				rebootNeeded = true
 			}
 		}
@@ -136,14 +143,23 @@ func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *
 	// Layer Network Bay system_conf validation on top of the regular nv config validation.
 	systemConfMismatch, err := h.systemConfMismatch(ctx, device)
 	if err != nil {
-		return false, false, err
+		return false, false, nil, err
 	}
 	if systemConfMismatch {
 		configUpdateNeeded = true
 		rebootNeeded = true
 	}
 
-	return configUpdateNeeded, rebootNeeded, nil
+	var unsupportedParams []string
+	if len(unsupportedSet) > 0 {
+		unsupportedParams = make([]string, 0, len(unsupportedSet))
+		for name := range unsupportedSet {
+			unsupportedParams = append(unsupportedParams, name)
+		}
+		sort.Strings(unsupportedParams)
+	}
+
+	return configUpdateNeeded, rebootNeeded, unsupportedParams, nil
 }
 
 // ApplyNVConfiguration calculates device's missing nv spec configuration and applies it to the device on the host
@@ -182,38 +198,6 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 
 	if device.Spec.Configuration.Template == nil {
 		return &types.ConfigurationApplyResult{Status: types.ApplyStatusNothingToDo}, nil
-	}
-
-	// if ADVANCED_PCI_SETTINGS == 0, not all nv config parameters are available for configuration
-	// we enable this parameter first to unlock them
-	if !h.configValidation.AdvancedPCISettingsEnabled(firstPortConfig) {
-		log.Log.V(2).Info("AdvancedPciSettings not enabled, fw reset required", "device", device.Name)
-		err := h.nvConfigUtils.SetNvConfigParameter(firstPortPCIAddr, consts.AdvancedPCISettingsParam, consts.NvParamTrue)
-		if err != nil {
-			log.Log.Error(err, "Failed to apply nv config parameter", "device", device.Name, "param", consts.AdvancedPCISettingsParam, "value", consts.NvParamTrue)
-			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
-		}
-
-		if !options.SkipReset {
-			err = h.ResetNicFirmware(ctx, device)
-			if err != nil {
-				log.Log.Error(err, "Failed to reset NIC firmware, reboot required to apply ADVANCED_PCI_SETTINGS", "device", device.Name)
-				// We try to perform FW reset after setting the ADVANCED_PCI_SETTINGS to save us a reboot
-				// However, if the soft FW reset fails for some reason, we need to perform a reboot to unlock
-				// all the nv config parameters
-				return &types.ConfigurationApplyResult{Status: types.ApplyStatusSuccess, RebootRequired: true}, nil
-			}
-		} else {
-			return &types.ConfigurationApplyResult{Status: types.ApplyStatusSuccess, RebootRequired: true}, nil
-		}
-
-		// Query nv config again, additional options could become available
-		nvConfigsForPorts, err = h.queryNvConfigs(ctx, device)
-		if err != nil {
-			log.Log.Error(err, "failed to query nv configs", "device", device.Name)
-			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
-		}
-		firstPortConfig = nvConfigsForPorts[firstPortPCIAddr]
 	}
 
 	desiredConfig, err := h.configValidation.ConstructNvParamMapFromTemplate(device, firstPortConfig)
@@ -383,12 +367,6 @@ func (h configurationManager) applyResetToDefault(device *v1alpha1.NicDevice, pc
 			log.Log.Error(err, "Failed to restore the BlueField device mode of operation", "device", device.Name, "mode", mode, "param", consts.BF3OperationModeParam, "value", val)
 			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 		}
-	}
-
-	err = h.nvConfigUtils.SetNvConfigParameter(pciAddr, consts.AdvancedPCISettingsParam, consts.NvParamTrue)
-	if err != nil {
-		log.Log.Error(err, "Failed to apply nv config parameter", "device", device.Name, "param", consts.AdvancedPCISettingsParam, "value", consts.NvParamTrue)
-		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}
 
 	return &types.ConfigurationApplyResult{Status: types.ApplyStatusSuccess, RebootRequired: true}, nil

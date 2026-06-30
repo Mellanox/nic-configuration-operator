@@ -294,12 +294,8 @@ var _ = Describe("ConfigValidationImpl", func() {
 			defaultValues := map[string][]string{
 				consts.MaxAccOutReadParam: {consts.NvParamZero},
 			}
-			currentValues := map[string][]string{
-				consts.AdvancedPCISettingsParam: {consts.NvParamTrue},
-			}
 			query := types.NewNvConfigQuery()
 			query.DefaultConfig = defaultValues
-			query.CurrentConfig = currentValues
 
 			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
 			Expect(err).NotTo(HaveOccurred())
@@ -699,12 +695,8 @@ var _ = Describe("ConfigValidationImpl", func() {
 			defaultValues := map[string][]string{
 				consts.MaxAccOutReadParam: {"testMaxAccOutRead", "0"},
 			}
-			currentValues := map[string][]string{
-				consts.AdvancedPCISettingsParam: {"testAdvancedPCISettings", "1"},
-			}
 			query := types.NewNvConfigQuery()
 			query.DefaultConfig = defaultValues
-			query.CurrentConfig = currentValues
 
 			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
 			Expect(err).NotTo(HaveOccurred())
@@ -717,9 +709,6 @@ var _ = Describe("ConfigValidationImpl", func() {
 	Describe("ValidateResetToDefault", func() {
 		It("should return false, false if device is already reset in current and next boot", func() {
 			nvConfigQuery := types.NewNvConfigQuery()
-			nvConfigQuery.CurrentConfig[consts.AdvancedPCISettingsParam] = []string{consts.NvParamTrue}
-			nvConfigQuery.NextBootConfig[consts.AdvancedPCISettingsParam] = []string{consts.NvParamTrue}
-
 			nvConfigQuery.DefaultConfig["RandomParam"] = []string{testVal}
 			nvConfigQuery.CurrentConfig["RandomParam"] = []string{testVal}
 			nvConfigQuery.NextBootConfig["RandomParam"] = []string{testVal}
@@ -732,9 +721,6 @@ var _ = Describe("ConfigValidationImpl", func() {
 
 		It("should return false, true if reset will complete after reboot", func() {
 			nvConfigQuery := types.NewNvConfigQuery()
-			nvConfigQuery.CurrentConfig[consts.AdvancedPCISettingsParam] = []string{consts.NvParamTrue}
-			nvConfigQuery.NextBootConfig[consts.AdvancedPCISettingsParam] = []string{consts.NvParamTrue}
-
 			nvConfigQuery.DefaultConfig["RandomParam"] = []string{testVal}
 			nvConfigQuery.CurrentConfig["RandomParam"] = []string{anotherTestVal}
 			nvConfigQuery.NextBootConfig["RandomParam"] = []string{testVal}
@@ -747,9 +733,6 @@ var _ = Describe("ConfigValidationImpl", func() {
 
 		It("should return true, true if reset is required", func() {
 			nvConfigQuery := types.NewNvConfigQuery()
-			nvConfigQuery.CurrentConfig[consts.AdvancedPCISettingsParam] = []string{consts.NvParamTrue}
-			nvConfigQuery.NextBootConfig[consts.AdvancedPCISettingsParam] = []string{consts.NvParamTrue}
-
 			nvConfigQuery.DefaultConfig["RandomParam"] = []string{testVal}
 			nvConfigQuery.CurrentConfig["RandomParam"] = []string{anotherTestVal}
 			nvConfigQuery.NextBootConfig["RandomParam"] = []string{anotherTestVal}
