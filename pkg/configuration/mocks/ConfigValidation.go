@@ -13,24 +13,6 @@ type ConfigValidation struct {
 	mock.Mock
 }
 
-// AdvancedPCISettingsEnabled provides a mock function with given fields: nvConfig
-func (_m *ConfigValidation) AdvancedPCISettingsEnabled(nvConfig types.NvConfigQuery) bool {
-	ret := _m.Called(nvConfig)
-
-	if len(ret) == 0 {
-		panic("no return value specified for AdvancedPCISettingsEnabled")
-	}
-
-	var r0 bool
-	if rf, ok := ret.Get(0).(func(types.NvConfigQuery) bool); ok {
-		r0 = rf(nvConfig)
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-
-	return r0
-}
-
 // CalculateDesiredRuntimeConfig provides a mock function with given fields: device
 func (_m *ConfigValidation) CalculateDesiredRuntimeConfig(device *v1alpha1.NicDevice) types.DesiredRuntimeConfig {
 	ret := _m.Called(device)

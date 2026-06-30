@@ -41,6 +41,8 @@ const (
 	NonVolatileConfigUpdateFailedReason = "NonVolatileConfigUpdateFailed"
 	RuntimeConfigUpdateFailedReason     = "RuntimeConfigUpdateFailed"
 	UpdateSuccessfulReason              = "UpdateSuccessful"
+	PartiallyAppliedReason              = "PartiallyApplied"
+	PartiallyAppliedMessageFmt          = "configuration partially applied; the following spec params are not supported on this device and were skipped: %s"
 	SpecValidationFailed                = "SpecValidationFailed"
 	FirmwareError                       = "FirmwareError"
 	PendingFirmwareUpdateReason         = "PendingFirmwareUpdate"

@@ -126,7 +126,7 @@ type GpuDirectOptimizedSpec struct {
 type SpectrumXOptimizedSpec struct {
 	// Optimize Spectrum X
 	Enabled bool `json:"enabled"`
-	// Version of the Spectrum-X architecture to optimize for. Should match the name of the config map with Spectrum-X profile 
+	// Version of the Spectrum-X architecture to optimize for. Should match the name of the config map with Spectrum-X profile
 	// +required
 	Version string `json:"version"`
 	// Overlay mode to be configured
