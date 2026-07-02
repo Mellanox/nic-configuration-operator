@@ -116,7 +116,7 @@ func (_m *NVConfigUtils) SetSystemConf(ctx context.Context, pciAddr string, conf
 }
 
 // ValidateSystemConf provides a mock function with given fields: ctx, pciAddr, conf, asic
-func (_m *NVConfigUtils) ValidateSystemConf(ctx context.Context, pciAddr string, conf string, asic int) (bool, error) {
+func (_m *NVConfigUtils) ValidateSystemConf(ctx context.Context, pciAddr string, conf string, asic int) (bool, []string, error) {
 	ret := _m.Called(ctx, pciAddr, conf, asic)
 
 	if len(ret) == 0 {
@@ -124,8 +124,9 @@ func (_m *NVConfigUtils) ValidateSystemConf(ctx context.Context, pciAddr string,
 	}
 
 	var r0 bool
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, string, int) (bool, error)); ok {
+	var r1 []string
+	var r2 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, int) (bool, []string, error)); ok {
 		return rf(ctx, pciAddr, conf, asic)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, string, string, int) bool); ok {
@@ -134,13 +135,21 @@ func (_m *NVConfigUtils) ValidateSystemConf(ctx context.Context, pciAddr string,
 		r0 = ret.Get(0).(bool)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, string, string, int) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, int) []string); ok {
 		r1 = rf(ctx, pciAddr, conf, asic)
 	} else {
-		r1 = ret.Error(1)
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).([]string)
+		}
 	}
 
-	return r0, r1
+	if rf, ok := ret.Get(2).(func(context.Context, string, string, int) error); ok {
+		r2 = rf(ctx, pciAddr, conf, asic)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
 }
 
 // NewNVConfigUtils creates a new instance of NVConfigUtils. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

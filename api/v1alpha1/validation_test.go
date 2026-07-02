@@ -145,6 +145,28 @@ var _ = Describe("NicConfigurationTemplate CEL validation", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
+	It("allows a rawNvConfig param with an explicit index key", func() {
+		obj := newNicConfigurationTemplate("rawnv-explicit-index", "Ethernet", 1, nil)
+		obj.Spec.Template.RawNvConfig = []NvConfigParam{
+			{Name: "MODULE_SPLIT_M0[0]", Value: "1"},
+			{Name: "MODULE_SPLIT_M0[2]", Value: "5"},
+		}
+		Expect(k8sClient.Create(ctx, obj)).To(Succeed())
+	})
+
+	It("rejects a rawNvConfig param name using index-range syntax", func() {
+		// A range like MODULE_SPLIT_M0[0..3] plus an explicit MODULE_SPLIT_M0[2] would both normalize
+		// to the same concrete key; disallow ranges in rawNvConfig so overrides are unambiguous.
+		obj := newNicConfigurationTemplate("rawnv-range", "Ethernet", 1, nil)
+		obj.Spec.Template.RawNvConfig = []NvConfigParam{
+			{Name: "MODULE_SPLIT_M0[0..3]", Value: "1"},
+			{Name: "MODULE_SPLIT_M0[2]", Value: "5"},
+		}
+		err := k8sClient.Create(ctx, obj)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("index-range syntax"))
+	})
+
 	It("allows SpectrumXOptimized enabled for ConnectX-8 (NicType 1023)", func() {
 		obj := newNicConfigurationTemplate("spcx-allow-1023", "Ethernet", 1, &SpectrumXOptimizedSpec{Enabled: true, Version: "RA2.0"})
 		obj.Spec.NicSelector.NicType = nicTypeConnectX8

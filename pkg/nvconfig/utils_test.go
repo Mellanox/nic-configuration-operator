@@ -221,32 +221,102 @@ Configurations:                              Default         Current         Nex
 	})
 
 	Describe("parseValidateSystemConf", func() {
-		It("returns true on a MATCHES result line", func() {
-			output := `Validating system configuration 'conf16[0]' on device 000e:01:00.0
+		It("parses an all-OK MATCHES output with skipped params", func() {
+			output := `Validating system configuration 'conf6[1]' on device 0001:03:00.0
 ------------------------------------------------------------------------
-  OK:       BOARD_CONFIGURATION_MODE = 2
+  OK:       BOARD_CONFIGURATION_MODE = 1
+  OK:       MODULE_SPLIT_M0[0] = 0x1
+  OK:       LINK_TYPE_P1 = IB
+  OK:       NUM_OF_PLANES_P1 = 4
+  OK:       NUM_OF_PF = 1
+  SKIPPED (failed to query):
+    - MODULE_SPLIT_M1[0]
+    - MODULE_SPLIT_M1[1]
 ------------------------------------------------------------------------
 Result: Device configuration MATCHES the system configuration.
 `
-			matches, err := parseValidateSystemConf([]byte(output))
+			matches, mismatched, foundResult, err := parseValidateSystemConf([]byte(output))
 			Expect(err).ToNot(HaveOccurred())
+			Expect(foundResult).To(BeTrue())
 			Expect(matches).To(BeTrue())
+			Expect(mismatched).To(BeEmpty())
 		})
 
-		It("returns false on a does NOT match result line", func() {
-			output := `Validating system configuration 'conf3[0]' on device 000e:01:00.0
+		It("parses a mixed MISMATCH/OK output and reports does NOT match", func() {
+			output := `Validating system configuration 'conf3[1]' on device 0001:03:00.0
 ------------------------------------------------------------------------
-  MISMATCH: BOARD_CONFIGURATION_MODE	Expected: 0	Actual: 2
+  MISMATCH: BOARD_CONFIGURATION_MODE	Expected: 0	Actual: 1
+  MISMATCH: MODULE_SPLIT_M0[4]	Expected: 0x1	Actual: 0xFF
+  OK:       MODULE_SPLIT_M0[8] = 0xFF
+  MISMATCH: LINK_TYPE_P1	Expected: ETH	Actual: IB
+  MISMATCH: NUM_OF_PF	Expected: 4	Actual: 1
+  SKIPPED (failed to query):
+    - MODULE_SPLIT_M1[0]
+    - LINK_TYPE_P2
 ------------------------------------------------------------------------
 Result: Device configuration does NOT match the system configuration.
 `
-			matches, err := parseValidateSystemConf([]byte(output))
+			matches, mismatched, foundResult, err := parseValidateSystemConf([]byte(output))
 			Expect(err).ToNot(HaveOccurred())
+			Expect(foundResult).To(BeTrue())
 			Expect(matches).To(BeFalse())
+			Expect(mismatched).To(ConsistOf("BOARD_CONFIGURATION_MODE", "MODULE_SPLIT_M0[4]", "LINK_TYPE_P1", "NUM_OF_PF"))
 		})
 
-		It("returns an error when no Result line is present", func() {
-			_, err := parseValidateSystemConf([]byte("some unexpected output"))
+		It("derives matches from rows when no Result line is present", func() {
+			output := `  OK:       NUM_OF_PF = 1
+  MISMATCH: LINK_TYPE_P1	Expected: ETH	Actual: IB
+`
+			matches, mismatched, foundResult, err := parseValidateSystemConf([]byte(output))
+			Expect(err).ToNot(HaveOccurred())
+			Expect(foundResult).To(BeFalse())
+			Expect(matches).To(BeFalse())
+			Expect(mismatched).To(ConsistOf("LINK_TYPE_P1"))
+		})
+
+		It("reports foundResult=true when a Result line is present", func() {
+			output := `  OK:       NUM_OF_PF = 1
+Result: Device configuration MATCHES the system configuration.
+`
+			_, _, foundResult, err := parseValidateSystemConf([]byte(output))
+			Expect(err).ToNot(HaveOccurred())
+			Expect(foundResult).To(BeTrue())
+		})
+
+		It("counts an OK row even when the '=' is absent (no spurious parse error)", func() {
+			matches, mismatched, _, err := parseValidateSystemConf([]byte("  OK:       NUM_OF_PF\nResult: Device configuration MATCHES the system configuration.\n"))
+			Expect(err).ToNot(HaveOccurred())
+			Expect(matches).To(BeTrue())
+			Expect(mismatched).To(BeEmpty())
+		})
+
+		It("does not mis-classify a stray '-' line after a SKIPPED block that a header interrupted", func() {
+			output := `  SKIPPED (failed to query):
+    - MODULE_SPLIT_M1[0]
+Validating system configuration 'conf3[1]' on device 0001:03:00.1
+    - SHOULD_NOT_BE_SKIPPED
+Result: Device configuration does NOT match the system configuration.
+`
+			matches, mismatched, foundResult, err := parseValidateSystemConf([]byte(output))
+			Expect(err).ToNot(HaveOccurred())
+			Expect(foundResult).To(BeTrue())
+			Expect(matches).To(BeFalse())
+			Expect(mismatched).To(BeEmpty())
+		})
+
+		It("does not error on a SKIPPED-only output (rows seen, no Result line)", func() {
+			output := `  SKIPPED (failed to query):
+    - MODULE_SPLIT_M1[0]
+`
+			matches, mismatched, foundResult, err := parseValidateSystemConf([]byte(output))
+			Expect(err).ToNot(HaveOccurred())
+			Expect(foundResult).To(BeFalse())
+			Expect(matches).To(BeTrue())
+			Expect(mismatched).To(BeEmpty())
+		})
+
+		It("returns an error when the output cannot be parsed", func() {
+			_, _, _, err := parseValidateSystemConf([]byte("some unexpected output"))
 			Expect(err).To(HaveOccurred())
 		})
 	})
@@ -328,9 +398,10 @@ Result: Device configuration does NOT match the system configuration.
 					return cmd
 				},
 			}
-			matches, err := h.ValidateSystemConf(context.TODO(), pciAddress, "conf16", 0)
+			matches, mismatched, err := h.ValidateSystemConf(context.TODO(), pciAddress, "conf16", 0)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(matches).To(BeTrue())
+			Expect(mismatched).To(BeEmpty())
 		})
 
 		It("reports a mismatch even when mlxconfig exits non-zero", func() {
@@ -349,9 +420,10 @@ Result: Device configuration does NOT match the system configuration.
 			fakeExec.CommandScript = []execTesting.FakeCommandAction{
 				func(name string, args ...string) exec.Cmd { return cmd },
 			}
-			matches, err := h.ValidateSystemConf(context.TODO(), pciAddress, "conf3", 1)
+			matches, mismatched, err := h.ValidateSystemConf(context.TODO(), pciAddress, "conf3", 1)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(matches).To(BeFalse())
+			Expect(mismatched).To(ConsistOf("LINK_TYPE_P1"))
 		})
 
 		It("returns an error when mlxconfig fails", func() {
@@ -362,7 +434,7 @@ Result: Device configuration does NOT match the system configuration.
 			fakeExec.CommandScript = []execTesting.FakeCommandAction{
 				func(name string, args ...string) exec.Cmd { return cmd },
 			}
-			_, err := h.ValidateSystemConf(context.TODO(), pciAddress, "conf3", 0)
+			_, _, err := h.ValidateSystemConf(context.TODO(), pciAddress, "conf3", 0)
 			Expect(err).To(HaveOccurred())
 		})
 	})

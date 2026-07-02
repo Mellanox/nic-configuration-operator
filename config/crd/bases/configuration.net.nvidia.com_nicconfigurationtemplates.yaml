@@ -168,14 +168,17 @@ spec:
                       properties:
                         name:
                           description: Name of the arbitrary nvconfig parameter
+                          maxLength: 64
                           type: string
                         value:
                           description: Value of the arbitrary nvconfig parameter
+                          maxLength: 128
                           type: string
                       required:
                       - name
                       - value
                       type: object
+                    maxItems: 128
                     type: array
                   roceOptimized:
                     description: RoCE optimization settings
@@ -343,6 +346,10 @@ spec:
                 - message: linkType must not be set when networkBay is configured
                     (the Network Bay link type is governed by the system configuration)
                   rule: '!has(self.networkBay) || !has(self.linkType)'
+                - message: rawNvConfig parameter names must not use index-range syntax
+                    like NAME[0..3]; list each index explicitly (NAME[0], NAME[1],
+                    ...)
+                  rule: '!has(self.rawNvConfig) || self.rawNvConfig.all(p, !p.name.matches(''.*[[][0-9]+[.][.][0-9]+[]].*''))'
             required:
             - nicSelector
             - template
