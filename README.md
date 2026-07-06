@@ -126,7 +126,9 @@ To create a Spectrum-X profile ConfigMap:
 3. Add the label `network.nvidia.com/operator.nic-configuration.spectrum-x-profile`. The label value is ignored; only the label key must be present.
 4. Put the complete Spectrum-X profile YAML under `data.profile`.
 
-The profile ConfigMap can be created in any namespace watched by the operator. If two labeled ConfigMaps in different namespaces use the same name, they define the same Spectrum-X version key and the latest reconciled ConfigMap wins.
+The profile ConfigMap can be created in any namespace watched by the operator.
+
+> **Warning:** If two labeled ConfigMaps in different namespaces share the same name, they define the same Spectrum-X version key and the latest-reconciled ConfigMap silently wins with no error. To avoid unpredictable behavior, use unique ConfigMap names across all watched namespaces.
 
 ##### [Example Spectrum-X profile ConfigMap](docs/examples/spectrum-x/example-spectrum-x-profile-configmap.yaml):
 
