@@ -18,6 +18,7 @@ package nvconfig
 import (
 	"context"
 	"fmt"
+	"regexp"
 
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	. "github.com/onsi/ginkgo/v2"
@@ -27,6 +28,26 @@ import (
 )
 
 var _ = Describe("NVConfigUtils", func() {
+	Describe("parseMLXConfigValue", func() {
+		var valueInBracketsRegex *regexp.Regexp
+
+		BeforeEach(func() {
+			valueInBracketsRegex = regexp.MustCompile(`^(.*?)\(([^)]*)\)$`)
+		})
+
+		DescribeTable("parses mlxconfig value encodings",
+			func(value string, expected []string) {
+				Expect(parseMLXConfigValue(value, valueInBracketsRegex)).To(Equal(expected))
+			},
+			Entry("enum with numeric value", "DEVICE_DEFAULT(0)", []string{"device_default", "0"}),
+			Entry("enum containing underscore and digit", "HOST_0(1)", []string{"host_0", "1"}),
+			Entry("uppercase enum alias", "DISABLED(0)", []string{"disabled", "0"}),
+			Entry("plain numeric value", "148", []string{"148"}),
+			Entry("plain symbolic value", "HOST_0", []string{"HOST_0"}),
+			Entry("empty value", "", []string{""}),
+		)
+	})
+
 	Describe("queryMLXConfig", func() {
 		var (
 			h          *nvConfigUtils
@@ -186,6 +207,116 @@ Configurations:                              Default         Current         Nex
 			Expect(query.DefaultConfig).To(HaveKeyWithValue("INTERNAL_CPU_OFFLOAD_ENGINE", []string{"enabled", "0"}))
 			Expect(query.CurrentConfig).To(HaveKeyWithValue("INTERNAL_CPU_OFFLOAD_ENGINE", []string{"enabled", "0"}))
 			Expect(query.NextBootConfig).To(HaveKeyWithValue("INTERNAL_CPU_OFFLOAD_ENGINE", []string{"enabled", "0"}))
+		})
+
+		It("should parse array values when mlxconfig returns mixed enum and raw current values", func() {
+			cmd1 := &execTesting.FakeCmd{}
+			cmd1.OutputScript = append(cmd1.OutputScript,
+				func() ([]byte, []byte, error) {
+					output := `
+Device #1:
+----------
+
+Device type:        ConnectX9
+Configurations:                                         Default                           Current                           Next Boot
+        PCI_DOWNSTREAM_PORT_OWNER                       Array[0..15]                      Array[0..15]                      Array[0..15]
+`
+					return []byte(output), nil, nil
+				},
+			)
+
+			cmd2 := &execTesting.FakeCmd{}
+			cmd2.OutputScript = append(cmd2.OutputScript,
+				func() ([]byte, []byte, error) {
+					output := `
+Device #1:
+----------
+
+Device type:        ConnectX9
+Configurations:                                         Default                           Current                           Next Boot
+*       PCI_DOWNSTREAM_PORT_OWNER[0]                    DEVICE_DEFAULT(0)                 148                               DEVICE_DEFAULT(0)
+*       PCI_DOWNSTREAM_PORT_OWNER[1]                    DEVICE_DEFAULT(0)                 HOST_0(1)                         DEVICE_DEFAULT(0)
+        PCI_DOWNSTREAM_PORT_OWNER[2]                    DEVICE_DEFAULT(0)                 DEVICE_DEFAULT(0)                 DEVICE_DEFAULT(0)
+*       PCI_DOWNSTREAM_PORT_OWNER[4]                    DEVICE_DEFAULT(0)                 164                               DEVICE_DEFAULT(0)
+The '*' shows parameters with next value different from default/current value.
+`
+					return []byte(output), nil, nil
+				},
+			)
+
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(cmd string, args ...string) exec.Cmd {
+					Expect(cmd).To(Equal("mlxconfig"))
+					Expect(args).To(Equal([]string{"-d", pciAddress, "-e", "query"}))
+					return cmd1
+				},
+				func(cmd string, args ...string) exec.Cmd {
+					Expect(cmd).To(Equal("mlxconfig"))
+					Expect(args).To(Equal([]string{"-d", pciAddress, "-e", "query", "PCI_DOWNSTREAM_PORT_OWNER[0..15]"}))
+					return cmd2
+				},
+			}
+
+			h.execInterface = fakeExec
+
+			query, err := h.QueryNvConfig(context.TODO(), pciAddress, nil)
+			Expect(err).ToNot(HaveOccurred())
+
+			Expect(query.DefaultConfig).To(HaveKeyWithValue("PCI_DOWNSTREAM_PORT_OWNER[0]", []string{"device_default", "0"}))
+			Expect(query.CurrentConfig).To(HaveKeyWithValue("PCI_DOWNSTREAM_PORT_OWNER[0]", []string{"148"}))
+			Expect(query.NextBootConfig).To(HaveKeyWithValue("PCI_DOWNSTREAM_PORT_OWNER[0]", []string{"device_default", "0"}))
+
+			Expect(query.DefaultConfig).To(HaveKeyWithValue("PCI_DOWNSTREAM_PORT_OWNER[1]", []string{"device_default", "0"}))
+			Expect(query.CurrentConfig).To(HaveKeyWithValue("PCI_DOWNSTREAM_PORT_OWNER[1]", []string{"host_0", "1"}))
+			Expect(query.NextBootConfig).To(HaveKeyWithValue("PCI_DOWNSTREAM_PORT_OWNER[1]", []string{"device_default", "0"}))
+
+			Expect(query.DefaultConfig).To(HaveKeyWithValue("PCI_DOWNSTREAM_PORT_OWNER[4]", []string{"device_default", "0"}))
+			Expect(query.CurrentConfig).To(HaveKeyWithValue("PCI_DOWNSTREAM_PORT_OWNER[4]", []string{"164"}))
+			Expect(query.NextBootConfig).To(HaveKeyWithValue("PCI_DOWNSTREAM_PORT_OWNER[4]", []string{"device_default", "0"}))
+		})
+
+		It("should parse default, current, and next boot column formats independently", func() {
+			cmd1 := &execTesting.FakeCmd{}
+			cmd1.OutputScript = append(cmd1.OutputScript,
+				func() ([]byte, []byte, error) {
+					output := `
+Device #1:
+----------
+
+Device type:        ConnectX9
+Configurations:                                         Default                           Current                           Next Boot
+        MIXED_FORMAT_PARAM                              7                                 HOST_0(1)                         DEVICE_DEFAULT(0)
+        PLAIN_FORMAT_PARAM                              32                                64                                128
+        ENUM_FORMAT_PARAM                               DISABLED(0)                       ENABLED(1)                        ENABLED(1)
+`
+					return []byte(output), nil, nil
+				},
+			)
+
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(cmd string, args ...string) exec.Cmd {
+					Expect(cmd).To(Equal("mlxconfig"))
+					Expect(args).To(Equal([]string{"-d", pciAddress, "-e", "query", "MIXED_FORMAT_PARAM"}))
+					return cmd1
+				},
+			}
+
+			h.execInterface = fakeExec
+
+			query, err := h.QueryNvConfig(context.TODO(), pciAddress, []string{"MIXED_FORMAT_PARAM"})
+			Expect(err).ToNot(HaveOccurred())
+
+			Expect(query.DefaultConfig).To(HaveKeyWithValue("MIXED_FORMAT_PARAM", []string{"7"}))
+			Expect(query.CurrentConfig).To(HaveKeyWithValue("MIXED_FORMAT_PARAM", []string{"host_0", "1"}))
+			Expect(query.NextBootConfig).To(HaveKeyWithValue("MIXED_FORMAT_PARAM", []string{"device_default", "0"}))
+
+			Expect(query.DefaultConfig).To(HaveKeyWithValue("PLAIN_FORMAT_PARAM", []string{"32"}))
+			Expect(query.CurrentConfig).To(HaveKeyWithValue("PLAIN_FORMAT_PARAM", []string{"64"}))
+			Expect(query.NextBootConfig).To(HaveKeyWithValue("PLAIN_FORMAT_PARAM", []string{"128"}))
+
+			Expect(query.DefaultConfig).To(HaveKeyWithValue("ENUM_FORMAT_PARAM", []string{"disabled", "0"}))
+			Expect(query.CurrentConfig).To(HaveKeyWithValue("ENUM_FORMAT_PARAM", []string{"enabled", "1"}))
+			Expect(query.NextBootConfig).To(HaveKeyWithValue("ENUM_FORMAT_PARAM", []string{"enabled", "1"}))
 		})
 
 		It("should return error if mlxconfig command fails", func() {

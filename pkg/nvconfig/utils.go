@@ -34,6 +34,18 @@ const (
 	arrayPrefix = "Array"
 )
 
+func parseMLXConfigValue(value string, valueInBracketsRegex *regexp.Regexp) []string {
+	match := valueInBracketsRegex.FindStringSubmatch(value)
+	if len(match) != 3 {
+		return []string{value}
+	}
+
+	for i := 1; i < len(match); i++ {
+		match[i] = strings.ToLower(match[i])
+	}
+	return match[1:]
+}
+
 // NVConfigUtils is an interface that contains util functions related to querying and setting nv config
 type NVConfigUtils interface {
 	// QueryNvConfig queries nv config for a mellanox device and returns default, current and next boot configs
@@ -67,6 +79,7 @@ type nvConfigUtils struct {
 func (h *nvConfigUtils) queryMLXConfig(ctx context.Context, query types.NvConfigQuery, pciAddr string, additionalParameter string) error {
 	log.Log.Info(fmt.Sprintf("mlxconfig -d %s query %s", pciAddr, additionalParameter)) // TODO change verbosity
 	valueInBracketsRegex := regexp.MustCompile(`^(.*?)\(([^)]*)\)$`)
+	spaceRe := regexp.MustCompile(`\s{2,}`)
 
 	var cmd execUtils.Cmd
 	if additionalParameter == "" {
@@ -110,7 +123,6 @@ func (h *nvConfigUtils) queryMLXConfig(ctx context.Context, query types.NvConfig
 			}
 
 			// Replace multiple spaces with a single tab character
-			spaceRe := regexp.MustCompile(`\s{2,}`)
 			line = spaceRe.ReplaceAllString(line, "\t")
 
 			fields := strings.Split(line, "\t")
@@ -137,30 +149,9 @@ func (h *nvConfigUtils) queryMLXConfig(ctx context.Context, query types.NvConfig
 				continue
 			}
 
-			// If the actual value is wrapped in brackets, we want to save both it and its string alias
-			match := valueInBracketsRegex.FindStringSubmatch(defaultVal)
-			if len(match) == 3 {
-				for i, v := range match {
-					match[i] = strings.ToLower(v)
-				}
-				query.DefaultConfig[paramName] = match[1:]
-
-				match = valueInBracketsRegex.FindStringSubmatch(currentVal)
-				for i, v := range match {
-					match[i] = strings.ToLower(v)
-				}
-				query.CurrentConfig[paramName] = match[1:]
-
-				match = valueInBracketsRegex.FindStringSubmatch(nextBootVal)
-				for i, v := range match {
-					match[i] = strings.ToLower(v)
-				}
-				query.NextBootConfig[paramName] = match[1:]
-			} else {
-				query.DefaultConfig[paramName] = []string{defaultVal}
-				query.CurrentConfig[paramName] = []string{currentVal}
-				query.NextBootConfig[paramName] = []string{nextBootVal}
-			}
+			query.DefaultConfig[paramName] = parseMLXConfigValue(defaultVal, valueInBracketsRegex)
+			query.CurrentConfig[paramName] = parseMLXConfigValue(currentVal, valueInBracketsRegex)
+			query.NextBootConfig[paramName] = parseMLXConfigValue(nextBootVal, valueInBracketsRegex)
 
 		}
 	}
