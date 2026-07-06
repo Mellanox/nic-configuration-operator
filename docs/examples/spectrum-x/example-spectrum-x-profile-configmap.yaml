@@ -1,0 +1,74 @@
+# Copyright 2026 NVIDIA CORPORATION & AFFILIATES
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Example only. Replace the placeholder parameter names, values, and DMS paths
+# with values from a validated Spectrum-X profile.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: example-spectrum-x-profile
+  namespace: nvidia-network-operator
+  labels:
+    network.nvidia.com/operator.nic-configuration.spectrum-x-profile: ""
+data:
+  profile: |
+    useSoftwareCCAlgorithm: true
+    docaCCVersion: "example-version"
+    mlxConfig:
+      none:
+        "1023":
+          postBreakout:
+            EXAMPLE_NVCONFIG_PARAMETER: "example-value"
+        "1025":
+          postBreakout:
+            EXAMPLE_NVCONFIG_PARAMETER: "example-value"
+        "a2dc":
+          postBreakout:
+            EXAMPLE_NVCONFIG_PARAMETER: "example-value"
+      swplb:
+        "1023":
+          breakout:
+            2:
+              EXAMPLE_BREAKOUT_PARAMETER: "example-value"
+          postBreakout:
+            EXAMPLE_POST_BREAKOUT_PARAMETER: "example-value"
+    runtimeConfig:
+      roce:
+        - name: Example RoCE runtime parameter
+          value: "example-value"
+          valueType: string
+          dmsPath: "<dms-path-for-runtime-parameter>"
+      adaptiveRouting:
+        - name: Example adaptive routing parameter
+          value: true
+          valueType: bool
+          dmsPath: "<dms-path-for-runtime-parameter>"
+      congestionControl:
+        - name: Example congestion control parameter
+          value: 1
+          valueType: int
+          dmsPath: "<dms-path-for-runtime-parameter>"
+      interPacketGap:
+        pureL3:
+          - name: Example inter-packet gap parameter
+            value: 1
+            valueType: int
+            dmsPath: "<dms-path-for-runtime-parameter>"
+        l3EVPN:
+          - name: Example overlay inter-packet gap parameter
+            value: 1
+            valueType: int
+            dmsPath: "<dms-path-for-runtime-parameter>"
