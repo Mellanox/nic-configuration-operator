@@ -52,7 +52,16 @@ func GetDMSClientForDevice(mgr DMSManager, device *v1alpha1.NicDevice) (DMSClien
 	if device == nil || len(device.Status.Ports) == 0 {
 		return nil, fmt.Errorf("device has no ports")
 	}
-	return mgr.GetDMSClientByPCIAddress(utils.PCIDeviceAddress(device.Status.Ports[0].PCI))
+	client, err := mgr.GetDMSClientByPCIAddress(utils.PCIDeviceAddress(device.Status.Ports[0].PCI))
+	if err != nil {
+		return nil, err
+	}
+	if dmsClient, ok := client.(*dmsClient); ok {
+		dmsClient.deviceMutex.Lock()
+		dmsClient.device = *device.Status.DeepCopy()
+		dmsClient.deviceMutex.Unlock()
+	}
+	return client, nil
 }
 
 // DMSServer extends DMSManager with server lifecycle management
