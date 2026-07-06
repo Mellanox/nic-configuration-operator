@@ -26,6 +26,7 @@ import (
 	execTesting "k8s.io/utils/exec/testing"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
+	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 )
 
 // pgrepNotFound returns a FakeCommandAction that simulates pgrep finding no dmsd process
@@ -370,6 +371,56 @@ var _ = Describe("DMSServer", func() {
 				Expect(err.Error()).To(ContainSubstring("DMS server is not running"))
 				Expect(client).To(BeNil())
 			})
+		})
+	})
+
+	Describe("GetDMSClientForDevice", func() {
+		It("should refresh the concrete client's cached device status from the provided device", func() {
+			staleStatus := *testStatuses[0].DeepCopy()
+			client := &dmsClient{
+				device:        staleStatus,
+				targetPCI:     testStatuses[0].Ports[0].PCI,
+				bindAddress:   "localhost:9339",
+				authParams:    []string{"--insecure"},
+				execInterface: fakeExec,
+			}
+			server.clients["0000:01:00"] = client
+			server.running.Store(true)
+
+			refreshedStatus := *testStatuses[0].DeepCopy()
+			refreshedDevice := &v1alpha1.NicDevice{
+				Status: refreshedStatus,
+			}
+			refreshedDevice.Status.Ports[0].NetworkInterface = "nic_p0_r0"
+			Expect(client.deviceSnapshot().Ports[0].NetworkInterface).To(Equal("enp1s0f0np0"))
+
+			dmsClient, err := GetDMSClientForDevice(server, refreshedDevice)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(dmsClient).To(Equal(client))
+			Expect(client.deviceSnapshot().Ports[0].NetworkInterface).To(Equal("nic_p0_r0"))
+
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(cmd string, args ...string) exec.Cmd {
+					Expect(strings.Join(args, " ")).To(ContainSubstring("/interfaces/interface[name=nic_p0_r0]/nvidia/qos/config/trust-mode:::string:::dscp"))
+					Expect(strings.Join(args, " ")).NotTo(ContainSubstring("enp1s0f0np0"))
+					return &execTesting.FakeCmd{
+						CombinedOutputScript: []execTesting.FakeAction{
+							func() ([]byte, []byte, error) {
+								return nil, nil, nil
+							},
+						},
+					}
+				},
+			}
+
+			err = dmsClient.SetParameters([]types.ConfigurationParameter{
+				{
+					DMSPath:   "/interfaces/interface/nvidia/qos/config/trust-mode",
+					Value:     "dscp",
+					ValueType: ValueTypeString,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 })
