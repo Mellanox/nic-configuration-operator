@@ -109,22 +109,71 @@ spec:
   * Cannot be combined with `roceOptimized` (RoCE settings are included automatically)
   * Can be combined with `rawNvConfig` — raw params are merged as overrides on top of Spectrum-X calculated params
   * Only supported on ConnectX-8 (`nicType: 1023`), ConnectX-9 (`nicType: 1025`) and BlueField-3 SuperNIC (`nicType: a2dc`)
-  * `version`: Required. Reference Architecture version (`RA1.3`, `RA2.0`, `RA2.1`, or `RA2.2`)
+  * `version`: Required. Must match the name of a Spectrum-X profile ConfigMap
   * `overlay`: Optional, default `none`. Set to `l3` for L3 EVPN overlay
-  * `multiplaneMode`: Optional, default `none`. Only available with RA2.1. Options: `none`, `swplb`, `hwplb`, `uniplane`
-  * `numberOfPlanes`: Optional, default `1`. Only available with RA2.1. Options: `1`, `2`, or `4`
+  * `multiplaneMode`: Optional, default `none`. Options: `none`, `swplb`, `hwplb`, `uniplane`
+  * `numberOfPlanes`: Optional, default `1`. Options: `1`, `2`, or `4`
 * If a configuration is not set in spec, its non-volatile configuration parameters (if any) should be set to device default.
 
 #### Spectrum-X Configuration
 
-The NIC Configuration Operator supports Spectrum-X-specific NIC configuration for different versions of the NVIDIA Spectrum-X Reference Architecture (RA1.3, RA2.0, and RA2.1).
+The NIC Configuration Operator supports Spectrum-X-specific NIC configuration through Spectrum-X profile ConfigMaps. A profile ConfigMap contains the Spectrum-X YAML profile consumed by the daemon at runtime.
+
+To create a Spectrum-X profile ConfigMap:
+
+1. Create one ConfigMap per profile.
+2. Set the ConfigMap name to the value that will be used in `template.spectrumXOptimized.version`.
+3. Add the label `network.nvidia.com/operator.nic-configuration.spectrum-x-profile`. The label value is ignored; only the label key must be present.
+4. Put the complete Spectrum-X profile YAML under `data.profile`.
+
+The profile ConfigMap can be created in any namespace watched by the operator.
+
+> **Warning:** If two labeled ConfigMaps in different namespaces share the same name, they define the same Spectrum-X version key and the latest-reconciled ConfigMap silently wins with no error. To avoid unpredictable behavior, use unique ConfigMap names across all watched namespaces.
+
+##### [Example Spectrum-X profile ConfigMap](docs/examples/spectrum-x/example-spectrum-x-profile-configmap.yaml):
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: example-spectrum-x-profile
+  namespace: nvidia-network-operator
+  labels:
+    network.nvidia.com/operator.nic-configuration.spectrum-x-profile: ""
+data:
+  profile: |
+    useSoftwareCCAlgorithm: true
+    docaCCVersion: "example-version"
+    mlxConfig:
+      none:
+        "1023":
+          postBreakout:
+            EXAMPLE_NVCONFIG_PARAMETER: "example-value"
+    runtimeConfig:
+      roce:
+        - name: Example RoCE runtime parameter
+          value: "example-value"
+          valueType: string
+          dmsPath: "<dms-path-for-runtime-parameter>"
+```
+
+Reference the profile from a `NicConfigurationTemplate` by using the ConfigMap name as the Spectrum-X version:
+
+```yaml
+spectrumXOptimized:
+  enabled: true
+  version: "example-spectrum-x-profile"
+  overlay: "none"
+  multiplaneMode: "none"
+  numberOfPlanes: 1
+```
 
 Supported NIC types for Spectrum-X:
 * ConnectX-8 (device ID `1023`) -- supports all multiplane modes
 * ConnectX-9 (device ID `1025`) -- supports all multiplane modes (same configuration as ConnectX-8)
 * BlueField-3 SuperNIC (device ID `a2dc`) -- supports all multiplane modes except `hwplb`
 
-RA2.1 introduces multiplane mode support, allowing NICs to be configured with multiple data planes. Available modes:
+Spectrum-X profiles can configure NICs with multiple data planes. Available modes:
 
 | Mode | Description | Supported NICs | Planes |
 |------|-------------|----------------|--------|
@@ -132,8 +181,6 @@ RA2.1 introduces multiplane mode support, allowing NICs to be configured with mu
 | `swplb` | Software Packet Load Balancing | ConnectX-8, ConnectX-9, BF3 SuperNIC | 2, 4 |
 | `hwplb` | Hardware Packet Load Balancing | ConnectX-8, ConnectX-9 only | 2, 4 |
 | `uniplane` | Uniplane mode | ConnectX-8, ConnectX-9, BF3 SuperNIC | 2 |
-
-> **Note:** Multiplane modes are only available with RA2.1. For RA1.3 and RA2.0, `multiplaneMode` must be `none` and `numberOfPlanes` must be `1`.
 
 ##### [Example Spectrum-X NicConfigurationTemplate with multiplane](docs/examples/spectrum-x/example-nicconfigurationtemplate-spectrum-x-multiplane.yaml):
 
