@@ -163,11 +163,11 @@ func NewConfigurationManager(
 
 #### NV Configuration Flow
 
-1. **Query** current NV config via `nvConfigUtils.QueryNvConfig()`
-2. **Network Bay `set_system_conf` (baseline, applied first)** — for ConnectX-9 Network Bay devices (`template.networkBay` set and `status.networkBay` detected), the per-ASIC `set_system_conf <conf>[<asic>]` is applied **before** the regular / Spectrum-X params so those layer on top of it (override priority: `rawNvConfig` > Spectrum-X > system_conf). Drift is detected per-param via `nvconfig.ValidateSystemConf()`, which returns the overall match bit plus the names of the mismatched params; the manager ignores MISMATCH rows for params owned by a higher-priority layer (matched by exact per-index key — `rawNvConfig` index-range syntax like `MODULE_SPLIT_M0[0..3]` is rejected by CRD validation, so keys are always concrete); a change requires a reboot. Skipped for devices with `ResetToDefault`
-3. **Diff** desired vs current parameters. Params not present in the device's next-boot config are unsupported on this device (e.g. hidden because `ADVANCED_PCI_SETTINGS` is off) and are skipped — the operator does **not** auto-manage `ADVANCED_PCI_SETTINGS`; drive it explicitly via `template.rawNvConfig` if needed
-4. **Batch set** via `nvConfigUtils.SetNvConfigParametersBatch()` — single `mlxconfig set` call (`--force` added when `ConfigurationOptions.Force=true`). Apply reports `ApplyStatusPartiallyApplied` when any desired param was skipped as unsupported
-5. **Optional reset** — `mlxfwreset` unless `ConfigurationOptions.SkipReset=true`
+1. **Reset branch** — when `ResetToDefault` is set, query the first PF, run `mlxconfig reset`, restore BF3 operation mode when needed, then finish.
+2. **Link type capability check** — when `template.linkType` is set, query only `LINK_TYPE_P1` to determine whether link type changes are supported.
+3. **Network Bay `set_system_conf` (baseline, applied before overrides)** — for ConnectX-9 Network Bay devices (`template.networkBay` set and `status.networkBay` detected), the per-ASIC `set_system_conf <conf>[<asic>]` is applied **before** the regular / Spectrum-X params so those layer on top of it (override priority: `rawNvConfig` > Spectrum-X > system_conf). Drift is detected per-param via `nvconfig.ValidateSystemConf()`, which returns the overall match bit plus the names of the mismatched params; the manager ignores MISMATCH rows for params owned by a higher-priority layer (matched by exact per-index key — `rawNvConfig` index-range syntax like `MODULE_SPLIT_M0[0..3]` is rejected by CRD validation, so keys are always concrete); a change requires a reboot. Skipped for devices with `ResetToDefault`.
+4. **Diff** desired vs next-boot parameters when needed. Params not present in the device's next-boot config are unsupported or not visible yet and are skipped — the operator does **not** auto-manage `ADVANCED_PCI_SETTINGS`; drive it explicitly via `template.rawNvConfig` if needed.
+5. **Batch set** via `nvConfigUtils.SetNvConfigParametersBatch()` — single `mlxconfig set` call (`--force` added when `ConfigurationOptions.Force=true`, `--with_default` when `WithDefault=true`). The setter returns `ApplyStatusNothingToDo` when a successful `--with_default` command reports no `Configurations:` section, so the apply result only requires reboot when something was actually changed. Apply reports `ApplyStatusPartiallyApplied` when any desired param was skipped as unsupported.
 
 **`ConfigurationOptions`:**
 - `SkipReset` — skip `mlxfwreset` after applying NV config
@@ -360,7 +360,7 @@ type NVConfigUtils interface {
     // params: map of paramName → paramValue
     // withDefault: add --with_default flag
     // force: add --force flag
-    SetNvConfigParametersBatch(pciAddr string, params map[string]string, withDefault bool, force bool) error
+    SetNvConfigParametersBatch(pciAddr string, params map[string]string, withDefault bool, force bool) (types.ApplyStatus, error)
 
     // ResetNvConfig resets NIC's NV config to defaults
     ResetNvConfig(pciAddr string) error
@@ -383,7 +383,8 @@ func NewNVConfigUtils() NVConfigUtils
 
 **Batch command format:**
 ```
-mlxconfig -d <pci> --yes [--with_default] [--force] set PARAM1=VAL1 PARAM2=VAL2 ...
+mlxconfig -d <pci> --yes [--force] set PARAM1=VAL1 PARAM2=VAL2 ...
+mlxconfig -d <pci> -e --with_default -y [--force] set PARAM1=VAL1 PARAM2=VAL2 ...
 ```
 Parameter names are sorted for deterministic command generation.
 

@@ -45,7 +45,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 	})
 
 	Describe("ConstructNvParamMapFromTemplate", func() {
-		It("should return default values if optional config is disabled", func() {
+		It("should not use queried defaults when optional config is disabled", func() {
 			device := &v1alpha1.NicDevice{
 				Spec: v1alpha1.NicDeviceSpec{
 					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
@@ -63,31 +63,19 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			defaultValues := map[string][]string{
-				consts.RoceCcPrioMaskP1Param: {"testRoceCcP1"},
-				consts.CnpDscpP1Param:        {"testDscpP1"},
-				consts.Cnp802pPrioP1Param:    {"test802PrioP1"},
-				consts.RoceCcPrioMaskP2Param: {"testRoceCcP2"},
-				consts.CnpDscpP2Param:        {"testDscpP2"},
-				consts.Cnp802pPrioP2Param:    {"test802PrioP2"},
-				consts.AtsEnabledParam:       {"testAts"},
-			}
-			query := types.NewNvConfigQuery()
-			query.DefaultConfig = defaultValues
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, true)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(HaveKeyWithValue(consts.SriovEnabledParam, consts.NvParamFalse))
 			Expect(nvParams).To(HaveKeyWithValue(consts.SriovNumOfVfsParam, "0"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.RoceCcPrioMaskP1Param, "testRoceCcP1"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.CnpDscpP1Param, "testDscpP1"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.Cnp802pPrioP1Param, "test802PrioP1"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.RoceCcPrioMaskP2Param, "testRoceCcP2"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.CnpDscpP2Param, "testDscpP2"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.Cnp802pPrioP2Param, "test802PrioP2"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.AtsEnabledParam, "testAts"))
+			Expect(nvParams).To(HaveKeyWithValue(consts.LinkTypeP1Param, consts.NvParamLinkTypeEthernet))
+			Expect(nvParams).To(HaveKeyWithValue(consts.LinkTypeP2Param, consts.NvParamLinkTypeEthernet))
+			Expect(nvParams).NotTo(HaveKey(consts.RoceCcPrioMaskP1Param))
+			Expect(nvParams).NotTo(HaveKey(consts.CnpDscpP1Param))
+			Expect(nvParams).NotTo(HaveKey(consts.Cnp802pPrioP1Param))
+			Expect(nvParams).NotTo(HaveKey(consts.AtsEnabledParam))
 		})
 
-		It("should check if dual-port device has LINK_TYPE_P2 param", func() {
+		It("should emit LINK_TYPE params for all discovered ports when link type change is supported", func() {
 			device := &v1alpha1.NicDevice{
 				Spec: v1alpha1.NicDeviceSpec{
 					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
@@ -105,15 +93,10 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			defaultValues := map[string][]string{
-				consts.LinkTypeP1Param: {"testLinkTypeP1"},
-			}
-			query := types.NewNvConfigQuery()
-			query.DefaultConfig = defaultValues
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, true)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(HaveKeyWithValue(consts.LinkTypeP1Param, consts.NvParamLinkTypeEthernet))
-			Expect(nvParams).ToNot(HaveKey(consts.LinkTypeP2Param))
+			Expect(nvParams).To(HaveKeyWithValue(consts.LinkTypeP2Param, consts.NvParamLinkTypeEthernet))
 		})
 
 		It("should not emit LINK_TYPE params when linkType is unset (Network Bay)", func() {
@@ -134,14 +117,9 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			// Firmware exposes LINK_TYPE slots, but the template does not set linkType, so the
+			// Even when link type change is supported, the template does not set linkType, so the
 			// operator must not emit LINK_TYPE_P* (set_system_conf owns the link type).
-			query := types.NewNvConfigQuery()
-			query.DefaultConfig = map[string][]string{
-				consts.LinkTypeP1Param: {"2"},
-				consts.LinkTypeP2Param: {"2"},
-			}
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, true)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).ToNot(HaveKey(consts.LinkTypeP1Param))
 			Expect(nvParams).ToNot(HaveKey(consts.LinkTypeP2Param))
@@ -163,26 +141,16 @@ var _ = Describe("ConfigValidationImpl", func() {
 					},
 				},
 			}
-			defaultValues := map[string][]string{
-				consts.RoceCcPrioMaskP1Param: {"testRoceCcP1"},
-				consts.CnpDscpP1Param:        {"testDscpP1"},
-				consts.Cnp802pPrioP1Param:    {"test802PrioP1"},
-				consts.RoceCcPrioMaskP2Param: {"testRoceCcP2"},
-				consts.CnpDscpP2Param:        {"testDscpP2"},
-				consts.Cnp802pPrioP2Param:    {"test802PrioP2"},
-				consts.AtsEnabledParam:       {"testAts"},
-			}
-			query := types.NewNvConfigQuery()
-			query.DefaultConfig = defaultValues
-
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, true)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(HaveKeyWithValue(consts.SriovEnabledParam, consts.NvParamFalse))
 			Expect(nvParams).To(HaveKeyWithValue(consts.SriovNumOfVfsParam, "0"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.AtsEnabledParam, "testAts"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.RoceCcPrioMaskP1Param, "testRoceCcP1"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.CnpDscpP1Param, "testDscpP1"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.Cnp802pPrioP1Param, "test802PrioP1"))
+			Expect(nvParams).To(HaveKeyWithValue(consts.LinkTypeP1Param, consts.NvParamLinkTypeEthernet))
+			Expect(nvParams).To(Not(HaveKey(consts.LinkTypeP2Param)))
+			Expect(nvParams).To(Not(HaveKey(consts.AtsEnabledParam)))
+			Expect(nvParams).To(Not(HaveKey(consts.RoceCcPrioMaskP1Param)))
+			Expect(nvParams).To(Not(HaveKey(consts.CnpDscpP1Param)))
+			Expect(nvParams).To(Not(HaveKey(consts.Cnp802pPrioP1Param)))
 			Expect(nvParams).To(Not(HaveKey(consts.RoceCcPrioMaskP2Param)))
 			Expect(nvParams).To(Not(HaveKey(consts.CnpDscpP2Param)))
 			Expect(nvParams).To(Not(HaveKey(consts.Cnp802pPrioP2Param)))
@@ -224,11 +192,9 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			query := types.NewNvConfigQuery()
-
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, true)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(nvParams).To(HaveKeyWithValue(consts.MaxAccOutReadParam, "1337"))
+			Expect(nvParams).NotTo(HaveKey(consts.MaxAccOutReadParam))
 			Expect(nvParams).To(HaveKeyWithValue(consts.AtsEnabledParam, "0"))
 			Expect(nvParams).To(HaveKeyWithValue(consts.RoceCcPrioMaskP1Param, "255"))
 			Expect(nvParams).To(HaveKeyWithValue(consts.CnpDscpP1Param, "4"))
@@ -238,7 +204,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 			Expect(nvParams).To(HaveKeyWithValue(consts.Cnp802pPrioP2Param, "6"))
 		})
 
-		It("should skip the MaxAccOutRead if the default is not 0", func() {
+		It("should ignore MaxAccOutRead when pciPerformanceOptimized is enabled", func() {
 			mockConfigurationUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
 
 			device := &v1alpha1.NicDevice{
@@ -260,48 +226,9 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			defaultValues := map[string][]string{
-				consts.MaxAccOutReadParam: {"notZero"},
-			}
-			query := types.NewNvConfigQuery()
-			query.DefaultConfig = defaultValues
-
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, true)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(nvParams).NotTo(HaveKeyWithValue(consts.MaxAccOutReadParam, consts.NvParamZero))
-		})
-
-		It("should apply MaxAccOutRead if the default is 0", func() {
-			mockConfigurationUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
-
-			device := &v1alpha1.NicDevice{
-				Spec: v1alpha1.NicDeviceSpec{
-					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
-						Template: &v1alpha1.ConfigurationTemplateSpec{
-							NumVfs:   0,
-							LinkType: consts.Ethernet,
-							PciPerformanceOptimized: &v1alpha1.PciPerformanceOptimizedSpec{
-								Enabled: true,
-							},
-						},
-					},
-				},
-				Status: v1alpha1.NicDeviceStatus{
-					Ports: []v1alpha1.NicDevicePortSpec{
-						{PCI: "0000:03:00.0"},
-					},
-				},
-			}
-
-			defaultValues := map[string][]string{
-				consts.MaxAccOutReadParam: {consts.NvParamZero},
-			}
-			query := types.NewNvConfigQuery()
-			query.DefaultConfig = defaultValues
-
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(nvParams).To(HaveKeyWithValue(consts.MaxAccOutReadParam, consts.NvParamZero))
+			Expect(nvParams).NotTo(HaveKey(consts.MaxAccOutReadParam))
 		})
 
 		It("should not apply MaxAccOutRead if the default is unavailable", func() {
@@ -326,10 +253,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			// MAX_ACC_OUT_READ param is unavailable if ADVANCED_PCI_SETTINGS is disabled
-			query := types.NewNvConfigQuery()
-
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, true)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).ToNot(HaveKeyWithValue(consts.MaxAccOutReadParam, consts.NvParamZero))
 		})
@@ -357,9 +281,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			query := types.NewNvConfigQuery()
-
-			_, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			_, err := validator.ConstructNvParamMapFromTemplate(device, true)
 			Expect(err).To(MatchError("incorrect spec: GpuDirectOptimized should only be enabled together with PciPerformanceOptimized"))
 		})
 		It("should ignore raw config for the second port if device is single port", func() {
@@ -391,9 +313,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			query := types.NewNvConfigQuery()
-
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, true)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(HaveKeyWithValue("TEST_P1", "test"))
 			Expect(nvParams).NotTo(HaveKey("TEST_P2"))
@@ -428,12 +348,70 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			query := types.NewNvConfigQuery()
-
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, true)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(HaveKeyWithValue("TEST_P1", "test"))
 			Expect(nvParams).To(HaveKeyWithValue("TEST_P2", "test"))
+		})
+		It("should extrapolate port-suffixed params when NUM_OF_PF expands the effective port count", func() {
+			device := &v1alpha1.NicDevice{
+				Spec: v1alpha1.NicDeviceSpec{
+					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
+						Template: &v1alpha1.ConfigurationTemplateSpec{
+							NumVfs: 0,
+							RawNvConfig: []v1alpha1.NvConfigParam{
+								{Name: consts.NumOfPfParam, Value: "4"},
+								{Name: "LINK_TYPE_P1", Value: consts.NvParamLinkTypeEthernet},
+								{Name: "CUSTOM_PARAM_P1", Value: "base"},
+								{Name: "CUSTOM_PARAM_P3", Value: "explicit"},
+								{Name: "CUSTOM_PARAM_P5", Value: "drop"},
+							},
+						},
+					},
+				},
+				Status: v1alpha1.NicDeviceStatus{
+					Ports: []v1alpha1.NicDevicePortSpec{{PCI: "0000:03:00.0"}},
+				},
+			}
+
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, false)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(nvParams).To(HaveKeyWithValue(consts.NumOfPfParam, "4"))
+			Expect(nvParams).To(HaveKeyWithValue("LINK_TYPE_P1", consts.NvParamLinkTypeEthernet))
+			Expect(nvParams).To(HaveKeyWithValue("LINK_TYPE_P2", consts.NvParamLinkTypeEthernet))
+			Expect(nvParams).To(HaveKeyWithValue("LINK_TYPE_P3", consts.NvParamLinkTypeEthernet))
+			Expect(nvParams).To(HaveKeyWithValue("LINK_TYPE_P4", consts.NvParamLinkTypeEthernet))
+			Expect(nvParams).To(HaveKeyWithValue("CUSTOM_PARAM_P1", "base"))
+			Expect(nvParams).To(HaveKeyWithValue("CUSTOM_PARAM_P2", "base"))
+			Expect(nvParams).To(HaveKeyWithValue("CUSTOM_PARAM_P3", "explicit"))
+			Expect(nvParams).To(HaveKeyWithValue("CUSTOM_PARAM_P4", "base"))
+			Expect(nvParams).NotTo(HaveKey("CUSTOM_PARAM_P5"))
+		})
+		It("should extrapolate from the lowest existing port when P1 is absent", func() {
+			device := &v1alpha1.NicDevice{
+				Spec: v1alpha1.NicDeviceSpec{
+					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
+						Template: &v1alpha1.ConfigurationTemplateSpec{
+							RawNvConfig: []v1alpha1.NvConfigParam{
+								{Name: consts.NumOfPfParam, Value: "5"},
+								{Name: "LINK_TYPE_P2", Value: "2"},
+								{Name: "LINK_TYPE_P3", Value: "1"},
+							},
+						},
+					},
+				},
+				Status: v1alpha1.NicDeviceStatus{
+					Ports: []v1alpha1.NicDevicePortSpec{{PCI: "0000:03:00.0"}},
+				},
+			}
+
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, false)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(nvParams).To(HaveKeyWithValue("LINK_TYPE_P1", "2"))
+			Expect(nvParams).To(HaveKeyWithValue("LINK_TYPE_P2", "2"))
+			Expect(nvParams).To(HaveKeyWithValue("LINK_TYPE_P3", "1"))
+			Expect(nvParams).To(HaveKeyWithValue("LINK_TYPE_P4", "2"))
+			Expect(nvParams).To(HaveKeyWithValue("LINK_TYPE_P5", "2"))
 		})
 		It("should emit link type and RoCE params for every port on a quad-port device", func() {
 			mockConfigurationUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
@@ -466,19 +444,10 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			query := types.NewNvConfigQuery()
-			// Firmware exposes LINK_TYPE for all four ports.
-			query.DefaultConfig = map[string][]string{
-				"LINK_TYPE_P1": {"2"},
-				"LINK_TYPE_P2": {"2"},
-				"LINK_TYPE_P3": {"2"},
-				"LINK_TYPE_P4": {"2"},
-			}
-
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, true)
 			Expect(err).NotTo(HaveOccurred())
 
-			// Link type emitted for every port with a firmware-declared slot.
+			// Link type emitted for every discovered port when LINK_TYPE_P1 is supported.
 			for _, name := range []string{"LINK_TYPE_P1", "LINK_TYPE_P2", "LINK_TYPE_P3", "LINK_TYPE_P4"} {
 				Expect(nvParams).To(HaveKeyWithValue(name, consts.NvParamLinkTypeEthernet))
 			}
@@ -500,7 +469,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 			Expect(nvParams).To(HaveKeyWithValue("CUSTOM_PARAM_NO_SUFFIX", "rawN"))
 			Expect(nvParams).NotTo(HaveKey("CUSTOM_PARAM_P5"))
 		})
-		It("should skip LINK_TYPE_Pn for ports firmware does not declare a slot for", func() {
+		It("should emit LINK_TYPE_Pn without requiring a full query for each port slot", func() {
 			mockConfigurationUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
 
 			device := &v1alpha1.NicDevice{
@@ -522,19 +491,12 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			query := types.NewNvConfigQuery()
-			// Firmware exposes only P1 and P3, not P2 or P4.
-			query.DefaultConfig = map[string][]string{
-				"LINK_TYPE_P1": {"2"},
-				"LINK_TYPE_P3": {"2"},
-			}
-
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, true)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(HaveKeyWithValue("LINK_TYPE_P1", consts.NvParamLinkTypeEthernet))
+			Expect(nvParams).To(HaveKeyWithValue("LINK_TYPE_P2", consts.NvParamLinkTypeEthernet))
 			Expect(nvParams).To(HaveKeyWithValue("LINK_TYPE_P3", consts.NvParamLinkTypeEthernet))
-			Expect(nvParams).NotTo(HaveKey("LINK_TYPE_P2"))
-			Expect(nvParams).NotTo(HaveKey("LINK_TYPE_P4"))
+			Expect(nvParams).To(HaveKeyWithValue("LINK_TYPE_P4", consts.NvParamLinkTypeEthernet))
 		})
 		It("should report an error when LinkType cannot be changed and template differs from the actual status", func() {
 			mockConfigurationUtils.On("GetLinkType", mock.Anything).Return(consts.Ethernet)
@@ -566,9 +528,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			query := types.NewNvConfigQuery()
-
-			_, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			_, err := validator.ConstructNvParamMapFromTemplate(device, false)
 			Expect(err).To(MatchError("incorrect spec: device does not support link type change, wrong link type provided in the template, should be: Ethernet"))
 		})
 		It("should not report an error when LinkType can be changed and template differs from the actual status", func() {
@@ -601,13 +561,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			defaultValues := map[string][]string{
-				consts.LinkTypeP1Param: {consts.Ethernet},
-			}
-			query := types.NewNvConfigQuery()
-			query.DefaultConfig = defaultValues
-
-			_, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			_, err := validator.ConstructNvParamMapFromTemplate(device, true)
 			Expect(err).NotTo(HaveOccurred())
 		})
 		It("should not report an error when LinkType cannot be changed and template matches the actual status", func() {
@@ -640,9 +594,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			query := types.NewNvConfigQuery()
-
-			_, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			_, err := validator.ConstructNvParamMapFromTemplate(device, false)
 			Expect(err).NotTo(HaveOccurred())
 		})
 		It("should return an error when RoceOptimized is enabled with linkType Infiniband", func() {
@@ -667,13 +619,11 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			query := types.NewNvConfigQuery()
-
-			_, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			_, err := validator.ConstructNvParamMapFromTemplate(device, true)
 			Expect(err).To(MatchError("incorrect spec: RoceOptimized settings can only be used with link type Ethernet"))
 		})
 
-		It("should take numeric values when both numeric values and string aliases are present in nv config query", func() {
+		It("should not emit deprecated MaxAccOutRead values", func() {
 			device := &v1alpha1.NicDevice{
 				Spec: v1alpha1.NicDeviceSpec{
 					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
@@ -694,17 +644,11 @@ var _ = Describe("ConfigValidationImpl", func() {
 				},
 			}
 
-			defaultValues := map[string][]string{
-				consts.MaxAccOutReadParam: {"testMaxAccOutRead", "0"},
-			}
-			query := types.NewNvConfigQuery()
-			query.DefaultConfig = defaultValues
-
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, true)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(HaveKeyWithValue(consts.SriovEnabledParam, consts.NvParamFalse))
 			Expect(nvParams).To(HaveKeyWithValue(consts.SriovNumOfVfsParam, "0"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.MaxAccOutReadParam, "0"))
+			Expect(nvParams).NotTo(HaveKey(consts.MaxAccOutReadParam))
 		})
 	})
 
@@ -732,7 +676,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 		It("returns an empty map when the template is nil", func() {
 			device := newDevice()
 			device.Spec.Configuration.Template = nil
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, types.NewNvConfigQuery())
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, true)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(BeEmpty())
 		})
@@ -743,7 +687,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 			mockSpcXMgr.On("GetBreakoutMlxConfig", device).Return(map[string]string{"NUM_OF_PF": "2"}, nil)
 			mockSpcXMgr.On("GetPostBreakoutMlxConfig", device).Return(map[string]string{"LINK_TYPE_P1": "2"}, nil)
 
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, types.NewNvConfigQuery())
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, true)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(HaveKeyWithValue("NUM_OF_PF", "2"))
 			Expect(nvParams).To(HaveKeyWithValue("LINK_TYPE_P1", "2"))
@@ -756,7 +700,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 			mockSpcXMgr.On("GetBreakoutMlxConfig", device).Return(map[string]string{"NUM_OF_PF": "2"}, nil)
 			mockSpcXMgr.On("GetPostBreakoutMlxConfig", device).Return(nil, nil)
 
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, types.NewNvConfigQuery())
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, true)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(HaveKeyWithValue("NUM_OF_PF", "8"))
 		})
@@ -766,7 +710,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 			device.Spec.Configuration.Template.NumVfs = 4 // template sets SRIOV_EN=true, NUM_OF_VFS=4
 			device.Spec.Configuration.Template.RawNvConfig = []v1alpha1.NvConfigParam{{Name: consts.SriovNumOfVfsParam, Value: "16"}}
 
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, types.NewNvConfigQuery())
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, true)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(HaveKeyWithValue(consts.SriovNumOfVfsParam, "16"))
 		})
@@ -780,7 +724,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 			mockSpcXMgr.On("GetBreakoutMlxConfig", device).Return(map[string]string{"MODULE_SPLIT_M0[2]": "1", "MODULE_SPLIT_M0[3]": "1"}, nil)
 			mockSpcXMgr.On("GetPostBreakoutMlxConfig", device).Return(nil, nil)
 
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, types.NewNvConfigQuery())
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, true)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(HaveKeyWithValue("MODULE_SPLIT_M0[2]", "5"))
 			Expect(nvParams).To(HaveKeyWithValue("MODULE_SPLIT_M0[3]", "1"))
@@ -792,7 +736,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 				{Name: "SOME_PARAM_P1", Value: "1"},
 				{Name: "SOME_PARAM_P2", Value: "1"},
 			}
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, types.NewNvConfigQuery())
+			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, true)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(HaveKey("SOME_PARAM_P1"))
 			Expect(nvParams).ToNot(HaveKey("SOME_PARAM_P2"))
@@ -803,7 +747,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 			device.Spec.Configuration.Template.SpectrumXOptimized = &v1alpha1.SpectrumXOptimizedSpec{Enabled: true}
 			mockSpcXMgr.On("GetBreakoutMlxConfig", device).Return(nil, errors.New("config not found"))
 
-			_, err := validator.ConstructNvParamMapFromTemplate(device, types.NewNvConfigQuery())
+			_, err := validator.ConstructNvParamMapFromTemplate(device, true)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("config not found"))
 		})

@@ -31,9 +31,9 @@ func (_m *ConfigValidation) CalculateDesiredRuntimeConfig(device *v1alpha1.NicDe
 	return r0
 }
 
-// ConstructNvParamMapFromTemplate provides a mock function with given fields: device, nvConfigQuery
-func (_m *ConfigValidation) ConstructNvParamMapFromTemplate(device *v1alpha1.NicDevice, nvConfigQuery types.NvConfigQuery) (map[string]string, error) {
-	ret := _m.Called(device, nvConfigQuery)
+// ConstructNvParamMapFromTemplate provides a mock function with given fields: device, linkTypeChangeSupported
+func (_m *ConfigValidation) ConstructNvParamMapFromTemplate(device *v1alpha1.NicDevice, linkTypeChangeSupported bool) (map[string]string, error) {
+	ret := _m.Called(device, linkTypeChangeSupported)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ConstructNvParamMapFromTemplate")
@@ -41,19 +41,19 @@ func (_m *ConfigValidation) ConstructNvParamMapFromTemplate(device *v1alpha1.Nic
 
 	var r0 map[string]string
 	var r1 error
-	if rf, ok := ret.Get(0).(func(*v1alpha1.NicDevice, types.NvConfigQuery) (map[string]string, error)); ok {
-		return rf(device, nvConfigQuery)
+	if rf, ok := ret.Get(0).(func(*v1alpha1.NicDevice, bool) (map[string]string, error)); ok {
+		return rf(device, linkTypeChangeSupported)
 	}
-	if rf, ok := ret.Get(0).(func(*v1alpha1.NicDevice, types.NvConfigQuery) map[string]string); ok {
-		r0 = rf(device, nvConfigQuery)
+	if rf, ok := ret.Get(0).(func(*v1alpha1.NicDevice, bool) map[string]string); ok {
+		r0 = rf(device, linkTypeChangeSupported)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[string]string)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(*v1alpha1.NicDevice, types.NvConfigQuery) error); ok {
-		r1 = rf(device, nvConfigQuery)
+	if rf, ok := ret.Get(1).(func(*v1alpha1.NicDevice, bool) error); ok {
+		r1 = rf(device, linkTypeChangeSupported)
 	} else {
 		r1 = ret.Error(1)
 	}

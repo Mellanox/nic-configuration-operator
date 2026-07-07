@@ -113,7 +113,8 @@ func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *
 	// 4. Combined override config (Spectrum-X breakout + postBreakout + template + rawNvConfig, raw wins).
 	//    Validated against the device's next boot, exactly like the apply path — so a value already staged
 	//    for next boot but not yet rebooted reports reboot-required instead of looping.
-	overrides, err := h.configValidation.ConstructNvParamMapFromTemplate(device, firstPortConfig)
+	linkTypeChangeSupported := firstPortConfig.DefaultConfig[consts.LinkTypeP1Param] != nil
+	overrides, err := h.configValidation.ConstructNvParamMapFromTemplate(device, linkTypeChangeSupported)
 	if err != nil {
 		log.Log.Error(err, "failed to calculate desired nvconfig parameters", "device", device.Name)
 		return false, false, nil, err
@@ -190,24 +191,35 @@ func validateTemplateParamsApplied(nvConfigsForPorts map[string]types.NvConfigQu
 // returns *ConfigurationApplyResult - result of the apply operation
 // returns error - there were errors while applying nv configuration
 func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *v1alpha1.NicDevice, options *types.ConfigurationOptions) (*types.ConfigurationApplyResult, error) {
-	log.Log.Info("configurationManager.ApplyNVConfiguration", "device", device.Name)
+	log.Log.Info("configurationManager.ApplyNVConfiguration",
+		"device", device.Name,
+		"ports", len(device.Status.Ports),
+		"withDefault", options.WithDefault,
+		"force", options.Force,
+		"skipReset", options.SkipReset)
 
 	if device.Spec.Configuration == nil {
+		log.Log.V(2).Info("nv config apply skipped: device has no configuration spec", "device", device.Name)
 		return &types.ConfigurationApplyResult{Status: types.ApplyStatusNothingToDo}, nil
 	}
 
-	// 1. Query current nv config for every port.
-	nvConfigsForPorts, err := h.queryNvConfigs(ctx, device)
-	if err != nil {
-		log.Log.Error(err, "failed to query nv configs", "device", device.Name)
-		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
-	}
 	firstPortPCIAddr := device.Status.Ports[0].PCI
-	firstPortConfig := nvConfigsForPorts[firstPortPCIAddr]
 
-	// 2. Reset-to-default takes precedence: reset and finish.
+	// 1. Reset-to-default takes precedence: query only the first port, reset, and finish.
 	if device.Spec.Configuration.ResetToDefault {
+		log.Log.Info("nv config apply entering reset-to-default flow", "device", device.Name, "pci", firstPortPCIAddr)
+		firstPortConfig, err := h.nvConfigUtils.QueryNvConfig(ctx, firstPortPCIAddr, nil)
+		if err != nil {
+			log.Log.Error(err, "failed to query nv config for reset-to-default", "device", device.Name)
+			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+		}
 		return h.applyResetToDefault(device, firstPortPCIAddr, firstPortConfig)
+	}
+
+	// 2. Query only LINK_TYPE_P1 to decide whether link type changes are supported on this device.
+	linkTypeChangeSupported, err := h.linkTypeChangeSupported(ctx, device)
+	if err != nil {
+		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}
 
 	// 3. Network Bay system_conf: the params that don't match the requested named profile.
@@ -217,12 +229,19 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 	}
 
 	// 4. Combined desired params: Spectrum-X breakout + postBreakout + template + rawNvConfig (raw wins).
-	desiredParams, err := h.configValidation.ConstructNvParamMapFromTemplate(device, firstPortConfig)
+	desiredParams, err := h.configValidation.ConstructNvParamMapFromTemplate(device, linkTypeChangeSupported)
 	if err != nil {
 		log.Log.Error(err, "failed to calculate desired nvconfig parameters", "device", device.Name)
 		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}
-	log.Log.V(2).Info("combined desired nv config built", "device", device.Name, "params", desiredParams, "force", options.Force)
+	log.Log.Info("combined desired nv config built",
+		"device", device.Name,
+		"paramCount", len(desiredParams),
+		"force", options.Force,
+		"withDefault", options.WithDefault)
+	log.Log.V(2).Info("combined desired nv config details",
+		"device", device.Name,
+		"params", desiredParams)
 
 	// 5. set_system_conf baseline: if the combined params do not cover all mismatched profile params
 	//    (range-aware), the baseline itself drifted on an uncovered param — re-stage set_system_conf
@@ -235,15 +254,6 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 		}
 		systemConfApplied = true
-
-		// set_system_conf restages the whole profile, so the pre-call query is now stale. Re-query so the
-		// override batch below diffs against the restaged next-boot config and does not skip an override
-		// the baseline just overwrote.
-		nvConfigsForPorts, err = h.queryNvConfigs(ctx, device)
-		if err != nil {
-			log.Log.Error(err, "failed to re-query nv configs after set_system_conf", "device", device.Name)
-			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
-		}
 	}
 
 	anyParamsApplied := false
@@ -255,39 +265,74 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 	//   - force=false: apply only the params visible on this PF whose value differs; params not yet
 	//     visible are skipped this round and picked up after a reboot exposes them (which sequences
 	//     breakout before postBreakout without --force).
-	for pciAddr, nvConfig := range nvConfigsForPorts {
+	for _, port := range device.Status.Ports {
+		pciAddr := port.PCI
 		batch := map[string]string{}
 		if options.Force {
+			log.Log.V(2).Info("force enabled: applying desired nv config without querying port",
+				"device", device.Name,
+				"pci", pciAddr,
+				"paramCount", len(desiredParams))
 			// Copy rather than alias desiredParams: it is reused across PF iterations, and the
 			// SetNvConfigParametersBatch contract does not forbid mutating its params argument.
 			for param, value := range desiredParams {
 				batch[param] = value
 			}
-		} else {
+		} else if len(desiredParams) > 0 {
+			log.Log.V(2).Info("querying nv config before diffing desired params",
+				"device", device.Name,
+				"pci", pciAddr,
+				"withDefault", options.WithDefault)
+			nvConfig, err := h.nvConfigUtils.QueryNvConfig(ctx, pciAddr, nil)
+			if err != nil {
+				log.Log.Error(err, "failed to query nv configs", "device", device.Name, "pci", pciAddr)
+				return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+			}
+			unsupportedForPort := []string{}
 			for param, value := range desiredParams {
 				nextValues, found := nvConfig.NextBootConfig[param]
 				if !found {
 					hasUnsupportedParams = true
+					unsupportedForPort = append(unsupportedForPort, param)
 					continue
 				}
-				if !slices.Contains(nextValues, value) {
+				// WithDefault still requires the param to exist in the query, but applies it even
+				// when next-boot already contains the desired value.
+				if options.WithDefault || !slices.Contains(nextValues, value) {
 					batch[param] = value
 				}
 			}
+			if len(unsupportedForPort) > 0 {
+				sort.Strings(unsupportedForPort)
+				log.Log.Info("some desired nv config params are not present in query output and will be skipped",
+					"device", device.Name,
+					"pci", pciAddr,
+					"params", unsupportedForPort)
+			}
 		}
 		if len(batch) == 0 {
+			log.Log.V(2).Info("no nv config params need applying for port", "device", device.Name, "pci", pciAddr)
 			continue
 		}
-		log.Log.V(2).Info("applying nv config to device", "device", device.Name, "pci", pciAddr, "config", batch, "force", options.Force)
-		if err := h.nvConfigUtils.SetNvConfigParametersBatch(pciAddr, batch, options.WithDefault, options.Force); err != nil {
+		log.Log.Info("applying nv config batch",
+			"device", device.Name,
+			"pci", pciAddr,
+			"paramCount", len(batch),
+			"withDefault", options.WithDefault,
+			"force", options.Force)
+		log.Log.V(2).Info("applying nv config batch details", "device", device.Name, "pci", pciAddr, "config", batch)
+		applyStatus, err := h.nvConfigUtils.SetNvConfigParametersBatch(pciAddr, batch, options.WithDefault, options.Force)
+		if err != nil {
 			log.Log.Error(err, "Failed to apply nv config parameters", "device", device.Name, "params", batch)
 			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 		}
-		anyParamsApplied = true
+		if applyStatus == types.ApplyStatusSuccess {
+			anyParamsApplied = true
+		}
 	}
 
 	if !anyParamsApplied && !hasUnsupportedParams && !systemConfApplied {
-		log.Log.V(2).Info("nv config already up to date, nothing to apply", "device", device.Name)
+		log.Log.Info("nv config already up to date, nothing to apply", "device", device.Name)
 		return &types.ConfigurationApplyResult{Status: types.ApplyStatusNothingToDo}, nil
 	}
 
@@ -296,9 +341,42 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 		status = types.ApplyStatusPartiallyApplied
 	}
 	rebootRequired := anyParamsApplied || systemConfApplied
-	log.Log.Info("nv config applied", "device", device.Name, "status", status, "rebootRequired", rebootRequired)
+	log.Log.Info("nv config apply finished",
+		"device", device.Name,
+		"status", status,
+		"rebootRequired", rebootRequired,
+		"anyParamsApplied", anyParamsApplied,
+		"systemConfApplied", systemConfApplied,
+		"hasUnsupportedParams", hasUnsupportedParams)
 
 	return &types.ConfigurationApplyResult{Status: status, RebootRequired: rebootRequired}, nil
+}
+
+func (h configurationManager) linkTypeChangeSupported(ctx context.Context, device *v1alpha1.NicDevice) (bool, error) {
+	template := device.Spec.Configuration.Template
+	if template == nil || template.LinkType == "" {
+		return false, nil
+	}
+
+	_, err := h.nvConfigUtils.QueryNvConfig(ctx, device.Status.Ports[0].PCI, []string{consts.LinkTypeP1Param})
+	if err == nil {
+		return true, nil
+	}
+	if isUnsupportedLinkTypeParamError(err) {
+		log.Log.Info("device does not support link type change", "device", device.Name, "param", consts.LinkTypeP1Param)
+		return false, nil
+	}
+	log.Log.Error(err, "failed to query link type support", "device", device.Name, "param", consts.LinkTypeP1Param)
+	return false, err
+}
+
+func isUnsupportedLinkTypeParamError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errText := strings.ToLower(err.Error())
+	return strings.Contains(errText, strings.ToLower(consts.LinkTypeP1Param)) &&
+		(strings.Contains(errText, "doesn't support") || strings.Contains(errText, "does not support"))
 }
 
 // setSystemConf stages the requested Network Bay set_system_conf for the device's ASIC (the
@@ -582,6 +660,13 @@ func (h configurationManager) systemConfMismatchedParams(ctx context.Context, de
 	if !matches && len(mismatched) == 0 {
 		return nil, fmt.Errorf("device %s system_conf %q reports a mismatch but no mismatched params were parsed", device.Name, conf)
 	}
+
+	if len(mismatched) > 0 {
+		log.Log.V(2).Info("Network Bay system_conf mismatches found",
+			"device", device.Name,
+			"params", mismatched)
+	}
+
 	return mismatched, nil
 }
 
@@ -598,19 +683,14 @@ func (h configurationManager) queryNvConfigs(ctx context.Context, device *v1alph
 	return nvConfigs, nil
 }
 
-// getRawNvConfigParams extracts rawNvConfig params from the device template,
-// dropping _Pn params whose port index is beyond the device's port count.
+// getRawNvConfigParams extracts rawNvConfig params from the device template.
 func getRawNvConfigParams(device *v1alpha1.NicDevice) map[string]string {
 	template := device.Spec.Configuration.Template
 	if template == nil || len(template.RawNvConfig) == 0 {
 		return nil
 	}
-	portCount := len(device.Status.Ports)
 	params := make(map[string]string, len(template.RawNvConfig))
 	for _, rawParam := range template.RawNvConfig {
-		if n, ok := consts.PortSuffixNum(rawParam.Name); ok && n > portCount {
-			continue
-		}
 		params[rawParam.Name] = rawParam.Value
 	}
 	if len(params) == 0 {
