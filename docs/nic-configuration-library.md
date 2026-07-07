@@ -550,7 +550,7 @@ Source: `pkg/consts/consts.go`
 | `SriovEnabledParam` | `SRIOV_EN` |
 | `SriovNumOfVfsParam` | `NUM_OF_VFS` |
 | `LinkTypeP1Param` / `LinkTypeP2Param` | `LINK_TYPE_P1` / `LINK_TYPE_P2` |
-| `MaxAccOutReadParam` | `MAX_ACC_OUT_READ` |
+| `MaxAccOutReadParam` | `MAX_ACC_OUT_READ` (constant only; `template.pciPerformanceOptimized.maxAccOutRead` is deprecated and ignored) |
 | `RoceCcPrioMaskP1Param` / `RoceCcPrioMaskP2Param` | `ROCE_CC_PRIO_MASK_P1` / `_P2` |
 | `CnpDscpP1Param` / `CnpDscpP2Param` | `CNP_DSCP_P1` / `_P2` |
 | `AtsEnabledParam` | `ATS_ENABLED` |

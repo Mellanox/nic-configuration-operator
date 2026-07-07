@@ -60,7 +60,6 @@ spec:
       linkType: Ethernet
       pciPerformanceOptimized:
          enabled: true
-         maxAccOutRead: 44
          maxReadRequest: 4096
       roceOptimized:
          enabled: true
@@ -83,12 +82,9 @@ spec:
   * This is a mandatory parameter.
   * E.g `linkType = Infiniband` then set `LINK_TYPE_P1=IB` and `LINK_TYPE_P2=IB` if second PCI function is present
 * `pciPerformanceOptimized`: performs PCI performance optimizations. If enabled then by default the following will happen:
-  * Set nvconfig `MAX_ACC_OUT_READ` nvconfig parameter to `0` (use device defaults)
   * Set PCI max read request size for each PF to `4096` (note: this is a runtime config and is not persistent)
-  * Users can override values via `maxAccOutRead` and `maxReadRequest`
-  * **IMPORTANT** :
-    * According to the PRM, setting `MAX_ACC_OUT_READ` to zero enables the auto mode, which applies the best suitable optimizations. However, there is a bug in certain FW versions, where the zero value is not available.
-    * In this case, until the fix is available, `MAX_ACC_OUT_READ` will not be set and a warning event will be emitted for this device's CR.
+  * Users can override the runtime value via `maxReadRequest`
+  * `maxAccOutRead` is deprecated and ignored; use `rawNvConfig` for explicit `MAX_ACC_OUT_READ` management if needed.
 * `roceOptimized`: performs RoCE related optimizations. If enabled performs the following by default:
   * Nvconfig set for both ports (can be applied from PF0)
     * Conditionally applied for second port if present
