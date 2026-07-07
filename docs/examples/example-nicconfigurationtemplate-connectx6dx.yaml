@@ -41,8 +41,7 @@ spec:
     linkType: Ethernet
     pciPerformanceOptimized:
       enabled: true
-      # default values for maxAccOutRead and maxReadRequest listed below, can be omitted
-      maxAccOutRead: 44
+      # default value for maxReadRequest listed below, can be omitted
       maxReadRequest: 4096
     roceOptimized:
       enabled: true

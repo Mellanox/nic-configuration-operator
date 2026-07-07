@@ -134,8 +134,9 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 	}
 
 	if template.PciPerformanceOptimized != nil && template.PciPerformanceOptimized.Enabled {
-		if template.PciPerformanceOptimized.MaxAccOutRead != 0 {
-			desiredParameters[consts.MaxAccOutReadParam] = strconv.Itoa(template.PciPerformanceOptimized.MaxAccOutRead)
+		maxAccOutRead := template.PciPerformanceOptimized.MaxAccOutRead //nolint:staticcheck // Backward compatibility: keep honoring this field until the mapping is removed.
+		if maxAccOutRead != 0 {
+			desiredParameters[consts.MaxAccOutReadParam] = strconv.Itoa(maxAccOutRead)
 		} else if values, found := query.DefaultConfig[consts.MaxAccOutReadParam]; found {
 			// MAX_ACC_OUT_READ is hidden when ADVANCED_PCI_SETTINGS is off. If the default is not
 			// in DefaultConfig the param is unsupported on this device — skip it silently and let
