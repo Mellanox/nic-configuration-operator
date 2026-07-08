@@ -274,9 +274,10 @@ func (m *spectrumXConfigManager) checkCCProbeMPMode(device *v1alpha1.NicDevice) 
 		}
 		// Parse the mlxreg table output to find the cc_probe_mp_mode field and its value.
 		// Output format: "cc_probe_mp_mode                               | 0x00000001"
+		// We need to avoid checking cc_probe_mp_mode_field_select as it can have a different value.
 		found := false
 		for _, line := range strings.Split(string(output), "\n") {
-			if strings.Contains(line, ccProbeMPModeFieldName) {
+			if strings.Contains(line, ccProbeMPModeFieldName) && !strings.Contains(line, "field_select") {
 				found = true
 				if !strings.Contains(line, ccProbeMPModeExpectedValue) {
 					log.Log.V(2).Info("checkCCProbeMPMode(): cc_probe_mp_mode not set on PF",
