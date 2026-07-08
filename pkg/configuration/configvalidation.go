@@ -16,12 +16,10 @@ limitations under the License.
 package configuration
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
 
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -38,7 +36,7 @@ type configValidation interface {
 	// devices these params override the set_system_conf baseline. Operates under the assumption that spec
 	// validation was already carried out.
 	ConstructNvParamMapFromTemplate(
-		device *v1alpha1.NicDevice, nvConfigQuery types.NvConfigQuery) (map[string]string, error)
+		device *v1alpha1.NicDevice, linkTypeChangeSupported bool) (map[string]string, error)
 	// ValidateResetToDefault checks if device's nv config has been reset to default in current and next boots
 	// returns bool - need to perform reset
 	// returns bool - reboot required
@@ -67,22 +65,12 @@ func nvParamLinkTypeFromName(linkType string) string {
 	}
 }
 
-func applyDefaultNvConfigValueIfExists(
-	paramName string, desiredParameters map[string]string, query types.NvConfigQuery) {
-	defaultValues, found := query.DefaultConfig[paramName]
-	// The param's default may be absent if it is hidden on this device (e.g. ADVANCED_PCI_SETTINGS off).
-	if found {
-		// Take the default numeric value
-		desiredParameters[paramName] = defaultValues[len(defaultValues)-1]
-	}
-}
-
 // ConstructNvParamMapFromTemplate builds the full set of desired nvconfig parameters for a device by
 // combining, in increasing priority order, the Spectrum-X profile (breakout + postBreakout, when
 // enabled), the spec template params, and rawNvConfig (raw wins on key collisions). Operates under the
 // assumption that spec validation was already carried out.
 func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
-	device *v1alpha1.NicDevice, query types.NvConfigQuery) (map[string]string, error) {
+	device *v1alpha1.NicDevice, linkTypeChangeSupported bool) (map[string]string, error) {
 	template := device.Spec.Configuration.Template
 	if template == nil {
 		// No template: nothing to translate. rawNvConfig / Spectrum-X live under the template, so there
@@ -105,17 +93,11 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 	// so the operator must not emit LINK_TYPE_P* here or it would fight the system configuration.
 	if template.LinkType != "" {
 		// Link type change is not allowed on some devices
-		_, canChangeLinkType := query.DefaultConfig[consts.LinkTypeP1Param]
-		if canChangeLinkType {
+		if linkTypeChangeSupported {
 			linkType := nvParamLinkTypeFromName(string(template.LinkType))
-			// Emit LINK_TYPE_P<n> for every discovered port. Firmware may expose
-			// fewer slots than the device has ports (e.g. BF3 DPU mode), so gate
-			// each entry on a presence check in the query output.
 			for portIdx := 1; portIdx <= portCount; portIdx++ {
 				name := consts.PortParam(consts.LinkTypeParamBase, portIdx)
-				if _, ok := query.DefaultConfig[name]; ok {
-					desiredParameters[name] = linkType
-				}
+				desiredParameters[name] = linkType
 			}
 		} else {
 			desiredLinkType := string(device.Spec.Configuration.Template.LinkType)
@@ -134,28 +116,9 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 	}
 
 	if template.PciPerformanceOptimized != nil && template.PciPerformanceOptimized.Enabled {
-		maxAccOutRead := template.PciPerformanceOptimized.MaxAccOutRead //nolint:staticcheck // Backward compatibility: keep honoring this field until the mapping is removed.
+		maxAccOutRead := template.PciPerformanceOptimized.MaxAccOutRead //nolint:staticcheck // Log-only read for ignored deprecated configuration.
 		if maxAccOutRead != 0 {
-			desiredParameters[consts.MaxAccOutReadParam] = strconv.Itoa(maxAccOutRead)
-		} else if values, found := query.DefaultConfig[consts.MaxAccOutReadParam]; found {
-			// MAX_ACC_OUT_READ is hidden when ADVANCED_PCI_SETTINGS is off. If the default is not
-			// in DefaultConfig the param is unsupported on this device — skip it silently and let
-			// the apply path report ApplyStatusPartiallyApplied if any other params still need work.
-			maxAccOutReadParamDefaultValue := values[len(values)-1]
-
-			// According to the PRM, setting MAX_ACC_OUT_READ to zero enables the auto mode,
-			// which applies the best suitable optimizations.
-			// However, there is a bug in certain FW versions, where the zero value is not available.
-			// In this case, until the fix is available, skipping this parameter and emitting a warning
-			if maxAccOutReadParamDefaultValue == consts.NvParamZero {
-				applyDefaultNvConfigValueIfExists(consts.MaxAccOutReadParam, desiredParameters, query)
-			} else {
-				warning := fmt.Sprintf("%s nv config parameter does not work properly on this version of FW, skipping it", consts.MaxAccOutReadParam)
-				if v.eventRecorder != nil {
-					v.eventRecorder.Event(device, v1.EventTypeWarning, "FirmwareError", warning)
-				}
-				log.Log.Error(errors.New(warning), "skipping parameter", "device", device.Name, "fw version", device.Status.FirmwareVersion)
-			}
+			log.Log.Info("maxAccOutRead is deprecated and no longer maps to MAX_ACC_OUT_READ", "device", device.Name)
 		}
 
 		// maxReadRequest is applied as runtime configuration
@@ -178,12 +141,6 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 		}
 
 		// qos settings are applied as runtime configuration
-	} else {
-		for portIdx := 1; portIdx <= portCount; portIdx++ {
-			applyDefaultNvConfigValueIfExists(consts.PortParam(consts.RoceCcPrioMaskParamBase, portIdx), desiredParameters, query)
-			applyDefaultNvConfigValueIfExists(consts.PortParam(consts.CnpDscpParamBase, portIdx), desiredParameters, query)
-			applyDefaultNvConfigValueIfExists(consts.PortParam(consts.Cnp802pPrioParamBase, portIdx), desiredParameters, query)
-		}
 	}
 
 	if template.GpuDirectOptimized != nil && template.GpuDirectOptimized.Enabled {
@@ -200,10 +157,69 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 			log.Log.Error(err, "incorrect spec", "device", device.Name)
 			return desiredParameters, err
 		}
-	} else {
-		applyDefaultNvConfigValueIfExists(consts.AtsEnabledParam, desiredParameters, query)
 	}
-	return v.mergeOverrideLayers(device, desiredParameters)
+
+	combined, err := v.mergeOverrideLayers(device, desiredParameters)
+	if err != nil {
+		return nil, err
+	}
+	extrapolatePortParamsFromNumOfPF(combined)
+	filterPortParams(combined, effectivePortCount(device, combined))
+	return combined, nil
+}
+
+func effectivePortCount(device *v1alpha1.NicDevice, params map[string]string) int {
+	portCount := len(device.Status.Ports)
+	if value, ok := params[consts.NumOfPfParam]; ok {
+		if n, err := strconv.Atoi(value); err == nil && n > portCount {
+			portCount = n
+		}
+	}
+	return portCount
+}
+
+func extrapolatePortParamsFromNumOfPF(params map[string]string) {
+	value, ok := params[consts.NumOfPfParam]
+	if !ok {
+		return
+	}
+	portCount, err := strconv.Atoi(value)
+	if err != nil || portCount < 2 {
+		return
+	}
+
+	type portParamValue struct {
+		portNum int
+		value   string
+	}
+	baseValues := map[string]portParamValue{}
+	for param, value := range params {
+		portNum, ok := consts.PortSuffixNum(param)
+		if !ok || portNum < 1 {
+			continue
+		}
+		base := param[:len(param)-len(strconv.Itoa(portNum))-2]
+		current, exists := baseValues[base]
+		if !exists || portNum < current.portNum {
+			baseValues[base] = portParamValue{portNum: portNum, value: value}
+		}
+	}
+	for base, baseValue := range baseValues {
+		for portNum := 1; portNum <= portCount; portNum++ {
+			param := consts.PortParam(base, portNum)
+			if _, exists := params[param]; !exists {
+				params[param] = baseValue.value
+			}
+		}
+	}
+}
+
+func filterPortParams(params map[string]string, portCount int) {
+	for param := range params {
+		if n, ok := consts.PortSuffixNum(param); ok && n > portCount {
+			delete(params, param)
+		}
+	}
 }
 
 // mergeOverrideLayers combines the template-derived params with the Spectrum-X profile (breakout +
@@ -225,8 +241,8 @@ func (v *configValidationImpl) mergeOverrideLayers(device *v1alpha1.NicDevice, t
 		mergeParams(combined, postBreakoutParams)
 	}
 	mergeParams(combined, templateParams)
-	// rawNvConfig has the highest priority, so it is merged last. getRawNvConfigParams already drops
-	// _Pn params whose port is beyond the device's port count.
+	// rawNvConfig has the highest priority, so it is merged last. Port-suffixed params are filtered
+	// after NUM_OF_PF-driven extrapolation determines the effective port count.
 	mergeParams(combined, getRawNvConfigParams(device))
 
 	return combined, nil
