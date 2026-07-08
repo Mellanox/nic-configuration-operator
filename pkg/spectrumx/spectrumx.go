@@ -45,7 +45,7 @@ const cnpDscpExpectedValue = "48"
 // Remove this workaround once the parameter is added to DMS.
 const ccProbeMPModeRegName = "ROCE_ACCL"
 const ccProbeMPModeFieldName = "cc_probe_mp_mode"
-const ccProbeMPModeFieldSet = "cc_probe_mp_mode=0x1"
+const ccProbeMPModeFieldSet = "cc_probe_mp_mode=0x1,cc_probe_mp_mode_field_select=0x1"
 const ccProbeMPModeExpectedValue = "0x00000001"
 
 // mlxregBinary is the path to the mlxreg binary. This is a var to allow substitution in tests.
