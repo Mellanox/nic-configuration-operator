@@ -56,7 +56,7 @@ type NVConfigUtils interface {
 	// SetNvConfigParametersBatch sets multiple nv config parameters for a mellanox device in a single mlxconfig call
 	// When force is true, --force is passed to mlxconfig so it accepts a batch it would otherwise refuse
 	// due to implicit parameter dependencies.
-	SetNvConfigParametersBatch(pciAddr string, params map[string]string, withDefault bool, force bool) error
+	SetNvConfigParametersBatch(pciAddr string, params map[string]string, withDefault bool, force bool) (types.ApplyStatus, error)
 	// ResetNvConfig resets NIC's nv config
 	ResetNvConfig(pciAddr string) error
 	// SetSystemConf applies a ConnectX-9 Network Bay system configuration for a single ASIC via
@@ -197,12 +197,22 @@ func (h *nvConfigUtils) SetNvConfigParameter(pciAddr string, paramName string, p
 	return nil
 }
 
+func parseSetNvConfigParametersBatchStatus(output []byte, withDefault bool) types.ApplyStatus {
+	if strings.Contains(string(output), "Configurations:") {
+		return types.ApplyStatusSuccess
+	}
+	if withDefault {
+		return types.ApplyStatusNothingToDo
+	}
+	return types.ApplyStatusSuccess
+}
+
 // SetNvConfigParametersBatch sets multiple nv config parameters for a mellanox device in a single mlxconfig call
-func (h *nvConfigUtils) SetNvConfigParametersBatch(pciAddr string, params map[string]string, withDefault bool, force bool) error {
+func (h *nvConfigUtils) SetNvConfigParametersBatch(pciAddr string, params map[string]string, withDefault bool, force bool) (types.ApplyStatus, error) {
 	log.Log.Info("ConfigurationUtils.SetNvConfigParametersBatch()", "pciAddr", pciAddr, "params", params, "withDefault", withDefault, "force", force)
 
 	if len(params) == 0 {
-		return nil
+		return types.ApplyStatusNothingToDo, nil
 	}
 
 	// Build sorted param list for deterministic command
@@ -217,9 +227,11 @@ func (h *nvConfigUtils) SetNvConfigParametersBatch(pciAddr string, params map[st
 		paramArgs = append(paramArgs, name+"="+params[name])
 	}
 
-	args := []string{"-d", pciAddr, "--yes"}
+	args := []string{"-d", pciAddr}
 	if withDefault {
-		args = append(args, "--with_default")
+		args = append(args, "-e", "--with_default", "-y")
+	} else {
+		args = append(args, "--yes")
 	}
 	if force {
 		args = append(args, "--force")
@@ -231,9 +243,9 @@ func (h *nvConfigUtils) SetNvConfigParametersBatch(pciAddr string, params map[st
 	output, err := utils.RunCommand(cmd)
 	if err != nil {
 		log.Log.Error(err, "SetNvConfigParametersBatch(): Failed to run mlxconfig", "output", string(output))
-		return err
+		return types.ApplyStatusFailed, err
 	}
-	return nil
+	return parseSetNvConfigParametersBatchStatus(output, withDefault), nil
 }
 
 // systemConfToken builds the `<conf>[<asic>]` argument for set/validate_system_conf, e.g. conf3[0].
