@@ -67,6 +67,24 @@ func (_m *DeviceDiscoveryUtils) GetInterfaceName(pciAddr string) string {
 	return r0
 }
 
+// GetFwctlDevice provides a mock function with given fields: pciAddr
+func (_m *DeviceDiscoveryUtils) GetFwctlDevice(pciAddr string) string {
+	ret := _m.Called(pciAddr)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetFwctlDevice")
+	}
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func(string) string); ok {
+		r0 = rf(pciAddr)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
 // GetNetworkBayASIC provides a mock function for the type DeviceDiscoveryUtils
 func (_m *DeviceDiscoveryUtils) GetNetworkBayASIC(pciAddr string) (int, bool) {
 	ret := _m.Called(pciAddr)

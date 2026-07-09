@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -37,6 +38,8 @@ import (
 )
 
 const pciDevicesPath = "/sys/bus/pci/devices"
+
+const fwctlDevicesPath = "/dev/fwctl"
 
 const mlxvpdMaxAttempts = 3
 
@@ -82,6 +85,10 @@ type DeviceDiscoveryUtils interface {
 
 	// GetInterfaceName returns a network interface name for the given PCI address
 	GetInterfaceName(pciAddr string) string
+
+	// GetFwctlDevice returns a fwctl character device path for the given PCI address.
+	// Missing or unreadable sysfs state is logged and treated as no fwctl device.
+	GetFwctlDevice(pciAddr string) string
 
 	// IsSriovVF return true if the device is a SRIOV VF, false otherwise
 	IsSriovVF(pciAddr string) bool
@@ -266,6 +273,20 @@ func (d *deviceDiscoveryUtils) GetInterfaceName(pciAddr string) string {
 	return names[0]
 }
 
+// GetFwctlDevice returns a fwctl character device path for the given PCI address.
+func (d *deviceDiscoveryUtils) GetFwctlDevice(pciAddr string) string {
+	log.Log.Info("DeviceDiscoveryUtils.GetFwctlDevice()", "pciAddr", pciAddr)
+
+	fwctlDevice, err := getFwctlDeviceFromPath(pciDevicesPath, pciAddr)
+	if err != nil {
+		log.Log.V(1).Info("GetFwctlDevice(): fwctl device not found", "pciAddr", pciAddr, "error", err.Error())
+		return ""
+	}
+
+	log.Log.Info("fwctl device", "pciAddr", pciAddr, "device", fwctlDevice)
+	return fwctlDevice
+}
+
 // IsSriovVF return true if the device is a SRIOV VF, false otherwise
 func (d *deviceDiscoveryUtils) IsSriovVF(pciAddr string) bool {
 	log.Log.Info("HostUtils.IsSriovVF()", "pciAddr", pciAddr)
@@ -408,6 +429,28 @@ func getNetNamesFromPath(basePath, pciAddr string) ([]string, error) {
 	}
 
 	return names, nil
+}
+
+func getFwctlDeviceFromPath(pciDevicesBasePath, pciAddr string) (string, error) {
+	fwctlDir := filepath.Join(pciDevicesBasePath, pciAddr, "fwctl")
+	entries, err := os.ReadDir(fwctlDir)
+	if err != nil {
+		return "", fmt.Errorf("GetFwctlDevice(): failed to read fwctl directory %s: %w", fwctlDir, err)
+	}
+
+	deviceNames := make([]string, 0)
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasPrefix(name, "fwctl") {
+			deviceNames = append(deviceNames, name)
+		}
+	}
+	if len(deviceNames) == 0 {
+		return "", fmt.Errorf("GetFwctlDevice(): no fwctl entries under pci device %s", pciAddr)
+	}
+	sort.Strings(deviceNames)
+
+	return filepath.Join(fwctlDevicesPath, deviceNames[0]), nil
 }
 
 // NewDeviceDiscoveryUtils creates a new DeviceDiscoveryUtils instance

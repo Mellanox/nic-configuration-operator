@@ -317,9 +317,11 @@ status:
    partNumber: mcx632312a-hdat
    ports:
       - networkInterface: enp4s0f0np0
+        fwctlDevice: /dev/fwctl/fwctl0
         pci: "0000:04:00.0"
         rdmaInterface: mlx5_0
       - networkInterface: enp4s0f1np1
+        fwctlDevice: /dev/fwctl/fwctl1
         pci: "0000:04:00.1"
         rdmaInterface: mlx5_1
    psid: mt_0000000225

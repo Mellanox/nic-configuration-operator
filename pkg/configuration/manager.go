@@ -82,7 +82,8 @@ func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *
 		log.Log.Error(err, "failed to query nv configs", "device", device.Name)
 		return false, false, nil, err
 	}
-	firstPortConfig := nvConfigsForPorts[device.Status.Ports[0].PCI]
+	firstPort := device.Status.Ports[0]
+	firstPortConfig := nvConfigsForPorts[firstPort.PCI]
 
 	// 2. Reset-to-default takes precedence over everything else.
 	if device.Spec.Configuration.ResetToDefault {
@@ -202,12 +203,12 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 		log.Log.Error(err, "failed to query nv configs", "device", device.Name)
 		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}
-	firstPortPCIAddr := device.Status.Ports[0].PCI
-	firstPortConfig := nvConfigsForPorts[firstPortPCIAddr]
+	firstPort := device.Status.Ports[0]
+	firstPortConfig := nvConfigsForPorts[firstPort.PCI]
 
 	// 2. Reset-to-default takes precedence: reset and finish.
 	if device.Spec.Configuration.ResetToDefault {
-		return h.applyResetToDefault(device, firstPortPCIAddr, firstPortConfig)
+		return h.applyResetToDefault(device, firstPort, firstPortConfig)
 	}
 
 	// 3. Network Bay system_conf: the params that don't match the requested named profile.
@@ -255,7 +256,8 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 	//   - force=false: apply only the params visible on this PF whose value differs; params not yet
 	//     visible are skipped this round and picked up after a reboot exposes them (which sequences
 	//     breakout before postBreakout without --force).
-	for pciAddr, nvConfig := range nvConfigsForPorts {
+	for _, port := range device.Status.Ports {
+		nvConfig := nvConfigsForPorts[port.PCI]
 		batch := map[string]string{}
 		if options.Force {
 			// Copy rather than alias desiredParams: it is reused across PF iterations, and the
@@ -278,8 +280,8 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 		if len(batch) == 0 {
 			continue
 		}
-		log.Log.V(2).Info("applying nv config to device", "device", device.Name, "pci", pciAddr, "config", batch, "force", options.Force)
-		if err := h.nvConfigUtils.SetNvConfigParametersBatch(pciAddr, batch, options.WithDefault, options.Force); err != nil {
+		log.Log.V(2).Info("applying nv config to device", "device", device.Name, "pci", port.PCI, "fwctlDevice", port.FwctlDevice, "config", batch, "force", options.Force)
+		if err := h.nvConfigUtils.SetNvConfigParametersBatch(port, batch, options.WithDefault, options.Force); err != nil {
 			log.Log.Error(err, "Failed to apply nv config parameters", "device", device.Name, "params", batch)
 			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 		}
@@ -306,10 +308,10 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 func (h configurationManager) setSystemConf(ctx context.Context, device *v1alpha1.NicDevice, options *types.ConfigurationOptions) error {
 	conf := device.Spec.Configuration.Template.NetworkBay.Conf
 	asic := device.Status.NetworkBay.Asic
-	pci := device.Status.Ports[0].PCI
+	port := device.Status.Ports[0]
 
 	log.Log.Info("applying Network Bay system_conf", "device", device.Name, "conf", conf, "asic", asic)
-	if err := h.nvConfigUtils.SetSystemConf(ctx, pci, conf, asic, options.Force); err != nil {
+	if err := h.nvConfigUtils.SetSystemConf(ctx, port, conf, asic, options.Force); err != nil {
 		log.Log.Error(err, "failed to apply system_conf", "device", device.Name)
 		return err
 	}
@@ -317,11 +319,11 @@ func (h configurationManager) setSystemConf(ctx context.Context, device *v1alpha
 }
 
 // applyResetToDefault resets NV config to defaults, preserving BF3 operation mode
-func (h configurationManager) applyResetToDefault(device *v1alpha1.NicDevice, pciAddr string, portConfig types.NvConfigQuery) (*types.ConfigurationApplyResult, error) {
+func (h configurationManager) applyResetToDefault(device *v1alpha1.NicDevice, port v1alpha1.NicDevicePortSpec, portConfig types.NvConfigQuery) (*types.ConfigurationApplyResult, error) {
 	log.Log.Info("resetting nv config to default", "device", device.Name)
 	bf3OperationModeValue, isBF3device := portConfig.CurrentConfig[consts.BF3OperationModeParam]
 
-	err := h.nvConfigUtils.ResetNvConfig(pciAddr)
+	err := h.nvConfigUtils.ResetNvConfig(port)
 	if err != nil {
 		log.Log.Error(err, "Failed to reset nv config", "device", device.Name)
 		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
@@ -338,7 +340,7 @@ func (h configurationManager) applyResetToDefault(device *v1alpha1.NicDevice, pc
 			mode = "NIC"
 		}
 		log.Log.Info(fmt.Sprintf("The device %s is the BlueField-3, restoring the previous mode of operation (%s mode) after configuration reset", device.Name, mode))
-		err = h.nvConfigUtils.SetNvConfigParameter(pciAddr, consts.BF3OperationModeParam, val)
+		err = h.nvConfigUtils.SetNvConfigParameter(port, consts.BF3OperationModeParam, val)
 		if err != nil {
 			log.Log.Error(err, "Failed to restore the BlueField device mode of operation", "device", device.Name, "mode", mode, "param", consts.BF3OperationModeParam, "value", val)
 			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
@@ -569,9 +571,9 @@ func (h configurationManager) systemConfMismatchedParams(ctx context.Context, de
 
 	conf := device.Spec.Configuration.Template.NetworkBay.Conf
 	asic := device.Status.NetworkBay.Asic
-	pci := device.Status.Ports[0].PCI
+	port := device.Status.Ports[0]
 
-	matches, mismatched, err := h.nvConfigUtils.ValidateSystemConf(ctx, pci, conf, asic)
+	matches, mismatched, err := h.nvConfigUtils.ValidateSystemConf(ctx, port, conf, asic)
 	if err != nil {
 		log.Log.Error(err, "failed to validate system_conf", "device", device.Name)
 		return nil, err
@@ -588,12 +590,11 @@ func (h configurationManager) systemConfMismatchedParams(ctx context.Context, de
 func (h configurationManager) queryNvConfigs(ctx context.Context, device *v1alpha1.NicDevice) (map[string]types.NvConfigQuery, error) {
 	nvConfigs := make(map[string]types.NvConfigQuery)
 	for _, port := range device.Status.Ports {
-		pciAddr := port.PCI
-		nvConfig, err := h.nvConfigUtils.QueryNvConfig(ctx, pciAddr, nil)
+		nvConfig, err := h.nvConfigUtils.QueryNvConfig(ctx, port, nil)
 		if err != nil {
 			return nil, err
 		}
-		nvConfigs[pciAddr] = nvConfig
+		nvConfigs[port.PCI] = nvConfig
 	}
 	return nvConfigs, nil
 }

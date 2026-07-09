@@ -350,29 +350,29 @@ Source: `pkg/nvconfig/utils.go`
 ```go
 type NVConfigUtils interface {
     // QueryNvConfig returns default, current, and next-boot configs
-    // additionalParameter: optional specific parameter (e.g., "ESWITCH_HAIRPIN_DESCRIPTORS[0..7]")
-    QueryNvConfig(ctx context.Context, pciAddr string, additionalParameter string) (types.NvConfigQuery, error)
+    // parameters: optional specific parameters (e.g., "ESWITCH_HAIRPIN_DESCRIPTORS[0..7]")
+    QueryNvConfig(ctx context.Context, port v1alpha1.NicDevicePortSpec, parameters []string) (types.NvConfigQuery, error)
 
     // SetNvConfigParameter sets a single NV config parameter
-    SetNvConfigParameter(pciAddr string, paramName string, paramValue string) error
+    SetNvConfigParameter(port v1alpha1.NicDevicePortSpec, paramName string, paramValue string) error
 
     // SetNvConfigParametersBatch sets multiple parameters in single mlxconfig call
     // params: map of paramName → paramValue
     // withDefault: add --with_default flag
     // force: add --force flag
-    SetNvConfigParametersBatch(pciAddr string, params map[string]string, withDefault bool, force bool) error
+    SetNvConfigParametersBatch(port v1alpha1.NicDevicePortSpec, params map[string]string, withDefault bool, force bool) error
 
     // ResetNvConfig resets NIC's NV config to defaults
-    ResetNvConfig(pciAddr string) error
+    ResetNvConfig(port v1alpha1.NicDevicePortSpec) error
 
     // SetSystemConf applies a ConnectX-9 Network Bay system configuration for a single ASIC via
-    // `mlxconfig -d <pci> -y [--force] set_system_conf <conf>[<asic>]` (persistent, reboot-required)
-    SetSystemConf(ctx context.Context, pciAddr string, conf string, asic int, force bool) error
+    // `mlxconfig -d <device> -y [--force] set_system_conf <conf>[<asic>]` (persistent, reboot-required)
+    SetSystemConf(ctx context.Context, port v1alpha1.NicDevicePortSpec, conf string, asic int, force bool) error
 
-    // ValidateSystemConf runs `mlxconfig -d <pci> -y validate_system_conf <conf>[<asic>]` and returns
+    // ValidateSystemConf runs `mlxconfig -d <device> -y validate_system_conf <conf>[<asic>]` and returns
     // the overall match bit plus the names of the mismatched params (the MISMATCH rows), so callers can
     // decide which mismatches are intentional overrides rather than drift.
-    ValidateSystemConf(ctx context.Context, pciAddr string, conf string, asic int) (bool, []string, error)
+    ValidateSystemConf(ctx context.Context, port v1alpha1.NicDevicePortSpec, conf string, asic int) (bool, []string, error)
 }
 ```
 
@@ -383,14 +383,15 @@ func NewNVConfigUtils() NVConfigUtils
 
 **Batch command format:**
 ```
-mlxconfig -d <pci> --yes [--with_default] [--force] set PARAM1=VAL1 PARAM2=VAL2 ...
+mlxconfig -d <device> --yes [--with_default] [--force] set PARAM1=VAL1 PARAM2=VAL2 ...
 ```
 Parameter names are sorted for deterministic command generation.
+`<device>` is `port.FwctlDevice` when discovered, otherwise `port.PCI`.
 
 **System conf command format (ConnectX-9 Network Bay):**
 ```
-mlxconfig -d <pci> -y [--force] set_system_conf <conf>[<asic>]
-mlxconfig -d <pci> -y validate_system_conf <conf>[<asic>]
+mlxconfig -d <device> -y [--force] set_system_conf <conf>[<asic>]
+mlxconfig -d <device> -y validate_system_conf <conf>[<asic>]
 ```
 `ValidateSystemConf` parses the per-param `OK:` / `MISMATCH:` rows plus the `SKIPPED (failed to query:)` list and the trailing `Result:` line, returning the overall match bit and the mismatched param names. The configuration manager uses the mismatched names to treat MISMATCH rows for `rawNvConfig`- or Spectrum-X-owned params as intentional overrides (priority `rawNvConfig` > Spectrum-X > system_conf) rather than drift.
 
@@ -625,6 +626,7 @@ type NicDeviceStatus struct {
 ```go
 type NicDevicePortSpec struct {
     PCI              string // PCI address (e.g., "0000:3b:00.0")
+    FwctlDevice      string // fwctl character device path (e.g., "/dev/fwctl/fwctl0")
     NetworkInterface string // Network interface name (e.g., "eth1")
     RdmaInterface    string // RDMA interface name (e.g., "mlx5_1")
 }

@@ -102,6 +102,7 @@ func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, er
 
 		pciKey := utils.PCIDeviceAddress(device.Address)
 		deviceStatus, ok := statuses[pciKey]
+		fwctlDevice := d.utils.GetFwctlDevice(device.Address)
 
 		if !ok {
 			firmwareVersion, psid, err := d.utils.GetFirmwareVersionAndPSID(device.Address)
@@ -118,7 +119,8 @@ func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, er
 
 			dpu := false
 			if isBlueField {
-				nvConfig, err := d.nvConfigUtils.QueryNvConfig(context.Background(), device.Address, []string{consts.BF3OperationModeParam})
+				port := v1alpha1.NicDevicePortSpec{PCI: device.Address, FwctlDevice: fwctlDevice}
+				nvConfig, err := d.nvConfigUtils.QueryNvConfig(context.Background(), port, []string{consts.BF3OperationModeParam})
 				if err != nil {
 					log.Log.Error(err, "Failed to get BlueField device's operation mode", "address", device.Address)
 					return nil, err
@@ -148,6 +150,7 @@ func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, er
 
 		deviceStatus.Ports = append(deviceStatus.Ports, v1alpha1.NicDevicePortSpec{
 			PCI:              device.Address,
+			FwctlDevice:      fwctlDevice,
 			NetworkInterface: networkInterface,
 			RdmaInterface:    rdmaInterface,
 		})

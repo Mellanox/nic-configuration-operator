@@ -511,6 +511,12 @@ NicDevicePortSpec describes the ports of the NIC
 <td><p>PCI is a PCI address of the port, e.g. 0000:3b:00.0</p></td>
 </tr>
 <tr>
+<td><code>fwctlDevice</code><br />
+<em>string</em></td>
+<td><em>(Optional)</em>
+<p>FwctlDevice is the fwctl character device path for this port, e.g. /dev/fwctl/fwctl0. Empty when the host does not expose a fwctl device for this PCI function.</p></td>
+</tr>
+<tr>
 <td><code>networkInterface</code><br />
 <em>string</em></td>
 <td><p>NetworkInterface is the name of the network interface for this port, e.g. eth1</p></td>
@@ -1362,4 +1368,4 @@ SpectrumXOptimizedSpec enables Spectrum-X specific optimizations
 
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-*Generated with `gen-crd-api-reference-docs` on git commit `f6d99ae`.*
+*Generated with `gen-crd-api-reference-docs` on git commit `85f5e0d`.*

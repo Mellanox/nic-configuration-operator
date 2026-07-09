@@ -62,6 +62,10 @@ type NicDeviceSpec struct {
 type NicDevicePortSpec struct {
 	// PCI is a PCI address of the port, e.g. 0000:3b:00.0
 	PCI string `json:"pci"`
+	// FwctlDevice is the fwctl character device path for this port, e.g. /dev/fwctl/fwctl0.
+	// Empty when the host does not expose a fwctl device for this PCI function.
+	// +optional
+	FwctlDevice string `json:"fwctlDevice,omitempty"`
 	// NetworkInterface is the name of the network interface for this port, e.g. eth1
 	NetworkInterface string `json:"networkInterface,omitempty"`
 	// RdmaInterface is the name of the rdma interface for this port, e.g. mlx5_1
