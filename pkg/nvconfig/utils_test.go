@@ -21,6 +21,7 @@ import (
 	"regexp"
 
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/utils/exec"
@@ -594,7 +595,9 @@ Result: Device configuration does NOT match the system configuration.
 					return cmd
 				},
 			}
-			Expect(h.SetNvConfigParametersBatch(pciAddress, map[string]string{"PARAM": "1"}, false, true)).To(Succeed())
+			status, err := h.SetNvConfigParametersBatch(pciAddress, map[string]string{"PARAM": "1"}, false, true)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(status).To(Equal(types.ApplyStatusSuccess))
 		})
 
 		It("omits --force when force is false", func() {
@@ -608,7 +611,62 @@ Result: Device configuration does NOT match the system configuration.
 					return cmd
 				},
 			}
-			Expect(h.SetNvConfigParametersBatch(pciAddress, map[string]string{"PARAM": "1"}, false, false)).To(Succeed())
+			status, err := h.SetNvConfigParametersBatch(pciAddress, map[string]string{"PARAM": "1"}, false, false)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(status).To(Equal(types.ApplyStatusSuccess))
+		})
+
+		It("passes -y with --with_default and returns nothing-to-do when output has no configurations section", func() {
+			output := `Param SAFE_MODE_ENABLE is not going to be set since value matches next value
+Param SAFE_MODE_THRESHOLD is not going to be set since value matches next value
+
+ Apply reset and set? (y/n) [n] : y
+Done!
+-I- Please reboot machine to load new configurations.
+`
+			cmd := &execTesting.FakeCmd{}
+			cmd.OutputScript = append(cmd.OutputScript, func() ([]byte, []byte, error) {
+				return []byte(output), nil, nil
+			})
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(name string, args ...string) exec.Cmd {
+					Expect(args).To(Equal([]string{"-d", pciAddress, "-e", "--with_default", "-y", "set", "SAFE_MODE_ENABLE=1", "SAFE_MODE_THRESHOLD=10"}))
+					return cmd
+				},
+			}
+			status, err := h.SetNvConfigParametersBatch(pciAddress, map[string]string{"SAFE_MODE_ENABLE": "1", "SAFE_MODE_THRESHOLD": "10"}, true, false)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(status).To(Equal(types.ApplyStatusNothingToDo))
+		})
+
+		It("returns success with --with_default when output has a configurations section", func() {
+			output := `Param SAFE_MODE_ENABLE is not going to be set since value matches next value
+Param SAFE_MODE_THRESHOLD is not going to be set since value matches next value
+
+ Apply reset and set? (y/n) [n] : y
+
+Device #1:
+----------
+
+Configurations:                                         Default                           Current                           Next Boot                         New
+*       SRIOV_EN                                        True(1)                           False(0)                          True(1)                           False(0)
+The '*' shows parameters with next value different from default/current value.
+Applying... Done!
+-I- Please reboot machine to load new configurations.
+`
+			cmd := &execTesting.FakeCmd{}
+			cmd.OutputScript = append(cmd.OutputScript, func() ([]byte, []byte, error) {
+				return []byte(output), nil, nil
+			})
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(name string, args ...string) exec.Cmd {
+					Expect(args).To(Equal([]string{"-d", pciAddress, "-e", "--with_default", "-y", "set", "SAFE_MODE_ENABLE=1", "SAFE_MODE_THRESHOLD=10", "SRIOV_EN=0"}))
+					return cmd
+				},
+			}
+			status, err := h.SetNvConfigParametersBatch(pciAddress, map[string]string{"SAFE_MODE_ENABLE": "1", "SAFE_MODE_THRESHOLD": "10", "SRIOV_EN": "0"}, true, false)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(status).To(Equal(types.ApplyStatusSuccess))
 		})
 	})
 })
