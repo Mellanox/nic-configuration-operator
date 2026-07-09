@@ -91,6 +91,7 @@ const (
 
 	SriovEnabledParam        = "SRIOV_EN"
 	SriovNumOfVfsParam       = "NUM_OF_VFS"
+	NumOfPfParam             = "NUM_OF_PF"
 	LinkTypeP1Param          = "LINK_TYPE_P1"
 	LinkTypeP2Param          = "LINK_TYPE_P2"
 	MaxAccOutReadParam       = "MAX_ACC_OUT_READ"
