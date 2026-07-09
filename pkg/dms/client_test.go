@@ -89,6 +89,16 @@ func createToSSetPath(netInterface string, value int) string {
 // makeGetOutput returns JSON output for RunGetPathCommand
 // displayPath is the Path field value; valueKeyPath is the key expected by DMS client (original unfiltered path)
 func makeGetOutput(displayPath, valueKeyPath, value string) []byte {
+	return makeBatchedGetOutput(getOutputUpdate{displayPath: displayPath, valueKeyPath: valueKeyPath, value: value})
+}
+
+type getOutputUpdate struct {
+	displayPath  string
+	valueKeyPath string
+	value        string
+}
+
+func makeBatchedGetOutput(updates ...getOutputUpdate) []byte {
 	t := []struct {
 		Source    string `json:"source"`
 		Timestamp int64  `json:"timestamp"`
@@ -102,13 +112,16 @@ func makeGetOutput(displayPath, valueKeyPath, value string) []byte {
 			Source:    "test",
 			Timestamp: 0,
 			Time:      "",
-			Updates: []struct {
-				Path   string            `json:"Path"`
-				Values map[string]string `json:"values"`
-			}{
-				{Path: displayPath, Values: map[string]string{valueKeyPath[1:]: value}},
-			},
 		},
+	}
+	for _, update := range updates {
+		t[0].Updates = append(t[0].Updates, struct {
+			Path   string            `json:"Path"`
+			Values map[string]string `json:"values"`
+		}{
+			Path:   update.displayPath,
+			Values: map[string]string{strings.TrimPrefix(update.valueKeyPath, "/"): update.value},
+		})
 	}
 	b, _ := json.Marshal(t)
 	return b
@@ -355,14 +368,418 @@ var _ = Describe("DMSClient", func() {
 		})
 	})
 
+	Describe("RunGetPathCommands", func() {
+		It("returns values keyed by original parameter paths", func() {
+			paramPath := "/interfaces/interface/nvidia/cc/config/priority/rp_enabled"
+			requests := []getPathRequest{
+				newGetPathRequest(paramPath, mergeFilterRules(interfaceNameFilter(testNetworkInterface), priorityIdFilter(0))),
+				newGetPathRequest(paramPath, mergeFilterRules(interfaceNameFilter(testNetworkInterface), priorityIdFilter(1))),
+			}
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(cmd string, args ...string) exec.Cmd {
+					return createFakeCmd(makeBatchedGetOutput(
+						getOutputUpdate{displayPath: requests[0].queryPath, valueKeyPath: paramPath, value: "true"},
+						getOutputUpdate{displayPath: requests[1].queryPath, valueKeyPath: paramPath, value: "true"},
+					), nil)
+				},
+			}
+
+			values, err := client.RunGetPathCommands(getPathRequestBatch{
+				key:      getPathRequestBatchKey(interfaceNameFilter(testNetworkInterface)),
+				requests: requests,
+			})
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(values).To(Equal(map[string]string{
+				paramPath: "true",
+			}))
+		})
+
+		It("returns a values-do-not-match error for conflicting values of one parameter", func() {
+			paramPath := "/interfaces/interface/nvidia/cc/config/priority/rp_enabled"
+			requests := []getPathRequest{
+				newGetPathRequest(paramPath, mergeFilterRules(interfaceNameFilter(testNetworkInterface), priorityIdFilter(0))),
+				newGetPathRequest(paramPath, mergeFilterRules(interfaceNameFilter(testNetworkInterface), priorityIdFilter(1))),
+			}
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(cmd string, args ...string) exec.Cmd {
+					return createFakeCmd(makeBatchedGetOutput(
+						getOutputUpdate{displayPath: requests[0].queryPath, valueKeyPath: paramPath, value: "true"},
+						getOutputUpdate{displayPath: requests[1].queryPath, valueKeyPath: paramPath, value: "false"},
+					), nil)
+				},
+			}
+
+			_, err := client.RunGetPathCommands(getPathRequestBatch{
+				key:      getPathRequestBatchKey(interfaceNameFilter(testNetworkInterface)),
+				requests: requests,
+			})
+
+			Expect(err).To(HaveOccurred())
+			Expect(types.IsValuesDoNotMatchError(err)).To(BeTrue())
+		})
+	})
+
+	Describe("parseGetPathCommandOutput", func() {
+		It("maps multiple parameter values from a single batched command output", func() {
+			requests := []getPathRequest{
+				newGetPathRequest(QoSTrustModePath, interfaceNameFilter(testNetworkInterface)),
+				newGetPathRequest(QoSPFCPath, interfaceNameFilter(testNetworkInterface)),
+				newGetPathRequest(ToSPath, interfaceNameFilter(testNetworkInterface)),
+			}
+			output := makeBatchedGetOutput(
+				getOutputUpdate{displayPath: createTrustModePath(testNetworkInterface), valueKeyPath: QoSTrustModePath, value: "dscp"},
+				getOutputUpdate{displayPath: createPFCPath(testNetworkInterface), valueKeyPath: QoSPFCPath, value: "00001000"},
+				getOutputUpdate{displayPath: createToSPath(testNetworkInterface), valueKeyPath: ToSPath, value: "96"},
+			)
+
+			values, err := parseGetPathCommandOutput(output, requests)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(values).To(Equal(map[string]string{
+				QoSTrustModePath: "dscp",
+				QoSPFCPath:       "00001000",
+				ToSPath:          "96",
+			}))
+		})
+
+		It("matches batched output by returned path when updates are out of request order", func() {
+			requests := []getPathRequest{
+				newGetPathRequest(QoSTrustModePath, interfaceNameFilter(testNetworkInterface)),
+				newGetPathRequest(QoSPFCPath, interfaceNameFilter(testNetworkInterface)),
+				newGetPathRequest(ToSPath, interfaceNameFilter(testNetworkInterface)),
+			}
+			output := makeBatchedGetOutput(
+				getOutputUpdate{displayPath: createToSPath(testNetworkInterface), valueKeyPath: ToSPath, value: "96"},
+				getOutputUpdate{displayPath: createPFCPath(testNetworkInterface), valueKeyPath: QoSPFCPath, value: "00001000"},
+				getOutputUpdate{displayPath: createTrustModePath(testNetworkInterface), valueKeyPath: QoSTrustModePath, value: "dscp"},
+			)
+
+			values, err := parseGetPathCommandOutput(output, requests)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(values).To(Equal(map[string]string{
+				QoSTrustModePath: "dscp",
+				QoSPFCPath:       "00001000",
+				ToSPath:          "96",
+			}))
+		})
+
+		It("parses a raw batched dmsc output with many parameter values", func() {
+			requests := []getPathRequest{
+				newGetPathRequest("/interfaces/interface/nvidia/qos/config/trust-mode", interfaceNameFilter(testNetworkInterface)),
+				newGetPathRequest("/interfaces/interface/nvidia/qos/config/pfc", interfaceNameFilter(testNetworkInterface)),
+				newGetPathRequest("/interfaces/interface/nvidia/roce/config/cc-per-plane", interfaceNameFilter(testNetworkInterface)),
+				newGetPathRequest("/interfaces/interface/nvidia/roce/config/adaptive-retransmission", interfaceNameFilter(testNetworkInterface)),
+				newGetPathRequest("/interfaces/interface/nvidia/roce/config/tx-window", interfaceNameFilter(testNetworkInterface)),
+				newGetPathRequest("/interfaces/interface/nvidia/roce/config/slow-restart", interfaceNameFilter(testNetworkInterface)),
+				newGetPathRequest("/interfaces/interface/nvidia/roce/config/adaptive-routing-force", interfaceNameFilter(testNetworkInterface)),
+				newGetPathRequest("/interfaces/interface/nvidia/cc/config/priority/rp_enabled", mergeFilterRules(interfaceNameFilter(testNetworkInterface), priorityIdFilter(0))),
+				newGetPathRequest("/interfaces/interface/nvidia/cc/config/priority/rp_enabled", mergeFilterRules(interfaceNameFilter(testNetworkInterface), priorityIdFilter(1))),
+				newGetPathRequest("/interfaces/interface/nvidia/cc/config/priority/np_enabled", mergeFilterRules(interfaceNameFilter(testNetworkInterface), priorityIdFilter(0))),
+				newGetPathRequest("/interfaces/interface/nvidia/cc/config/priority/np_enabled", mergeFilterRules(interfaceNameFilter(testNetworkInterface), priorityIdFilter(1))),
+				newGetPathRequest("/interfaces/interface/nvidia/cc/slot[id=0]/config/enabled", interfaceNameFilter(testNetworkInterface)),
+				newGetPathRequest("/interfaces/interface/nvidia/cc/slot[id=0]/config/counter_enable", interfaceNameFilter(testNetworkInterface)),
+				newGetPathRequest("/interfaces/interface/nvidia/cc/slot[id=15]/config/enabled", interfaceNameFilter(testNetworkInterface)),
+				newGetPathRequest("/interfaces/interface/ethernet/nvidia/config/inter-packet-gap", interfaceNameFilter(testNetworkInterface)),
+			}
+			rawOutput := []byte(`[
+  {
+    "source": "dmsc",
+    "timestamp": 1783591000,
+    "time": "2026-07-09T11:16:40Z",
+    "updates": [
+      {
+        "Path": "/interfaces/interface[name=enp3s0f0np0]/nvidia/qos/config/trust-mode",
+        "values": {
+          "interfaces/interface/nvidia/qos/config/trust-mode": "dscp"
+        }
+      },
+      {
+        "Path": "/interfaces/interface[name=enp3s0f0np0]/nvidia/qos/config/pfc",
+        "values": {
+          "interfaces/interface/nvidia/qos/config/pfc": "00001000"
+        }
+      },
+      {
+        "Path": "/interfaces/interface[name=enp3s0f0np0]/nvidia/roce/config/cc-per-plane",
+        "values": {
+          "interfaces/interface/nvidia/roce/config/cc-per-plane": "true"
+        }
+      },
+      {
+        "Path": "/interfaces/interface[name=enp3s0f0np0]/nvidia/roce/config/adaptive-retransmission",
+        "values": {
+          "interfaces/interface/nvidia/roce/config/adaptive-retransmission": "true"
+        }
+      },
+      {
+        "Path": "/interfaces/interface[name=enp3s0f0np0]/nvidia/roce/config/tx-window",
+        "values": {
+          "interfaces/interface/nvidia/roce/config/tx-window": "64"
+        }
+      },
+      {
+        "Path": "/interfaces/interface[name=enp3s0f0np0]/nvidia/roce/config/slow-restart",
+        "values": {
+          "interfaces/interface/nvidia/roce/config/slow-restart": "false"
+        }
+      },
+      {
+        "Path": "/interfaces/interface[name=enp3s0f0np0]/nvidia/roce/config/adaptive-routing-force",
+        "values": {
+          "interfaces/interface/nvidia/roce/config/adaptive-routing-force": "true"
+        }
+      },
+      {
+        "Path": "/interfaces/interface[name=enp3s0f0np0]/nvidia/cc/config/priority[id=0]/rp_enabled",
+        "values": {
+          "interfaces/interface/nvidia/cc/config/priority/rp_enabled": "true"
+        }
+      },
+	      {
+	        "Path": "/interfaces/interface[name=enp3s0f0np0]/nvidia/cc/config/priority[id=1]/rp_enabled",
+	        "values": {
+	          "interfaces/interface/nvidia/cc/config/priority/rp_enabled": "true"
+	        }
+	      },
+      {
+        "Path": "/interfaces/interface[name=enp3s0f0np0]/nvidia/cc/config/priority[id=0]/np_enabled",
+        "values": {
+          "interfaces/interface/nvidia/cc/config/priority/np_enabled": "true"
+        }
+      },
+      {
+        "Path": "/interfaces/interface[name=enp3s0f0np0]/nvidia/cc/config/priority[id=1]/np_enabled",
+        "values": {
+          "interfaces/interface/nvidia/cc/config/priority/np_enabled": "true"
+        }
+      },
+      {
+        "Path": "/interfaces/interface[name=enp3s0f0np0]/nvidia/cc/slot[id=0]/config/enabled",
+        "values": {
+          "interfaces/interface/nvidia/cc/slot/config/enabled": "true"
+        }
+      },
+      {
+        "Path": "/interfaces/interface[name=enp3s0f0np0]/nvidia/cc/slot[id=0]/config/counter_enable",
+        "values": {
+          "interfaces/interface/nvidia/cc/slot/config/counter_enable": "true"
+        }
+      },
+      {
+        "Path": "/interfaces/interface[name=enp3s0f0np0]/nvidia/cc/slot[id=15]/config/enabled",
+        "values": {
+          "interfaces/interface/nvidia/cc/slot/config/enabled": "false"
+        }
+      },
+      {
+        "Path": "/interfaces/interface[name=enp3s0f0np0]/ethernet/nvidia/config/inter-packet-gap",
+        "values": {
+          "interfaces/interface/ethernet/nvidia/config/inter-packet-gap": "12"
+        }
+      }
+    ]
+  }
+]`)
+
+			values, err := parseGetPathCommandOutput(rawOutput, requests)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(values).To(Equal(map[string]string{
+				"/interfaces/interface/nvidia/qos/config/trust-mode":               "dscp",
+				"/interfaces/interface/nvidia/qos/config/pfc":                      "00001000",
+				"/interfaces/interface/nvidia/roce/config/cc-per-plane":            "true",
+				"/interfaces/interface/nvidia/roce/config/adaptive-retransmission": "true",
+				"/interfaces/interface/nvidia/roce/config/tx-window":               "64",
+				"/interfaces/interface/nvidia/roce/config/slow-restart":            "false",
+				"/interfaces/interface/nvidia/roce/config/adaptive-routing-force":  "true",
+				"/interfaces/interface/nvidia/cc/config/priority/rp_enabled":       "true",
+				"/interfaces/interface/nvidia/cc/config/priority/np_enabled":       "true",
+				"/interfaces/interface/nvidia/cc/slot[id=0]/config/enabled":        "true",
+				"/interfaces/interface/nvidia/cc/slot[id=0]/config/counter_enable": "true",
+				"/interfaces/interface/nvidia/cc/slot[id=15]/config/enabled":       "false",
+				"/interfaces/interface/ethernet/nvidia/config/inter-packet-gap":    "12",
+			}))
+		})
+
+		It("parses repeated paths from multiple batched result objects", func() {
+			requests := []getPathRequest{
+				newGetPathRequest("/interfaces/interface/nvidia/roce/config/tx-window", interfaceNameFilter("eth_p0_r0")),
+				newGetPathRequest("/interfaces/interface/nvidia/roce/config/slow-restart", interfaceNameFilter("eth_p0_r0")),
+				newGetPathRequest("/interfaces/interface/nvidia/roce/config/tx-window", interfaceNameFilter("eth_p1_r0")),
+				newGetPathRequest("/interfaces/interface/nvidia/roce/config/slow-restart", interfaceNameFilter("eth_p1_r0")),
+			}
+			rawOutput := []byte(`[
+  {
+    "source": "localhost:9339",
+    "timestamp": 1783591180747365539,
+    "time": "2026-07-09T09:59:40.747365539Z",
+    "target": "0000:c9:00.1",
+    "updates": [
+      {
+        "Path": "interfaces/interface[name=eth_p0_r0]/nvidia/roce/config/tx-window",
+        "values": {
+          "interfaces/interface/nvidia/roce/config/tx-window": "false"
+        }
+      }
+    ]
+  },
+  {
+    "source": "localhost:9339",
+    "timestamp": 1783591180873488751,
+    "time": "2026-07-09T09:59:40.873488751Z",
+    "target": "0000:c9:00.1",
+    "updates": [
+      {
+        "Path": "interfaces/interface[name=eth_p0_r0]/nvidia/roce/config/slow-restart",
+        "values": {
+          "interfaces/interface/nvidia/roce/config/slow-restart": "true"
+        }
+      }
+    ]
+  },
+  {
+    "source": "localhost:9339",
+    "timestamp": 1783591180975087880,
+    "time": "2026-07-09T09:59:40.97508788Z",
+    "target": "0000:c9:00.1",
+    "updates": [
+      {
+        "Path": "interfaces/interface[name=eth_p1_r0]/nvidia/roce/config/tx-window",
+        "values": {
+          "interfaces/interface/nvidia/roce/config/tx-window": "false"
+        }
+      }
+    ]
+  },
+  {
+    "source": "localhost:9339",
+    "timestamp": 1783591181073981538,
+    "time": "2026-07-09T09:59:41.073981538Z",
+    "target": "0000:c9:00.1",
+    "updates": [
+      {
+        "Path": "interfaces/interface[name=eth_p1_r0]/nvidia/roce/config/slow-restart",
+        "values": {
+          "interfaces/interface/nvidia/roce/config/slow-restart": "true"
+        }
+      }
+    ]
+  },
+  {
+    "source": "localhost:9339",
+    "timestamp": 1783591181173245802,
+    "time": "2026-07-09T09:59:41.173245802Z",
+    "target": "0000:c9:00.1",
+    "updates": [
+      {
+        "Path": "interfaces/interface[name=eth_p0_r0]/nvidia/roce/config/tx-window",
+        "values": {
+          "interfaces/interface/nvidia/roce/config/tx-window": "false"
+        }
+      }
+    ]
+  },
+  {
+    "source": "localhost:9339",
+    "timestamp": 1783591181271181677,
+    "time": "2026-07-09T09:59:41.271181677Z",
+    "target": "0000:c9:00.1",
+    "updates": [
+      {
+        "Path": "interfaces/interface[name=eth_p0_r0]/nvidia/roce/config/slow-restart",
+        "values": {
+          "interfaces/interface/nvidia/roce/config/slow-restart": "true"
+        }
+      }
+    ]
+  },
+  {
+    "source": "localhost:9339",
+    "timestamp": 1783591181369848140,
+    "time": "2026-07-09T09:59:41.36984814Z",
+    "target": "0000:c9:00.1",
+    "updates": [
+      {
+        "Path": "interfaces/interface[name=eth_p1_r0]/nvidia/roce/config/tx-window",
+        "values": {
+          "interfaces/interface/nvidia/roce/config/tx-window": "false"
+        }
+      }
+    ]
+  },
+  {
+    "source": "localhost:9339",
+    "timestamp": 1783591181469246758,
+    "time": "2026-07-09T09:59:41.469246758Z",
+    "target": "0000:c9:00.1",
+    "updates": [
+      {
+        "Path": "interfaces/interface[name=eth_p1_r0]/nvidia/roce/config/slow-restart",
+        "values": {
+          "interfaces/interface/nvidia/roce/config/slow-restart": "true"
+        }
+      }
+    ]
+  }
+]`)
+
+			values, err := parseGetPathCommandOutput(rawOutput, requests)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(values).To(Equal(map[string]string{
+				"/interfaces/interface/nvidia/roce/config/tx-window":    "false",
+				"/interfaces/interface/nvidia/roce/config/slow-restart": "true",
+			}))
+		})
+
+		It("returns a values-do-not-match error for conflicting values of one parameter", func() {
+			paramPath := "/interfaces/interface/nvidia/roce/config/tx-window"
+			requests := []getPathRequest{
+				newGetPathRequest(paramPath, interfaceNameFilter("eth_p0_r0")),
+				newGetPathRequest(paramPath, interfaceNameFilter("eth_p1_r0")),
+			}
+			output := makeBatchedGetOutput(
+				getOutputUpdate{displayPath: requests[0].queryPath, valueKeyPath: paramPath, value: "false"},
+				getOutputUpdate{displayPath: requests[1].queryPath, valueKeyPath: paramPath, value: "true"},
+			)
+
+			_, err := parseGetPathCommandOutput(output, requests)
+
+			Expect(err).To(HaveOccurred())
+			Expect(types.IsValuesDoNotMatchError(err)).To(BeTrue())
+		})
+
+		It("returns error when repeated paths have conflicting values", func() {
+			requests := []getPathRequest{
+				newGetPathRequest(QoSTrustModePath, interfaceNameFilter(testNetworkInterface)),
+			}
+			output := makeBatchedGetOutput(
+				getOutputUpdate{displayPath: createTrustModePath(testNetworkInterface), valueKeyPath: QoSTrustModePath, value: "dscp"},
+				getOutputUpdate{displayPath: createTrustModePath(testNetworkInterface), valueKeyPath: QoSTrustModePath, value: "pfc"},
+			)
+
+			_, err := parseGetPathCommandOutput(output, requests)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("conflicting value found for path /interfaces/interface[name=enp3s0f0np0]/nvidia/qos/config/trust-mode"))
+		})
+	})
+
 	Describe("GetParameters", func() {
+		collectPathPayloads := func(args []string) []string {
+			var payloads []string
+			for i, arg := range args {
+				if arg == "--path" && i+1 < len(args) {
+					payloads = append(payloads, args[i+1])
+				}
+			}
+			return payloads
+		}
+
 		It("returns value for simple path", func() {
 			param := types.ConfigurationParameter{DMSPath: "/nvidia/mode/config/mode"}
 			fakeExec.CommandScript = []execTesting.FakeCommandAction{
 				func(cmd string, args ...string) exec.Cmd {
 					verifyTargetFlag(args)
-					path := args[len(args)-1]
-					Expect(path).To(Equal(param.DMSPath))
+					paths := collectPathPayloads(args)
+					Expect(paths).To(Equal([]string{param.DMSPath}))
 					return createFakeCmd(makeGetOutput(param.DMSPath, param.DMSPath, "NIC"), nil)
 				},
 			}
@@ -372,20 +789,16 @@ var _ = Describe("DMSClient", func() {
 			Expect(vals[param.DMSPath]).To(Equal("NIC"))
 		})
 
-		It("returns value for interface path with final unfiltered get", func() {
+		It("returns value for interface path in a batched command", func() {
 			param := types.ConfigurationParameter{DMSPath: "/interfaces/interface/nvidia/qos/config/trust-mode"}
 
 			filtered := createTrustModePath(testNetworkInterface)
 			fakeExec.CommandScript = []execTesting.FakeCommandAction{
-				// filtered get per port
 				func(cmd string, args ...string) exec.Cmd {
 					verifyTargetFlag(args)
+					paths := collectPathPayloads(args)
+					Expect(paths).To(Equal([]string{filtered}))
 					return createFakeCmd(makeGetOutput(filtered, param.DMSPath, "dscp"), nil)
-				},
-				// final unfiltered get
-				func(cmd string, args ...string) exec.Cmd {
-					verifyTargetFlag(args)
-					return createFakeCmd(makeGetOutput(param.DMSPath, param.DMSPath, "dscp"), nil)
 				},
 			}
 
@@ -394,16 +807,180 @@ var _ = Describe("DMSClient", func() {
 			Expect(vals[param.DMSPath]).To(Equal("dscp"))
 		})
 
-		It("fails on mismatch across priorities", func() {
-			param := types.ConfigurationParameter{DMSPath: "/interfaces/interface/nvidia/cc/config/priority/np_enabled"}
-			filtered := "/interfaces/interface[name=" + testNetworkInterface + "]/nvidia/cc/config/priority/np_enabled"
+		It("fails on mismatch across interfaces of the same device", func() {
+			const secondNetworkInterface = "enp3s0f1np1"
+			param := types.ConfigurationParameter{DMSPath: "/interfaces/interface/nvidia/qos/config/trust-mode"}
+			multiPortClient := &dmsClient{
+				device: v1alpha1.NicDeviceStatus{
+					SerialNumber: "test-serial",
+					Ports: []v1alpha1.NicDevicePortSpec{
+						{PCI: testPCI, NetworkInterface: testNetworkInterface},
+						{PCI: "0000:00:00.1", NetworkInterface: secondNetworkInterface},
+					},
+				},
+				targetPCI:     testPCI,
+				bindAddress:   ":9339",
+				authParams:    []string{"--insecure"},
+				execInterface: fakeExec,
+			}
+			expectedPaths := []string{
+				createTrustModePath(testNetworkInterface),
+				createTrustModePath(secondNetworkInterface),
+			}
 
 			fakeExec.CommandScript = []execTesting.FakeCommandAction{
 				func(cmd string, args ...string) exec.Cmd {
-					return createFakeCmd(makeGetOutput(filtered, param.DMSPath, "1"), nil)
+					verifyTargetFlag(args)
+					paths := collectPathPayloads(args)
+					Expect(paths).To(Equal([]string{expectedPaths[0]}))
+					return createFakeCmd(makeBatchedGetOutput(
+						getOutputUpdate{displayPath: expectedPaths[0], valueKeyPath: param.DMSPath, value: "dscp"},
+					), nil)
 				},
 				func(cmd string, args ...string) exec.Cmd {
-					return createFakeCmd(makeGetOutput(filtered, param.DMSPath, "0"), nil)
+					verifyTargetFlag(args)
+					paths := collectPathPayloads(args)
+					Expect(paths).To(Equal([]string{expectedPaths[1]}))
+					return createFakeCmd(makeBatchedGetOutput(
+						getOutputUpdate{displayPath: expectedPaths[1], valueKeyPath: param.DMSPath, value: "pfc"},
+					), nil)
+				},
+			}
+
+			_, err := multiPortClient.GetParameters([]types.ConfigurationParameter{param})
+			Expect(err).To(HaveOccurred())
+			Expect(types.IsValuesDoNotMatchError(err)).To(BeTrue())
+		})
+
+		It("returns value when per-interface batches agree across device ports", func() {
+			const secondNetworkInterface = "enp3s0f1np1"
+			param := types.ConfigurationParameter{DMSPath: "/interfaces/interface/nvidia/qos/config/trust-mode"}
+			multiPortClient := &dmsClient{
+				device: v1alpha1.NicDeviceStatus{
+					SerialNumber: "test-serial",
+					Ports: []v1alpha1.NicDevicePortSpec{
+						{PCI: testPCI, NetworkInterface: testNetworkInterface},
+						{PCI: "0000:00:00.1", NetworkInterface: secondNetworkInterface},
+					},
+				},
+				targetPCI:     testPCI,
+				bindAddress:   ":9339",
+				authParams:    []string{"--insecure"},
+				execInterface: fakeExec,
+			}
+			expectedPaths := []string{
+				createTrustModePath(testNetworkInterface),
+				createTrustModePath(secondNetworkInterface),
+			}
+
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(cmd string, args ...string) exec.Cmd {
+					verifyTargetFlag(args)
+					paths := collectPathPayloads(args)
+					Expect(paths).To(Equal([]string{expectedPaths[0]}))
+					return createFakeCmd(makeBatchedGetOutput(
+						getOutputUpdate{displayPath: expectedPaths[0], valueKeyPath: param.DMSPath, value: "dscp"},
+					), nil)
+				},
+				func(cmd string, args ...string) exec.Cmd {
+					verifyTargetFlag(args)
+					paths := collectPathPayloads(args)
+					Expect(paths).To(Equal([]string{expectedPaths[1]}))
+					return createFakeCmd(makeBatchedGetOutput(
+						getOutputUpdate{displayPath: expectedPaths[1], valueKeyPath: param.DMSPath, value: "dscp"},
+					), nil)
+				},
+			}
+
+			vals, err := multiPortClient.GetParameters([]types.ConfigurationParameter{param})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(vals[param.DMSPath]).To(Equal("dscp"))
+		})
+
+		It("fails on mismatch when the first interface value is empty", func() {
+			const secondNetworkInterface = "enp3s0f1np1"
+			param := types.ConfigurationParameter{
+				Name:    "trust-mode",
+				DMSPath: "/interfaces/interface/nvidia/qos/config/trust-mode",
+			}
+			multiPortClient := &dmsClient{
+				device: v1alpha1.NicDeviceStatus{
+					SerialNumber: "test-serial",
+					Ports: []v1alpha1.NicDevicePortSpec{
+						{PCI: testPCI, NetworkInterface: testNetworkInterface},
+						{PCI: "0000:00:00.1", NetworkInterface: secondNetworkInterface},
+					},
+				},
+				targetPCI:     testPCI,
+				bindAddress:   ":9339",
+				authParams:    []string{"--insecure"},
+				execInterface: fakeExec,
+			}
+			firstPath := createTrustModePath(testNetworkInterface)
+			secondPath := createTrustModePath(secondNetworkInterface)
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(cmd string, args ...string) exec.Cmd {
+					return createFakeCmd(makeGetOutput(firstPath, param.DMSPath, ""), nil)
+				},
+				func(cmd string, args ...string) exec.Cmd {
+					return createFakeCmd(makeGetOutput(secondPath, param.DMSPath, "dscp"), nil)
+				},
+			}
+
+			_, err := multiPortClient.GetParameters([]types.ConfigurationParameter{param})
+
+			Expect(err).To(HaveOccurred())
+			Expect(types.IsValuesDoNotMatchError(err)).To(BeTrue())
+		})
+
+		It("keeps configured slot and param filters as distinct result keys", func() {
+			params := []types.ConfigurationParameter{
+				{Name: "param-0", DMSPath: "/interfaces/interface/nvidia/cc/slot[id=0]/param[id=0]/config/value"},
+				{Name: "param-11", DMSPath: "/interfaces/interface/nvidia/cc/slot[id=0]/param[id=11]/config/value"},
+			}
+			queryPaths := []string{
+				injectFilterRules(params[0].DMSPath, interfaceNameFilter(testNetworkInterface)),
+				injectFilterRules(params[1].DMSPath, interfaceNameFilter(testNetworkInterface)),
+			}
+			valuePath := "/interfaces/interface/nvidia/cc/slot/param/config/value"
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(cmd string, args ...string) exec.Cmd {
+					return createFakeCmd(makeBatchedGetOutput(
+						getOutputUpdate{displayPath: queryPaths[0], valueKeyPath: valuePath, value: "1"},
+						getOutputUpdate{displayPath: queryPaths[1], valueKeyPath: valuePath, value: "2"},
+					), nil)
+				},
+			}
+
+			values, err := client.GetParameters(params)
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(values).To(Equal(map[string]string{
+				params[0].DMSPath: "1",
+				params[1].DMSPath: "2",
+			}))
+		})
+
+		It("fails on mismatch across priorities", func() {
+			param := types.ConfigurationParameter{DMSPath: "/interfaces/interface/nvidia/cc/config/priority/np_enabled"}
+			updates := make([]getOutputUpdate, 0, 8)
+			for id := 0; id < 8; id++ {
+				value := "1"
+				if id == 4 {
+					value = "0"
+				}
+				updates = append(updates, getOutputUpdate{
+					displayPath:  fmt.Sprintf("/interfaces/interface[name=%s]/nvidia/cc/config/priority[id=%d]/np_enabled", testNetworkInterface, id),
+					valueKeyPath: param.DMSPath,
+					value:        value,
+				})
+			}
+
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(cmd string, args ...string) exec.Cmd {
+					paths := collectPathPayloads(args)
+					Expect(paths).To(HaveLen(8))
+					return createFakeCmd(makeBatchedGetOutput(updates...), nil)
 				},
 			}
 
@@ -419,28 +996,113 @@ var _ = Describe("DMSClient", func() {
 				expectedFiltered = append(expectedFiltered, fmt.Sprintf("/interfaces/interface[name=%s]/nvidia/cc/config/priority[id=%d]/np_enabled", testNetworkInterface, id))
 			}
 
-			fakeExec.CommandScript = []execTesting.FakeCommandAction{}
-			// eight filtered gets
-			for i := 0; i < 8; i++ {
-				path := expectedFiltered[i]
-				fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(cmd string, args ...string) exec.Cmd {
 					verifyTargetFlag(args)
-					reqPath := args[len(args)-1]
-					Expect(reqPath).To(Equal(path))
-					return createFakeCmd(makeGetOutput(path, param.DMSPath, "1"), nil)
-				})
+					paths := collectPathPayloads(args)
+					Expect(paths).To(Equal(expectedFiltered))
+					updates := make([]getOutputUpdate, 0, len(expectedFiltered))
+					for _, path := range expectedFiltered {
+						updates = append(updates, getOutputUpdate{displayPath: path, valueKeyPath: param.DMSPath, value: "1"})
+					}
+					return createFakeCmd(makeBatchedGetOutput(updates...), nil)
+				},
 			}
-			// final unfiltered get
-			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
-				verifyTargetFlag(args)
-				reqPath := args[len(args)-1]
-				Expect(reqPath).To(Equal(param.DMSPath))
-				return createFakeCmd(makeGetOutput(param.DMSPath, param.DMSPath, "1"), nil)
-			})
 
 			vals, err := client.GetParameters([]types.ConfigurationParameter{param})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(vals[param.DMSPath]).To(Equal("1"))
+		})
+
+		It("batches get paths by concrete interface", func() {
+			params := []types.ConfigurationParameter{
+				{DMSPath: "/nvidia/mode/config/mode"},
+				{DMSPath: "/interfaces/interface/nvidia/qos/config/trust-mode"},
+				{DMSPath: "/interfaces/interface/nvidia/cc/config/priority/np_enabled"},
+			}
+
+			expectedInterfacePaths := []string{createTrustModePath(testNetworkInterface)}
+			for id := 0; id < 8; id++ {
+				expectedInterfacePaths = append(expectedInterfacePaths, fmt.Sprintf("/interfaces/interface[name=%s]/nvidia/cc/config/priority[id=%d]/np_enabled", testNetworkInterface, id))
+			}
+
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(cmd string, args ...string) exec.Cmd {
+					verifyTargetFlag(args)
+					paths := collectPathPayloads(args)
+					Expect(paths).To(Equal([]string{"/nvidia/mode/config/mode"}))
+
+					updates := []getOutputUpdate{
+						{displayPath: params[0].DMSPath, valueKeyPath: params[0].DMSPath, value: "NIC"},
+					}
+					return createFakeCmd(makeBatchedGetOutput(updates...), nil)
+				},
+				func(cmd string, args ...string) exec.Cmd {
+					verifyTargetFlag(args)
+					paths := collectPathPayloads(args)
+					Expect(paths).To(Equal(expectedInterfacePaths))
+
+					updates := make([]getOutputUpdate, 0, len(expectedInterfacePaths))
+					updates = append(updates, getOutputUpdate{
+						displayPath:  expectedInterfacePaths[0],
+						valueKeyPath: params[1].DMSPath,
+						value:        "dscp",
+					})
+					for _, path := range expectedInterfacePaths[1:] {
+						updates = append(updates, getOutputUpdate{displayPath: path, valueKeyPath: params[2].DMSPath, value: "1"})
+					}
+					return createFakeCmd(makeBatchedGetOutput(updates...), nil)
+				},
+			}
+
+			vals, err := client.GetParameters(params)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(vals[params[0].DMSPath]).To(Equal("NIC"))
+			Expect(vals[params[1].DMSPath]).To(Equal("dscp"))
+			Expect(vals[params[2].DMSPath]).To(Equal("1"))
+		})
+
+		It("returns error when batched output does not include matching Path values", func() {
+			param := types.ConfigurationParameter{DMSPath: "/interfaces/interface/nvidia/cc/config/priority/np_enabled"}
+
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(cmd string, args ...string) exec.Cmd {
+					paths := collectPathPayloads(args)
+					Expect(paths).To(HaveLen(8))
+					return createFakeCmd(makeBatchedGetOutput(getOutputUpdate{displayPath: param.DMSPath, valueKeyPath: param.DMSPath, value: "1"}), nil)
+				},
+			}
+
+			_, err := client.GetParameters([]types.ConfigurationParameter{param})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("no update found for path /interfaces/interface[name=enp3s0f0np0]/nvidia/cc/config/priority[id=0]/np_enabled"))
+		})
+
+		It("returns a descriptive error when batched output is missing a requested value", func() {
+			param := types.ConfigurationParameter{DMSPath: "/nvidia/mode/config/mode"}
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(cmd string, args ...string) exec.Cmd {
+					output := makeBatchedGetOutput(getOutputUpdate{displayPath: param.DMSPath, valueKeyPath: "/some/other/path", value: "NIC"})
+					return createFakeCmd(output, nil)
+				},
+			}
+
+			_, err := client.GetParameters([]types.ConfigurationParameter{param})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("value not found for path /nvidia/mode/config/mode"))
+		})
+
+		It("returns a descriptive error when batched get command fails", func() {
+			param := types.ConfigurationParameter{DMSPath: "/nvidia/mode/config/mode"}
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(cmd string, args ...string) exec.Cmd {
+					return createFakeCmd([]byte("boom"), errors.New("command failed"))
+				},
+			}
+
+			_, err := client.GetParameters([]types.ConfigurationParameter{param})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("failed to run get path command"))
 		})
 	})
 
@@ -663,15 +1325,28 @@ var _ = Describe("DMSClient", func() {
 				HwplbFirstPortOnly: true,
 			}
 
-			// 8 priority queries for first port only
-			for i := 0; i < 8; i++ {
-				expectedPath := fmt.Sprintf("/interfaces/interface[name=%s]/nvidia/cc/config/priority[id=%d]/rp_enabled", testNetworkInterface, i)
-				fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
-					reqPath := args[len(args)-1]
-					Expect(reqPath).To(Equal(expectedPath))
-					Expect(reqPath).NotTo(ContainSubstring(secondNetworkInterface))
-					return createFakeCmd(makeGetOutput(expectedPath, param.DMSPath, "1"), nil)
-				})
+			expectedPaths := make([]string, 0, 8)
+			for id := 0; id < 8; id++ {
+				expectedPaths = append(expectedPaths, fmt.Sprintf("/interfaces/interface[name=%s]/nvidia/cc/config/priority[id=%d]/rp_enabled", testNetworkInterface, id))
+			}
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(cmd string, args ...string) exec.Cmd {
+					paths := make([]string, 0, len(expectedPaths))
+					for i, arg := range args {
+						if arg == "--path" && i+1 < len(args) {
+							paths = append(paths, args[i+1])
+						}
+					}
+					Expect(paths).To(Equal(expectedPaths))
+					for _, path := range paths {
+						Expect(path).NotTo(ContainSubstring(secondNetworkInterface))
+					}
+					updates := make([]getOutputUpdate, 0, len(expectedPaths))
+					for _, path := range expectedPaths {
+						updates = append(updates, getOutputUpdate{displayPath: path, valueKeyPath: param.DMSPath, value: "1"})
+					}
+					return createFakeCmd(makeBatchedGetOutput(updates...), nil)
+				},
 			}
 
 			vals, err := multiPortClient.GetParameters([]types.ConfigurationParameter{param})

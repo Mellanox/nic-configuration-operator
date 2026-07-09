@@ -271,6 +271,12 @@ dmsc -a <address> <authParams...> --target 0000:08:00.0 set --update "path:::typ
 - `--tls-key <path>` — client TLS private key
 - `--skip-verify` — skip server certificate verification
 
+#### Batch GetParameters
+
+`GetParameters` expands interface and priority parameters, then groups the resulting paths by concrete interface. Each interface is queried with one `dmsc get` command containing multiple `--path` flags; paths without an interface filter use a separate global batch. Parameters marked `hwplbFirstPortOnly` are added only to the first interface batch.
+
+The response parser matches each returned `Path` to its request, reads the value through DMS's selector-free `values` key, and stores it under the request's original parameter path. This removes generated interface and priority selectors while preserving configured selectors such as `slot[id=0]` and `param[id=11]`. Values returned for the same parameter within a batch or across interface batches must match.
+
 #### Batch SetParameters
 
 `SetParameters` collects all update entries via `collectSetUpdates()` (expanding interface/port/priority combinations into individual `path:::type:::value` strings using `formatSetUpdate()`), then passes them to a single `dmsc set` command with multiple `--update` flags and `--timeout 5m`:
@@ -704,7 +710,7 @@ All external commands use `cmd.CombinedOutput()` (not `cmd.Output()`) and log un
 ### Batch Operations
 
 - **mlxconfig**: `SetNvConfigParametersBatch()` applies multiple params in single `mlxconfig set` call
-- **DMS**: `SetParameters()` sends all `--update` entries in single `dmsc set` command with `--timeout 5m`
+- **DMS**: `GetParameters()` batches `--path` entries per concrete interface (with a separate global batch), and `SetParameters()` sends all `--update` entries in a single `dmsc set` command with `--timeout 5m`
 - **IgnoreError**: per-parameter flag; in batch mode, errors are suppressed only if ALL params have `IgnoreError=true`
 
 ### Channel-Based Notifications

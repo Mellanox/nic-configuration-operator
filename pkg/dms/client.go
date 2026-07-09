@@ -78,6 +78,29 @@ type dmsClient struct {
 	execInterface execUtils.Interface
 }
 
+type getPathRequest struct {
+	paramPath  string
+	queryPath  string
+	lookupPath string
+}
+
+type getPathRequestBatch struct {
+	key      string
+	requests []getPathRequest
+}
+
+type dmsGetCommandResult struct {
+	Source    string         `json:"source"`
+	Timestamp int64          `json:"timestamp"`
+	Time      string         `json:"time"`
+	Updates   []dmsGetUpdate `json:"updates"`
+}
+
+type dmsGetUpdate struct {
+	Path   string            `json:"Path"`
+	Values map[string]string `json:"values"`
+}
+
 func (i *dmsClient) deviceSnapshot() v1alpha1.NicDeviceStatus {
 	i.deviceMutex.RLock()
 	defer i.deviceMutex.RUnlock()
@@ -90,7 +113,6 @@ func (i *dmsClient) deviceSnapshot() v1alpha1.NicDeviceStatus {
 // filters: {"interface": "name=enp3s0f0np0"}
 // Returns: /interfaces/interface[name=enp3s0f0np0]/nvidia/qos/config/trust-mode
 func injectFilterRules(path string, filters map[string]string) string {
-	log.Log.V(2).Info("injectFilterRules", "path", path, "filters", filters)
 	pathParts := strings.Split(path, "/")
 	for i, part := range pathParts {
 		if filter, exists := filters[part]; exists {
@@ -98,18 +120,15 @@ func injectFilterRules(path string, filters map[string]string) string {
 		}
 	}
 	result := strings.Join(pathParts, "/")
-	log.Log.V(2).Info("injectFilterRules result", "original", path, "filtered", result)
 	return result
 }
 
 // interfaceNameFilter returns a filter map for DMS path filtering based on interface name
 func interfaceNameFilter(interfaceName string) map[string]string {
-	log.Log.V(2).Info("interfaceNameFilter", "interfaceName", interfaceName)
 	return map[string]string{"interface": fmt.Sprintf("name=%s", interfaceName)}
 }
 
 func priorityIdFilter(priorityId int) map[string]string {
-	log.Log.V(2).Info("priorityIdFilter", "priorityId", priorityId)
 	return map[string]string{"priority": fmt.Sprintf("id=%d", priorityId)}
 }
 
@@ -151,59 +170,143 @@ func stripSquareBracketClauses(s string) string {
 	return builder.String()
 }
 
+func normalizeDMSPath(path string) string {
+	return strings.TrimPrefix(path, "/")
+}
+
+func newGetPathRequest(path string, filterRules map[string]string) getPathRequest {
+	return getPathRequest{
+		paramPath:  path,
+		queryPath:  injectFilterRules(path, filterRules),
+		lookupPath: stripSquareBracketClauses(normalizeDMSPath(path)),
+	}
+}
+
+func getPathRequestBatchKey(filterRules map[string]string) string {
+	if interfaceFilter, ok := filterRules[Interface]; ok {
+		return Interface + "[" + interfaceFilter + "]"
+	}
+	return "global"
+}
+
 func (i *dmsClient) RunGetPathCommand(path string, filterRules map[string]string) (string, error) {
 	device := i.deviceSnapshot()
 	log.Log.V(2).Info("dmsClient.RunGetPathCommand()", "path", path, "filterRules", filterRules, "device", device.SerialNumber)
 
-	queryPath := injectFilterRules(path, filterRules)
+	request := newGetPathRequest(path, filterRules)
+	values, err := i.RunGetPathCommands(getPathRequestBatch{key: getPathRequestBatchKey(filterRules), requests: []getPathRequest{request}})
+	if err != nil {
+		return "", err
+	}
+
+	value, ok := values[request.paramPath]
+	if !ok {
+		return "", fmt.Errorf("value not found for path %s", request.paramPath)
+	}
+	log.Log.V(2).Info("RunGetPathCommand successful", "device", device.SerialNumber, "path", path, "value", value)
+	return value, nil
+}
+
+func (i *dmsClient) RunGetPathCommands(batch getPathRequestBatch) (map[string]string, error) {
+	device := i.deviceSnapshot()
+	requests := batch.requests
+	if len(requests) == 0 {
+		return map[string]string{}, nil
+	}
+
+	batchKey := batch.key
+	log.Log.V(2).Info("dmsClient.RunGetPathCommands()", "requestCount", len(requests), "batchKey", batchKey, "device", device.SerialNumber)
 
 	args := append([]string{dmsClientPath, "-a", i.bindAddress}, i.authParams...)
-	args = append(args, "--target", i.targetPCI, "--timeout", dmsClientTimeout, "get", "--path", queryPath)
-	log.Log.V(2).Info("dmsClient.RunGetPathCommand()", "args", strings.Join(args, " "))
+	args = append(args, "--target", i.targetPCI, "--timeout", dmsClientTimeout, "get")
+	for _, request := range requests {
+		args = append(args, "--path", request.queryPath)
+	}
+	log.Log.V(2).Info("dmsClient.RunGetPathCommands()", "batchKey", batchKey, "args", strings.Join(args, " "))
 
 	command := i.execInterface.Command(args[0], args[1:]...)
 
 	log.Log.V(2).Info("Executing command", "device", device.SerialNumber, "command", strings.Join(args, " "))
-	output, err := command.Output()
+	output, err := command.CombinedOutput()
+	log.Log.V(2).Info("dmsClient.RunGetPathCommands() raw DMS output", "device", device.SerialNumber, "batchKey", batchKey, "output", string(output))
 	if err != nil {
-		log.Log.V(2).Error(err, "Command execution failed", "device", device.SerialNumber, "path", path)
-		return "", fmt.Errorf("failed to run get path command: %v", err)
+		log.Log.V(2).Error(err, "Command execution failed", "device", device.SerialNumber)
+		return nil, fmt.Errorf("failed to run get path command: %v, output: %s", err, string(output))
 	}
 	log.Log.V(2).Info("Command execution successful", "device", device.SerialNumber, "outputSize", len(output))
 
-	var result []struct {
-		Source    string `json:"source"`
-		Timestamp int64  `json:"timestamp"`
-		Time      string `json:"time"`
-		Updates   []struct {
-			Path   string            `json:"Path"`
-			Values map[string]string `json:"values"`
-		} `json:"updates"`
+	values, err := parseGetPathCommandOutput(output, requests)
+	if err != nil {
+		log.Log.V(2).Error(err, "Failed to parse get path command output", "device", device.SerialNumber)
+		return nil, err
 	}
 
+	return values, nil
+}
+
+func parseGetPathCommandOutput(output []byte, requests []getPathRequest) (map[string]string, error) {
+	var result []dmsGetCommandResult
 	if err := json.Unmarshal(output, &result); err != nil {
-		log.Log.V(2).Error(err, "Failed to unmarshal command output", "device", device.SerialNumber)
-		return "", fmt.Errorf("failed to unmarshal command output: %v", err)
+		return nil, fmt.Errorf("failed to unmarshal command output: %v", err)
 	}
 
-	log.Log.V(2).Info("dmsClient.RunGetPathCommand()", "json result", result)
+	log.Log.V(2).Info("parseGetPathCommandOutput()", "json result", result)
 
-	if len(result) == 0 || len(result[0].Updates) == 0 {
-		log.Log.V(2).Info("No updates found in command output", "device", device.SerialNumber)
-		return "", fmt.Errorf("no updates found in command output")
+	var updates []dmsGetUpdate
+	for _, item := range result {
+		updates = append(updates, item.Updates...)
+	}
+	if len(updates) == 0 {
+		return nil, fmt.Errorf("no updates found in command output")
 	}
 
-	// we have to remove the leading "/" from the path, because DMS returns the path without it
-	// Remove all "[... ]" blocks from the path for lookup to match the values map keys
-	lookupPath := stripSquareBracketClauses(strings.TrimPrefix(path, "/"))
-	value, ok := result[0].Updates[0].Values[lookupPath]
-	if !ok {
-		log.Log.V(2).Info("Value not found for path", "device", device.SerialNumber, "path", path)
-		return "", fmt.Errorf("value not found for path %s", path)
+	updatesByPath := make(map[string]dmsGetUpdate, len(updates))
+	for _, update := range updates {
+		updatePath := normalizeDMSPath(update.Path)
+		existing, found := updatesByPath[updatePath]
+		if !found {
+			updatesByPath[updatePath] = update
+			continue
+		}
+
+		values := make(map[string]string, len(existing.Values)+len(update.Values))
+		for key, value := range existing.Values {
+			values[key] = value
+		}
+		for key, value := range update.Values {
+			if existingValue, exists := values[key]; exists && existingValue != value {
+				return nil, fmt.Errorf("conflicting value found for path %s", update.Path)
+			}
+			values[key] = value
+		}
+		existing.Values = values
+		updatesByPath[updatePath] = existing
 	}
 
-	log.Log.V(2).Info("RunGetPathCommand successful", "device", device.SerialNumber, "path", path, "value", value)
-	return value, nil
+	values := make(map[string]string, len(requests))
+	for _, request := range requests {
+		update, ok := updatesByPath[normalizeDMSPath(request.queryPath)]
+		if !ok {
+			return nil, fmt.Errorf("no update found for path %s", request.queryPath)
+		}
+		value, ok := update.Values[request.lookupPath]
+		if !ok {
+			updateLookupPath := stripSquareBracketClauses(normalizeDMSPath(update.Path))
+			value, ok = update.Values[updateLookupPath]
+		}
+		if !ok {
+			return nil, fmt.Errorf("value not found for path %s", request.paramPath)
+		}
+
+		path := request.paramPath
+		currentValue, found := values[path]
+		if found && currentValue != value {
+			return nil, types.ValuesDoNotMatchError(types.ConfigurationParameter{Name: request.paramPath, DMSPath: path}, value)
+		}
+		values[path] = value
+	}
+
+	return values, nil
 }
 
 // formatSetUpdate builds a "path:::type:::value" update entry, applying filter rules to the path.
@@ -377,34 +480,60 @@ func (i *dmsClient) InstallBFB(ctx context.Context, version string, bfbPath stri
 	return nil
 }
 
-func (i *dmsClient) getCompareReplaceValue(param *types.ConfigurationParameter, filterRules map[string]string, value *string) error {
-	device := i.deviceSnapshot()
-	result, err := i.RunGetPathCommand(param.DMSPath, filterRules)
-	if err != nil {
-		log.Log.V(2).Error(err, "Failed to get parameter", "device", device.SerialNumber, "param", param)
-		return fmt.Errorf("failed to get parameter: %v", err)
-	}
-
-	if *value != "" && result != *value {
-		err = types.ValuesDoNotMatchError(*param, result)
-		log.Log.V(2).Error(err, "Failed to get parameter", "device", device.SerialNumber, "param", param)
-		return err
-	}
-
-	*value = result
-	return nil
-
-}
-
 func (i *dmsClient) GetParameters(params []types.ConfigurationParameter) (map[string]string, error) {
 	device := i.deviceSnapshot()
 	log.Log.V(2).Info("dmsClient.GetParameters()", "params", params, "device", device.SerialNumber)
 
 	values := make(map[string]string)
+	paramByPath := make(map[string]types.ConfigurationParameter, len(params))
+	for _, param := range params {
+		paramByPath[param.DMSPath] = param
+	}
+
+	batches := collectGetPathRequestBatches(device, params)
+	for _, batch := range batches {
+		requestValues, err := i.RunGetPathCommands(batch)
+		if err != nil {
+			log.Log.V(2).Error(err, "Failed to get parameters", "device", device.SerialNumber, "batchKey", batch.key)
+			if types.IsValuesDoNotMatchError(err) {
+				return nil, err
+			}
+			return nil, fmt.Errorf("failed to get parameter: %v", err)
+		}
+
+		for path, result := range requestValues {
+			param, ok := paramByPath[path]
+			if !ok {
+				return nil, fmt.Errorf("unexpected value found for path %s", path)
+			}
+			value, found := values[path]
+			if found && result != value {
+				err := types.ValuesDoNotMatchError(param, result)
+				log.Log.V(2).Error(err, "Failed to get parameter", "device", device.SerialNumber, "param", param)
+				return nil, err
+			}
+			values[path] = result
+		}
+	}
+
+	return values, nil
+}
+
+func collectGetPathRequestBatches(device v1alpha1.NicDeviceStatus, params []types.ConfigurationParameter) []getPathRequestBatch {
+	batches := []getPathRequestBatch{}
+	batchIndexes := make(map[string]int)
+	appendRequest := func(batchKey string, request getPathRequest) {
+		batchIndex, found := batchIndexes[batchKey]
+		if !found {
+			batchIndex = len(batches)
+			batchIndexes[batchKey] = batchIndex
+			batches = append(batches, getPathRequestBatch{key: batchKey})
+		}
+		batches[batchIndex].requests = append(batches[batchIndex].requests, request)
+	}
 
 	for _, param := range params {
 		paramPathParts := strings.Split(param.DMSPath, "/")
-		value := ""
 
 		if slices.Contains(paramPathParts, Interface) {
 			ports := device.Ports
@@ -413,36 +542,22 @@ func (i *dmsClient) GetParameters(params []types.ConfigurationParameter) (map[st
 			}
 			for _, port := range ports {
 				filterRules := interfaceNameFilter(port.NetworkInterface)
+				batchKey := getPathRequestBatchKey(filterRules)
 
 				if slices.Contains(paramPathParts, Priority) {
 					for id := 0; id < 8; id++ {
-						filterRules := mergeFilterRules(filterRules, priorityIdFilter(id))
-
-						err := i.getCompareReplaceValue(&param, filterRules, &value)
-						if err != nil {
-							return nil, err
-						}
+						fr := mergeFilterRules(filterRules, priorityIdFilter(id))
+						appendRequest(batchKey, newGetPathRequest(param.DMSPath, fr))
 					}
 				} else {
-					err := i.getCompareReplaceValue(&param, filterRules, &value)
-					if err != nil {
-						return nil, err
-					}
+					appendRequest(batchKey, newGetPathRequest(param.DMSPath, filterRules))
 				}
 			}
-
 		} else {
-			var err error
-			value, err = i.RunGetPathCommand(param.DMSPath, nil)
-			if err != nil {
-				log.Log.V(2).Error(err, "Failed to get parameter", "device", device.SerialNumber, "param", param)
-				return nil, fmt.Errorf("failed to get parameter: %v", err)
-			}
+			appendRequest(getPathRequestBatchKey(nil), newGetPathRequest(param.DMSPath, nil))
 		}
-
-		values[param.DMSPath] = value
 	}
-	return values, nil
+	return batches
 }
 
 // collectSetUpdates expands all parameters into individual "path:::type:::value" update entries,
