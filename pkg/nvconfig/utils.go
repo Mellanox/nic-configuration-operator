@@ -26,6 +26,7 @@ import (
 	execUtils "k8s.io/utils/exec"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
@@ -50,42 +51,50 @@ func parseMLXConfigValue(value string, valueInBracketsRegex *regexp.Regexp) []st
 type NVConfigUtils interface {
 	// QueryNvConfig queries nv config for a mellanox device and returns default, current and next boot configs
 	// parameters is an optional list of specific parameters to query, e.g. "ESWITCH_HAIRPIN_DESCRIPTORS[0..7]"
-	QueryNvConfig(ctx context.Context, pciAddr string, parameters []string) (types.NvConfigQuery, error)
+	QueryNvConfig(ctx context.Context, port v1alpha1.NicDevicePortSpec, parameters []string) (types.NvConfigQuery, error)
 	// SetNvConfigParameter sets a nv config parameter for a mellanox device
-	SetNvConfigParameter(pciAddr string, paramName string, paramValue string) error
+	SetNvConfigParameter(port v1alpha1.NicDevicePortSpec, paramName string, paramValue string) error
 	// SetNvConfigParametersBatch sets multiple nv config parameters for a mellanox device in a single mlxconfig call
 	// When force is true, --force is passed to mlxconfig so it accepts a batch it would otherwise refuse
 	// due to implicit parameter dependencies.
-	SetNvConfigParametersBatch(pciAddr string, params map[string]string, withDefault bool, force bool) error
+	SetNvConfigParametersBatch(port v1alpha1.NicDevicePortSpec, params map[string]string, withDefault bool, force bool) error
 	// ResetNvConfig resets NIC's nv config
-	ResetNvConfig(pciAddr string) error
+	ResetNvConfig(port v1alpha1.NicDevicePortSpec) error
 	// SetSystemConf applies a ConnectX-9 Network Bay system configuration for a single ASIC via
-	// `mlxconfig -d <pci> -y [--force] set_system_conf <conf>[<asic>]`. Persistent, reboot-required.
-	SetSystemConf(ctx context.Context, pciAddr string, conf string, asic int, force bool) error
+	// `mlxconfig -d <device> -y [--force] set_system_conf <conf>[<asic>]`. Persistent, reboot-required.
+	SetSystemConf(ctx context.Context, port v1alpha1.NicDevicePortSpec, conf string, asic int, force bool) error
 	// ValidateSystemConf reports whether the device's applied configuration matches the named system
-	// configuration for the given ASIC via `mlxconfig -d <pci> -y validate_system_conf <conf>[<asic>]`.
+	// configuration for the given ASIC via `mlxconfig -d <device> -y validate_system_conf <conf>[<asic>]`.
 	// It returns the overall match bit plus the names of the mismatched params (the MISMATCH rows), so
 	// callers that allow explicit overrides (e.g. rawNvConfig / Spectrum-X) on top of a named system conf
 	// can decide whether a reported mismatch is an intentional override or real drift requiring re-apply.
-	ValidateSystemConf(ctx context.Context, pciAddr string, conf string, asic int) (bool, []string, error)
+	ValidateSystemConf(ctx context.Context, port v1alpha1.NicDevicePortSpec, conf string, asic int) (bool, []string, error)
 }
 
 type nvConfigUtils struct {
 	execInterface execUtils.Interface
 }
 
+func resolveDevice(port v1alpha1.NicDevicePortSpec) string {
+	if port.FwctlDevice != "" {
+		log.Log.V(2).Info("using fwctl device for mlxconfig", "pciAddr", port.PCI, "fwctlDevice", port.FwctlDevice)
+		return port.FwctlDevice
+	}
+	return port.PCI
+}
+
 // queryMLXConfig runs a query on mlxconfig to parse out default, current and nextboot configurations
 // might run recursively to expand array parameters' values
-func (h *nvConfigUtils) queryMLXConfig(ctx context.Context, query types.NvConfigQuery, pciAddr string, additionalParameter string) error {
-	log.Log.Info(fmt.Sprintf("mlxconfig -d %s query %s", pciAddr, additionalParameter)) // TODO change verbosity
+func (h *nvConfigUtils) queryMLXConfig(ctx context.Context, query types.NvConfigQuery, targetDevice string, additionalParameter string) error {
+	log.Log.Info(fmt.Sprintf("mlxconfig -d %s query %s", targetDevice, additionalParameter)) // TODO change verbosity
 	valueInBracketsRegex := regexp.MustCompile(`^(.*?)\(([^)]*)\)$`)
 	spaceRe := regexp.MustCompile(`\s{2,}`)
 
 	var cmd execUtils.Cmd
 	if additionalParameter == "" {
-		cmd = h.execInterface.CommandContext(ctx, "mlxconfig", "-d", pciAddr, "-e", "query")
+		cmd = h.execInterface.CommandContext(ctx, "mlxconfig", "-d", targetDevice, "-e", "query")
 	} else {
-		cmd = h.execInterface.CommandContext(ctx, "mlxconfig", "-d", pciAddr, "-e", "query", additionalParameter)
+		cmd = h.execInterface.CommandContext(ctx, "mlxconfig", "-d", targetDevice, "-e", "query", additionalParameter)
 	}
 	output, err := utils.RunCommand(cmd)
 	if err != nil {
@@ -142,7 +151,7 @@ func (h *nvConfigUtils) queryMLXConfig(ctx context.Context, query types.NvConfig
 
 			// If the parameter value is an array, we want to extract values for all indices
 			if strings.HasPrefix(defaultVal, arrayPrefix) {
-				err = h.queryMLXConfig(ctx, query, pciAddr, paramName+strings.TrimPrefix(defaultVal, arrayPrefix))
+				err = h.queryMLXConfig(ctx, query, targetDevice, paramName+strings.TrimPrefix(defaultVal, arrayPrefix))
 				if err != nil {
 					return err
 				}
@@ -160,22 +169,23 @@ func (h *nvConfigUtils) queryMLXConfig(ctx context.Context, query types.NvConfig
 }
 
 // QueryNvConfig queries nv config for a mellanox device and returns default, current and next boot configs
-func (h *nvConfigUtils) QueryNvConfig(ctx context.Context, pciAddr string, parameters []string) (types.NvConfigQuery, error) {
-	log.Log.Info("ConfigurationUtils.QueryNvConfig()", "pciAddr", pciAddr)
+func (h *nvConfigUtils) QueryNvConfig(ctx context.Context, port v1alpha1.NicDevicePortSpec, parameters []string) (types.NvConfigQuery, error) {
+	targetDevice := resolveDevice(port)
+	log.Log.Info("ConfigurationUtils.QueryNvConfig()", "pciAddr", port.PCI, "targetDevice", targetDevice)
 
 	query := types.NewNvConfigQuery()
 
 	if len(parameters) == 0 {
-		err := h.queryMLXConfig(ctx, query, pciAddr, "")
+		err := h.queryMLXConfig(ctx, query, targetDevice, "")
 		if err != nil {
-			log.Log.Error(err, "Failed to parse mlxconfig query output", "device", pciAddr)
+			log.Log.Error(err, "Failed to parse mlxconfig query output", "device", targetDevice)
 			return query, err
 		}
 	} else {
 		for _, param := range parameters {
-			err := h.queryMLXConfig(ctx, query, pciAddr, param)
+			err := h.queryMLXConfig(ctx, query, targetDevice, param)
 			if err != nil {
-				log.Log.Error(err, "Failed to parse mlxconfig query output", "device", pciAddr, "parameter", param)
+				log.Log.Error(err, "Failed to parse mlxconfig query output", "device", targetDevice, "parameter", param)
 				return query, err
 			}
 		}
@@ -185,10 +195,11 @@ func (h *nvConfigUtils) QueryNvConfig(ctx context.Context, pciAddr string, param
 }
 
 // SetNvConfigParameter sets a nv config parameter for a mellanox device
-func (h *nvConfigUtils) SetNvConfigParameter(pciAddr string, paramName string, paramValue string) error {
-	log.Log.Info("ConfigurationUtils.SetNvConfigParameter()", "pciAddr", pciAddr, "paramName", paramName, "paramValue", paramValue)
+func (h *nvConfigUtils) SetNvConfigParameter(port v1alpha1.NicDevicePortSpec, paramName string, paramValue string) error {
+	targetDevice := resolveDevice(port)
+	log.Log.Info("ConfigurationUtils.SetNvConfigParameter()", "pciAddr", port.PCI, "targetDevice", targetDevice, "paramName", paramName, "paramValue", paramValue)
 
-	cmd := h.execInterface.Command("mlxconfig", "-d", pciAddr, "--yes", "set", paramName+"="+paramValue)
+	cmd := h.execInterface.Command("mlxconfig", "-d", targetDevice, "--yes", "set", paramName+"="+paramValue)
 	output, err := utils.RunCommand(cmd)
 	if err != nil {
 		log.Log.Error(err, "SetNvConfigParameter(): Failed to run mlxconfig", "output", string(output))
@@ -198,8 +209,9 @@ func (h *nvConfigUtils) SetNvConfigParameter(pciAddr string, paramName string, p
 }
 
 // SetNvConfigParametersBatch sets multiple nv config parameters for a mellanox device in a single mlxconfig call
-func (h *nvConfigUtils) SetNvConfigParametersBatch(pciAddr string, params map[string]string, withDefault bool, force bool) error {
-	log.Log.Info("ConfigurationUtils.SetNvConfigParametersBatch()", "pciAddr", pciAddr, "params", params, "withDefault", withDefault, "force", force)
+func (h *nvConfigUtils) SetNvConfigParametersBatch(port v1alpha1.NicDevicePortSpec, params map[string]string, withDefault bool, force bool) error {
+	targetDevice := resolveDevice(port)
+	log.Log.Info("ConfigurationUtils.SetNvConfigParametersBatch()", "pciAddr", port.PCI, "targetDevice", targetDevice, "params", params, "withDefault", withDefault, "force", force)
 
 	if len(params) == 0 {
 		return nil
@@ -217,7 +229,7 @@ func (h *nvConfigUtils) SetNvConfigParametersBatch(pciAddr string, params map[st
 		paramArgs = append(paramArgs, name+"="+params[name])
 	}
 
-	args := []string{"-d", pciAddr, "--yes"}
+	args := []string{"-d", targetDevice, "--yes"}
 	if withDefault {
 		args = append(args, "--with_default")
 	}
@@ -242,19 +254,20 @@ func systemConfToken(conf string, asic int) string {
 }
 
 // SetSystemConf applies a ConnectX-9 Network Bay system configuration for a single ASIC.
-func (h *nvConfigUtils) SetSystemConf(ctx context.Context, pciAddr string, conf string, asic int, force bool) error {
-	log.Log.Info("ConfigurationUtils.SetSystemConf()", "pciAddr", pciAddr, "conf", conf, "asic", asic, "force", force)
+func (h *nvConfigUtils) SetSystemConf(ctx context.Context, port v1alpha1.NicDevicePortSpec, conf string, asic int, force bool) error {
+	targetDevice := resolveDevice(port)
+	log.Log.Info("ConfigurationUtils.SetSystemConf()", "pciAddr", port.PCI, "targetDevice", targetDevice, "conf", conf, "asic", asic, "force", force)
 
-	args := []string{"-d", pciAddr, "-y"}
+	args := []string{"-d", targetDevice, "-y"}
 	if force {
 		args = append(args, "--force")
 	}
 	args = append(args, "set_system_conf", systemConfToken(conf, asic))
 
 	output, err := h.execInterface.CommandContext(ctx, "mlxconfig", args...).CombinedOutput()
-	log.Log.V(2).Info("command output", "command", "mlxconfig set_system_conf", "pciAddr", pciAddr, "output", string(output))
+	log.Log.V(2).Info("command output", "command", "mlxconfig set_system_conf", "pciAddr", port.PCI, "targetDevice", targetDevice, "output", string(output))
 	if err != nil {
-		log.Log.Error(err, "SetSystemConf(): Failed to run mlxconfig", "pciAddr", pciAddr)
+		log.Log.Error(err, "SetSystemConf(): Failed to run mlxconfig", "pciAddr", port.PCI, "targetDevice", targetDevice)
 		return err
 	}
 	return nil
@@ -262,12 +275,13 @@ func (h *nvConfigUtils) SetSystemConf(ctx context.Context, pciAddr string, conf 
 
 // ValidateSystemConf runs validate_system_conf and returns the overall match bit plus the names of
 // the mismatched params (the MISMATCH rows).
-func (h *nvConfigUtils) ValidateSystemConf(ctx context.Context, pciAddr string, conf string, asic int) (bool, []string, error) {
-	log.Log.Info("ConfigurationUtils.ValidateSystemConf()", "pciAddr", pciAddr, "conf", conf, "asic", asic)
+func (h *nvConfigUtils) ValidateSystemConf(ctx context.Context, port v1alpha1.NicDevicePortSpec, conf string, asic int) (bool, []string, error) {
+	targetDevice := resolveDevice(port)
+	log.Log.Info("ConfigurationUtils.ValidateSystemConf()", "pciAddr", port.PCI, "targetDevice", targetDevice, "conf", conf, "asic", asic)
 
-	args := []string{"-d", pciAddr, "-y", "validate_system_conf", systemConfToken(conf, asic)}
+	args := []string{"-d", targetDevice, "-y", "validate_system_conf", systemConfToken(conf, asic)}
 	output, err := h.execInterface.CommandContext(ctx, "mlxconfig", args...).CombinedOutput()
-	log.Log.V(2).Info("command output", "command", "mlxconfig validate_system_conf", "pciAddr", pciAddr, "output", string(output))
+	log.Log.V(2).Info("command output", "command", "mlxconfig validate_system_conf", "pciAddr", port.PCI, "targetDevice", targetDevice, "output", string(output))
 
 	// mlxconfig validate_system_conf exits non-zero (e.g. 3) when the device configuration does
 	// NOT match the system conf — that is a valid result, not a command failure. Treat the parsed
@@ -276,7 +290,7 @@ func (h *nvConfigUtils) ValidateSystemConf(ctx context.Context, pciAddr string, 
 	matches, mismatched, resultLineFound, parseErr := parseValidateSystemConf(output)
 	if parseErr != nil {
 		if err != nil {
-			log.Log.Error(err, "ValidateSystemConf(): Failed to run mlxconfig", "pciAddr", pciAddr)
+			log.Log.Error(err, "ValidateSystemConf(): Failed to run mlxconfig", "pciAddr", port.PCI, "targetDevice", targetDevice)
 			return false, nil, err
 		}
 		return false, nil, parseErr
@@ -285,11 +299,11 @@ func (h *nvConfigUtils) ValidateSystemConf(ctx context.Context, pciAddr string, 
 	// In that case the parsed rows are partial, so we must not trust a derived match bit — surface the
 	// command error instead of reporting a (possibly false) match from incomplete data.
 	if !resultLineFound && err != nil {
-		log.Log.Error(err, "ValidateSystemConf(): incomplete validate_system_conf output", "pciAddr", pciAddr)
+		log.Log.Error(err, "ValidateSystemConf(): incomplete validate_system_conf output", "pciAddr", port.PCI, "targetDevice", targetDevice)
 		return false, nil, err
 	}
 
-	log.Log.Info("ValidateSystemConf() result", "pciAddr", pciAddr, "conf", conf, "asic", asic, "matches", matches)
+	log.Log.Info("ValidateSystemConf() result", "pciAddr", port.PCI, "targetDevice", targetDevice, "conf", conf, "asic", asic, "matches", matches)
 	return matches, mismatched, nil
 }
 
@@ -366,10 +380,11 @@ func parseValidateSystemConf(output []byte) (matches bool, mismatched []string, 
 }
 
 // ResetNvConfig resets NIC's nv config
-func (h *nvConfigUtils) ResetNvConfig(pciAddr string) error {
-	log.Log.Info("ConfigurationUtils.ResetNvConfig()", "pciAddr", pciAddr)
+func (h *nvConfigUtils) ResetNvConfig(port v1alpha1.NicDevicePortSpec) error {
+	targetDevice := resolveDevice(port)
+	log.Log.Info("ConfigurationUtils.ResetNvConfig()", "pciAddr", port.PCI, "targetDevice", targetDevice)
 
-	cmd := h.execInterface.Command("mlxconfig", "-d", pciAddr, "--yes", "reset")
+	cmd := h.execInterface.Command("mlxconfig", "-d", targetDevice, "--yes", "reset")
 	output, err := utils.RunCommand(cmd)
 	if err != nil {
 		log.Log.Error(err, "ResetNvConfig(): Failed to run mlxconfig", "output", string(output))

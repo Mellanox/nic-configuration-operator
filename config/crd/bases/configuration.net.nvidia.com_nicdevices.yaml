@@ -470,6 +470,11 @@ spec:
                 items:
                   description: NicDevicePortSpec describes the ports of the NIC
                   properties:
+                    fwctlDevice:
+                      description: |-
+                        FwctlDevice is the fwctl character device path for this port, e.g. /dev/fwctl/fwctl0.
+                        Empty when the host does not expose a fwctl device for this PCI function.
+                      type: string
                     networkInterface:
                       description: NetworkInterface is the name of the network interface
                         for this port, e.g. eth1

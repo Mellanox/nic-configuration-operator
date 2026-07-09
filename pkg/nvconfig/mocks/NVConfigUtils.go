@@ -7,6 +7,7 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
+	v1alpha1 "github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	types "github.com/Mellanox/nic-configuration-operator/pkg/types"
 )
 
@@ -15,9 +16,9 @@ type NVConfigUtils struct {
 	mock.Mock
 }
 
-// QueryNvConfig provides a mock function with given fields: ctx, pciAddr, parameters
-func (_m *NVConfigUtils) QueryNvConfig(ctx context.Context, pciAddr string, parameters []string) (types.NvConfigQuery, error) {
-	ret := _m.Called(ctx, pciAddr, parameters)
+// QueryNvConfig provides a mock function with given fields: ctx, port, parameters
+func (_m *NVConfigUtils) QueryNvConfig(ctx context.Context, port v1alpha1.NicDevicePortSpec, parameters []string) (types.NvConfigQuery, error) {
+	ret := _m.Called(ctx, port, parameters)
 
 	if len(ret) == 0 {
 		panic("no return value specified for QueryNvConfig")
@@ -25,17 +26,17 @@ func (_m *NVConfigUtils) QueryNvConfig(ctx context.Context, pciAddr string, para
 
 	var r0 types.NvConfigQuery
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, []string) (types.NvConfigQuery, error)); ok {
-		return rf(ctx, pciAddr, parameters)
+	if rf, ok := ret.Get(0).(func(context.Context, v1alpha1.NicDevicePortSpec, []string) (types.NvConfigQuery, error)); ok {
+		return rf(ctx, port, parameters)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, []string) types.NvConfigQuery); ok {
-		r0 = rf(ctx, pciAddr, parameters)
+	if rf, ok := ret.Get(0).(func(context.Context, v1alpha1.NicDevicePortSpec, []string) types.NvConfigQuery); ok {
+		r0 = rf(ctx, port, parameters)
 	} else {
 		r0 = ret.Get(0).(types.NvConfigQuery)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, string, []string) error); ok {
-		r1 = rf(ctx, pciAddr, parameters)
+	if rf, ok := ret.Get(1).(func(context.Context, v1alpha1.NicDevicePortSpec, []string) error); ok {
+		r1 = rf(ctx, port, parameters)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -43,17 +44,17 @@ func (_m *NVConfigUtils) QueryNvConfig(ctx context.Context, pciAddr string, para
 	return r0, r1
 }
 
-// ResetNvConfig provides a mock function with given fields: pciAddr
-func (_m *NVConfigUtils) ResetNvConfig(pciAddr string) error {
-	ret := _m.Called(pciAddr)
+// ResetNvConfig provides a mock function with given fields: port
+func (_m *NVConfigUtils) ResetNvConfig(port v1alpha1.NicDevicePortSpec) error {
+	ret := _m.Called(port)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ResetNvConfig")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string) error); ok {
-		r0 = rf(pciAddr)
+	if rf, ok := ret.Get(0).(func(v1alpha1.NicDevicePortSpec) error); ok {
+		r0 = rf(port)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -61,17 +62,17 @@ func (_m *NVConfigUtils) ResetNvConfig(pciAddr string) error {
 	return r0
 }
 
-// SetNvConfigParameter provides a mock function with given fields: pciAddr, paramName, paramValue
-func (_m *NVConfigUtils) SetNvConfigParameter(pciAddr string, paramName string, paramValue string) error {
-	ret := _m.Called(pciAddr, paramName, paramValue)
+// SetNvConfigParameter provides a mock function with given fields: port, paramName, paramValue
+func (_m *NVConfigUtils) SetNvConfigParameter(port v1alpha1.NicDevicePortSpec, paramName string, paramValue string) error {
+	ret := _m.Called(port, paramName, paramValue)
 
 	if len(ret) == 0 {
 		panic("no return value specified for SetNvConfigParameter")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, string, string) error); ok {
-		r0 = rf(pciAddr, paramName, paramValue)
+	if rf, ok := ret.Get(0).(func(v1alpha1.NicDevicePortSpec, string, string) error); ok {
+		r0 = rf(port, paramName, paramValue)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -79,17 +80,17 @@ func (_m *NVConfigUtils) SetNvConfigParameter(pciAddr string, paramName string, 
 	return r0
 }
 
-// SetNvConfigParametersBatch provides a mock function with given fields: pciAddr, params, withDefault, force
-func (_m *NVConfigUtils) SetNvConfigParametersBatch(pciAddr string, params map[string]string, withDefault bool, force bool) error {
-	ret := _m.Called(pciAddr, params, withDefault, force)
+// SetNvConfigParametersBatch provides a mock function with given fields: port, params, withDefault, force
+func (_m *NVConfigUtils) SetNvConfigParametersBatch(port v1alpha1.NicDevicePortSpec, params map[string]string, withDefault bool, force bool) error {
+	ret := _m.Called(port, params, withDefault, force)
 
 	if len(ret) == 0 {
 		panic("no return value specified for SetNvConfigParametersBatch")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, map[string]string, bool, bool) error); ok {
-		r0 = rf(pciAddr, params, withDefault, force)
+	if rf, ok := ret.Get(0).(func(v1alpha1.NicDevicePortSpec, map[string]string, bool, bool) error); ok {
+		r0 = rf(port, params, withDefault, force)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -97,17 +98,17 @@ func (_m *NVConfigUtils) SetNvConfigParametersBatch(pciAddr string, params map[s
 	return r0
 }
 
-// SetSystemConf provides a mock function with given fields: ctx, pciAddr, conf, asic, force
-func (_m *NVConfigUtils) SetSystemConf(ctx context.Context, pciAddr string, conf string, asic int, force bool) error {
-	ret := _m.Called(ctx, pciAddr, conf, asic, force)
+// SetSystemConf provides a mock function with given fields: ctx, port, conf, asic, force
+func (_m *NVConfigUtils) SetSystemConf(ctx context.Context, port v1alpha1.NicDevicePortSpec, conf string, asic int, force bool) error {
+	ret := _m.Called(ctx, port, conf, asic, force)
 
 	if len(ret) == 0 {
 		panic("no return value specified for SetSystemConf")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, string, int, bool) error); ok {
-		r0 = rf(ctx, pciAddr, conf, asic, force)
+	if rf, ok := ret.Get(0).(func(context.Context, v1alpha1.NicDevicePortSpec, string, int, bool) error); ok {
+		r0 = rf(ctx, port, conf, asic, force)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -115,9 +116,9 @@ func (_m *NVConfigUtils) SetSystemConf(ctx context.Context, pciAddr string, conf
 	return r0
 }
 
-// ValidateSystemConf provides a mock function with given fields: ctx, pciAddr, conf, asic
-func (_m *NVConfigUtils) ValidateSystemConf(ctx context.Context, pciAddr string, conf string, asic int) (bool, []string, error) {
-	ret := _m.Called(ctx, pciAddr, conf, asic)
+// ValidateSystemConf provides a mock function with given fields: ctx, port, conf, asic
+func (_m *NVConfigUtils) ValidateSystemConf(ctx context.Context, port v1alpha1.NicDevicePortSpec, conf string, asic int) (bool, []string, error) {
+	ret := _m.Called(ctx, port, conf, asic)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ValidateSystemConf")
@@ -126,25 +127,25 @@ func (_m *NVConfigUtils) ValidateSystemConf(ctx context.Context, pciAddr string,
 	var r0 bool
 	var r1 []string
 	var r2 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, string, int) (bool, []string, error)); ok {
-		return rf(ctx, pciAddr, conf, asic)
+	if rf, ok := ret.Get(0).(func(context.Context, v1alpha1.NicDevicePortSpec, string, int) (bool, []string, error)); ok {
+		return rf(ctx, port, conf, asic)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, string, int) bool); ok {
-		r0 = rf(ctx, pciAddr, conf, asic)
+	if rf, ok := ret.Get(0).(func(context.Context, v1alpha1.NicDevicePortSpec, string, int) bool); ok {
+		r0 = rf(ctx, port, conf, asic)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, string, string, int) []string); ok {
-		r1 = rf(ctx, pciAddr, conf, asic)
+	if rf, ok := ret.Get(1).(func(context.Context, v1alpha1.NicDevicePortSpec, string, int) []string); ok {
+		r1 = rf(ctx, port, conf, asic)
 	} else {
 		if ret.Get(1) != nil {
 			r1 = ret.Get(1).([]string)
 		}
 	}
 
-	if rf, ok := ret.Get(2).(func(context.Context, string, string, int) error); ok {
-		r2 = rf(ctx, pciAddr, conf, asic)
+	if rf, ok := ret.Get(2).(func(context.Context, v1alpha1.NicDevicePortSpec, string, int) error); ok {
+		r2 = rf(ctx, port, conf, asic)
 	} else {
 		r2 = ret.Error(2)
 	}

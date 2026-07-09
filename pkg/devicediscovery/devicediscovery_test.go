@@ -33,12 +33,17 @@ import (
 
 var _ = Describe("DeviceDiscovery", func() {
 	var (
-		mockUtils mocks.DeviceDiscoveryUtils
-		manager   DeviceDiscovery
+		mockUtils    mocks.DeviceDiscoveryUtils
+		manager      DeviceDiscovery
+		fwctlDevices map[string]string
 	)
 
 	BeforeEach(func() {
 		mockUtils = mocks.DeviceDiscoveryUtils{}
+		fwctlDevices = map[string]string{}
+		mockUtils.On("GetFwctlDevice", mock.Anything).Return(func(pciAddr string) string {
+			return fwctlDevices[pciAddr]
+		}).Maybe()
 		manager = deviceDiscovery{utils: &mockUtils, nodeName: "test-node"}
 	})
 
@@ -630,6 +635,7 @@ var _ = Describe("DeviceDiscovery", func() {
 
 	Context("when parsing model name and SuperNIC flag", func() {
 		It("should truncate model name at first comma and set SuperNIC", func() {
+			fwctlDevices["0000:00:00.0"] = "/dev/fwctl/fwctl0"
 			mockUtils.On("GetPCIDevices").Return([]*pci.Device{
 				{
 					Address: "0000:00:00.0",
@@ -656,6 +662,8 @@ var _ = Describe("DeviceDiscovery", func() {
 			discoveredDevice := devicesByPCI["0000:00:00"]
 			Expect(discoveredDevice.Status.ModelName).To(Equal("NVIDIA ConnectX-8 C8180 HHHL SuperNIC"))
 			Expect(discoveredDevice.Status.SuperNIC).To(BeTrue())
+			Expect(discoveredDevice.Status.Ports).To(HaveLen(1))
+			Expect(discoveredDevice.Status.Ports[0].FwctlDevice).To(Equal("/dev/fwctl/fwctl0"))
 		})
 	})
 
@@ -677,7 +685,7 @@ var _ = Describe("DeviceDiscovery", func() {
 			mockUtils.On("GetRDMADeviceName", "0000:00:00.0").Return("mlx5_0")
 
 			nvConfigUtilsMock := nvmmocks.NewNVConfigUtils(GinkgoT())
-			nvConfigUtilsMock.On("QueryNvConfig", mock.Anything, "0000:00:00.0", []string{consts.BF3OperationModeParam}).Return(types.NvConfigQuery{
+			nvConfigUtilsMock.On("QueryNvConfig", mock.Anything, v1alpha1.NicDevicePortSpec{PCI: "0000:00:00.0"}, []string{consts.BF3OperationModeParam}).Return(types.NvConfigQuery{
 				CurrentConfig:  map[string][]string{consts.BF3OperationModeParam: {"enabled", consts.NvParamBF3DpuMode}},
 				NextBootConfig: map[string][]string{},
 				DefaultConfig:  map[string][]string{},

@@ -310,6 +310,54 @@ var _ = Describe("HostUtils", func() {
 			Expect(vpd.ModelName).To(Equal(""))
 		})
 	})
+
+	Describe("getFwctlDeviceFromPath", func() {
+		It("returns the dev path for a discovered fwctl entry", func() {
+			root := GinkgoT().TempDir()
+			fwctlDir := filepath.Join(root, pciAddress, "fwctl")
+			Expect(os.MkdirAll(fwctlDir, 0o755)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(fwctlDir, "fwctl2"), []byte{}, 0o644)).To(Succeed())
+
+			fwctlDevice, err := getFwctlDeviceFromPath(root, pciAddress)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(fwctlDevice).To(Equal("/dev/fwctl/fwctl2"))
+		})
+
+		It("returns the first fwctl entry sorted by name", func() {
+			root := GinkgoT().TempDir()
+			fwctlDir := filepath.Join(root, pciAddress, "fwctl")
+			Expect(os.MkdirAll(fwctlDir, 0o755)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(fwctlDir, "fwctl7"), []byte{}, 0o644)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(fwctlDir, "fwctl3"), []byte{}, 0o644)).To(Succeed())
+
+			fwctlDevice, err := getFwctlDeviceFromPath(root, pciAddress)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(fwctlDevice).To(Equal("/dev/fwctl/fwctl3"))
+		})
+
+		It("returns an error when the fwctl directory is missing", func() {
+			root := GinkgoT().TempDir()
+
+			fwctlDevice, err := getFwctlDeviceFromPath(root, pciAddress)
+
+			Expect(err).To(HaveOccurred())
+			Expect(fwctlDevice).To(BeEmpty())
+		})
+
+		It("returns an error when the fwctl directory has no fwctl entries", func() {
+			root := GinkgoT().TempDir()
+			fwctlDir := filepath.Join(root, pciAddress, "fwctl")
+			Expect(os.MkdirAll(fwctlDir, 0o755)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(fwctlDir, "not-fwctl"), []byte{}, 0o644)).To(Succeed())
+
+			fwctlDevice, err := getFwctlDeviceFromPath(root, pciAddress)
+
+			Expect(err).To(HaveOccurred())
+			Expect(fwctlDevice).To(BeEmpty())
+		})
+	})
 	//nolint:dupl
 	Describe("GetFirmwareVersionAndPSID", func() {
 		It("should return lowercased firmware version and psid", func() {

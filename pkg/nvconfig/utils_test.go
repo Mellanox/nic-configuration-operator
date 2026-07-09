@@ -20,12 +20,17 @@ import (
 	"fmt"
 	"regexp"
 
+	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/utils/exec"
 	execTesting "k8s.io/utils/exec/testing"
 )
+
+func nvconfigPort(pciAddr string) v1alpha1.NicDevicePortSpec {
+	return v1alpha1.NicDevicePortSpec{PCI: pciAddr}
+}
 
 var _ = Describe("NVConfigUtils", func() {
 	Describe("parseMLXConfigValue", func() {
@@ -46,6 +51,17 @@ var _ = Describe("NVConfigUtils", func() {
 			Entry("plain symbolic value", "HOST_0", []string{"HOST_0"}),
 			Entry("empty value", "", []string{""}),
 		)
+	})
+
+	Describe("resolveDevice", func() {
+		It("prefers fwctl when discovered", func() {
+			port := v1alpha1.NicDevicePortSpec{PCI: "0000:3b:00.0", FwctlDevice: "/dev/fwctl/fwctl0"}
+			Expect(resolveDevice(port)).To(Equal("/dev/fwctl/fwctl0"))
+		})
+
+		It("falls back to PCI when fwctl is empty", func() {
+			Expect(resolveDevice(nvconfigPort("0000:3b:00.0"))).To(Equal("0000:3b:00.0"))
+		})
 	})
 
 	Describe("queryMLXConfig", func() {
@@ -117,7 +133,7 @@ Configurations:                              Default         Current         Nex
 		})
 
 		It("should parse mlxconfig output correctly", func() {
-			query, err := h.QueryNvConfig(context.TODO(), pciAddress, nil)
+			query, err := h.QueryNvConfig(context.TODO(), nvconfigPort(pciAddress), nil)
 			Expect(err).ToNot(HaveOccurred())
 
 			// Verify regular parameters
@@ -166,7 +182,7 @@ Device type:    ConnectX4
 
 			h.execInterface = fakeExec
 
-			query, err := h.QueryNvConfig(context.TODO(), pciAddress, nil)
+			query, err := h.QueryNvConfig(context.TODO(), nvconfigPort(pciAddress), nil)
 			Expect(err).ToNot(HaveOccurred())
 
 			Expect(query.DefaultConfig).To(BeEmpty())
@@ -200,7 +216,7 @@ Configurations:                              Default         Current         Nex
 
 			h.execInterface = fakeExec
 
-			query, err := h.QueryNvConfig(context.TODO(), pciAddress, []string{consts.BF3OperationModeParam})
+			query, err := h.QueryNvConfig(context.TODO(), nvconfigPort(pciAddress), []string{consts.BF3OperationModeParam})
 			Expect(err).ToNot(HaveOccurred())
 
 			// Verify regular parameters
@@ -259,7 +275,7 @@ The '*' shows parameters with next value different from default/current value.
 
 			h.execInterface = fakeExec
 
-			query, err := h.QueryNvConfig(context.TODO(), pciAddress, nil)
+			query, err := h.QueryNvConfig(context.TODO(), nvconfigPort(pciAddress), nil)
 			Expect(err).ToNot(HaveOccurred())
 
 			Expect(query.DefaultConfig).To(HaveKeyWithValue("PCI_DOWNSTREAM_PORT_OWNER[0]", []string{"device_default", "0"}))
@@ -303,7 +319,7 @@ Configurations:                                         Default                 
 
 			h.execInterface = fakeExec
 
-			query, err := h.QueryNvConfig(context.TODO(), pciAddress, []string{"MIXED_FORMAT_PARAM"})
+			query, err := h.QueryNvConfig(context.TODO(), nvconfigPort(pciAddress), []string{"MIXED_FORMAT_PARAM"})
 			Expect(err).ToNot(HaveOccurred())
 
 			Expect(query.DefaultConfig).To(HaveKeyWithValue("MIXED_FORMAT_PARAM", []string{"7"}))
@@ -338,7 +354,7 @@ Configurations:                                         Default                 
 
 			h.execInterface = fakeExec
 
-			_, err := h.QueryNvConfig(context.TODO(), pciAddress, nil)
+			_, err := h.QueryNvConfig(context.TODO(), nvconfigPort(pciAddress), nil)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(Equal("mlxconfig error"))
 		})
@@ -476,7 +492,22 @@ Result: Device configuration does NOT match the system configuration.
 					return cmd
 				},
 			}
-			Expect(h.SetSystemConf(context.TODO(), pciAddress, "conf3", 0, false)).To(Succeed())
+			Expect(h.SetSystemConf(context.TODO(), nvconfigPort(pciAddress), "conf3", 0, false)).To(Succeed())
+		})
+
+		It("uses fwctl device when present", func() {
+			cmd := &execTesting.FakeCmd{}
+			cmd.CombinedOutputScript = append(cmd.CombinedOutputScript, func() ([]byte, []byte, error) {
+				return []byte("ok"), nil, nil
+			})
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(name string, args ...string) exec.Cmd {
+					Expect(args).To(Equal([]string{"-d", "/dev/fwctl/fwctl2", "-y", "set_system_conf", "conf3[0]"}))
+					return cmd
+				},
+			}
+			port := v1alpha1.NicDevicePortSpec{PCI: pciAddress, FwctlDevice: "/dev/fwctl/fwctl2"}
+			Expect(h.SetSystemConf(context.TODO(), port, "conf3", 0, false)).To(Succeed())
 		})
 
 		It("builds args with --force", func() {
@@ -490,7 +521,7 @@ Result: Device configuration does NOT match the system configuration.
 					return cmd
 				},
 			}
-			Expect(h.SetSystemConf(context.TODO(), pciAddress, "conf3", 1, true)).To(Succeed())
+			Expect(h.SetSystemConf(context.TODO(), nvconfigPort(pciAddress), "conf3", 1, true)).To(Succeed())
 		})
 
 		It("returns an error when mlxconfig fails", func() {
@@ -501,7 +532,7 @@ Result: Device configuration does NOT match the system configuration.
 			fakeExec.CommandScript = []execTesting.FakeCommandAction{
 				func(name string, args ...string) exec.Cmd { return cmd },
 			}
-			Expect(h.SetSystemConf(context.TODO(), pciAddress, "conf3", 0, false)).ToNot(Succeed())
+			Expect(h.SetSystemConf(context.TODO(), nvconfigPort(pciAddress), "conf3", 0, false)).ToNot(Succeed())
 		})
 	})
 
@@ -529,7 +560,7 @@ Result: Device configuration does NOT match the system configuration.
 					return cmd
 				},
 			}
-			matches, mismatched, err := h.ValidateSystemConf(context.TODO(), pciAddress, "conf16", 0)
+			matches, mismatched, err := h.ValidateSystemConf(context.TODO(), nvconfigPort(pciAddress), "conf16", 0)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(matches).To(BeTrue())
 			Expect(mismatched).To(BeEmpty())
@@ -551,7 +582,7 @@ Result: Device configuration does NOT match the system configuration.
 			fakeExec.CommandScript = []execTesting.FakeCommandAction{
 				func(name string, args ...string) exec.Cmd { return cmd },
 			}
-			matches, mismatched, err := h.ValidateSystemConf(context.TODO(), pciAddress, "conf3", 1)
+			matches, mismatched, err := h.ValidateSystemConf(context.TODO(), nvconfigPort(pciAddress), "conf3", 1)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(matches).To(BeFalse())
 			Expect(mismatched).To(ConsistOf("LINK_TYPE_P1"))
@@ -565,7 +596,7 @@ Result: Device configuration does NOT match the system configuration.
 			fakeExec.CommandScript = []execTesting.FakeCommandAction{
 				func(name string, args ...string) exec.Cmd { return cmd },
 			}
-			_, _, err := h.ValidateSystemConf(context.TODO(), pciAddress, "conf3", 0)
+			_, _, err := h.ValidateSystemConf(context.TODO(), nvconfigPort(pciAddress), "conf3", 0)
 			Expect(err).To(HaveOccurred())
 		})
 	})
@@ -594,7 +625,7 @@ Result: Device configuration does NOT match the system configuration.
 					return cmd
 				},
 			}
-			Expect(h.SetNvConfigParametersBatch(pciAddress, map[string]string{"PARAM": "1"}, false, true)).To(Succeed())
+			Expect(h.SetNvConfigParametersBatch(nvconfigPort(pciAddress), map[string]string{"PARAM": "1"}, false, true)).To(Succeed())
 		})
 
 		It("omits --force when force is false", func() {
@@ -608,7 +639,22 @@ Result: Device configuration does NOT match the system configuration.
 					return cmd
 				},
 			}
-			Expect(h.SetNvConfigParametersBatch(pciAddress, map[string]string{"PARAM": "1"}, false, false)).To(Succeed())
+			Expect(h.SetNvConfigParametersBatch(nvconfigPort(pciAddress), map[string]string{"PARAM": "1"}, false, false)).To(Succeed())
+		})
+
+		It("uses fwctl device when present", func() {
+			cmd := &execTesting.FakeCmd{}
+			cmd.OutputScript = append(cmd.OutputScript, func() ([]byte, []byte, error) {
+				return []byte("ok"), nil, nil
+			})
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(name string, args ...string) exec.Cmd {
+					Expect(args).To(Equal([]string{"-d", "/dev/fwctl/fwctl3", "--yes", "set", "PARAM=1"}))
+					return cmd
+				},
+			}
+			port := v1alpha1.NicDevicePortSpec{PCI: pciAddress, FwctlDevice: "/dev/fwctl/fwctl3"}
+			Expect(h.SetNvConfigParametersBatch(port, map[string]string{"PARAM": "1"}, false, false)).To(Succeed())
 		})
 	})
 })
