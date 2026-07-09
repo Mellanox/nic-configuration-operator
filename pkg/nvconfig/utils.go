@@ -57,7 +57,7 @@ type NVConfigUtils interface {
 	// SetNvConfigParametersBatch sets multiple nv config parameters for a mellanox device in a single mlxconfig call
 	// When force is true, --force is passed to mlxconfig so it accepts a batch it would otherwise refuse
 	// due to implicit parameter dependencies.
-	SetNvConfigParametersBatch(port v1alpha1.NicDevicePortSpec, params map[string]string, withDefault bool, force bool) error
+	SetNvConfigParametersBatch(port v1alpha1.NicDevicePortSpec, params map[string]string, withDefault bool, force bool) (types.ApplyStatus, error)
 	// ResetNvConfig resets NIC's nv config
 	ResetNvConfig(port v1alpha1.NicDevicePortSpec) error
 	// SetSystemConf applies a ConnectX-9 Network Bay system configuration for a single ASIC via
@@ -208,13 +208,23 @@ func (h *nvConfigUtils) SetNvConfigParameter(port v1alpha1.NicDevicePortSpec, pa
 	return nil
 }
 
+func parseSetNvConfigParametersBatchStatus(output []byte, withDefault bool) types.ApplyStatus {
+	if strings.Contains(string(output), "Configurations:") {
+		return types.ApplyStatusSuccess
+	}
+	if withDefault {
+		return types.ApplyStatusNothingToDo
+	}
+	return types.ApplyStatusSuccess
+}
+
 // SetNvConfigParametersBatch sets multiple nv config parameters for a mellanox device in a single mlxconfig call
-func (h *nvConfigUtils) SetNvConfigParametersBatch(port v1alpha1.NicDevicePortSpec, params map[string]string, withDefault bool, force bool) error {
+func (h *nvConfigUtils) SetNvConfigParametersBatch(port v1alpha1.NicDevicePortSpec, params map[string]string, withDefault bool, force bool) (types.ApplyStatus, error) {
 	targetDevice := resolveDevice(port)
 	log.Log.Info("ConfigurationUtils.SetNvConfigParametersBatch()", "pciAddr", port.PCI, "targetDevice", targetDevice, "params", params, "withDefault", withDefault, "force", force)
 
 	if len(params) == 0 {
-		return nil
+		return types.ApplyStatusNothingToDo, nil
 	}
 
 	// Build sorted param list for deterministic command
@@ -229,9 +239,11 @@ func (h *nvConfigUtils) SetNvConfigParametersBatch(port v1alpha1.NicDevicePortSp
 		paramArgs = append(paramArgs, name+"="+params[name])
 	}
 
-	args := []string{"-d", targetDevice, "--yes"}
+	args := []string{"-d", targetDevice}
 	if withDefault {
-		args = append(args, "--with_default")
+		args = append(args, "-e", "--with_default", "-y")
+	} else {
+		args = append(args, "--yes")
 	}
 	if force {
 		args = append(args, "--force")
@@ -240,12 +252,13 @@ func (h *nvConfigUtils) SetNvConfigParametersBatch(port v1alpha1.NicDevicePortSp
 	args = append(args, paramArgs...)
 
 	cmd := h.execInterface.Command("mlxconfig", args...)
-	output, err := utils.RunCommand(cmd)
+	output, err := cmd.CombinedOutput()
+	log.Log.V(2).Info("command output", "output", string(output))
 	if err != nil {
-		log.Log.Error(err, "SetNvConfigParametersBatch(): Failed to run mlxconfig", "output", string(output))
-		return err
+		log.Log.Error(err, "SetNvConfigParametersBatch(): Failed to run mlxconfig")
+		return types.ApplyStatusFailed, fmt.Errorf("failed to run mlxconfig: %w: %s", err, strings.TrimSpace(string(output)))
 	}
-	return nil
+	return parseSetNvConfigParametersBatchStatus(output, withDefault), nil
 }
 
 // systemConfToken builds the `<conf>[<asic>]` argument for set/validate_system_conf, e.g. conf3[0].
