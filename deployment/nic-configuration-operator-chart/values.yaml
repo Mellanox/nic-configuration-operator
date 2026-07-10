@@ -55,6 +55,9 @@ configDaemon:
     # -- feature gate to enable FW reset after nv config update
     # - name: FW_RESET_AFTER_CONFIG_UPDATE
     #   value: "true"
+    # -- skip VM check when resetting NIC firmware via mlxfwreset
+    # - name: SKIP_VM_CHECK
+    #   value: "true"
   # -- node selector for the config daemon
   nodeSelector:
     network.nvidia.com/operator.mofed.wait: "false"
