@@ -444,7 +444,11 @@ func (u *utils) BurnNicFirmware(ctx context.Context, pciAddress, fwPath string) 
 func (u *utils) ResetNicFirmware(ctx context.Context, pciAddress string) error {
 	log.Log.V(2).Info("FirmwareUtils.ResetNicFirmware()", "pciAddress", pciAddress)
 
-	cmd := u.execInterface.CommandContext(ctx, "mlxfwreset", "--device", pciAddress, "reset", "--yes")
+	args := []string{"--device", pciAddress, "reset", "--yes"}
+	if os.Getenv(consts.SKIP_VM_CHECK) == consts.LabelValueTrue {
+		args = append(args, "--skip_vm_check")
+	}
+	cmd := u.execInterface.CommandContext(ctx, "mlxfwreset", args...)
 	output, err := cmd.CombinedOutput()
 	log.Log.V(2).Info("ResetNicFirmware(): command output", "output", string(output))
 	if err != nil {

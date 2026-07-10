@@ -19,6 +19,7 @@ package firmware
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -920,6 +921,96 @@ var _ = Describe("utils", func() {
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("creating destination file"))
 			})
+		})
+	})
+
+	Describe("ResetNicFirmware", func() {
+		const pciAddress = "0000:03:00.0"
+
+		AfterEach(func() {
+			os.Unsetenv(consts.SKIP_VM_CHECK)
+		})
+
+		It("should not pass --skip_vm_check when SKIP_VM_CHECK is unset", func() {
+			fakeExec := &execTesting.FakeExec{}
+
+			fakeCmd := &execTesting.FakeCmd{}
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
+				return []byte("reset successful"), nil, nil
+			})
+
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				Expect(cmd).To(Equal("mlxfwreset"))
+				Expect(args).To(Equal([]string{"--device", pciAddress, "reset", "--yes"}))
+				return fakeCmd
+			})
+
+			testedUtils := &utils{execInterface: fakeExec}
+
+			err := testedUtils.ResetNicFirmware(context.Background(), pciAddress)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should pass --skip_vm_check when SKIP_VM_CHECK is true", func() {
+			os.Setenv(consts.SKIP_VM_CHECK, consts.LabelValueTrue)
+
+			fakeExec := &execTesting.FakeExec{}
+
+			fakeCmd := &execTesting.FakeCmd{}
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
+				return []byte("reset successful"), nil, nil
+			})
+
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				Expect(cmd).To(Equal("mlxfwreset"))
+				Expect(args).To(Equal([]string{"--device", pciAddress, "reset", "--yes", "--skip_vm_check"}))
+				return fakeCmd
+			})
+
+			testedUtils := &utils{execInterface: fakeExec}
+
+			err := testedUtils.ResetNicFirmware(context.Background(), pciAddress)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should not pass --skip_vm_check when SKIP_VM_CHECK is not true", func() {
+			os.Setenv(consts.SKIP_VM_CHECK, consts.LabelValueFalse)
+
+			fakeExec := &execTesting.FakeExec{}
+
+			fakeCmd := &execTesting.FakeCmd{}
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
+				return []byte("reset successful"), nil, nil
+			})
+
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				Expect(cmd).To(Equal("mlxfwreset"))
+				Expect(args).To(Equal([]string{"--device", pciAddress, "reset", "--yes"}))
+				return fakeCmd
+			})
+
+			testedUtils := &utils{execInterface: fakeExec}
+
+			err := testedUtils.ResetNicFirmware(context.Background(), pciAddress)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should return an error when mlxfwreset fails", func() {
+			fakeExec := &execTesting.FakeExec{}
+
+			fakeCmd := &execTesting.FakeCmd{}
+			fakeCmd.CombinedOutputScript = append(fakeCmd.CombinedOutputScript, func() ([]byte, []byte, error) {
+				return []byte("reset failed"), nil, fmt.Errorf("mlxfwreset failed")
+			})
+
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
+				return fakeCmd
+			})
+
+			testedUtils := &utils{execInterface: fakeExec}
+
+			err := testedUtils.ResetNicFirmware(context.Background(), pciAddress)
+			Expect(err).To(HaveOccurred())
 		})
 	})
 
