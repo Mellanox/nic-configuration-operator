@@ -16,10 +16,10 @@ limitations under the License.
 package devicediscovery
 
 import (
+	"context"
+	"os"
 	"strconv"
 	"strings"
-
-	"context"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -35,9 +35,15 @@ type DeviceDiscovery interface {
 	DiscoverNicDevices() (map[string]v1alpha1.NicDevice, error)
 }
 
+type SkippedDeviceReporter interface {
+	// SkippedDevices returns physical PCI device keys skipped during the last discovery pass.
+	SkippedDevices() map[string]error
+}
+
 type deviceDiscovery struct {
-	utils         DeviceDiscoveryUtils
-	nvConfigUtils nvconfig.NVConfigUtils
+	utils          DeviceDiscoveryUtils
+	nvConfigUtils  nvconfig.NVConfigUtils
+	skippedDevices map[string]error
 
 	nodeName string
 }
@@ -47,8 +53,9 @@ type deviceDiscovery struct {
 // the same Domain:Bus:Device are ports of the same physical NIC and are merged into one NicDevice. Keying
 // by PCI device address (rather than serial number) is required on systems where multiple cards share a
 // flashed VPD image (e.g. embedded NICs on HGX B300).
-func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, error) {
+func (d *deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, error) {
 	log.Log.Info("ConfigurationManager.DiscoverNicDevices()")
+	d.skippedDevices = map[string]error{}
 
 	pciDevices, err := d.utils.GetPCIDevices()
 	if err != nil {
@@ -57,6 +64,7 @@ func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, er
 	}
 
 	statuses := make(map[string]v1alpha1.NicDeviceStatus)
+	skipDeviceOnDiscoveryError := os.Getenv(consts.SKIP_DEVICE_ON_DISCOVERY_ERROR) == consts.LabelValueTrue
 
 	for _, device := range pciDevices {
 		if device.Vendor.ID != consts.MellanoxVendor {
@@ -79,11 +87,18 @@ func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, er
 			continue
 		}
 
+		pciKey := utils.PCIDeviceAddress(device.Address)
+		if _, skipped := d.skippedDevices[pciKey]; skipped {
+			log.Log.Info("Physical device already skipped during this discovery pass, skipping port", "pciKey", pciKey, "address", device.Address)
+			continue
+		}
+
 		log.Log.Info("Found Mellanox device", "address", device.Address, "type", device.Product.Name)
 
 		vpd, err := d.utils.GetVPD(device.Address)
 		if err != nil {
 			log.Log.Error(err, "Failed to get device's part and serial numbers, skipping", "address", device.Address)
+			d.skipPhysicalDevice(statuses, pciKey, err)
 			continue
 		}
 
@@ -100,7 +115,6 @@ func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, er
 			continue
 		}
 
-		pciKey := utils.PCIDeviceAddress(device.Address)
 		deviceStatus, ok := statuses[pciKey]
 		fwctlDevice := d.utils.GetFwctlDevice(device.Address)
 
@@ -108,6 +122,10 @@ func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, er
 			firmwareVersion, psid, err := d.utils.GetFirmwareVersionAndPSID(device.Address)
 			if err != nil {
 				log.Log.Error(err, "Failed to get device's firmware and PSID", "address", device.Address)
+				if skipDeviceOnDiscoveryError {
+					d.skipPhysicalDevice(statuses, pciKey, err)
+					continue
+				}
 				return nil, err
 			}
 
@@ -123,6 +141,10 @@ func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, er
 				nvConfig, err := d.nvConfigUtils.QueryNvConfig(context.Background(), port, []string{consts.BF3OperationModeParam})
 				if err != nil {
 					log.Log.Error(err, "Failed to get BlueField device's operation mode", "address", device.Address)
+					if skipDeviceOnDiscoveryError {
+						d.skipPhysicalDevice(statuses, pciKey, err)
+						continue
+					}
 					return nil, err
 				}
 				// For a field ENABLED(0) or DISABLED(1), the second parameter is the 0/1 value
@@ -181,6 +203,19 @@ func (d deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, er
 	log.Log.V(2).Info("Found devices", "devices", devices)
 
 	return devices, nil
+}
+
+func (d *deviceDiscovery) skipPhysicalDevice(statuses map[string]v1alpha1.NicDeviceStatus, pciKey string, err error) {
+	d.skippedDevices[pciKey] = err
+	delete(statuses, pciKey)
+}
+
+func (d *deviceDiscovery) SkippedDevices() map[string]error {
+	skippedDevices := make(map[string]error, len(d.skippedDevices))
+	for pciKey, err := range d.skippedDevices {
+		skippedDevices[pciKey] = err
+	}
+	return skippedDevices
 }
 
 // pairNetworkBayDevices resolves PeerPCI for ConnectX-9 Network Bay siblings. The two ASICs of a

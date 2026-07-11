@@ -58,6 +58,9 @@ configDaemon:
     # -- skip VM check when resetting NIC firmware via mlxfwreset
     # - name: SKIP_VM_CHECK
     #   value: "true"
+    # -- skip a physical NIC when per-device discovery details cannot be read
+    # - name: SKIP_DEVICE_ON_DISCOVERY_ERROR
+    #   value: "true"
   # -- node selector for the config daemon
   nodeSelector:
     network.nvidia.com/operator.mofed.wait: "false"

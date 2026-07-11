@@ -17,6 +17,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -192,6 +193,29 @@ var _ = Describe("DeviceDiscoveryController", func() {
 				}, timeout).Should(Equal(0))
 			})
 
+			It("should preserve CRs for devices skipped during discovery", func() {
+				deviceRegistry.deviceDiscovery = &skippedDeviceDiscovery{
+					devices: map[string]v1alpha1.NicDevice{},
+					skipped: map[string]error{
+						pciDevKey: errors.New("firmware error"),
+					},
+				}
+
+				startManager(mgr, ctx, &wg)
+
+				Eventually(func() (string, error) {
+					device := &v1alpha1.NicDevice{}
+					err := k8sClient.Get(ctx, client.ObjectKey{
+						Name:      deviceName,
+						Namespace: namespaceName,
+					}, device)
+					if err != nil {
+						return "", err
+					}
+					return device.Status.SerialNumber, nil
+				}, timeout).Should(Equal(serialNumber))
+			})
+
 			It("should create new CRs for new devices", func() {
 				newPciDevKey := "0000:81:00"
 				newSerial := "new-serial-num"
@@ -235,3 +259,16 @@ var _ = Describe("DeviceDiscoveryController", func() {
 		})
 	})
 })
+
+type skippedDeviceDiscovery struct {
+	devices map[string]v1alpha1.NicDevice
+	skipped map[string]error
+}
+
+func (d *skippedDeviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, error) {
+	return d.devices, nil
+}
+
+func (d *skippedDeviceDiscovery) SkippedDevices() map[string]error {
+	return d.skipped
+}

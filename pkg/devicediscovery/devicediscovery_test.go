@@ -17,6 +17,7 @@ package devicediscovery
 
 import (
 	"errors"
+	"os"
 
 	"github.com/jaypipes/ghw/pkg/pci"
 	"github.com/jaypipes/pcidb"
@@ -34,17 +35,18 @@ import (
 var _ = Describe("DeviceDiscovery", func() {
 	var (
 		mockUtils    mocks.DeviceDiscoveryUtils
-		manager      DeviceDiscovery
+		manager      *deviceDiscovery
 		fwctlDevices map[string]string
 	)
 
 	BeforeEach(func() {
+		Expect(os.Unsetenv(consts.SKIP_DEVICE_ON_DISCOVERY_ERROR)).To(Succeed())
 		mockUtils = mocks.DeviceDiscoveryUtils{}
 		fwctlDevices = map[string]string{}
 		mockUtils.On("GetFwctlDevice", mock.Anything).Return(func(pciAddr string) string {
 			return fwctlDevices[pciAddr]
 		}).Maybe()
-		manager = deviceDiscovery{utils: &mockUtils, nodeName: "test-node"}
+		manager = &deviceDiscovery{utils: &mockUtils, nodeName: "test-node"}
 	})
 
 	Describe("NewDeviceDiscovery", func() {
@@ -160,6 +162,21 @@ var _ = Describe("DeviceDiscovery", func() {
 				devices, err := manager.DiscoverNicDevices()
 				Expect(err).To(HaveOccurred())
 				Expect(devices).To(BeNil())
+				mockUtils.AssertExpectations(GinkgoT())
+			})
+
+			It("should skip devices if GetFirmwareVersionAndPSID fails and SKIP_DEVICE_ON_DISCOVERY_ERROR is true", func() {
+				Expect(os.Setenv(consts.SKIP_DEVICE_ON_DISCOVERY_ERROR, consts.LabelValueTrue)).To(Succeed())
+				mockUtils.On("IsSriovVF", "0000:00:00.0").Return(false)
+				mockUtils.On("GetVPD", "0000:00:00.0").
+					Return(&types.VPD{PartNumber: "part-number", SerialNumber: "serial-number", ModelName: ""}, nil)
+				mockUtils.On("GetFirmwareVersionAndPSID", "0000:00:00.0").
+					Return("", "", errors.New("firmware error"))
+
+				devices, err := manager.DiscoverNicDevices()
+				Expect(err).NotTo(HaveOccurred())
+				Expect(devices).To(BeEmpty())
+				Expect(manager.SkippedDevices()).To(HaveKey("0000:00:00"))
 				mockUtils.AssertExpectations(GinkgoT())
 			})
 
@@ -313,6 +330,35 @@ var _ = Describe("DeviceDiscovery", func() {
 			mockUtils.AssertExpectations(GinkgoT())
 		})
 
+		It("should skip only a faulty device if GetFirmwareVersionAndPSID fails and SKIP_DEVICE_ON_DISCOVERY_ERROR is true", func() {
+			Expect(os.Setenv(consts.SKIP_DEVICE_ON_DISCOVERY_ERROR, consts.LabelValueTrue)).To(Succeed())
+			mockUtils.On("IsSriovVF", "0000:00:00.0").
+				Return(false)
+			mockUtils.On("GetVPD", "0000:00:00.0").
+				Return(&types.VPD{PartNumber: "part-number", SerialNumber: "serial-number", ModelName: ""}, nil)
+			mockUtils.On("GetFirmwareVersionAndPSID", "0000:00:00.0").
+				Return("fw-version", "psid", nil)
+			mockUtils.On("GetInterfaceName", "0000:00:00.0").
+				Return("eth0")
+			mockUtils.On("GetRDMADeviceName", "0000:00:00.0").
+				Return("mlx5_0")
+
+			mockUtils.On("IsSriovVF", "0000:01:00.0").
+				Return(false)
+			mockUtils.On("GetVPD", "0000:01:00.0").
+				Return(&types.VPD{PartNumber: "part-number", SerialNumber: "serial-number-2", ModelName: ""}, nil)
+			mockUtils.On("GetFirmwareVersionAndPSID", "0000:01:00.0").
+				Return("", "", errors.New("firmware error"))
+
+			devices, err := manager.DiscoverNicDevices()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(devices).To(HaveLen(1))
+			Expect(devices).To(HaveKey("0000:00:00"))
+			Expect(devices).NotTo(HaveKey("0000:01:00"))
+			Expect(manager.SkippedDevices()).To(HaveKey("0000:01:00"))
+			mockUtils.AssertExpectations(GinkgoT())
+		})
+
 		It("should discover and return devices successfully", func() {
 			mockUtils.On("IsSriovVF", "0000:00:00.0").
 				Return(false)
@@ -384,6 +430,7 @@ var _ = Describe("DeviceDiscovery", func() {
 
 			mockUtils.AssertExpectations(GinkgoT())
 		})
+
 	})
 
 	Context("when discovering ConnectX-9 Network Bay (orchid) devices", func() {
@@ -521,6 +568,44 @@ var _ = Describe("DeviceDiscovery", func() {
 
 			mockUtils.AssertExpectations(GinkgoT())
 		})
+
+		It("should skip the whole physical device when discovery fails after one port was added", func() {
+			Expect(os.Setenv(consts.SKIP_DEVICE_ON_DISCOVERY_ERROR, consts.LabelValueTrue)).To(Succeed())
+			mockUtils.On("GetPCIDevices").Return([]*pci.Device{
+				{
+					Address: "0000:00:00.0",
+					Vendor:  &pcidb.Vendor{ID: consts.MellanoxVendor},
+					Product: &pcidb.Product{ID: "test-id", Name: "Mellanox Device"},
+					Class:   &pcidb.Class{ID: "02"},
+				},
+				{
+					Address: "0000:00:00.1",
+					Vendor:  &pcidb.Vendor{ID: consts.MellanoxVendor},
+					Product: &pcidb.Product{ID: "test-id", Name: "Mellanox Device"},
+					Class:   &pcidb.Class{ID: "02"},
+				},
+			}, nil)
+
+			mockUtils.On("IsSriovVF", "0000:00:00.0").Return(false)
+			mockUtils.On("GetVPD", "0000:00:00.0").
+				Return(&types.VPD{PartNumber: "part-number", SerialNumber: "serial-number", ModelName: ""}, nil)
+			mockUtils.On("GetFirmwareVersionAndPSID", "0000:00:00.0").
+				Return("fw-version", "psid", nil)
+			mockUtils.On("GetInterfaceName", "0000:00:00.0").
+				Return("eth0")
+			mockUtils.On("GetRDMADeviceName", "0000:00:00.0").
+				Return("mlx5_0")
+
+			mockUtils.On("IsSriovVF", "0000:00:00.1").Return(false)
+			mockUtils.On("GetVPD", "0000:00:00.1").
+				Return(nil, errors.New("vpd error"))
+
+			devices, err := manager.DiscoverNicDevices()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(devices).To(BeEmpty())
+			Expect(manager.SkippedDevices()).To(HaveKey("0000:00:00"))
+			mockUtils.AssertExpectations(GinkgoT())
+		})
 	})
 
 	Context("when multiple NICs share the same flashed serial number (HGX B300)", func() {
@@ -654,7 +739,7 @@ var _ = Describe("DeviceDiscovery", func() {
 			mockUtils.On("GetInterfaceName", "0000:00:00.0").Return("eth0")
 			mockUtils.On("GetRDMADeviceName", "0000:00:00.0").Return("mlx5_0")
 
-			manager := deviceDiscovery{utils: &mockUtils, nvConfigUtils: nvmmocks.NewNVConfigUtils(GinkgoT()), nodeName: "test-node"}
+			manager := &deviceDiscovery{utils: &mockUtils, nvConfigUtils: nvmmocks.NewNVConfigUtils(GinkgoT()), nodeName: "test-node"}
 
 			devicesByPCI, err := manager.DiscoverNicDevices()
 			Expect(err).NotTo(HaveOccurred())
@@ -691,7 +776,7 @@ var _ = Describe("DeviceDiscovery", func() {
 				DefaultConfig:  map[string][]string{},
 			}, nil)
 
-			manager := deviceDiscovery{utils: &mockUtils, nvConfigUtils: nvConfigUtilsMock, nodeName: "test-node"}
+			manager := &deviceDiscovery{utils: &mockUtils, nvConfigUtils: nvConfigUtilsMock, nodeName: "test-node"}
 
 			devicesByPCI, err := manager.DiscoverNicDevices()
 			Expect(err).NotTo(HaveOccurred())
@@ -715,6 +800,58 @@ var _ = Describe("DeviceDiscovery", func() {
 			devices, err := manager.DiscoverNicDevices()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(devices).To(HaveLen(0))
+			mockUtils.AssertExpectations(GinkgoT())
+		})
+
+		It("should return an error when querying operation mode fails by default", func() {
+			mockUtils.On("GetPCIDevices").Return([]*pci.Device{
+				{
+					Address: "0000:00:00.0",
+					Vendor:  &pcidb.Vendor{ID: consts.MellanoxVendor},
+					Product: &pcidb.Product{ID: consts.BlueField3DeviceID, Name: "BlueField-3"},
+					Class:   &pcidb.Class{ID: "02"},
+				},
+			}, nil)
+			mockUtils.On("IsSriovVF", "0000:00:00.0").Return(false)
+			mockUtils.On("GetVPD", "0000:00:00.0").Return(&types.VPD{PartNumber: "part-number", SerialNumber: "serial-number", ModelName: "BlueField-3"}, nil)
+			mockUtils.On("IsZeroTrust", "0000:00:00.0").Return(false, nil)
+			mockUtils.On("GetFirmwareVersionAndPSID", "0000:00:00.0").Return("fw-version", "psid", nil)
+
+			nvConfigUtilsMock := nvmmocks.NewNVConfigUtils(GinkgoT())
+			nvConfigUtilsMock.On("QueryNvConfig", mock.Anything, v1alpha1.NicDevicePortSpec{PCI: "0000:00:00.0"}, []string{consts.BF3OperationModeParam}).Return(types.NvConfigQuery{}, errors.New("operation mode error"))
+
+			manager := &deviceDiscovery{utils: &mockUtils, nvConfigUtils: nvConfigUtilsMock, nodeName: "test-node"}
+
+			devices, err := manager.DiscoverNicDevices()
+			Expect(err).To(HaveOccurred())
+			Expect(devices).To(BeNil())
+			mockUtils.AssertExpectations(GinkgoT())
+		})
+
+		It("should skip the device when querying operation mode fails and SKIP_DEVICE_ON_DISCOVERY_ERROR is true", func() {
+			Expect(os.Setenv(consts.SKIP_DEVICE_ON_DISCOVERY_ERROR, consts.LabelValueTrue)).To(Succeed())
+			mockUtils.On("GetPCIDevices").Return([]*pci.Device{
+				{
+					Address: "0000:00:00.0",
+					Vendor:  &pcidb.Vendor{ID: consts.MellanoxVendor},
+					Product: &pcidb.Product{ID: consts.BlueField3DeviceID, Name: "BlueField-3"},
+					Class:   &pcidb.Class{ID: "02"},
+				},
+			}, nil)
+			mockUtils.On("IsSriovVF", "0000:00:00.0").Return(false)
+			mockUtils.On("GetVPD", "0000:00:00.0").Return(&types.VPD{PartNumber: "part-number", SerialNumber: "serial-number", ModelName: "BlueField-3"}, nil)
+			mockUtils.On("IsZeroTrust", "0000:00:00.0").Return(false, nil)
+			mockUtils.On("GetFirmwareVersionAndPSID", "0000:00:00.0").Return("fw-version", "psid", nil)
+
+			nvConfigUtilsMock := nvmmocks.NewNVConfigUtils(GinkgoT())
+			nvConfigUtilsMock.On("QueryNvConfig", mock.Anything, v1alpha1.NicDevicePortSpec{PCI: "0000:00:00.0"}, []string{consts.BF3OperationModeParam}).Return(types.NvConfigQuery{}, errors.New("operation mode error"))
+
+			manager := &deviceDiscovery{utils: &mockUtils, nvConfigUtils: nvConfigUtilsMock, nodeName: "test-node"}
+
+			devices, err := manager.DiscoverNicDevices()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(devices).To(BeEmpty())
+			Expect(manager.SkippedDevices()).To(HaveKey("0000:00:00"))
 			mockUtils.AssertExpectations(GinkgoT())
 		})
 	})
