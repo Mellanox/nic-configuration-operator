@@ -358,3 +358,5 @@ The NIC Configuration Daemon itself relies on the `network.nvidia.com/operator.m
 Feature flags can be enabled via environment variables in the helm chart or NVIDIA Network Operator's NicClusterPolicy.
 Supported flags:
 * `FW_RESET_AFTER_CONFIG_UPDATE`=`true`: explicitely reset the NIC's Firmware before the reboot and after updating its non-volatile configuration. Might be required on DGX servers where configuration update is not successfully applied after the warm reboot.
+
+* `SKIP_DEVICE_ON_DISCOVERY_ERROR`=`true`: skip a physical NIC during device discovery when firmware/PSID lookup or BlueField operation-mode lookup fails. When unset, these errors fail discovery so the daemon retries. Existing `NicDevice` CRs are preserved for skipped devices to avoid delete/recreate churn during transient per-device discovery failures.

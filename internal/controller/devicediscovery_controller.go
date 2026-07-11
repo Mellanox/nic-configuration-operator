@@ -120,6 +120,10 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	skippedDevices := map[string]error{}
+	if skippedDeviceReporter, ok := d.deviceDiscovery.(devicediscovery.SkippedDeviceReporter); ok {
+		skippedDevices = skippedDeviceReporter.SkippedDevices()
+	}
 
 	list := &v1alpha1.NicDeviceList{}
 
@@ -149,6 +153,10 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 		observedDevice, exists := observedDevices[pciKey]
 
 		if !exists {
+			if skippedErr, skipped := skippedDevices[pciKey]; skipped {
+				log.Log.Info("device discovery was skipped, preserving existing NicDevice CR", "device", nicDeviceCR.Name, "pciKey", pciKey, "error", skippedErr)
+				continue
+			}
 			log.Log.V(2).Info("device doesn't exist on the node anymore, deleting", "device", nicDeviceCR.Name)
 			// Need to delete this CR, it doesn't represent the observedDevice on host anymore
 			err = d.Delete(ctx, &nicDeviceCR)

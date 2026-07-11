@@ -164,6 +164,7 @@ const (
 	LabelValueFalse               = "false"
 
 	FEATURE_GATE_FW_RESET_AFTER_CONFIG_UPDATE = "FW_RESET_AFTER_CONFIG_UPDATE"
+	SKIP_DEVICE_ON_DISCOVERY_ERROR            = "SKIP_DEVICE_ON_DISCOVERY_ERROR"
 
 	MultiplaneModeNone     = "none"
 	MultiplaneModeSwplb    = "swplb"
