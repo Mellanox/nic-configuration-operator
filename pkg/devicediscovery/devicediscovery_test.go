@@ -149,6 +149,22 @@ var _ = Describe("DeviceDiscovery", func() {
 				devices, err := manager.DiscoverNicDevices()
 				Expect(err).NotTo(HaveOccurred())
 				Expect(devices).To(BeEmpty())
+				Expect(manager.SkippedDevices()).To(BeEmpty())
+				Expect(manager.IncompleteDevices()).To(HaveKey("0000:00:00"))
+				mockUtils.AssertExpectations(GinkgoT())
+			})
+
+			It("should report skipped device if GetPartAndSerialNumber fails and SKIP_DEVICE_ON_DISCOVERY_ERROR is true", func() {
+				Expect(os.Setenv(consts.SKIP_DEVICE_ON_DISCOVERY_ERROR, consts.LabelValueTrue)).To(Succeed())
+				mockUtils.On("IsSriovVF", "0000:00:00.0").Return(false)
+				mockUtils.On("GetVPD", "0000:00:00.0").
+					Return(nil, errors.New("serial number error"))
+
+				devices, err := manager.DiscoverNicDevices()
+				Expect(err).NotTo(HaveOccurred())
+				Expect(devices).To(BeEmpty())
+				Expect(manager.SkippedDevices()).To(HaveKey("0000:00:00"))
+				Expect(manager.IncompleteDevices()).To(HaveKey("0000:00:00"))
 				mockUtils.AssertExpectations(GinkgoT())
 			})
 
@@ -569,7 +585,45 @@ var _ = Describe("DeviceDiscovery", func() {
 			mockUtils.AssertExpectations(GinkgoT())
 		})
 
-		It("should skip the whole physical device when discovery fails after one port was added", func() {
+		It("should drop the whole physical device when VPD discovery fails after one port was added", func() {
+			mockUtils.On("GetPCIDevices").Return([]*pci.Device{
+				{
+					Address: "0000:00:00.0",
+					Vendor:  &pcidb.Vendor{ID: consts.MellanoxVendor},
+					Product: &pcidb.Product{ID: "test-id", Name: "Mellanox Device"},
+					Class:   &pcidb.Class{ID: "02"},
+				},
+				{
+					Address: "0000:00:00.1",
+					Vendor:  &pcidb.Vendor{ID: consts.MellanoxVendor},
+					Product: &pcidb.Product{ID: "test-id", Name: "Mellanox Device"},
+					Class:   &pcidb.Class{ID: "02"},
+				},
+			}, nil)
+
+			mockUtils.On("IsSriovVF", "0000:00:00.0").Return(false)
+			mockUtils.On("GetVPD", "0000:00:00.0").
+				Return(&types.VPD{PartNumber: "part-number", SerialNumber: "serial-number", ModelName: ""}, nil)
+			mockUtils.On("GetFirmwareVersionAndPSID", "0000:00:00.0").
+				Return("fw-version", "psid", nil)
+			mockUtils.On("GetInterfaceName", "0000:00:00.0").
+				Return("eth0")
+			mockUtils.On("GetRDMADeviceName", "0000:00:00.0").
+				Return("mlx5_0")
+
+			mockUtils.On("IsSriovVF", "0000:00:00.1").Return(false)
+			mockUtils.On("GetVPD", "0000:00:00.1").
+				Return(nil, errors.New("vpd error"))
+
+			devices, err := manager.DiscoverNicDevices()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(devices).To(BeEmpty())
+			Expect(manager.SkippedDevices()).To(BeEmpty())
+			Expect(manager.IncompleteDevices()).To(HaveKey("0000:00:00"))
+			mockUtils.AssertExpectations(GinkgoT())
+		})
+
+		It("should report the whole physical device as skipped when VPD discovery fails after one port was added and SKIP_DEVICE_ON_DISCOVERY_ERROR is true", func() {
 			Expect(os.Setenv(consts.SKIP_DEVICE_ON_DISCOVERY_ERROR, consts.LabelValueTrue)).To(Succeed())
 			mockUtils.On("GetPCIDevices").Return([]*pci.Device{
 				{
@@ -604,6 +658,7 @@ var _ = Describe("DeviceDiscovery", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(devices).To(BeEmpty())
 			Expect(manager.SkippedDevices()).To(HaveKey("0000:00:00"))
+			Expect(manager.IncompleteDevices()).To(HaveKey("0000:00:00"))
 			mockUtils.AssertExpectations(GinkgoT())
 		})
 	})

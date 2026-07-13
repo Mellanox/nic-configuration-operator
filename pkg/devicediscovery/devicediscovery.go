@@ -40,10 +40,16 @@ type SkippedDeviceReporter interface {
 	SkippedDevices() map[string]error
 }
 
+type IncompleteDeviceReporter interface {
+	// IncompleteDevices returns physical PCI device keys omitted because discovery could not build complete status.
+	IncompleteDevices() map[string]error
+}
+
 type deviceDiscovery struct {
-	utils          DeviceDiscoveryUtils
-	nvConfigUtils  nvconfig.NVConfigUtils
-	skippedDevices map[string]error
+	utils             DeviceDiscoveryUtils
+	nvConfigUtils     nvconfig.NVConfigUtils
+	skippedDevices    map[string]error
+	incompleteDevices map[string]error
 
 	nodeName string
 }
@@ -56,6 +62,7 @@ type deviceDiscovery struct {
 func (d *deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, error) {
 	log.Log.Info("ConfigurationManager.DiscoverNicDevices()")
 	d.skippedDevices = map[string]error{}
+	d.incompleteDevices = map[string]error{}
 
 	pciDevices, err := d.utils.GetPCIDevices()
 	if err != nil {
@@ -98,7 +105,11 @@ func (d *deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, e
 		vpd, err := d.utils.GetVPD(device.Address)
 		if err != nil {
 			log.Log.Error(err, "Failed to get device's part and serial numbers, skipping", "address", device.Address)
-			d.skipPhysicalDevice(statuses, pciKey, err)
+			// A VPD failure makes the whole physical device incomplete for this pass.
+			d.dropIncompleteDevice(statuses, pciKey, err)
+			if skipDeviceOnDiscoveryError {
+				d.skippedDevices[pciKey] = err
+			}
 			continue
 		}
 
@@ -207,6 +218,11 @@ func (d *deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, e
 
 func (d *deviceDiscovery) skipPhysicalDevice(statuses map[string]v1alpha1.NicDeviceStatus, pciKey string, err error) {
 	d.skippedDevices[pciKey] = err
+	d.dropIncompleteDevice(statuses, pciKey, err)
+}
+
+func (d *deviceDiscovery) dropIncompleteDevice(statuses map[string]v1alpha1.NicDeviceStatus, pciKey string, err error) {
+	d.incompleteDevices[pciKey] = err
 	delete(statuses, pciKey)
 }
 
@@ -216,6 +232,14 @@ func (d *deviceDiscovery) SkippedDevices() map[string]error {
 		skippedDevices[pciKey] = err
 	}
 	return skippedDevices
+}
+
+func (d *deviceDiscovery) IncompleteDevices() map[string]error {
+	incompleteDevices := make(map[string]error, len(d.incompleteDevices))
+	for pciKey, err := range d.incompleteDevices {
+		incompleteDevices[pciKey] = err
+	}
+	return incompleteDevices
 }
 
 // pairNetworkBayDevices resolves PeerPCI for ConnectX-9 Network Bay siblings. The two ASICs of a

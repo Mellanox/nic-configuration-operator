@@ -120,9 +120,16 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	skippedDevices := map[string]error{}
+	incompleteDevices := map[string]error{}
+	if incompleteDeviceReporter, ok := d.deviceDiscovery.(devicediscovery.IncompleteDeviceReporter); ok {
+		for pciKey, err := range incompleteDeviceReporter.IncompleteDevices() {
+			incompleteDevices[pciKey] = err
+		}
+	}
 	if skippedDeviceReporter, ok := d.deviceDiscovery.(devicediscovery.SkippedDeviceReporter); ok {
-		skippedDevices = skippedDeviceReporter.SkippedDevices()
+		for pciKey, err := range skippedDeviceReporter.SkippedDevices() {
+			incompleteDevices[pciKey] = err
+		}
 	}
 
 	list := &v1alpha1.NicDeviceList{}
@@ -153,8 +160,8 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 		observedDevice, exists := observedDevices[pciKey]
 
 		if !exists {
-			if skippedErr, skipped := skippedDevices[pciKey]; skipped {
-				log.Log.Info("device discovery was skipped, preserving existing NicDevice CR", "device", nicDeviceCR.Name, "pciKey", pciKey, "error", skippedErr)
+			if incompleteErr, incomplete := incompleteDevices[pciKey]; incomplete {
+				log.Log.Info("device discovery was incomplete, preserving existing NicDevice CR", "device", nicDeviceCR.Name, "pciKey", pciKey, "error", incompleteErr)
 				continue
 			}
 			log.Log.V(2).Info("device doesn't exist on the node anymore, deleting", "device", nicDeviceCR.Name)
