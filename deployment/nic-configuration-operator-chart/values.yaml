@@ -55,6 +55,9 @@ configDaemon:
     # -- feature gate to enable FW reset after nv config update
     # - name: FW_RESET_AFTER_CONFIG_UPDATE
     #   value: "true"
+    # -- skip a physical NIC when per-device discovery details cannot be read
+    # - name: SKIP_DEVICE_ON_DISCOVERY_ERROR
+    #   value: "true"
   # -- node selector for the config daemon
   nodeSelector:
     network.nvidia.com/operator.mofed.wait: "false"
