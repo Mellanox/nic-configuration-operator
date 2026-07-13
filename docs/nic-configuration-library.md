@@ -466,24 +466,37 @@ type VPD struct {
 
 #### ConfigurationParameter
 
-Used by DMS client and Spectrum-X config. Loaded from YAML files in `bindata/spectrum-x/`.
+Used by DMS client and Spectrum-X profile ConfigMaps.
 
 ```go
 type ConfigurationParameter struct {
-    Name             string // Human-readable name
-    MlxConfig        string // mlxconfig parameter name (e.g., "LINK_TYPE_P1")
-    Value            string // Value to set
-    ValueType        string // DMS value type: "string", "bool", "int"
-    DMSPath          string // DMS path (e.g., "/interfaces/interface/nvidia/qos/config/trust-mode")
-    AlternativeValue string // Alternative value representation
-    DeviceId         string // Device ID filter (e.g., "1023", "a2dc")
-    Breakout         int    // Plane count filter (1, 2, 4)
-    Multiplane       string // Multiplane mode filter (none, swplb, hwplb, uniplane)
-    IgnoreError      bool   // Suppress errors for this parameter in batch operations
+    Name               string           // Human-readable name
+    MlxConfig          string           // mlxconfig parameter name (e.g., "LINK_TYPE_P1")
+    Value              string           // DMS set value or expected mlxreg get value
+    ValueType          string           // DMS value type: "string", "bool", "int"
+    DMSPath            string           // DMS path (e.g., "/interfaces/interface/nvidia/qos/config/trust-mode")
+    MlxReg             *MlxRegParameter // Optional mlxreg runtime parameter
+    AlternativeValue   string           // Alternative value representation accepted during checks
+    DeviceId           string           // Device ID filter (e.g., "1023", "a2dc")
+    Breakout           int              // Plane count filter (1, 2, 4)
+    Multiplane         string           // Multiplane mode filter (none, swplb, hwplb, uniplane)
+    IgnoreError        bool             // Suppress errors for this parameter in batch operations
+    HwplbFirstPortOnly bool             // Limit DMS interface expansion to the first port in hwplb
+}
+
+type MlxRegParameter struct {
+    Register  string        // mlxreg register name, e.g., "ROCE_ACCL"
+    Field     string        // Field read by mlxreg --get and compared with Value
+    SetFields []MlxRegField // Fields rendered into mlxreg --set NAME=VALUE,...
+}
+
+type MlxRegField struct {
+    Name  string
+    Value string
 }
 ```
 
-A parameter with `MlxConfig` set is applied via `nvconfig.SetNvConfigParametersBatch()`; a parameter with `DMSPath` set is applied via `dms.DMSClient.SetParameters()`.
+A parameter with `MlxConfig` set is applied via `nvconfig.SetNvConfigParametersBatch()`. Runtime profile parameters with `DMSPath` set are applied via `dms.DMSClient.SetParameters()`. Runtime profile parameters with `MlxReg` set are applied with `mlxreg`; they preserve profile order and split surrounding DMS parameters into separate batches.
 
 #### Spectrum-X Config Types
 

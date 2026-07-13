@@ -44,6 +44,16 @@ runtimeConfig:
     - name: ar_enabled
       mlxconfig: ROCE_ADAPTIVE_ROUTING_EN
       value: "1"
+    - name: cc_probe_mp_mode
+      value: "0x00000001"
+      mlxreg:
+        register: ROCE_ACCL
+        field: cc_probe_mp_mode
+        setFields:
+          - name: cc_probe_mp_mode
+            value: "0x1"
+          - name: cc_probe_mp_mode_field_select
+            value: "0x1"
   congestionControl:
     - name: cc_enabled
       mlxconfig: ROCE_CC_PRIO_MASK_P1
@@ -82,6 +92,13 @@ var _ = Describe("LoadSpectrumXConfig", func() {
 		Expect(cfg.DocaCCVersion).To(Equal("1.0"))
 		Expect(cfg.RuntimeConfig.AdaptiveRouting).ToNot(BeEmpty())
 		Expect(cfg.RuntimeConfig.AdaptiveRouting[0].Name).To(Equal("ar_enabled"))
+		Expect(cfg.RuntimeConfig.AdaptiveRouting[1].MlxReg).ToNot(BeNil())
+		Expect(cfg.RuntimeConfig.AdaptiveRouting[1].MlxReg.Register).To(Equal("ROCE_ACCL"))
+		Expect(cfg.RuntimeConfig.AdaptiveRouting[1].MlxReg.Field).To(Equal("cc_probe_mp_mode"))
+		Expect(cfg.RuntimeConfig.AdaptiveRouting[1].MlxReg.SetFields).To(Equal([]MlxRegField{
+			{Name: "cc_probe_mp_mode", Value: "0x1"},
+			{Name: "cc_probe_mp_mode_field_select", Value: "0x1"},
+		}))
 		Expect(cfg.RuntimeConfig.CongestionControl).ToNot(BeEmpty())
 		Expect(cfg.RuntimeConfig.InterPacketGap.PureL3[0].Name).To(Equal("ipg_pureL3"))
 		Expect(cfg.RuntimeConfig.InterPacketGap.L3EVPN[0].Name).To(Equal("ipg_l3evpn"))
@@ -110,5 +127,39 @@ var _ = Describe("ParseSpectrumXConfig", func() {
 	It("returns an error on malformed YAML", func() {
 		_, err := ParseSpectrumXConfig([]byte("mlxConfig: [this is: not valid"))
 		Expect(err).To(HaveOccurred())
+	})
+
+	It("returns an error when a runtime parameter mixes dmsPath and mlxreg", func() {
+		cfg := `
+runtimeConfig:
+  adaptiveRouting:
+    - name: mixed
+      value: "0x1"
+      dmsPath: /interfaces/interface/nvidia/roce/config/cc-per-plane
+      mlxreg:
+        register: ROCE_ACCL
+        field: cc_per_plane_en
+        setFields:
+          - name: cc_per_plane_en
+            value: "0x1"
+`
+		_, err := ParseSpectrumXConfig([]byte(cfg))
+		Expect(err).To(MatchError(ContainSubstring("cannot define both dmsPath and mlxreg")))
+	})
+
+	It("returns an error when an mlxreg set field has no value", func() {
+		cfg := `
+runtimeConfig:
+  adaptiveRouting:
+    - name: missing set value
+      value: "0x1"
+      mlxreg:
+        register: ROCE_ACCL
+        field: cc_per_plane_en
+        setFields:
+          - name: cc_per_plane_en
+`
+		_, err := ParseSpectrumXConfig([]byte(cfg))
+		Expect(err).To(MatchError(ContainSubstring("without value")))
 	})
 })

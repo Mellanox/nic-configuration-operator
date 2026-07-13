@@ -51,17 +51,29 @@ type InterPacketGapConfig struct {
 }
 
 type ConfigurationParameter struct {
-	Name               string `yaml:"name,omitempty"`
-	MlxConfig          string `yaml:"mlxconfig,omitempty"`
-	Value              string `yaml:"value,omitempty"`
-	ValueType          string `yaml:"valueType,omitempty"`
-	DMSPath            string `yaml:"dmsPath,omitempty"`
-	AlternativeValue   string `yaml:"alternativeValue,omitempty"`
-	DeviceId           string `yaml:"deviceId,omitempty"`
-	Breakout           int    `yaml:"breakout,omitempty"`
-	Multiplane         string `yaml:"multiplane,omitempty"`
-	IgnoreError        bool   `yaml:"ignoreError,omitempty"`
-	HwplbFirstPortOnly bool   `yaml:"hwplbFirstPortOnly,omitempty"`
+	Name               string           `yaml:"name,omitempty"`
+	MlxConfig          string           `yaml:"mlxconfig,omitempty"`
+	Value              string           `yaml:"value,omitempty"`
+	ValueType          string           `yaml:"valueType,omitempty"`
+	DMSPath            string           `yaml:"dmsPath,omitempty"`
+	MlxReg             *MlxRegParameter `yaml:"mlxreg,omitempty"`
+	AlternativeValue   string           `yaml:"alternativeValue,omitempty"`
+	DeviceId           string           `yaml:"deviceId,omitempty"`
+	Breakout           int              `yaml:"breakout,omitempty"`
+	Multiplane         string           `yaml:"multiplane,omitempty"`
+	IgnoreError        bool             `yaml:"ignoreError,omitempty"`
+	HwplbFirstPortOnly bool             `yaml:"hwplbFirstPortOnly,omitempty"`
+}
+
+type MlxRegParameter struct {
+	Register  string        `yaml:"register,omitempty"`
+	Field     string        `yaml:"field,omitempty"`
+	SetFields []MlxRegField `yaml:"setFields,omitempty"`
+}
+
+type MlxRegField struct {
+	Name  string `yaml:"name,omitempty"`
+	Value string `yaml:"value,omitempty"`
 }
 
 // ParseSpectrumXConfig unmarshals a SpectrumXConfig from raw YAML bytes.
@@ -72,8 +84,63 @@ func ParseSpectrumXConfig(data []byte) (*SpectrumXConfig, error) {
 	if err := yaml.Unmarshal(data, spectrumXConfig); err != nil {
 		return nil, err
 	}
+	if err := validateSpectrumXConfig(spectrumXConfig); err != nil {
+		return nil, err
+	}
 
 	return spectrumXConfig, nil
+}
+
+func validateSpectrumXConfig(config *SpectrumXConfig) error {
+	if config == nil {
+		return nil
+	}
+	runtimeParams := map[string][]ConfigurationParameter{
+		"roce":                  config.RuntimeConfig.Roce,
+		"adaptiveRouting":       config.RuntimeConfig.AdaptiveRouting,
+		"congestionControl":     config.RuntimeConfig.CongestionControl,
+		"interPacketGap.pureL3": config.RuntimeConfig.InterPacketGap.PureL3,
+		"interPacketGap.l3EVPN": config.RuntimeConfig.InterPacketGap.L3EVPN,
+	}
+	for section, params := range runtimeParams {
+		for i, param := range params {
+			if err := validateRuntimeParameter(section, i, param); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateRuntimeParameter(section string, index int, param ConfigurationParameter) error {
+	if param.MlxReg == nil {
+		return nil
+	}
+	paramID := fmt.Sprintf("%s[%d] parameter %q", section, index, param.Name)
+	if param.DMSPath != "" {
+		return fmt.Errorf("%s cannot define both dmsPath and mlxreg", paramID)
+	}
+	if param.Value == "" {
+		return fmt.Errorf("%s is missing value", paramID)
+	}
+	if param.MlxReg.Register == "" {
+		return fmt.Errorf("%s is missing mlxreg register", paramID)
+	}
+	if param.MlxReg.Field == "" {
+		return fmt.Errorf("%s is missing mlxreg field", paramID)
+	}
+	if len(param.MlxReg.SetFields) == 0 {
+		return fmt.Errorf("%s has no mlxreg setFields", paramID)
+	}
+	for i, field := range param.MlxReg.SetFields {
+		if field.Name == "" {
+			return fmt.Errorf("%s has mlxreg setFields[%d] without name", paramID, i)
+		}
+		if field.Value == "" {
+			return fmt.Errorf("%s has mlxreg setFields[%d] without value", paramID, i)
+		}
+	}
+	return nil
 }
 
 func LoadSpectrumXConfig(configPath string) (*SpectrumXConfig, error) {
