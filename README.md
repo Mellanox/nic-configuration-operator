@@ -151,6 +151,17 @@ data:
           value: "example-value"
           valueType: string
           dmsPath: "<dms-path-for-runtime-parameter>"
+      adaptiveRouting:
+        - name: Example mlxreg runtime parameter
+          value: "0x00000001"
+          mlxreg:
+            register: ROCE_ACCL
+            field: "<mlxreg-field-to-check>"
+            setFields:
+              - name: "<mlxreg-field-to-set>"
+                value: "0x1"
+              - name: "<mlxreg-field-select-to-set>"
+                value: "0x1"
 ```
 
 Reference the profile from a `NicConfigurationTemplate` by using the ConfigMap name as the Spectrum-X version:

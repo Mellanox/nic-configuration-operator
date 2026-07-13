@@ -18,6 +18,7 @@ package spectrumx
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -39,14 +40,6 @@ var cnpDscpSysfsPathTemplate = "/sys/class/net/%s/ecn/roce_np/cnp_dscp"
 
 // cnpDscpExpectedValue is the expected value for CNP DSCP
 const cnpDscpExpectedValue = "48"
-
-// mlxreg constants for CC Probe MP mode workaround.
-// Workaround: CC Probe MP mode is not configurable via DMS, so we use mlxreg instead.
-// Remove this workaround once the parameter is added to DMS.
-const ccProbeMPModeRegName = "ROCE_ACCL"
-const ccProbeMPModeFieldName = "cc_probe_mp_mode"
-const ccProbeMPModeFieldSet = "cc_probe_mp_mode=0x1,cc_probe_mp_mode_field_select=0x1"
-const ccProbeMPModeExpectedValue = "0x00000001"
 
 // mlxregBinary is the path to the mlxreg binary. This is a var to allow substitution in tests.
 var mlxregBinary = "/usr/bin/mlxreg"
@@ -258,71 +251,163 @@ func writeCnpDscp(device *v1alpha1.NicDevice) error {
 	return nil
 }
 
-// checkCCProbeMPMode checks if CC Probe MP mode is set on all PFs via mlxreg.
-// Workaround: CC Probe MP mode is not configurable via DMS, so we use mlxreg instead.
-// Remove this workaround once the parameter is added to DMS.
-func (m *spectrumXConfigManager) checkCCProbeMPMode(device *v1alpha1.NicDevice) (bool, error) {
-	log.Log.V(2).Info("SpectrumXConfigManager.checkCCProbeMPMode()", "device", device.Name)
+func isMlxRegParam(param types.ConfigurationParameter) bool {
+	return param.MlxReg != nil
+}
 
+func validateMlxRegParam(param types.ConfigurationParameter) error {
+	if param.MlxReg == nil {
+		return fmt.Errorf("mlxreg parameter %q is missing mlxreg config", param.Name)
+	}
+	if param.DMSPath != "" {
+		return fmt.Errorf("mlxreg parameter %q cannot define both dmsPath and mlxreg", param.Name)
+	}
+	if param.Value == "" {
+		return fmt.Errorf("mlxreg parameter %q is missing value", param.Name)
+	}
+	if param.MlxReg.Register == "" {
+		return fmt.Errorf("mlxreg parameter %q is missing register", param.Name)
+	}
+	if param.MlxReg.Field == "" {
+		return fmt.Errorf("mlxreg parameter %q is missing field", param.Name)
+	}
+	if len(param.MlxReg.SetFields) == 0 {
+		return fmt.Errorf("mlxreg parameter %q has no setFields", param.Name)
+	}
+	for _, field := range param.MlxReg.SetFields {
+		if field.Name == "" {
+			return fmt.Errorf("mlxreg parameter %q has a setField without name", param.Name)
+		}
+		if field.Value == "" {
+			return fmt.Errorf("mlxreg parameter %q has a setField without value", param.Name)
+		}
+	}
+	return nil
+}
+
+func parseMlxRegFieldValue(output []byte, field string) (string, bool) {
+	for _, line := range strings.Split(string(output), "\n") {
+		parts := strings.SplitN(line, "|", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		if strings.TrimSpace(parts[0]) == field {
+			return strings.TrimSpace(parts[1]), true
+		}
+	}
+	return "", false
+}
+
+func commandLine(binary string, args []string) string {
+	return strings.Join(append([]string{binary}, args...), " ")
+}
+
+func equalMlxRegValue(expected, actual string) bool {
+	expected = strings.TrimSpace(expected)
+	actual = strings.TrimSpace(actual)
+	if actual == expected {
+		return true
+	}
+
+	expectedValue, err := strconv.ParseUint(expected, 0, 64)
+	if err != nil {
+		return false
+	}
+	actualValue, err := strconv.ParseUint(actual, 0, 64)
+	if err != nil {
+		return false
+	}
+	return actualValue == expectedValue
+}
+
+func expectedMlxRegValue(param types.ConfigurationParameter, actual string) bool {
+	return equalMlxRegValue(param.Value, actual) || (param.AlternativeValue != "" && equalMlxRegValue(param.AlternativeValue, actual))
+}
+
+func mlxRegSetValue(param types.ConfigurationParameter) string {
+	fields := make([]string, 0, len(param.MlxReg.SetFields))
+	for _, field := range param.MlxReg.SetFields {
+		fields = append(fields, fmt.Sprintf("%s=%s", field.Name, field.Value))
+	}
+	return strings.Join(fields, ",")
+}
+
+func (m *spectrumXConfigManager) checkMlxRegParamApplied(device *v1alpha1.NicDevice, param types.ConfigurationParameter) (bool, error) {
+	if err := validateMlxRegParam(param); err != nil {
+		return false, err
+	}
+
+	log.Log.V(2).Info("SpectrumXConfigManager.checkMlxRegParamApplied()", "device", device.Name, "param", param.Name)
 	for _, port := range device.Status.Ports {
-		cmd := m.execInterface.Command(mlxregBinary, "-d", port.PCI,
-			"--reg_name", ccProbeMPModeRegName, "--get")
+		args := []string{"-d", port.PCI, "--reg_name", param.MlxReg.Register, "--get"}
+		command := commandLine(mlxregBinary, args)
+		log.Log.V(2).Info("checkMlxRegParamApplied(): running mlxreg get",
+			"device", device.Name, "pci", port.PCI, "param", param.Name, "field", param.MlxReg.Field,
+			"expected", param.Value, "alternativeExpected", param.AlternativeValue, "command", command)
+
+		cmd := m.execInterface.Command(mlxregBinary, args...)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
-			log.Log.Error(err, "checkCCProbeMPMode(): failed to run mlxreg get", "device", device.Name, "pci", port.PCI)
-			return false, fmt.Errorf("failed to check CC Probe MP mode via mlxreg for PF %s: %w", port.PCI, err)
+			log.Log.Error(err, "checkMlxRegParamApplied(): failed to run mlxreg get",
+				"device", device.Name, "pci", port.PCI, "param", param.Name, "command", command, "output", string(output))
+			return false, fmt.Errorf("failed to check mlxreg parameter %q for PF %s: %w", param.Name, port.PCI, err)
 		}
-		// Parse the mlxreg table output to find the cc_probe_mp_mode field and its value.
-		// Output format: "cc_probe_mp_mode                               | 0x00000001"
-		// We need to avoid checking cc_probe_mp_mode_field_select as it can have a different value.
-		found := false
-		for _, line := range strings.Split(string(output), "\n") {
-			if strings.Contains(line, ccProbeMPModeFieldName) && !strings.Contains(line, "field_select") {
-				found = true
-				if !strings.Contains(line, ccProbeMPModeExpectedValue) {
-					log.Log.V(2).Info("checkCCProbeMPMode(): cc_probe_mp_mode not set on PF",
-						"device", device.Name, "pci", port.PCI, "line", strings.TrimSpace(line))
-					return false, nil
-				}
-				break
-			}
-		}
+
+		value, found := parseMlxRegFieldValue(output, param.MlxReg.Field)
+		matches := found && expectedMlxRegValue(param, value)
+		log.Log.V(2).Info("checkMlxRegParamApplied(): got mlxreg value",
+			"device", device.Name, "pci", port.PCI, "param", param.Name, "register", param.MlxReg.Register,
+			"field", param.MlxReg.Field, "expected", param.Value, "alternativeExpected", param.AlternativeValue,
+			"actual", value, "found", found, "matches", matches, "command", command, "output", string(output))
 		if !found {
-			log.Log.V(2).Info("checkCCProbeMPMode(): cc_probe_mp_mode field not found in mlxreg output",
-				"device", device.Name, "pci", port.PCI)
+			log.Log.V(2).Info("checkMlxRegParamApplied(): field not found in mlxreg output",
+				"device", device.Name, "pci", port.PCI, "param", param.Name, "field", param.MlxReg.Field,
+				"command", command, "output", string(output))
+			return false, nil
+		}
+		if !matches {
+			log.Log.V(2).Info("checkMlxRegParamApplied(): mlxreg parameter not applied",
+				"device", device.Name, "pci", port.PCI, "param", param.Name, "expected", param.Value,
+				"alternativeExpected", param.AlternativeValue, "actual", value, "command", command)
 			return false, nil
 		}
 	}
-
-	log.Log.V(2).Info("checkCCProbeMPMode(): cc_probe_mp_mode is set on all PFs", "device", device.Name)
 	return true, nil
 }
 
-// setCCProbeMPMode sets CC Probe MP mode on all PFs via mlxreg.
-// Workaround: CC Probe MP mode is not configurable via DMS, so we use mlxreg instead.
-// Remove this workaround once the parameter is added to DMS.
-func (m *spectrumXConfigManager) setCCProbeMPMode(device *v1alpha1.NicDevice) error {
-	log.Log.V(2).Info("SpectrumXConfigManager.setCCProbeMPMode()", "device", device.Name)
+func (m *spectrumXConfigManager) setMlxRegParam(device *v1alpha1.NicDevice, param types.ConfigurationParameter) error {
+	if err := validateMlxRegParam(param); err != nil {
+		return err
+	}
+	setValue := mlxRegSetValue(param)
 
+	log.Log.V(2).Info("SpectrumXConfigManager.setMlxRegParam()", "device", device.Name, "param", param.Name)
 	for _, port := range device.Status.Ports {
-		cmd := m.execInterface.Command(mlxregBinary, "-d", port.PCI,
-			"--reg_name", ccProbeMPModeRegName, "--set", ccProbeMPModeFieldSet, "--yes")
+		args := []string{"-d", port.PCI, "--reg_name", param.MlxReg.Register, "--set", setValue, "--yes"}
+		command := commandLine(mlxregBinary, args)
+		log.Log.V(2).Info("setMlxRegParam(): running mlxreg set",
+			"device", device.Name, "pci", port.PCI, "param", param.Name, "register", param.MlxReg.Register,
+			"setValue", setValue, "command", command)
+
+		cmd := m.execInterface.Command(mlxregBinary, args...)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
-			log.Log.Error(err, "setCCProbeMPMode(): failed to run mlxreg set",
-				"device", device.Name, "pci", port.PCI, "output", string(output))
-			return fmt.Errorf("failed to set CC Probe MP mode via mlxreg for PF %s: %w", port.PCI, err)
+			log.Log.Error(err, "setMlxRegParam(): failed to run mlxreg set",
+				"device", device.Name, "pci", port.PCI, "param", param.Name, "command", command, "output", string(output))
+			return fmt.Errorf("failed to set mlxreg parameter %q for PF %s: %w", param.Name, port.PCI, err)
 		}
-		log.Log.V(2).Info("setCCProbeMPMode(): successfully set cc_probe_mp_mode on PF",
-			"device", device.Name, "pci", port.PCI)
+		log.Log.V(2).Info("setMlxRegParam(): successfully set mlxreg parameter on PF",
+			"device", device.Name, "pci", port.PCI, "param", param.Name, "command", command, "output", string(output))
 	}
-
 	return nil
 }
 
 // checkDmsParamsApplied checks if the given DMS parameters are applied to the device
 func checkDmsParamsApplied(device *v1alpha1.NicDevice, params []types.ConfigurationParameter, dmsClient dms.DMSClient) (bool, error) {
 	log.Log.Info("SpectrumXConfigManager.checkDmsParamsApplied()", "device", device.Name)
+	if len(params) == 0 {
+		return true, nil
+	}
 
 	values, err := dmsClient.GetParameters(params)
 	if err != nil {
@@ -336,13 +421,77 @@ func checkDmsParamsApplied(device *v1alpha1.NicDevice, params []types.Configurat
 	log.Log.V(2).Info("SpectrumXConfigManager.checkDmsParamsApplied(): got the following values", "device", device.Name, "values", values)
 
 	for _, param := range params {
-		if values[param.DMSPath] != param.Value && values[param.DMSPath] != param.AlternativeValue {
+		actual, found := values[param.DMSPath]
+		matches := found && (actual == param.Value || (param.AlternativeValue != "" && actual == param.AlternativeValue))
+		log.Log.V(2).Info("SpectrumXConfigManager.checkDmsParamsApplied(): compared parameter",
+			"device", device.Name, "param", param.Name, "path", param.DMSPath, "expected", param.Value,
+			"alternativeExpected", param.AlternativeValue, "actual", actual, "found", found, "matches", matches)
+		if !matches {
 			log.Log.V(2).Info("SpectrumXConfigManager.checkDmsParamsApplied(): parameter not applied", "device", device.Name, "param", param)
 			return false, nil
 		}
 	}
 
 	return true, nil
+}
+
+func (m *spectrumXConfigManager) checkRuntimeParamsApplied(device *v1alpha1.NicDevice, params []types.ConfigurationParameter, dmsClient dms.DMSClient) (bool, error) {
+	dmsBatch := []types.ConfigurationParameter{}
+	flushDMSBatch := func() (bool, error) {
+		applied, err := checkDmsParamsApplied(device, dmsBatch, dmsClient)
+		dmsBatch = nil
+		return applied, err
+	}
+
+	for _, param := range params {
+		if isMlxRegParam(param) {
+			if err := validateMlxRegParam(param); err != nil {
+				return false, err
+			}
+			applied, err := flushDMSBatch()
+			if err != nil || !applied {
+				return applied, err
+			}
+			applied, err = m.checkMlxRegParamApplied(device, param)
+			if err != nil || !applied {
+				return applied, err
+			}
+			continue
+		}
+		dmsBatch = append(dmsBatch, param)
+	}
+
+	return flushDMSBatch()
+}
+
+func (m *spectrumXConfigManager) applyRuntimeParams(device *v1alpha1.NicDevice, params []types.ConfigurationParameter, dmsClient dms.DMSClient) error {
+	dmsBatch := []types.ConfigurationParameter{}
+	flushDMSBatch := func() error {
+		if len(dmsBatch) == 0 {
+			return nil
+		}
+		err := dmsClient.SetParameters(dmsBatch)
+		dmsBatch = nil
+		return err
+	}
+
+	for _, param := range params {
+		if isMlxRegParam(param) {
+			if err := validateMlxRegParam(param); err != nil {
+				return err
+			}
+			if err := flushDMSBatch(); err != nil {
+				return err
+			}
+			if err := m.setMlxRegParam(device, param); err != nil {
+				return err
+			}
+			continue
+		}
+		dmsBatch = append(dmsBatch, param)
+	}
+
+	return flushDMSBatch()
 }
 
 // RuntimeConfigApplied checks if the desired Spectrum-X runtime spec is applied to the device
@@ -368,7 +517,7 @@ func (m *spectrumXConfigManager) RuntimeConfigApplied(device *v1alpha1.NicDevice
 
 	roceParams := filterParameters(desiredConfig.RuntimeConfig.Roce, deviceType, numberOfPlanes, multiplaneMode)
 	log.Log.V(2).Info("SpectrumXConfigManager.RuntimeConfigApplied(): checking RoCE config", "device", device.Name)
-	roceApplied, err := checkDmsParamsApplied(device, roceParams, dmsClient)
+	roceApplied, err := m.checkRuntimeParamsApplied(device, roceParams, dmsClient)
 	if err != nil {
 		log.Log.Error(err, "RuntimeConfigApplied(): failed to check if RoCE config is applied", "device", device.Name)
 		return false, err
@@ -391,57 +540,14 @@ func (m *spectrumXConfigManager) RuntimeConfigApplied(device *v1alpha1.NicDevice
 	}
 
 	adaptiveRoutingParams := filterParameters(desiredConfig.RuntimeConfig.AdaptiveRouting, deviceType, numberOfPlanes, multiplaneMode)
-
-	if multiplaneMode == consts.MultiplaneModeHwplb && len(adaptiveRoutingParams) > 0 {
-		// Workaround: CC Probe MP mode must be checked BEFORE the last adaptive routing
-		// parameter is read. Split the params: all except last, then mlxreg, then last.
-		// Remove this workaround once the parameter is added to DMS.
-		lastIndex := len(adaptiveRoutingParams) - 1
-		beforeLastParams := adaptiveRoutingParams[:lastIndex]
-		lastParam := adaptiveRoutingParams[lastIndex:]
-
-		if len(beforeLastParams) > 0 {
-			log.Log.V(2).Info("SpectrumXConfigManager.RuntimeConfigApplied(): checking Adaptive Routing config (before CC Probe MP mode)", "device", device.Name)
-			applied, err := checkDmsParamsApplied(device, beforeLastParams, dmsClient)
-			if err != nil {
-				log.Log.Error(err, "RuntimeConfigApplied(): failed to check Adaptive Routing config (before CC Probe MP mode)", "device", device.Name)
-				return false, err
-			}
-			if !applied {
-				return false, nil
-			}
-		}
-
-		// Workaround: Check CC Probe MP mode via mlxreg on all PFs (not configurable via DMS)
-		log.Log.V(2).Info("SpectrumXConfigManager.RuntimeConfigApplied(): checking CC Probe MP mode via mlxreg", "device", device.Name)
-		ccProbeMPApplied, err := m.checkCCProbeMPMode(device)
-		if err != nil {
-			log.Log.Error(err, "RuntimeConfigApplied(): failed to check CC Probe MP mode", "device", device.Name)
-			return false, err
-		}
-		if !ccProbeMPApplied {
-			return false, nil
-		}
-
-		log.Log.V(2).Info("SpectrumXConfigManager.RuntimeConfigApplied(): checking Adaptive Routing config (after CC Probe MP mode)", "device", device.Name)
-		adaptiveRoutingApplied, err := checkDmsParamsApplied(device, lastParam, dmsClient)
-		if err != nil {
-			log.Log.Error(err, "RuntimeConfigApplied(): failed to check Adaptive Routing config (after CC Probe MP mode)", "device", device.Name)
-			return false, err
-		}
-		if !adaptiveRoutingApplied {
-			return false, nil
-		}
-	} else {
-		log.Log.V(2).Info("SpectrumXConfigManager.RuntimeConfigApplied(): checking Adaptive Routing config", "device", device.Name)
-		adaptiveRoutingApplied, err := checkDmsParamsApplied(device, adaptiveRoutingParams, dmsClient)
-		if err != nil {
-			log.Log.Error(err, "RuntimeConfigApplied(): failed to check if Adaptive Routing config is applied", "device", device.Name)
-			return false, err
-		}
-		if !adaptiveRoutingApplied {
-			return false, nil
-		}
+	log.Log.V(2).Info("SpectrumXConfigManager.RuntimeConfigApplied(): checking Adaptive Routing config", "device", device.Name)
+	adaptiveRoutingApplied, err := m.checkRuntimeParamsApplied(device, adaptiveRoutingParams, dmsClient)
+	if err != nil {
+		log.Log.Error(err, "RuntimeConfigApplied(): failed to check if Adaptive Routing config is applied", "device", device.Name)
+		return false, err
+	}
+	if !adaptiveRoutingApplied {
+		return false, nil
 	}
 
 	if desiredConfig.UseSoftwareCCAlgorithm {
@@ -465,7 +571,7 @@ func (m *spectrumXConfigManager) RuntimeConfigApplied(device *v1alpha1.NicDevice
 
 	congestionControlParams := filterParameters(desiredConfig.RuntimeConfig.CongestionControl, deviceType, numberOfPlanes, multiplaneMode)
 	log.Log.V(2).Info("SpectrumXConfigManager.RuntimeConfigApplied(): checking Congestion Control config", "device", device.Name)
-	congestionControlApplied, err := checkDmsParamsApplied(device, congestionControlParams, dmsClient)
+	congestionControlApplied, err := m.checkRuntimeParamsApplied(device, congestionControlParams, dmsClient)
 	if err != nil {
 		log.Log.Error(err, "RuntimeConfigApplied(): failed to check if Congestion Control config is applied", "device", device.Name)
 		return false, err
@@ -487,7 +593,7 @@ func (m *spectrumXConfigManager) RuntimeConfigApplied(device *v1alpha1.NicDevice
 	}
 	interPacketGapParams = filterParameters(interPacketGapParams, deviceType, numberOfPlanes, multiplaneMode)
 
-	overlayParamsApplied, err := checkDmsParamsApplied(device, interPacketGapParams, dmsClient)
+	overlayParamsApplied, err := m.checkRuntimeParamsApplied(device, interPacketGapParams, dmsClient)
 	if err != nil {
 		log.Log.Error(err, "ApplyRuntimeConfig(): failed to set Spectrum-X InterPacketGap config", "device", device.Name)
 		return false, err
@@ -522,7 +628,7 @@ func (m *spectrumXConfigManager) ApplyRuntimeConfig(device *v1alpha1.NicDevice) 
 
 	roceParams := filterParameters(desiredConfig.RuntimeConfig.Roce, deviceType, numberOfPlanes, multiplaneMode)
 	log.Log.V(2).Info("SpectrumXConfigManager.ApplyRuntimeConfig(): setting RoCE config", "device", device.Name)
-	err = dmsClient.SetParameters(roceParams)
+	err = m.applyRuntimeParams(device, roceParams, dmsClient)
 	if err != nil {
 		log.Log.Error(err, "ApplyRuntimeConfig(): failed to set Spectrum-X RoCE config", "device", device.Name)
 		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
@@ -537,45 +643,11 @@ func (m *spectrumXConfigManager) ApplyRuntimeConfig(device *v1alpha1.NicDevice) 
 	}
 
 	adaptiveRoutingParams := filterParameters(desiredConfig.RuntimeConfig.AdaptiveRouting, deviceType, numberOfPlanes, multiplaneMode)
-
-	if multiplaneMode == consts.MultiplaneModeHwplb && len(adaptiveRoutingParams) > 0 {
-		// Workaround: CC Probe MP mode must be set BEFORE the last adaptive routing
-		// parameter is applied. Split the params: all except last, then mlxreg, then last.
-		// Remove this workaround once the parameter is added to DMS.
-		lastIndex := len(adaptiveRoutingParams) - 1
-		beforeLastParams := adaptiveRoutingParams[:lastIndex]
-		lastParam := adaptiveRoutingParams[lastIndex:]
-
-		if len(beforeLastParams) > 0 {
-			log.Log.V(2).Info("SpectrumXConfigManager.ApplyRuntimeConfig(): setting Adaptive Routing config (before CC Probe MP mode)", "device", device.Name)
-			err = dmsClient.SetParameters(beforeLastParams)
-			if err != nil {
-				log.Log.Error(err, "ApplyRuntimeConfig(): failed to set Adaptive Routing config (before CC Probe MP mode)", "device", device.Name)
-				return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
-			}
-		}
-
-		// Workaround: Set CC Probe MP mode via mlxreg on all PFs (not configurable via DMS)
-		log.Log.V(2).Info("SpectrumXConfigManager.ApplyRuntimeConfig(): setting CC Probe MP mode via mlxreg", "device", device.Name)
-		err = m.setCCProbeMPMode(device)
-		if err != nil {
-			log.Log.Error(err, "ApplyRuntimeConfig(): failed to set CC Probe MP mode", "device", device.Name)
-			return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
-		}
-
-		log.Log.V(2).Info("SpectrumXConfigManager.ApplyRuntimeConfig(): setting Adaptive Routing config (after CC Probe MP mode)", "device", device.Name)
-		err = dmsClient.SetParameters(lastParam)
-		if err != nil {
-			log.Log.Error(err, "ApplyRuntimeConfig(): failed to set Adaptive Routing config (after CC Probe MP mode)", "device", device.Name)
-			return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
-		}
-	} else {
-		log.Log.V(2).Info("SpectrumXConfigManager.ApplyRuntimeConfig(): setting Adaptive Routing config", "device", device.Name)
-		err = dmsClient.SetParameters(adaptiveRoutingParams)
-		if err != nil {
-			log.Log.Error(err, "ApplyRuntimeConfig(): failed to set Spectrum-X Adaptive Routing config", "device", device.Name)
-			return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
-		}
+	log.Log.V(2).Info("SpectrumXConfigManager.ApplyRuntimeConfig(): setting Adaptive Routing config", "device", device.Name)
+	err = m.applyRuntimeParams(device, adaptiveRoutingParams, dmsClient)
+	if err != nil {
+		log.Log.Error(err, "ApplyRuntimeConfig(): failed to set Spectrum-X Adaptive Routing config", "device", device.Name)
+		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}
 
 	if desiredConfig.UseSoftwareCCAlgorithm {
@@ -604,7 +676,7 @@ func (m *spectrumXConfigManager) ApplyRuntimeConfig(device *v1alpha1.NicDevice) 
 
 	congestionControlParams := filterParameters(desiredConfig.RuntimeConfig.CongestionControl, deviceType, numberOfPlanes, multiplaneMode)
 	log.Log.V(2).Info("SpectrumXConfigManager.ApplyRuntimeConfig(): setting Congestion Control config", "device", device.Name)
-	err = dmsClient.SetParameters(congestionControlParams)
+	err = m.applyRuntimeParams(device, congestionControlParams, dmsClient)
 	if err != nil {
 		log.Log.Error(err, "ApplyRuntimeConfig(): failed to set Spectrum-X Congestion Control config", "device", device.Name)
 		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
@@ -622,7 +694,7 @@ func (m *spectrumXConfigManager) ApplyRuntimeConfig(device *v1alpha1.NicDevice) 
 	}
 	interPacketGapParams = filterParameters(interPacketGapParams, deviceType, numberOfPlanes, multiplaneMode)
 
-	err = dmsClient.SetParameters(interPacketGapParams)
+	err = m.applyRuntimeParams(device, interPacketGapParams, dmsClient)
 	if err != nil {
 		log.Log.Error(err, "ApplyRuntimeConfig(): failed to set Spectrum-X InterPacketGap config", "device", device.Name)
 		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
