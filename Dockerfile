@@ -43,7 +43,7 @@ COPY ./ ./
 #RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/maintenance-manager/main.go
 RUN --mount=type=cache,target=/go/pkg/mod/ GO_GCFLAGS=${GCFLAGS} make build-manager
 
-FROM ${nvcr.io/nvstaging/doca/doca:full-rt-3.4.0112-host-dev}
+FROM nvcr.io/nvstaging/doca/doca:full-rt-3.4.0112-host-dev
 
 ARG TARGETARCH
 
