@@ -3,6 +3,7 @@ on:
   push:
     tags:
       - v*
+      - network-operator*
 env:
   REGISTRY: "ghcr.io"
   OPERATOR_IMAGE_NAME: "nic-configuration-operator"
