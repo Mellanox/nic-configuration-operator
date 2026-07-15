@@ -7,7 +7,7 @@ on:
 
 jobs:
   call-reusable-ci-fork-workflow:
-    uses: Mellanox/cloud-orchestration-reusable-workflows/.github/workflows/fork-ci-reusable.yml@main
+    uses: Mellanox/cloud-orchestration-reusable-workflows/.github/workflows/fork-ci-reusable.yml@network-operator-26.1.x
     with:
       registry-internal: nvcr.io/nvstaging/mellanox
       service-account-username: nvidia-ci-cd
