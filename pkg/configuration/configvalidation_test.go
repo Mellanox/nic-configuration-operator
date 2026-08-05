@@ -1127,13 +1127,26 @@ var _ = Describe("ConfigValidationImpl", func() {
 	})
 
 	Describe("RuntimeConfigApplied", func() {
+		type linkStateResult struct {
+			noCarrier bool
+			err       error
+		}
+
 		var (
-			device  *v1alpha1.NicDevice
-			applied bool
-			err     error
+			device           *v1alpha1.NicDevice
+			applied          bool
+			err              error
+			linkStateResults map[string]linkStateResult
 		)
 
 		BeforeEach(func() {
+			linkStateResults = map[string]linkStateResult{}
+			mockConfigurationUtils.On("HasNoCarrier", mock.Anything).Return(
+				func(interfaceName string) (bool, error) {
+					result := linkStateResults[interfaceName]
+					return result.noCarrier, result.err
+				},
+			)
 			device = &v1alpha1.NicDevice{
 				Spec: v1alpha1.NicDeviceSpec{
 					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
@@ -1149,6 +1162,34 @@ var _ = Describe("ConfigValidationImpl", func() {
 					},
 				},
 			}
+		})
+
+		Context("when a port has NO-CARRIER", func() {
+			BeforeEach(func() {
+				linkStateResults["interface1"] = linkStateResult{noCarrier: true}
+			})
+
+			It("should return an error before checking the runtime settings", func() {
+				applied, err = validator.RuntimeConfigApplied(device)
+				Expect(err).To(MatchError("network interface interface1 for device port 0000:03:00.1 has NO-CARRIER"))
+				Expect(applied).To(BeFalse())
+				mockConfigurationUtils.AssertNotCalled(GinkgoT(), "GetMaxReadRequestSize", mock.Anything)
+				mockConfigurationUtils.AssertNotCalled(GinkgoT(), "GetQoSSettings", mock.Anything, mock.Anything)
+			})
+		})
+
+		Context("when checking a port's link state fails", func() {
+			linkStateErr := errors.New("failed to query link")
+
+			BeforeEach(func() {
+				linkStateResults["interface0"] = linkStateResult{err: linkStateErr}
+			})
+
+			It("should return the link state error", func() {
+				applied, err = validator.RuntimeConfigApplied(device)
+				Expect(err).To(MatchError(linkStateErr))
+				Expect(applied).To(BeFalse())
+			})
 		})
 
 		Context("when desired runtime config is applied correctly on all ports", func() {

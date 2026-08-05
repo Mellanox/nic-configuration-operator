@@ -19,6 +19,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"net"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -44,6 +45,8 @@ var (
 type ConfigurationUtils interface {
 	// GetLinkType return the link type of the net device (Ethernet / Infiniband)
 	GetLinkType(name string) string
+	// HasNoCarrier returns whether the net device is administratively up without a running carrier
+	HasNoCarrier(name string) (bool, error)
 	// GetPCILinkSpeed return PCI bus speed in GT/s
 	GetPCILinkSpeed(pciAddr string) (int, error)
 	// GetMaxReadRequestSize returns MaxReadRequest size for PCI device
@@ -111,6 +114,22 @@ func (d *configurationUtils) GetLinkType(name string) string {
 		return ""
 	}
 	return encapTypeToLinkType(link.Attrs().EncapType)
+}
+
+// HasNoCarrier returns whether the net device is administratively up without a running carrier.
+// This matches the condition rendered as NO-CARRIER by iproute2.
+func (d *configurationUtils) HasNoCarrier(name string) (bool, error) {
+	log.Log.Info("ConfigurationUtils.HasNoCarrier()", "name", name)
+	link, err := netlink.LinkByName(name)
+	if err != nil {
+		return false, fmt.Errorf("failed to get link state for network interface %s: %w", name, err)
+	}
+
+	return hasNoCarrier(link.Attrs().Flags), nil
+}
+
+func hasNoCarrier(flags net.Flags) bool {
+	return flags&net.FlagUp != 0 && flags&net.FlagRunning == 0
 }
 
 // GetPCILinkSpeed return PCI bus speed in GT/s
