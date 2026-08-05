@@ -32,6 +32,34 @@ func (_m *ConfigurationUtils) GetLinkType(name string) string {
 	return r0
 }
 
+// HasNoCarrier provides a mock function with given fields: name
+func (_m *ConfigurationUtils) HasNoCarrier(name string) (bool, error) {
+	ret := _m.Called(name)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HasNoCarrier")
+	}
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (bool, error)); ok {
+		return rf(name)
+	}
+	if rf, ok := ret.Get(0).(func(string) bool); ok {
+		r0 = rf(name)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetMaxReadRequestSize provides a mock function with given fields: pciAddr
 func (_m *ConfigurationUtils) GetMaxReadRequestSize(pciAddr string) (int, error) {
 	ret := _m.Called(pciAddr)

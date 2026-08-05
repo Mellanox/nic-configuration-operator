@@ -18,6 +18,7 @@ package configuration
 import (
 	"errors"
 	"fmt"
+	"net"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -29,6 +30,17 @@ import (
 )
 
 var _ = Describe("ConfigurationUtils", func() {
+	Describe("hasNoCarrier", func() {
+		DescribeTable("detecting the iproute2 NO-CARRIER flag state",
+			func(flags net.Flags, expected bool) {
+				Expect(hasNoCarrier(flags)).To(Equal(expected))
+			},
+			Entry("administratively up without a running carrier", net.FlagUp, true),
+			Entry("administratively up with a running carrier", net.FlagUp|net.FlagRunning, false),
+			Entry("administratively down", net.Flags(0), false),
+		)
+	})
+
 	Describe("GetPCILinkSpeed", func() {
 		var (
 			h        *configurationUtils
