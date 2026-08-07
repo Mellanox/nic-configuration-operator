@@ -51,6 +51,34 @@ func mismatchSystemConf(mismatchedParams ...string) []interface{} {
 }
 
 var _ = Describe("ConfigurationManager", func() {
+	Describe("buildNVConfigApplyDiff", func() {
+		It("separates changed, unchanged, and unsupported parameters", func() {
+			diff := buildNVConfigApplyDiff(types.NvConfigQuery{
+				NextBootConfig: map[string][]string{
+					"CHANGED":   {"old"},
+					"UNCHANGED": {"requested"},
+				},
+			}, map[string]string{
+				"CHANGED":     "requested",
+				"UNCHANGED":   "requested",
+				"UNSUPPORTED": "requested",
+			}, false)
+
+			Expect(diff.changed).To(Equal(map[string]string{"CHANGED": "requested"}))
+			Expect(diff.unchanged).To(Equal([]string{"UNCHANGED"}))
+			Expect(diff.unsupported).To(Equal([]string{"UNSUPPORTED"}))
+		})
+
+		It("classifies every desired parameter as changed when force is enabled", func() {
+			desired := map[string]string{"A": "1", "B": "2"}
+			diff := buildNVConfigApplyDiff(types.NewNvConfigQuery(), desired, true)
+
+			Expect(diff.changed).To(Equal(desired))
+			Expect(diff.unchanged).To(BeEmpty())
+			Expect(diff.unsupported).To(BeEmpty())
+		})
+	})
+
 	Describe("configurationManager.ValidateDeviceNvSpec", func() {
 		var (
 			mockHostUtils        mocks.ConfigurationUtils

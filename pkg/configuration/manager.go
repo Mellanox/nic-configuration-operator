@@ -187,6 +187,39 @@ func validateTemplateParamsApplied(nvConfigsForPorts map[string]types.NvConfigQu
 	return configUpdateNeeded, rebootNeeded, unsupportedParams
 }
 
+type nvConfigApplyDiff struct {
+	changed     map[string]string
+	unchanged   []string
+	unsupported []string
+}
+
+func buildNVConfigApplyDiff(nvConfig types.NvConfigQuery, desiredConfig map[string]string, force bool) nvConfigApplyDiff {
+	diff := nvConfigApplyDiff{
+		changed:     make(map[string]string, len(desiredConfig)),
+		unchanged:   []string{},
+		unsupported: []string{},
+	}
+	for param, value := range desiredConfig {
+		if force {
+			diff.changed[param] = value
+			continue
+		}
+		nextValues, found := nvConfig.NextBootConfig[param]
+		if !found {
+			diff.unsupported = append(diff.unsupported, param)
+			continue
+		}
+		if slices.Contains(nextValues, value) {
+			diff.unchanged = append(diff.unchanged, param)
+			continue
+		}
+		diff.changed[param] = value
+	}
+	sort.Strings(diff.unchanged)
+	sort.Strings(diff.unsupported)
+	return diff
+}
+
 // ApplyNVConfiguration calculates device's missing nv spec configuration and applies it to the device on the host
 // returns *ConfigurationApplyResult - result of the apply operation
 // returns error - there were errors while applying nv configuration
@@ -258,29 +291,26 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 	//     breakout before postBreakout without --force).
 	for _, port := range device.Status.Ports {
 		nvConfig := nvConfigsForPorts[port.PCI]
-		batch := map[string]string{}
-		if options.Force {
-			// Copy rather than alias desiredParams: it is reused across PF iterations, and the
-			// SetNvConfigParametersBatch contract does not forbid mutating its params argument.
-			for param, value := range desiredParams {
-				batch[param] = value
-			}
-		} else {
-			for param, value := range desiredParams {
-				nextValues, found := nvConfig.NextBootConfig[param]
-				if !found {
-					hasUnsupportedParams = true
-					continue
-				}
-				if !slices.Contains(nextValues, value) {
-					batch[param] = value
-				}
-			}
-		}
+		diff := buildNVConfigApplyDiff(nvConfig, desiredParams, options.Force)
+		batch := diff.changed
+		hasUnsupportedParams = hasUnsupportedParams || len(diff.unsupported) > 0
+		target := "pci/" + port.PCI
+		log.Log.V(2).Info("nv config apply diff",
+			"device", device.Name,
+			"target", target,
+			"force", options.Force,
+			"comparedToNextBoot", !options.Force,
+			"desiredCount", len(desiredParams),
+			"changedCount", len(batch),
+			"changedParams", batch,
+			"unchangedCount", len(diff.unchanged),
+			"unchangedParams", diff.unchanged,
+			"unsupportedCount", len(diff.unsupported),
+			"unsupportedParams", diff.unsupported)
 		if len(batch) == 0 {
 			continue
 		}
-		log.Log.V(2).Info("applying nv config to device", "device", device.Name, "pci", port.PCI, "fwctlDevice", port.FwctlDevice, "config", batch, "force", options.Force)
+		log.Log.V(2).Info("applying nv config batch", "device", device.Name, "target", target, "params", batch, "force", options.Force)
 		if err := h.nvConfigUtils.SetNvConfigParametersBatch(port, batch, options.WithDefault, options.Force); err != nil {
 			log.Log.Error(err, "Failed to apply nv config parameters", "device", device.Name, "params", batch)
 			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err

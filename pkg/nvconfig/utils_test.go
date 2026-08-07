@@ -17,11 +17,14 @@ package nvconfig
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	"github.com/Mellanox/nic-configuration-operator/pkg/dmscli"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/utils/exec"
@@ -127,9 +130,7 @@ Configurations:                              Default         Current         Nex
 				},
 			}
 
-			h = &nvConfigUtils{
-				execInterface: fakeExec,
-			}
+			h = &nvConfigUtils{execInterface: fakeExec}
 		})
 
 		It("should parse mlxconfig output correctly", func() {
@@ -603,58 +604,106 @@ Result: Device configuration does NOT match the system configuration.
 
 	Describe("SetNvConfigParametersBatch", func() {
 		var (
-			h          *nvConfigUtils
-			fakeExec   *execTesting.FakeExec
-			pciAddress = "0000:3b:00.0"
+			h             *nvConfigUtils
+			fakeExec      *execTesting.FakeExec
+			commandName   string
+			commandArgs   []string
+			commandOutput []byte
+			commandErr    error
+			pciAddress    = "0000:3b:00.0"
 		)
 
 		BeforeEach(func() {
+			commandName = ""
+			commandArgs = nil
+			commandOutput = []byte(`{"status":"ok"}`)
+			commandErr = nil
+
+			cmd := &execTesting.FakeCmd{}
+			cmd.CombinedOutputScript = append(cmd.CombinedOutputScript, func() ([]byte, []byte, error) {
+				return commandOutput, nil, commandErr
+			})
 			fakeExec = &execTesting.FakeExec{}
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{
+				func(name string, args ...string) exec.Cmd {
+					commandName = name
+					commandArgs = append([]string(nil), args...)
+					return cmd
+				},
+			}
 			h = &nvConfigUtils{execInterface: fakeExec}
 		})
 
-		It("appends --force when force is true", func() {
-			cmd := &execTesting.FakeCmd{}
-			cmd.OutputScript = append(cmd.OutputScript, func() ([]byte, []byte, error) {
-				return []byte("ok"), nil, nil
-			})
-			fakeExec.CommandScript = []execTesting.FakeCommandAction{
-				func(name string, args ...string) exec.Cmd {
-					Expect(name).To(Equal("mlxconfig"))
-					Expect(args).To(Equal([]string{"-d", pciAddress, "--yes", "--force", "set", "PARAM=1"}))
-					return cmd
-				},
+		It("sends a sorted raw batch and forwards with-default and force", func() {
+			Expect(h.SetNvConfigParametersBatch(nvconfigPort(pciAddress), map[string]string{
+				"Z_PARAM": "2",
+				"A_PARAM": "1",
+			}, true, true)).To(Succeed())
+
+			Expect(commandName).To(Equal("dms-cli"))
+			Expect(commandArgs[0:4]).To(Equal([]string{"--json", "-t", "pci/" + pciAddress, "--input"}))
+			Expect(commandArgs[5]).To(Equal("/nvidia/nvconfig/apply"))
+
+			var payload struct {
+				Raw         []dmscli.NVConfigParam `json:"raw"`
+				WithDefault bool                   `json:"with-default"`
+				Force       bool                   `json:"force"`
 			}
-			Expect(h.SetNvConfigParametersBatch(nvconfigPort(pciAddress), map[string]string{"PARAM": "1"}, false, true)).To(Succeed())
+			Expect(json.Unmarshal([]byte(commandArgs[4]), &payload)).To(Succeed())
+			Expect(payload).To(Equal(struct {
+				Raw         []dmscli.NVConfigParam `json:"raw"`
+				WithDefault bool                   `json:"with-default"`
+				Force       bool                   `json:"force"`
+			}{
+				Raw: []dmscli.NVConfigParam{
+					{Param: "A_PARAM", Value: "1"},
+					{Param: "Z_PARAM", Value: "2"},
+				},
+				WithDefault: true,
+				Force:       true,
+			}))
+
+			var rawPayload map[string]any
+			Expect(json.Unmarshal([]byte(commandArgs[4]), &rawPayload)).To(Succeed())
+			Expect(rawPayload).NotTo(HaveKey("ports"))
+			Expect(rawPayload).NotTo(HaveKey("typed"))
 		})
 
-		It("omits --force when force is false", func() {
-			cmd := &execTesting.FakeCmd{}
-			cmd.OutputScript = append(cmd.OutputScript, func() ([]byte, []byte, error) {
-				return []byte("ok"), nil, nil
-			})
-			fakeExec.CommandScript = []execTesting.FakeCommandAction{
-				func(name string, args ...string) exec.Cmd {
-					Expect(args).To(Equal([]string{"-d", pciAddress, "--yes", "set", "PARAM=1"}))
-					return cmd
-				},
-			}
+		It("forwards false flag values explicitly", func() {
 			Expect(h.SetNvConfigParametersBatch(nvconfigPort(pciAddress), map[string]string{"PARAM": "1"}, false, false)).To(Succeed())
+
+			var payload map[string]any
+			Expect(json.Unmarshal([]byte(commandArgs[4]), &payload)).To(Succeed())
+			Expect(payload).To(HaveKeyWithValue("with-default", false))
+			Expect(payload).To(HaveKeyWithValue("force", false))
 		})
 
-		It("uses fwctl device when present", func() {
-			cmd := &execTesting.FakeCmd{}
-			cmd.OutputScript = append(cmd.OutputScript, func() ([]byte, []byte, error) {
-				return []byte("ok"), nil, nil
-			})
-			fakeExec.CommandScript = []execTesting.FakeCommandAction{
-				func(name string, args ...string) exec.Cmd {
-					Expect(args).To(Equal([]string{"-d", "/dev/fwctl/fwctl3", "--yes", "set", "PARAM=1"}))
-					return cmd
-				},
-			}
+		It("passes the PCI target and does not use fwctl metadata", func() {
 			port := v1alpha1.NicDevicePortSpec{PCI: pciAddress, FwctlDevice: "/dev/fwctl/fwctl3"}
 			Expect(h.SetNvConfigParametersBatch(port, map[string]string{"PARAM": "1"}, false, false)).To(Succeed())
+
+			Expect(commandArgs[0:3]).To(Equal([]string{"--json", "-t", "pci/" + pciAddress}))
+		})
+
+		It("does not invoke DMS for an empty batch", func() {
+			Expect(h.SetNvConfigParametersBatch(nvconfigPort(pciAddress), map[string]string{}, true, true)).To(Succeed())
+			Expect(fakeExec.CommandCalls).To(BeZero())
+		})
+
+		It("propagates DMS apply failures", func() {
+			applyErr := errors.New("exit status 1")
+			commandOutput = []byte(`{"status":"error","error_msg":"DMS apply failed"}`)
+			commandErr = applyErr
+
+			err := h.SetNvConfigParametersBatch(nvconfigPort(pciAddress), map[string]string{"PARAM": "1"}, false, false)
+			Expect(err).To(MatchError(ContainSubstring("DMS apply failed")))
+			Expect(errors.Is(err, applyErr)).To(BeTrue())
+		})
+
+		It("returns an error when the command executor is not initialized", func() {
+			h.execInterface = nil
+
+			Expect(h.SetNvConfigParametersBatch(nvconfigPort(pciAddress), map[string]string{"PARAM": "1"}, false, false)).To(MatchError("command executor must not be nil"))
 		})
 	})
 })
