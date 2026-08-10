@@ -166,13 +166,13 @@ func NewConfigurationManager(
 1. **Query** current NV config via `nvConfigUtils.QueryNvConfig()`
 2. **Network Bay `set_system_conf` (baseline, applied first)** — for ConnectX-9 Network Bay devices (`template.networkBay` set and `status.networkBay` detected), the per-ASIC `set_system_conf <conf>[<asic>]` is applied **before** the regular / Spectrum-X params so those layer on top of it (override priority: `rawNvConfig` > Spectrum-X > system_conf). Drift is detected per-param via `nvconfig.ValidateSystemConf()`, which returns the overall match bit plus the names of the mismatched params; the manager ignores MISMATCH rows for params owned by a higher-priority layer (matched by exact per-index key — `rawNvConfig` index-range syntax like `MODULE_SPLIT_M0[0..3]` is rejected by CRD validation, so keys are always concrete); a change requires a reboot. Skipped for devices with `ResetToDefault`
 3. **Diff** desired vs current parameters. Params not present in the device's next-boot config are unsupported on this device (e.g. hidden because `ADVANCED_PCI_SETTINGS` is off) and are skipped — the operator does **not** auto-manage `ADVANCED_PCI_SETTINGS`; drive it explicitly via `template.rawNvConfig` if needed
-4. **Batch set** via `nvConfigUtils.SetNvConfigParametersBatch()` — single `mlxconfig set` call (`--force` added when `ConfigurationOptions.Force=true`). Apply reports `ApplyStatusPartiallyApplied` when any desired param was skipped as unsupported
+4. **Batch set** via `nvConfigUtils.SetNvConfigParametersBatch()` — one agentless `dms-cli` `/nvidia/nvconfig/apply` action per PCI target. The action carries the existing raw batch plus `with-default` and `force`; DMS compiles it into one `mlxconfig` invocation. Apply reports `ApplyStatusPartiallyApplied` when any desired param was skipped as unsupported
 5. **Optional reset** — `mlxfwreset` unless `ConfigurationOptions.SkipReset=true`
 
 **`ConfigurationOptions`:**
 - `SkipReset` — skip `mlxfwreset` after applying NV config
-- `WithDefault` — add `--with_default` to `mlxconfig set`
-- `Force` — add `--force` to `mlxconfig set` and `set_system_conf` (lets mlxconfig accept a batch it would otherwise refuse due to implicit parameter dependencies)
+- `WithDefault` — request `--with_default` through the DMS NVConfig apply action
+- `Force` — request `--force` through the DMS NVConfig apply action and add it to `set_system_conf` (lets mlxconfig accept a batch it would otherwise refuse due to implicit parameter dependencies)
 
 #### Runtime Configuration Flow
 
@@ -297,6 +297,64 @@ dmsc -a localhost:9339 --insecure --target 0000:08:00.0 set --timeout 5m \
 
 ---
 
+### pkg/dmscli/ — Agentless DMS CLI API
+
+Source: `pkg/dmscli/nvconfig.go`
+
+`pkg/dmscli` wraps the local, agentless `dms-cli` executable with package-level
+functions; there is no client object or stored runtime state. Its first
+supported action is bulk NVConfig apply. The request already models both raw
+native parameters and typed XPath operations so other projects and future
+doSPCX integration can reuse the same API.
+
+```go
+type NVConfigXPathOperation struct {
+    Path   string
+    Values map[string]any
+}
+
+type NVConfigParam struct {
+    Param string
+    Value any // JSON string, boolean, or number
+}
+
+type ApplyNVConfigRequest struct {
+    Target      string
+    Ports       []int
+    Typed       []NVConfigXPathOperation
+    Raw         []NVConfigParam
+    WithDefault bool
+    Force       bool
+}
+
+func ApplyNVConfig(
+    ctx context.Context,
+    execInterface execUtils.Interface,
+    request ApplyNVConfigRequest,
+) (*ApplyNVConfigResult, error)
+```
+
+The caller supplies the repository-standard `k8s.io/utils/exec.Interface`; this
+reuses the existing command abstraction and supports
+`k8s.io/utils/exec/testing.FakeExec` in tests. Command output is logged at V(2)
+through a `logr.Logger` carried by the context. The command shape is:
+
+```text
+dms-cli --json -t pci/<BDF> --input <payload-json> /nvidia/nvconfig/apply
+```
+
+`dms-cli` must be available on the caller's `PATH`. The daemon image adds the
+standard DOCA installation directory, `/opt/mellanox/doca/services/dms`, to its
+runtime `PATH`.
+
+The payload supports `ports`, `typed`, `raw`, `with-default`, and `force`.
+`Target` is carried by `-t` and is not serialized. The operator currently
+populates only `Raw`, `WithDefault`, and `Force`; `ports` and `typed` are omitted
+until doSPCX planning and typed XPath generation are introduced in a later
+phase.
+
+---
+
 ### pkg/spectrumx/ — Spectrum-X Configuration
 
 Source: `pkg/spectrumx/spectrumx.go`
@@ -362,10 +420,10 @@ type NVConfigUtils interface {
     // SetNvConfigParameter sets a single NV config parameter
     SetNvConfigParameter(port v1alpha1.NicDevicePortSpec, paramName string, paramValue string) error
 
-    // SetNvConfigParametersBatch sets multiple parameters in single mlxconfig call
+    // SetNvConfigParametersBatch sets multiple parameters in one DMS NVConfig action
     // params: map of paramName → paramValue
-    // withDefault: add --with_default flag
-    // force: add --force flag
+    // withDefault: request --with_default from DMS
+    // force: request --force from DMS
     SetNvConfigParametersBatch(port v1alpha1.NicDevicePortSpec, params map[string]string, withDefault bool, force bool) error
 
     // ResetNvConfig resets NIC's NV config to defaults
@@ -389,10 +447,13 @@ func NewNVConfigUtils() NVConfigUtils
 
 **Batch command format:**
 ```
-mlxconfig -d <device> --yes [--with_default] [--force] set PARAM1=VAL1 PARAM2=VAL2 ...
+dms-cli --json -t pci/<BDF> --input <payload-json> /nvidia/nvconfig/apply
 ```
-Parameter names are sorted for deterministic command generation.
-`<device>` is `port.FwctlDevice` when discovered, otherwise `port.PCI`.
+Parameter names are sorted before they are encoded as raw DMS entries. The
+target is always `pci/<port.PCI>`; the discovered `FwctlDevice` value is not
+passed to the NVConfig apply action. Query, single-parameter set, reset, and
+Network Bay system-conf operations continue to invoke `mlxconfig` directly in
+this phase.
 
 **System conf command format (ConnectX-9 Network Bay):**
 ```
@@ -722,7 +783,7 @@ All external commands use `cmd.CombinedOutput()` (not `cmd.Output()`) and log un
 
 ### Batch Operations
 
-- **mlxconfig**: `SetNvConfigParametersBatch()` applies multiple params in single `mlxconfig set` call
+- **NVConfig apply**: `SetNvConfigParametersBatch()` sends one sorted raw batch per PCI target through `dms-cli`; DMS executes the corresponding single `mlxconfig` operation
 - **DMS**: `GetParameters()` batches `--path` entries per concrete interface (with a separate global batch), and `SetParameters()` sends all `--update` entries in a single `dmsc set` command with `--timeout 5m`
 - **IgnoreError**: per-parameter flag; in batch mode, errors are suppressed only if ALL params have `IgnoreError=true`
 

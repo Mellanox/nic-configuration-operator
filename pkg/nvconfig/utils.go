@@ -23,10 +23,12 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/go-logr/logr"
 	execUtils "k8s.io/utils/exec"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
+	"github.com/Mellanox/nic-configuration-operator/pkg/dmscli"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
@@ -54,9 +56,8 @@ type NVConfigUtils interface {
 	QueryNvConfig(ctx context.Context, port v1alpha1.NicDevicePortSpec, parameters []string) (types.NvConfigQuery, error)
 	// SetNvConfigParameter sets a nv config parameter for a mellanox device
 	SetNvConfigParameter(port v1alpha1.NicDevicePortSpec, paramName string, paramValue string) error
-	// SetNvConfigParametersBatch sets multiple nv config parameters for a mellanox device in a single mlxconfig call
-	// When force is true, --force is passed to mlxconfig so it accepts a batch it would otherwise refuse
-	// due to implicit parameter dependencies.
+	// SetNvConfigParametersBatch sets multiple NVConfig parameters in one DMS NVConfig action.
+	// withDefault and force are forwarded to DMS, which applies them to the compiled mlxconfig batch.
 	SetNvConfigParametersBatch(port v1alpha1.NicDevicePortSpec, params map[string]string, withDefault bool, force bool) error
 	// ResetNvConfig resets NIC's nv config
 	ResetNvConfig(port v1alpha1.NicDevicePortSpec) error
@@ -208,43 +209,49 @@ func (h *nvConfigUtils) SetNvConfigParameter(port v1alpha1.NicDevicePortSpec, pa
 	return nil
 }
 
-// SetNvConfigParametersBatch sets multiple nv config parameters for a mellanox device in a single mlxconfig call
+// SetNvConfigParametersBatch sets multiple nv config parameters for a Mellanox device in one DMS NVConfig action.
 func (h *nvConfigUtils) SetNvConfigParametersBatch(port v1alpha1.NicDevicePortSpec, params map[string]string, withDefault bool, force bool) error {
-	targetDevice := resolveDevice(port)
-	log.Log.Info("ConfigurationUtils.SetNvConfigParametersBatch()", "pciAddr", port.PCI, "targetDevice", targetDevice, "params", params, "withDefault", withDefault, "force", force)
-
 	if len(params) == 0 {
 		return nil
 	}
+	if h.execInterface == nil {
+		return fmt.Errorf("command executor must not be nil")
+	}
 
-	// Build sorted param list for deterministic command
+	target := "pci/" + port.PCI
+	log.Log.Info("ConfigurationUtils.SetNvConfigParametersBatch()", "pciAddr", port.PCI, "target", target, "params", params, "withDefault", withDefault, "force", force)
+
+	// Build a sorted raw list to preserve deterministic batch construction.
 	paramNames := make([]string, 0, len(params))
 	for name := range params {
 		paramNames = append(paramNames, name)
 	}
 	sort.Strings(paramNames)
 
-	paramArgs := make([]string, 0, len(params))
+	raw := make([]dmscli.NVConfigParam, 0, len(params))
 	for _, name := range paramNames {
-		paramArgs = append(paramArgs, name+"="+params[name])
+		raw = append(raw, dmscli.NVConfigParam{Param: name, Value: params[name]})
 	}
 
-	args := []string{"-d", targetDevice, "--yes"}
-	if withDefault {
-		args = append(args, "--with_default")
-	}
-	if force {
-		args = append(args, "--force")
-	}
-	args = append(args, "set")
-	args = append(args, paramArgs...)
-
-	cmd := h.execInterface.Command("mlxconfig", args...)
-	output, err := utils.RunCommand(cmd)
+	ctx := logr.NewContext(context.Background(), log.Log)
+	result, err := dmscli.ApplyNVConfig(ctx, h.execInterface, dmscli.ApplyNVConfigRequest{
+		Target:      target,
+		Raw:         raw,
+		WithDefault: withDefault,
+		Force:       force,
+	})
 	if err != nil {
-		log.Log.Error(err, "SetNvConfigParametersBatch(): Failed to run mlxconfig", "output", string(output))
+		log.Log.Error(err, "SetNvConfigParametersBatch(): DMS NVConfig apply failed", "target", target)
 		return err
 	}
+	log.Log.V(2).Info("DMS NVConfig apply succeeded",
+		"target", target,
+		"primaryTarget", result.PrimaryTarget,
+		"compiledCount", result.CompiledCount,
+		"requiresReset", result.RequiresReset,
+		"withDefault", result.WithDefault,
+		"force", result.Force,
+		"params", result.Params)
 	return nil
 }
 
