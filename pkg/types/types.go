@@ -85,6 +85,37 @@ type RuntimeConfigurationApplyResult struct {
 	Status ApplyStatus
 }
 
+// NVConfigurationRequest associates a device with its NV configuration options.
+type NVConfigurationRequest struct {
+	Device  *v1alpha1.NicDevice
+	Options *ConfigurationOptions
+	Skip    bool
+}
+
+// DeviceNVConfigurationResult is the NV configuration outcome for one device.
+// Device is the same pointer supplied in the corresponding request.
+type DeviceNVConfigurationResult struct {
+	Device  *v1alpha1.NicDevice
+	Result  *ConfigurationApplyResult
+	Skipped bool
+	Err     error
+}
+
+// RuntimeConfigurationRequest identifies a device in a node-scoped runtime configuration batch.
+type RuntimeConfigurationRequest struct {
+	Device *v1alpha1.NicDevice
+	Skip   bool
+}
+
+// DeviceRuntimeConfigurationResult is the runtime configuration outcome for one device.
+// Device is the same pointer supplied in the corresponding request.
+type DeviceRuntimeConfigurationResult struct {
+	Device  *v1alpha1.NicDevice
+	Result  *RuntimeConfigurationApplyResult
+	Skipped bool
+	Err     error
+}
+
 // FirmwareInstallOptions contains options for firmware installation
 type FirmwareInstallOptions struct {
 	Version    string // FW version (for K8s cache lookup in operator mode)

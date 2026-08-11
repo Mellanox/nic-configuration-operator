@@ -35,11 +35,22 @@ rebootRequired, err := fwMgr.InstallFirmware(ctx, device, &types.FirmwareInstall
     FwFilePath: "/path/to/fw.bin",
 })
 
-// 3. Apply NV configuration
+// 3. Apply NV configuration to the complete node device set
 nvUtils := nvconfig.NewNVConfigUtils()
 spectrumXMgr := spectrumx.NewSpectrumXConfigManager(dmsSrv, configs)
 cfgMgr := configuration.NewConfigurationManager(nil, dmsSrv, nvUtils, spectrumXMgr)
-result, err := cfgMgr.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
+requests := make([]types.NVConfigurationRequest, 0, len(devices))
+for i := range devices {
+    requests = append(requests, types.NVConfigurationRequest{
+        Device:  &devices[i],
+        Options: &types.ConfigurationOptions{},
+    })
+}
+results, err := cfgMgr.ApplyNVConfigurations(ctx, nodeName, requests)
+for _, deviceResult := range results {
+    // deviceResult is present even when this device failed. Callers can report
+    // status independently for every device before handling the aggregate err.
+}
 ```
 
 ### With external DMS server (library mode)
@@ -137,19 +148,35 @@ Source: `pkg/configuration/manager.go`
 ```go
 type ConfigurationManager interface {
     // ValidateDeviceNvSpec validates device's NV spec against host configuration
-    // returns: nv config update required, reboot required, error
-    ValidateDeviceNvSpec(ctx context.Context, device *v1alpha1.NicDevice) (bool, bool, error)
+    // returns: nv config update required, reboot required, unsupported params, error
+    ValidateDeviceNvSpec(ctx context.Context, device *v1alpha1.NicDevice) (bool, bool, []string, error)
 
     // ApplyNVConfiguration calculates and applies missing NV spec configuration
     ApplyNVConfiguration(ctx context.Context, device *v1alpha1.NicDevice, options *types.ConfigurationOptions) (*types.ConfigurationApplyResult, error)
 
+    // ApplyNVConfigurations applies NV configuration concurrently to a node device set
+    ApplyNVConfigurations(ctx context.Context, nodeName string, requests []types.NVConfigurationRequest) ([]types.DeviceNVConfigurationResult, error)
+
     // ApplyRuntimeConfiguration calculates and applies missing runtime spec configuration
     ApplyRuntimeConfiguration(ctx context.Context, device *v1alpha1.NicDevice) (*types.RuntimeConfigurationApplyResult, error)
+
+    // ApplyRuntimeConfigurations applies runtime configuration concurrently to a node device set
+    ApplyRuntimeConfigurations(ctx context.Context, nodeName string, requests []types.RuntimeConfigurationRequest) ([]types.DeviceRuntimeConfigurationResult, error)
 
     // ResetNicFirmware resets NIC's firmware via mlxfwreset
     ResetNicFirmware(ctx context.Context, device *v1alpha1.NicDevice) error
 }
 ```
+
+The plural APIs preserve input order and return one result for every input device, including
+failed and skipped devices. Their returned error joins all per-device errors; callers should
+process the result slice first so successful and failed devices can be reported independently.
+Every node device should be included in the request. Set `Skip` when a device belongs to the
+node-scoped inventory but should not run the legacy per-device operation in this pass; its result
+will have `Skipped=true`. This keeps the complete topology available to node-scoped integrations.
+The singular APIs remain available for compatibility and are also the per-device implementation
+used by the plural methods. `nodeName` identifies the node-scoped configuration operation and is
+reserved for integrations that require the complete node topology.
 
 **Constructor:**
 ```go

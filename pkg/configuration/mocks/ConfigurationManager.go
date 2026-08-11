@@ -16,6 +16,60 @@ type ConfigurationManager struct {
 	mock.Mock
 }
 
+// ApplyNVConfigurations provides a mock function with given fields: ctx, nodeName, requests
+func (_m *ConfigurationManager) ApplyNVConfigurations(ctx context.Context, nodeName string, requests []types.NVConfigurationRequest) ([]types.DeviceNVConfigurationResult, error) {
+	ret := _m.Called(ctx, nodeName, requests)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ApplyNVConfigurations")
+	}
+
+	var r0 []types.DeviceNVConfigurationResult
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, []types.NVConfigurationRequest) ([]types.DeviceNVConfigurationResult, error)); ok {
+		return rf(ctx, nodeName, requests)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, []types.NVConfigurationRequest) []types.DeviceNVConfigurationResult); ok {
+		r0 = rf(ctx, nodeName, requests)
+	} else if ret.Get(0) != nil {
+		r0 = ret.Get(0).([]types.DeviceNVConfigurationResult)
+	}
+	if rf, ok := ret.Get(1).(func(context.Context, string, []types.NVConfigurationRequest) error); ok {
+		r1 = rf(ctx, nodeName, requests)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// ApplyRuntimeConfigurations provides a mock function with given fields: ctx, nodeName, devices
+func (_m *ConfigurationManager) ApplyRuntimeConfigurations(ctx context.Context, nodeName string, requests []types.RuntimeConfigurationRequest) ([]types.DeviceRuntimeConfigurationResult, error) {
+	ret := _m.Called(ctx, nodeName, requests)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ApplyRuntimeConfigurations")
+	}
+
+	var r0 []types.DeviceRuntimeConfigurationResult
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, []types.RuntimeConfigurationRequest) ([]types.DeviceRuntimeConfigurationResult, error)); ok {
+		return rf(ctx, nodeName, requests)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, []types.RuntimeConfigurationRequest) []types.DeviceRuntimeConfigurationResult); ok {
+		r0 = rf(ctx, nodeName, requests)
+	} else if ret.Get(0) != nil {
+		r0 = ret.Get(0).([]types.DeviceRuntimeConfigurationResult)
+	}
+	if rf, ok := ret.Get(1).(func(context.Context, string, []types.RuntimeConfigurationRequest) error); ok {
+		r1 = rf(ctx, nodeName, requests)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // ApplyNVConfiguration provides a mock function with given fields: ctx, device, options
 func (_m *ConfigurationManager) ApplyNVConfiguration(ctx context.Context, device *v1alpha1.NicDevice, options *types.ConfigurationOptions) (*types.ConfigurationApplyResult, error) {
 	ret := _m.Called(ctx, device, options)

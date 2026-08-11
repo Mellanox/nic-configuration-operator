@@ -47,10 +47,16 @@ type ConfigurationManager interface {
 	// returns *ConfigurationApplyResult - result of the apply operation
 	// returns error - there were errors while applying nv configuration
 	ApplyNVConfiguration(ctx context.Context, device *v1alpha1.NicDevice, options *types.ConfigurationOptions) (*types.ConfigurationApplyResult, error)
+	// ApplyNVConfigurations applies NV configuration to a node-scoped device batch in parallel.
+	// The returned result slice contains one entry per request in the same order, including failures.
+	ApplyNVConfigurations(ctx context.Context, nodeName string, requests []types.NVConfigurationRequest) ([]types.DeviceNVConfigurationResult, error)
 	// ApplyRuntimeConfiguration calculates device's missing runtime spec configuration and applies it to the device on the host
 	// returns *RuntimeConfigurationApplyResult - result of the apply operation
 	// returns error - there were errors while applying runtime configuration
 	ApplyRuntimeConfiguration(ctx context.Context, device *v1alpha1.NicDevice) (*types.RuntimeConfigurationApplyResult, error)
+	// ApplyRuntimeConfigurations applies runtime configuration to a node-scoped device batch in parallel.
+	// The returned result slice contains one entry per device in the same order, including failures.
+	ApplyRuntimeConfigurations(ctx context.Context, nodeName string, requests []types.RuntimeConfigurationRequest) ([]types.DeviceRuntimeConfigurationResult, error)
 	// ResetNicFirmware resets NIC's firmware
 	// Operation can be long, required context to be able to terminate by timeout
 	// IB devices need to communicate with other nodes for confirmation

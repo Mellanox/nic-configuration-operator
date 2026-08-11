@@ -88,6 +88,7 @@ type nicDeviceConfigurationStatus struct {
 	requestedFirmwareVersion     string
 	nvConfigUpdateRequired       bool
 	rebootRequired               bool
+	runtimeConfigReady           bool
 	// unsupportedNvParams lists desired nv params that are hidden on this device (absent from
 	// NextBootConfig). Surfaces as PartiallyApplied in the ConfigUpdateInProgress condition.
 	unsupportedNvParams []string
@@ -216,7 +217,7 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 		log.Log.Info("maintenance allowed, applying nv config")
 
-		err = runInParallel(ctx, configStatuses, r.applyNvConfig)
+		err = r.applyNvConfigs(ctx, configStatuses)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -232,7 +233,7 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	log.Log.Info("applying runtime config")
-	err = runInParallel(ctx, configStatuses, r.applyRuntimeConfig)
+	err = r.applyRuntimeConfigs(ctx, configStatuses)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -493,12 +494,68 @@ func runInParallel(ctx context.Context, statuses nicDeviceConfigurationStatuses,
 	return nil
 }
 
-// applyRuntimeConfig applies device's runtime spec
-// if update is successful, applies status condition UpdateSuccessful, otherwise RuntimeConfigUpdateFailed
-// if rebootRequired, sets status condition PendingReboot
-// if status.rebootRequired == true, skips the device
-// returns nil if device's config update was successful, error otherwise
-func (r *NicDeviceReconciler) applyRuntimeConfig(ctx context.Context, status *nicDeviceConfigurationStatus) error {
+// applyRuntimeConfigs prepares all eligible devices, applies their runtime configuration as one
+// node-scoped batch, and then reports each result on the corresponding NicDevice.
+func (r *NicDeviceReconciler) applyRuntimeConfigs(ctx context.Context, statuses nicDeviceConfigurationStatuses) error {
+	preparationErr := runInParallel(ctx, statuses, r.prepareRuntimeConfig)
+
+	requests := make([]types.RuntimeConfigurationRequest, 0, len(statuses))
+	statusByDevice := make(map[*v1alpha1.NicDevice]*nicDeviceConfigurationStatus, len(statuses))
+	for _, status := range statuses {
+		requests = append(requests, types.RuntimeConfigurationRequest{
+			Device: status.device,
+			Skip:   !status.runtimeConfigReady,
+		})
+		statusByDevice[status.device] = status
+	}
+
+	results, batchErr := r.ConfigurationManager.ApplyRuntimeConfigurations(ctx, r.NodeName, requests)
+	observedErrors := []error{preparationErr, batchErr}
+	handledDevices := make(map[*v1alpha1.NicDevice]struct{}, len(results))
+	handlerErrors := make([]error, len(results))
+	var waitGroup sync.WaitGroup
+	for index, deviceResult := range results {
+		status, found := statusByDevice[deviceResult.Device]
+		if !found {
+			observedErrors = append(observedErrors, fmt.Errorf("runtime configuration returned a result for an unknown device"))
+			continue
+		}
+		if _, duplicate := handledDevices[deviceResult.Device]; duplicate {
+			observedErrors = append(observedErrors, fmt.Errorf("runtime configuration returned duplicate results for device %q", deviceResult.Device.Name))
+			continue
+		}
+		handledDevices[deviceResult.Device] = struct{}{}
+		if deviceResult.Skipped {
+			continue
+		}
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			handlerErrors[index] = r.handleRuntimeConfigResult(ctx, status, deviceResult.Result, deviceResult.Err)
+		}()
+	}
+	waitGroup.Wait()
+	observedErrors = append(observedErrors, handlerErrors...)
+
+	for _, request := range requests {
+		if _, found := handledDevices[request.Device]; found {
+			continue
+		}
+		err := fmt.Errorf("runtime configuration did not return a result for device %q", request.Device.Name)
+		if request.Skip {
+			observedErrors = append(observedErrors, err)
+			continue
+		}
+		observedErrors = append(observedErrors, r.handleRuntimeConfigResult(ctx, statusByDevice[request.Device], nil, err))
+	}
+
+	return errors.Join(observedErrors...)
+}
+
+// prepareRuntimeConfig runs the controller-owned prerequisites for one device. The actual runtime
+// configuration is performed later by ConfigurationManager as part of the complete node batch.
+func (r *NicDeviceReconciler) prepareRuntimeConfig(ctx context.Context, status *nicDeviceConfigurationStatus) error {
+	status.runtimeConfigReady = false
 	if status.device.Spec.Configuration == nil || status.rebootRequired {
 		return nil
 	}
@@ -529,28 +586,32 @@ func (r *NicDeviceReconciler) applyRuntimeConfig(ctx context.Context, status *ni
 
 	targetVersion, err := r.SpectrumXManager.GetDocaCCTargetVersion(status.device)
 	if err != nil {
-		return err
+		return r.reportRuntimeConfigError(ctx, status.device, err)
 	}
 
 	if targetVersion != "" {
 		err = r.FirmwareManager.InstallDocaSpcXCC(ctx, status.device, targetVersion)
 		if err != nil {
-			return err
+			return r.reportRuntimeConfigError(ctx, status.device, err)
 		}
 	}
+	status.runtimeConfigReady = true
+	return nil
+}
 
-	_, err = r.ConfigurationManager.ApplyRuntimeConfiguration(ctx, status.device)
-	if err != nil {
-		updateErr := r.updateConfigInProgressStatusCondition(ctx, status.device, consts.RuntimeConfigUpdateFailedReason, metav1.ConditionFalse, err.Error())
-		if updateErr != nil {
-			log.Log.Error(err, "failed to update device status condition", "device", status.device.Name)
-		}
-		return err
+func (r *NicDeviceReconciler) handleRuntimeConfigResult(
+	ctx context.Context,
+	status *nicDeviceConfigurationStatus,
+	_ *types.RuntimeConfigurationApplyResult,
+	applyErr error,
+) error {
+	if applyErr != nil {
+		return r.reportRuntimeConfigError(ctx, status.device, applyErr)
 	}
 
 	specJson, err := json.Marshal(status.device.Spec)
 	if err != nil {
-		return err
+		return r.reportRuntimeConfigError(ctx, status.device, err)
 	}
 
 	if status.device.Annotations == nil {
@@ -559,7 +620,7 @@ func (r *NicDeviceReconciler) applyRuntimeConfig(ctx context.Context, status *ni
 	status.device.Annotations[consts.LastAppliedStateAnnotation] = string(specJson)
 	err = r.Update(ctx, status.device)
 	if err != nil {
-		return err
+		return r.reportRuntimeConfigError(ctx, status.device, err)
 	}
 
 	reason := consts.UpdateSuccessfulReason
@@ -574,6 +635,16 @@ func (r *NicDeviceReconciler) applyRuntimeConfig(ctx context.Context, status *ni
 	}
 
 	return nil
+}
+
+func (r *NicDeviceReconciler) reportRuntimeConfigError(ctx context.Context, device *v1alpha1.NicDevice, err error) error {
+	updateErr := r.updateConfigInProgressStatusCondition(
+		ctx, device, consts.RuntimeConfigUpdateFailedReason, metav1.ConditionFalse, err.Error(),
+	)
+	if updateErr != nil {
+		log.Log.Error(updateErr, "failed to update device status condition", "device", device.Name)
+	}
+	return errors.Join(err, updateErr)
 }
 
 // handleReboot schedules maintenance and reboots the node if maintenance is allowed
@@ -616,37 +687,90 @@ func (r *NicDeviceReconciler) stripLastAppliedStateAnnotation(ctx context.Contex
 	return r.Update(ctx, status.device)
 }
 
-// applyNvConfig applies device's non-volatile spec
-// if update is correct, applies status condition PendingReboot, otherwise NonVolatileConfigUpdateFailed
-// sets rebootRequired flags for each device's configuration status
-// if status.nvConfigUpdateRequired == false, skips the device
-// returns nil if config update was successful, error otherwise
-func (r *NicDeviceReconciler) applyNvConfig(ctx context.Context, status *nicDeviceConfigurationStatus) error {
-	if status.device.Spec.Configuration == nil || !status.nvConfigUpdateRequired {
-		return nil
-	}
-
-	options := &types.ConfigurationOptions{SkipReset: true}
-	if status.device.Spec.Configuration.Template != nil {
-		options.Force = status.device.Spec.Configuration.Template.Force
-	}
-
-	result, err := r.ConfigurationManager.ApplyNVConfiguration(ctx, status.device, options)
-	if err != nil {
-		if types.IsIncorrectSpecError(err) {
-			updateErr := r.updateConfigInProgressStatusCondition(ctx, status.device, consts.IncorrectSpecReason, metav1.ConditionFalse, err.Error())
-			if updateErr != nil {
-				log.Log.Error(err, "failed to update device status condition", "device", status.device.Name)
-			}
-		} else {
-			updateErr := r.updateConfigInProgressStatusCondition(ctx, status.device, consts.NonVolatileConfigUpdateFailedReason, metav1.ConditionFalse, err.Error())
-			if updateErr != nil {
-				log.Log.Error(err, "failed to update device status condition", "device", status.device.Name)
+// applyNvConfigs applies NV configuration as one node-scoped batch and reports each result on the
+// corresponding NicDevice without losing successful outcomes when another device fails.
+func (r *NicDeviceReconciler) applyNvConfigs(ctx context.Context, statuses nicDeviceConfigurationStatuses) error {
+	requests := make([]types.NVConfigurationRequest, 0, len(statuses))
+	statusByDevice := make(map[*v1alpha1.NicDevice]*nicDeviceConfigurationStatus, len(statuses))
+	for _, status := range statuses {
+		request := types.NVConfigurationRequest{
+			Device: status.device,
+			Skip:   status.device.Spec.Configuration == nil || !status.nvConfigUpdateRequired,
+		}
+		if !request.Skip {
+			request.Options = &types.ConfigurationOptions{SkipReset: true}
+			if status.device.Spec.Configuration.Template != nil {
+				request.Options.Force = status.device.Spec.Configuration.Template.Force
 			}
 		}
-		return err
+		requests = append(requests, request)
+		statusByDevice[status.device] = status
 	}
-	err = r.updateConfigInProgressStatusCondition(ctx, status.device, consts.PendingRebootReason, metav1.ConditionTrue, "")
+
+	results, batchErr := r.ConfigurationManager.ApplyNVConfigurations(ctx, r.NodeName, requests)
+	observedErrors := []error{batchErr}
+	handledDevices := make(map[*v1alpha1.NicDevice]struct{}, len(results))
+	handlerErrors := make([]error, len(results))
+	var waitGroup sync.WaitGroup
+	for index, deviceResult := range results {
+		status, found := statusByDevice[deviceResult.Device]
+		if !found {
+			observedErrors = append(observedErrors, fmt.Errorf("NV configuration returned a result for an unknown device"))
+			continue
+		}
+		if _, duplicate := handledDevices[deviceResult.Device]; duplicate {
+			observedErrors = append(observedErrors, fmt.Errorf("NV configuration returned duplicate results for device %q", deviceResult.Device.Name))
+			continue
+		}
+		handledDevices[deviceResult.Device] = struct{}{}
+		if deviceResult.Skipped {
+			continue
+		}
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			handlerErrors[index] = r.handleNVConfigResult(ctx, status, deviceResult.Result, deviceResult.Err)
+		}()
+	}
+	waitGroup.Wait()
+	observedErrors = append(observedErrors, handlerErrors...)
+
+	for _, request := range requests {
+		if _, found := handledDevices[request.Device]; found {
+			continue
+		}
+		err := fmt.Errorf("NV configuration did not return a result for device %q", request.Device.Name)
+		if request.Skip {
+			observedErrors = append(observedErrors, err)
+			continue
+		}
+		observedErrors = append(observedErrors, r.handleNVConfigResult(ctx, statusByDevice[request.Device], nil, err))
+	}
+
+	return errors.Join(observedErrors...)
+}
+
+func (r *NicDeviceReconciler) handleNVConfigResult(
+	ctx context.Context,
+	status *nicDeviceConfigurationStatus,
+	result *types.ConfigurationApplyResult,
+	applyErr error,
+) error {
+	if applyErr != nil {
+		reason := consts.NonVolatileConfigUpdateFailedReason
+		if types.IsIncorrectSpecError(applyErr) {
+			reason = consts.IncorrectSpecReason
+		}
+		updateErr := r.updateConfigInProgressStatusCondition(
+			ctx, status.device, reason, metav1.ConditionFalse, applyErr.Error(),
+		)
+		if updateErr != nil {
+			log.Log.Error(updateErr, "failed to update device status condition", "device", status.device.Name)
+		}
+		return errors.Join(applyErr, updateErr)
+	}
+
+	err := r.updateConfigInProgressStatusCondition(ctx, status.device, consts.PendingRebootReason, metav1.ConditionTrue, "")
 	if err != nil {
 		return err
 	}

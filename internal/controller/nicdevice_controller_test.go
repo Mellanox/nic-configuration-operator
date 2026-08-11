@@ -93,6 +93,44 @@ var _ = Describe("NicDeviceReconciler", func() {
 
 		deviceDiscoveryReconcileTime = 1 * time.Second
 		configurationManager = &configurationMocks.ConfigurationManager{}
+		configurationManager.On("ApplyNVConfigurations", mock.Anything, nodeName, mock.Anything).
+			Return(func(
+				batchCtx context.Context,
+				_ string,
+				requests []types.NVConfigurationRequest,
+			) ([]types.DeviceNVConfigurationResult, error) {
+				results := make([]types.DeviceNVConfigurationResult, len(requests))
+				errs := make([]error, len(requests))
+				for index, request := range requests {
+					if request.Skip {
+						results[index] = types.DeviceNVConfigurationResult{Device: request.Device, Skipped: true}
+						continue
+					}
+					result, err := configurationManager.ApplyNVConfiguration(batchCtx, request.Device, request.Options)
+					results[index] = types.DeviceNVConfigurationResult{Device: request.Device, Result: result, Err: err}
+					errs[index] = err
+				}
+				return results, errors.Join(errs...)
+			}).Maybe()
+		configurationManager.On("ApplyRuntimeConfigurations", mock.Anything, nodeName, mock.Anything).
+			Return(func(
+				batchCtx context.Context,
+				_ string,
+				requests []types.RuntimeConfigurationRequest,
+			) ([]types.DeviceRuntimeConfigurationResult, error) {
+				results := make([]types.DeviceRuntimeConfigurationResult, len(requests))
+				errs := make([]error, len(requests))
+				for index, request := range requests {
+					if request.Skip {
+						results[index] = types.DeviceRuntimeConfigurationResult{Device: request.Device, Skipped: true}
+						continue
+					}
+					result, err := configurationManager.ApplyRuntimeConfiguration(batchCtx, request.Device)
+					results[index] = types.DeviceRuntimeConfigurationResult{Device: request.Device, Result: result, Err: err}
+					errs[index] = err
+				}
+				return results, errors.Join(errs...)
+			}).Maybe()
 		firmwareManager = &firmwareMocks.FirmwareManager{}
 		maintenanceManager = &maintenanceMocks.MaintenanceManager{}
 		hostUtils = &hostMocks.HostUtils{}
@@ -786,6 +824,64 @@ var _ = Describe("NicDeviceReconciler", func() {
 
 			configurationManager.AssertNotCalled(GinkgoT(), "ApplyRuntimeConfiguration", mock.Anything, mock.Anything)
 			maintenanceManager.AssertExpectations(GinkgoT())
+		})
+
+		It("reports each device's NV batch result independently", func() {
+			applyErr := errors.New("second device apply failed")
+			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, matchFirstDevice).Return(true, true, nil, nil)
+			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, matchSecondDevice).Return(true, true, nil, nil)
+			configurationManager.On("ApplyNVConfiguration", mock.Anything, matchFirstDevice, mock.Anything).
+				Return(&types.ConfigurationApplyResult{Status: types.ApplyStatusSuccess, RebootRequired: true}, nil)
+			configurationManager.On("ApplyNVConfiguration", mock.Anything, matchSecondDevice, mock.Anything).
+				Return(&types.ConfigurationApplyResult{Status: types.ApplyStatusFailed, RebootRequired: false}, applyErr)
+			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
+			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
+
+			createDevices()
+
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
+				Type:   consts.ConfigUpdateInProgressCondition,
+				Status: metav1.ConditionTrue,
+				Reason: consts.PendingRebootReason,
+			}))
+			Eventually(func() []metav1.Condition {
+				device := &v1alpha1.NicDevice{}
+				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: secondDeviceName, Namespace: namespaceName}, device)).To(Succeed())
+				return device.Status.Conditions
+			}, timeout).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.ConfigUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.NonVolatileConfigUpdateFailedReason,
+				Message: applyErr.Error(),
+			}))
+		})
+
+		It("reports each device's runtime batch result independently", func() {
+			applyErr := errors.New("second device runtime apply failed")
+			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, matchFirstDevice).Return(false, false, nil, nil)
+			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, matchSecondDevice).Return(false, false, nil, nil)
+			configurationManager.On("ApplyRuntimeConfiguration", mock.Anything, matchFirstDevice).
+				Return(&types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusSuccess}, nil)
+			configurationManager.On("ApplyRuntimeConfiguration", mock.Anything, matchSecondDevice).
+				Return(&types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, applyErr)
+
+			createDevices()
+
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
+				Type:   consts.ConfigUpdateInProgressCondition,
+				Status: metav1.ConditionFalse,
+				Reason: consts.UpdateSuccessfulReason,
+			}))
+			Eventually(func() []metav1.Condition {
+				device := &v1alpha1.NicDevice{}
+				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: secondDeviceName, Namespace: namespaceName}, device)).To(Succeed())
+				return device.Status.Conditions
+			}, timeout).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.ConfigUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.RuntimeConfigUpdateFailedReason,
+				Message: applyErr.Error(),
+			}))
 		})
 	})
 
