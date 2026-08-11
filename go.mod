@@ -5,7 +5,7 @@ go 1.25.0
 require (
 	github.com/Mellanox/maintenance-operator/api v0.3.0
 	github.com/Mellanox/rdmamap v1.2.0
-	github.com/go-logr/logr v1.4.3
+	github.com/go-logr/logr v1.4.4
 	github.com/jaypipes/ghw v0.25.0
 	github.com/jaypipes/pcidb v1.1.1
 	github.com/onsi/ginkgo/v2 v2.32.0
