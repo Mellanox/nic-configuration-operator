@@ -106,8 +106,9 @@ spec:
   * Can be combined with `rawNvConfig` — raw params are merged as overrides on top of Spectrum-X calculated params
   * Only supported on ConnectX-8 (`nicType: 1023`), ConnectX-9 (`nicType: 1025`) and BlueField-3 SuperNIC (`nicType: a2dc`)
   * `version`: Required. Must match the name of a Spectrum-X profile ConfigMap
+  * `platformType`: Required. doSPCX platform identifier defined by the supplied Blueprints profile
   * `overlay`: Optional, default `none`. Set to `l3` for L3 EVPN overlay
-  * `multiplaneMode`: Optional, default `none`. Options: `none`, `swplb`, `hwplb`, `uniplane`
+  * `multiplaneMode`: Optional, default `none`. Options: `none`, `swplb`, `hwplb`
   * `numberOfPlanes`: Optional, default `1`. Options: `1`, `2`, or `4`
 * If a configuration is not set in spec, its non-volatile configuration parameters (if any) should be set to device default.
 
@@ -170,15 +171,16 @@ Reference the profile from a `NicConfigurationTemplate` by using the ConfigMap n
 spectrumXOptimized:
   enabled: true
   version: "example-spectrum-x-profile"
+  platformType: "gb300"
   overlay: "none"
   multiplaneMode: "none"
   numberOfPlanes: 1
 ```
 
 Supported NIC types for Spectrum-X:
-* ConnectX-8 (device ID `1023`) -- supports all multiplane modes
-* ConnectX-9 (device ID `1025`) -- supports all multiplane modes (same configuration as ConnectX-8)
-* BlueField-3 SuperNIC (device ID `a2dc`) -- supports all multiplane modes except `hwplb`
+* ConnectX-8 (device ID `1023`) -- supports `none`, `swplb`, and `hwplb`
+* ConnectX-9 (device ID `1025`) -- supports `none`, `swplb`, and `hwplb`
+* BlueField-3 SuperNIC (device ID `a2dc`) -- supports `none` and `swplb`
 
 Spectrum-X profiles can configure NICs with multiple data planes. Available modes:
 
@@ -187,7 +189,39 @@ Spectrum-X profiles can configure NICs with multiple data planes. Available mode
 | `none` | Single plane (default) | ConnectX-8, ConnectX-9, BF3 SuperNIC | 1 |
 | `swplb` | Software Packet Load Balancing | ConnectX-8, ConnectX-9, BF3 SuperNIC | 2, 4 |
 | `hwplb` | Hardware Packet Load Balancing | ConnectX-8, ConnectX-9 only | 2, 4 |
-| `uniplane` | Uniplane mode | ConnectX-8, ConnectX-9, BF3 SuperNIC | 2 |
+
+`spectrumx.SpectrumXManager` includes the `spectrumx.PlanManager` interface. Before the controller
+starts its existing concurrent per-device NV apply, it calls `PreparePlan` once for the node's
+Spectrum-X device group with the `prepare` stage. It does the same with the `configure` stage before
+the existing concurrent runtime apply. Plan preparation never executes generated plan operations.
+
+The manager creates its command executor internally and points the `dms-cli` child process at the
+Blueprints source tree fixed at `/opt/nvidia/blueprints`. The daemon image build must inject a
+compatible tree at that path, including `planner/`, `installer/`, `data/`, and `plugins/`. When
+`PreparePlan` is called, files are written to:
+
+```text
+/var/lib/blueprints/target-maps/nco-<node>-spcx.json
+/var/lib/blueprints/plans/nco-<node>-spcx-prepare/plan.json
+/var/lib/blueprints/plans/nco-<node>-spcx-prepare/metadata.json
+/var/lib/blueprints/plans/nco-<node>-spcx-configure/plan.json
+/var/lib/blueprints/plans/nco-<node>-spcx-configure/metadata.json
+```
+
+NICs are sorted by function-zero BDF and assigned deterministic target-map rail IDs. The same
+pre-breakout target map is passed to both stages; during `configure`, doSPCX resolves the
+post-breakout inventory after NVConfig is active. The planner does not read `interfaceNameTemplate`;
+interface naming remains an independent NCO capability.
+
+Each stage stores a flat metadata document containing only the planner inputs, including the
+platform, Spectrum-X settings, planner parameters, and target-map digest. A later `PreparePlan`
+call reuses the saved plan when that metadata still matches, the target-map digest is unchanged,
+and the saved plan passes normal validation. Any input change or invalid saved artifact regenerates
+the plan through `dms-cli`. Before applying an individual Spectrum-X device, the configuration
+manager calls `GetPreparedPlan` and fails without changing the device if the stage-specific plan is
+missing, stale, or does not contain that device.
+
+Set `BLUEPRINTS_STATE_DIR` to override `/var/lib/blueprints`.
 
 ##### [Example Spectrum-X NicConfigurationTemplate with multiplane](docs/examples/spectrum-x/example-nicconfigurationtemplate-spectrum-x-multiplane.yaml):
 

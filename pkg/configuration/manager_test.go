@@ -27,6 +27,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/pkg/configuration/mocks"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	nvconfigmocks "github.com/Mellanox/nic-configuration-operator/pkg/nvconfig/mocks"
+	"github.com/Mellanox/nic-configuration-operator/pkg/spectrumx"
 	spcxmocks "github.com/Mellanox/nic-configuration-operator/pkg/spectrumx/mocks"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 )
@@ -940,6 +941,40 @@ var _ = Describe("ConfigurationManager", func() {
 			})
 		})
 
+		Context("with Spectrum-X optimization", func() {
+			var mockSpcXMgr *spcxmocks.SpectrumXManager
+
+			BeforeEach(func() {
+				mockSpcXMgr = spcxmocks.NewSpectrumXManager(GinkgoT())
+				manager.spectrumXConfigManager = mockSpcXMgr
+				device.Spec.Configuration.Template.SpectrumXOptimized = &v1alpha1.SpectrumXOptimizedSpec{Enabled: true}
+			})
+
+			It("requires a matching configure plan before checking or applying runtime configuration", func() {
+				planErr := errors.New("configure plan is stale")
+				mockSpcXMgr.On("GetPreparedPlan", device, spectrumx.PlanStageConfigure).Return(nil, planErr)
+
+				result, err := manager.ApplyRuntimeConfiguration(ctx, device)
+
+				Expect(result.Status).To(Equal(types.ApplyStatusFailed))
+				Expect(err).To(MatchError(ContainSubstring("matching doSPCX configure plan")))
+				Expect(err).To(MatchError(ContainSubstring(planErr.Error())))
+				mockConfigValidation.AssertNotCalled(GinkgoT(), "RuntimeConfigApplied", mock.Anything)
+			})
+
+			It("continues the existing runtime flow when the configure plan matches", func() {
+				mockSpcXMgr.On("GetPreparedPlan", device, spectrumx.PlanStageConfigure).
+					Return(&spectrumx.Plan{Stage: spectrumx.PlanStageConfigure}, nil)
+				mockConfigValidation.On("RuntimeConfigApplied", device).Return(true, nil)
+				mockSpcXMgr.On("RuntimeConfigApplied", device).Return(true, nil)
+
+				result, err := manager.ApplyRuntimeConfiguration(ctx, device)
+
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.Status).To(Equal(types.ApplyStatusNothingToDo))
+			})
+		})
+
 		Context("when applying max read request size", func() {
 			BeforeEach(func() {
 				mockConfigValidation.On("RuntimeConfigApplied", device).Return(false, nil)
@@ -1393,6 +1428,24 @@ var _ = Describe("ConfigurationManager", func() {
 		})
 
 		Describe("ApplyNVConfiguration", func() {
+			BeforeEach(func() {
+				mockSpcXMgr.On("GetPreparedPlan", device, spectrumx.PlanStagePrepare).
+					Return(&spectrumx.Plan{Stage: spectrumx.PlanStagePrepare}, nil).Maybe()
+			})
+
+			It("requires a matching prepare plan before querying or applying NV configuration", func() {
+				missingPlanManager := spcxmocks.NewSpectrumXManager(GinkgoT())
+				missingPlanManager.On("GetPreparedPlan", device, spectrumx.PlanStagePrepare).
+					Return(nil, errors.New("prepare plan is missing"))
+				manager.spectrumXConfigManager = missingPlanManager
+
+				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
+
+				Expect(result.Status).To(Equal(types.ApplyStatusFailed))
+				Expect(err).To(MatchError(ContainSubstring("matching doSPCX prepare plan")))
+				mockNVConfigUtils.AssertNotCalled(GinkgoT(), "QueryNvConfig", mock.Anything, mock.Anything)
+			})
+
 			It("force=false applies the combined params present in the query that differ", func() {
 				mockNVConfigUtils.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(
 					types.NvConfigQuery{NextBootConfig: map[string][]string{"NUM_OF_PF": {"1"}, "LINK_TYPE_P1": {"2"}}}, nil)
@@ -1727,6 +1780,8 @@ var _ = Describe("ConfigurationManager", func() {
 						NetworkBay: &v1alpha1.NicDeviceNetworkBayStatus{Asic: 0},
 					},
 				}
+				fullFlowSpcX.On("GetPreparedPlan", mock.Anything, spectrumx.PlanStagePrepare).
+					Return(&spectrumx.Plan{Stage: spectrumx.PlanStagePrepare}, nil).Maybe()
 			})
 
 			// sriovStaged returns the SRIOV defaults ConstructNvParamMapFromTemplate emits for an empty

@@ -40,6 +40,7 @@ import (
 	firmwareMocks "github.com/Mellanox/nic-configuration-operator/pkg/firmware/mocks"
 	hostMocks "github.com/Mellanox/nic-configuration-operator/pkg/host/mocks"
 	maintenanceMocks "github.com/Mellanox/nic-configuration-operator/pkg/maintenance/mocks"
+	"github.com/Mellanox/nic-configuration-operator/pkg/spectrumx"
 	spectrumxMocks "github.com/Mellanox/nic-configuration-operator/pkg/spectrumx/mocks"
 	"github.com/Mellanox/nic-configuration-operator/pkg/testutils"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
@@ -270,6 +271,52 @@ var _ = Describe("NicDeviceReconciler", func() {
 			// should return false if all false
 			statuses = nicDeviceConfigurationStatuses{&falseStatus1, &falseStatus2, &falseStatus3}
 			Expect(statuses.firmwareUpdateRequired()).To(Equal(false))
+		})
+	})
+
+	Describe("prepareSpectrumXPlan", func() {
+		newSpectrumXDevice := func(name string) *v1alpha1.NicDevice {
+			return &v1alpha1.NicDevice{
+				ObjectMeta: metav1.ObjectMeta{Name: name},
+				Spec: v1alpha1.NicDeviceSpec{Configuration: &v1alpha1.NicDeviceConfigurationSpec{
+					Template: &v1alpha1.ConfigurationTemplateSpec{SpectrumXOptimized: &v1alpha1.SpectrumXOptimizedSpec{Enabled: true}},
+				}},
+			}
+		}
+
+		It("does nothing when no device enables Spectrum-X", func() {
+			statuses := nicDeviceConfigurationStatuses{{device: &v1alpha1.NicDevice{}}}
+
+			Expect(reconciler.prepareSpectrumXPlan(ctx, statuses, spectrumx.PlanStagePrepare)).To(Succeed())
+			spectrumXManager.AssertNotCalled(GinkgoT(), "PreparePlan", mock.Anything, mock.Anything, mock.Anything)
+		})
+
+		DescribeTable("prepares one group before the requested configuration stage",
+			func(stage spectrumx.PlanStage) {
+				first := newSpectrumXDevice("first")
+				second := newSpectrumXDevice("second")
+				statuses := nicDeviceConfigurationStatuses{
+					{device: first},
+					{device: &v1alpha1.NicDevice{}},
+					{device: second},
+				}
+				spectrumXManager.On("PreparePlan", mock.Anything, []*v1alpha1.NicDevice{first, second}, stage).Return(nil).Once()
+
+				Expect(reconciler.prepareSpectrumXPlan(ctx, statuses, stage)).To(Succeed())
+			},
+			Entry("NV prepare", spectrumx.PlanStagePrepare),
+			Entry("runtime configure", spectrumx.PlanStageConfigure),
+		)
+
+		It("returns the group planning error", func() {
+			device := newSpectrumXDevice("first")
+			planErr := errors.New("plan generation failed")
+			spectrumXManager.On("PreparePlan", mock.Anything, []*v1alpha1.NicDevice{device}, spectrumx.PlanStagePrepare).
+				Return(planErr).Once()
+
+			Expect(reconciler.prepareSpectrumXPlan(
+				ctx, nicDeviceConfigurationStatuses{{device: device}}, spectrumx.PlanStagePrepare,
+			)).To(MatchError(planErr))
 		})
 	})
 

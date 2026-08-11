@@ -163,7 +163,7 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			log.Log.V(2).Error(err, "failed to schedule maintenance")
 			return ctrl.Result{}, err
 		}
-		if result.Requeue || result.RequeueAfter != 0 {
+		if !result.IsZero() {
 			return result, nil
 		}
 
@@ -210,11 +210,16 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			log.Log.V(2).Error(err, "failed to schedule maintenance")
 			return ctrl.Result{}, err
 		}
-		if result.Requeue || result.RequeueAfter != 0 {
+		if !result.IsZero() {
 			return result, nil
 		}
 
 		log.Log.Info("maintenance allowed, applying nv config")
+
+		err = r.prepareSpectrumXPlan(ctx, configStatuses, spectrumx.PlanStagePrepare)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("prepare doSPCX NV configuration plan: %w", err)
+		}
 
 		err = runInParallel(ctx, configStatuses, r.applyNvConfig)
 		if err != nil {
@@ -232,6 +237,11 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	log.Log.Info("applying runtime config")
+	err = r.prepareSpectrumXPlan(ctx, configStatuses, spectrumx.PlanStageConfigure)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("prepare doSPCX runtime configuration plan: %w", err)
+	}
+
 	err = runInParallel(ctx, configStatuses, r.applyRuntimeConfig)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -491,6 +501,27 @@ func runInParallel(ctx context.Context, statuses nicDeviceConfigurationStatuses,
 	}
 
 	return nil
+}
+
+func (r *NicDeviceReconciler) prepareSpectrumXPlan(
+	ctx context.Context,
+	statuses nicDeviceConfigurationStatuses,
+	stage spectrumx.PlanStage,
+) error {
+	devices := make([]*v1alpha1.NicDevice, 0, len(statuses))
+	for _, status := range statuses {
+		device := status.device
+		if device != nil && device.Spec.Configuration != nil &&
+			device.Spec.Configuration.Template != nil &&
+			device.Spec.Configuration.Template.SpectrumXOptimized != nil &&
+			device.Spec.Configuration.Template.SpectrumXOptimized.Enabled {
+			devices = append(devices, device)
+		}
+	}
+	if len(devices) == 0 {
+		return nil
+	}
+	return r.SpectrumXManager.PreparePlan(ctx, devices, stage)
 }
 
 // applyRuntimeConfig applies device's runtime spec

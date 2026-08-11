@@ -162,6 +162,17 @@ var _ = Describe("SpectrumXConfigManager", func() {
 		}
 	}
 
+	It("constructs the plan lifecycle as an internal dependency", func() {
+		configManager := NewSpectrumXConfigManager(nil, nil)
+		var planManager PlanManager = configManager
+		internalManager, ok := planManager.(*spectrumXConfigManager)
+
+		Expect(ok).To(BeTrue())
+		Expect(internalManager.execInterface).NotTo(BeNil())
+		Expect(internalManager.blueprintsRoot).To(Equal(defaultBlueprintsRoot))
+		Expect(internalManager.blueprintsStateDir).To(BeEmpty())
+	})
+
 	BeforeEach(func() {
 		dmsMgr = dmsmocks.DMSManager{}
 		dmsCli = dmsmocks.DMSClient{}
@@ -196,15 +207,6 @@ var _ = Describe("SpectrumXConfigManager", func() {
 							PostBreakout: map[string]string{"LINK_TYPE_P1": "2"},
 						},
 					},
-					"uniplane": {
-						"1023": {
-							Breakout: map[int]map[string]string{
-								2: {"NUM_OF_PF": "2", "NUM_OF_PLANES_P1": "0"},
-								4: {"NUM_OF_PF": "4", "NUM_OF_PLANES_P1": "0"},
-							},
-							PostBreakout: map[string]string{"LINK_TYPE_P1": "2"},
-						},
-					},
 				},
 				RuntimeConfig: types.SpectrumXRuntimeConfig{
 					Roce:              []types.ConfigurationParameter{{Name: "r", Value: "x", DMSPath: "/r"}},
@@ -220,11 +222,13 @@ var _ = Describe("SpectrumXConfigManager", func() {
 		}
 
 		manager = &spectrumXConfigManager{
-			dmsManager:        &dmsMgr,
-			spectrumXConfigs:  cfgs,
-			execInterface:     execFake,
-			ccProcesses:       map[string]*ccProcess{},
-			ccTerminationChan: make(chan string, 10),
+			dmsManager:         &dmsMgr,
+			spectrumXConfigs:   cfgs,
+			execInterface:      execFake,
+			blueprintsRoot:     defaultBlueprintsRoot,
+			blueprintsStateDir: "",
+			ccProcesses:        map[string]*ccProcess{},
+			ccTerminationChan:  make(chan string, 10),
 		}
 
 		beforeDevice()
@@ -621,13 +625,13 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			})
 
 			It("checks CNP DSCP for multiple ports", func() {
-				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeUniplane
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
 				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
 					{PCI: "0000:00:00.0", NetworkInterface: "eth0", RdmaInterface: "mlx5_0"},
 					{PCI: "0000:00:00.1", NetworkInterface: "eth1", RdmaInterface: "mlx5_1"},
 				}
-				createCnpDscpFile("eth0", "48") // uniplane expects 48
+				createCnpDscpFile("eth0", "48")
 				createCnpDscpFile("eth1", "48")
 
 				dmsCli.On("GetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(map[string]string{"/r": "x"}, nil)
@@ -740,7 +744,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			})
 
 			It("writes CNP DSCP for multiple ports", func() {
-				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeUniplane
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
 				device.Status.Ports = []v1alpha1.NicDevicePortSpec{
 					{PCI: "0000:00:00.0", NetworkInterface: "eth0", RdmaInterface: "mlx5_0"},
@@ -766,7 +770,6 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				_, err := manager.ApplyRuntimeConfig(device)
 				Expect(err).NotTo(HaveOccurred())
 
-				// uniplane expects 48
 				data0, err := os.ReadFile(filepath.Join(dir0, "cnp_dscp"))
 				Expect(err).NotTo(HaveOccurred())
 				Expect(string(data0)).To(Equal("48"))
@@ -890,7 +893,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				cfgs["v1"].RuntimeConfig.AdaptiveRouting = []types.ConfigurationParameter{
 					{Name: "ar_match", Value: "val2", DMSPath: "/ar/match", Multiplane: consts.MultiplaneModeHwplb},
 					{Name: "ar_skip_swplb", Value: "val3", DMSPath: "/ar/skip1", Multiplane: consts.MultiplaneModeSwplb},
-					{Name: "ar_skip_uniplane", Value: "val4", DMSPath: "/ar/skip2", Multiplane: consts.MultiplaneModeUniplane},
+					{Name: "ar_skip_none", Value: "val4", DMSPath: "/ar/skip2", Multiplane: consts.MultiplaneModeNone},
 				}
 				cfgs["v1"].RuntimeConfig.CongestionControl = []types.ConfigurationParameter{
 					{Name: "cc_match", Value: "val5", DMSPath: "/cc/match"},
@@ -1030,13 +1033,13 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 			It("filters runtime config params by Multiplane mode", func() {
 				device.Status.Type = "1023"
-				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeUniplane
+				device.Spec.Configuration.Template.SpectrumXOptimized.MultiplaneMode = consts.MultiplaneModeSwplb
 				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 2
 
 				cfgs["v1"].RuntimeConfig.Roce = []types.ConfigurationParameter{
-					{Name: "roce_match", Value: "val1", DMSPath: "/roce/match", Multiplane: consts.MultiplaneModeUniplane},
+					{Name: "roce_match", Value: "val1", DMSPath: "/roce/match", Multiplane: consts.MultiplaneModeSwplb},
 					{Name: "roce_skip_hwplb", Value: "val2", DMSPath: "/roce/skip1", Multiplane: consts.MultiplaneModeHwplb},
-					{Name: "roce_skip_swplb", Value: "val3", DMSPath: "/roce/skip2", Multiplane: consts.MultiplaneModeSwplb},
+					{Name: "roce_skip_none", Value: "val3", DMSPath: "/roce/skip2", Multiplane: consts.MultiplaneModeNone},
 				}
 				cfgs["v1"].RuntimeConfig.AdaptiveRouting = []types.ConfigurationParameter{
 					{Name: "ar_no_filter", Value: "val4", DMSPath: "/ar/match"},
@@ -1050,7 +1053,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 				cfgs["v1"].UseSoftwareCCAlgorithm = false
 
 				expectedRoce := []types.ConfigurationParameter{
-					{Name: "roce_match", Value: "val1", DMSPath: "/roce/match", Multiplane: consts.MultiplaneModeUniplane},
+					{Name: "roce_match", Value: "val1", DMSPath: "/roce/match", Multiplane: consts.MultiplaneModeSwplb},
 				}
 
 				dmsCli.On("SetParameters", expectedRoce).Return(nil)

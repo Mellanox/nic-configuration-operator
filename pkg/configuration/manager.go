@@ -229,6 +229,9 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 	if device.Spec.Configuration == nil {
 		return &types.ConfigurationApplyResult{Status: types.ApplyStatusNothingToDo}, nil
 	}
+	if err := h.requirePreparedSpectrumXPlan(device, spectrumx.PlanStagePrepare); err != nil {
+		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+	}
 
 	// 1. Query current nv config for every port.
 	nvConfigsForPorts, err := h.queryNvConfigs(ctx, device)
@@ -388,6 +391,9 @@ func (h configurationManager) ApplyRuntimeConfiguration(ctx context.Context, dev
 
 	if device.Spec.Configuration == nil || device.Spec.Configuration.Template == nil {
 		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusNothingToDo}, nil
+	}
+	if err := h.requirePreparedSpectrumXPlan(device, spectrumx.PlanStageConfigure); err != nil {
+		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}
 
 	alreadyApplied, err := h.configValidation.RuntimeConfigApplied(device)
@@ -575,6 +581,19 @@ func spectrumXEnabled(device *v1alpha1.NicDevice) bool {
 		device.Spec.Configuration.Template != nil &&
 		device.Spec.Configuration.Template.SpectrumXOptimized != nil &&
 		device.Spec.Configuration.Template.SpectrumXOptimized.Enabled
+}
+
+func (h configurationManager) requirePreparedSpectrumXPlan(device *v1alpha1.NicDevice, stage spectrumx.PlanStage) error {
+	if !spectrumXEnabled(device) {
+		return nil
+	}
+	if h.spectrumXConfigManager == nil {
+		return fmt.Errorf("matching doSPCX %s plan is required for device %q: Spectrum-X manager is not configured", stage, device.Name)
+	}
+	if _, err := h.spectrumXConfigManager.GetPreparedPlan(device, stage); err != nil {
+		return fmt.Errorf("matching doSPCX %s plan is required for device %q: %w", stage, device.Name, err)
+	}
+	return nil
 }
 
 // hasNetworkBaySpec reports whether the device has a Network Bay template configured AND was

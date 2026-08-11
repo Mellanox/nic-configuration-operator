@@ -163,11 +163,12 @@ func NewConfigurationManager(
 
 #### NV Configuration Flow
 
-1. **Query** current NV config via `nvConfigUtils.QueryNvConfig()`
-2. **Network Bay `set_system_conf` (baseline, applied first)** — for ConnectX-9 Network Bay devices (`template.networkBay` set and `status.networkBay` detected), the per-ASIC `set_system_conf <conf>[<asic>]` is applied **before** the regular / Spectrum-X params so those layer on top of it (override priority: `rawNvConfig` > Spectrum-X > system_conf). Drift is detected per-param via `nvconfig.ValidateSystemConf()`, which returns the overall match bit plus the names of the mismatched params; the manager ignores MISMATCH rows for params owned by a higher-priority layer (matched by exact per-index key — `rawNvConfig` index-range syntax like `MODULE_SPLIT_M0[0..3]` is rejected by CRD validation, so keys are always concrete); a change requires a reboot. Skipped for devices with `ResetToDefault`
-3. **Diff** desired vs current parameters. Params not present in the device's next-boot config are unsupported on this device (e.g. hidden because `ADVANCED_PCI_SETTINGS` is off) and are skipped — the operator does **not** auto-manage `ADVANCED_PCI_SETTINGS`; drive it explicitly via `template.rawNvConfig` if needed
-4. **Batch set** via `nvConfigUtils.SetNvConfigParametersBatch()` — one agentless `dms-cli` `/nvidia/nvconfig/apply` action per PCI target. The action carries the existing raw batch plus `with-default` and `force`; DMS compiles it into one `mlxconfig` invocation. Apply reports `ApplyStatusPartiallyApplied` when any desired param was skipped as unsupported
-5. **Optional reset** — `mlxfwreset` unless `ConfigurationOptions.SkipReset=true`
+1. **Spectrum-X plan precondition** — Spectrum-X devices require a matching cached `prepare` plan; the method returns `ApplyStatusFailed` before querying or changing hardware otherwise
+2. **Query** current NV config via `nvConfigUtils.QueryNvConfig()`
+3. **Network Bay `set_system_conf` (baseline, applied first)** — for ConnectX-9 Network Bay devices (`template.networkBay` set and `status.networkBay` detected), the per-ASIC `set_system_conf <conf>[<asic>]` is applied **before** the regular / Spectrum-X params so those layer on top of it (override priority: `rawNvConfig` > Spectrum-X > system_conf). Drift is detected per-param via `nvconfig.ValidateSystemConf()`, which returns the overall match bit plus the names of the mismatched params; the manager ignores MISMATCH rows for params owned by a higher-priority layer (matched by exact per-index key — `rawNvConfig` index-range syntax like `MODULE_SPLIT_M0[0..3]` is rejected by CRD validation, so keys are always concrete); a change requires a reboot. Skipped for devices with `ResetToDefault`
+4. **Diff** desired vs current parameters. Params not present in the device's next-boot config are unsupported on this device (e.g. hidden because `ADVANCED_PCI_SETTINGS` is off) and are skipped — the operator does **not** auto-manage `ADVANCED_PCI_SETTINGS`; drive it explicitly via `template.rawNvConfig` if needed
+5. **Batch set** via `nvConfigUtils.SetNvConfigParametersBatch()` — one agentless `dms-cli` `/nvidia/nvconfig/apply` action per PCI target. The action carries the existing raw batch plus `with-default` and `force`; DMS compiles it into one `mlxconfig` invocation. Apply reports `ApplyStatusPartiallyApplied` when any desired param was skipped as unsupported
+6. **Optional reset** — `mlxfwreset` unless `ConfigurationOptions.SkipReset=true`
 
 **`ConfigurationOptions`:**
 - `SkipReset` — skip `mlxfwreset` after applying NV config
@@ -176,8 +177,9 @@ func NewConfigurationManager(
 
 #### Runtime Configuration Flow
 
-1. **PCI MaxReadRequest** — applied via sysfs
-2. **QoS settings** — trust mode and PFC applied via `DMSClient.SetQoSSettings()`
+1. **Spectrum-X plan precondition** — Spectrum-X devices require a matching cached `configure` plan before runtime validation or application
+2. **PCI MaxReadRequest** — applied via sysfs
+3. **QoS settings** — trust mode and PFC applied via `DMSClient.SetQoSSettings()`
 
 #### ResetToDefault Behavior
 
@@ -299,13 +301,13 @@ dmsc -a localhost:9339 --insecure --target 0000:08:00.0 set --timeout 5m \
 
 ### pkg/dmscli/ — Agentless DMS CLI API
 
-Source: `pkg/dmscli/nvconfig.go`
+Sources: `pkg/dmscli/nvconfig.go`, `pkg/dmscli/blueprints.go`
 
 `pkg/dmscli` wraps the local, agentless `dms-cli` executable with package-level
 functions; there is no client object or stored runtime state. Its first
-supported action is bulk NVConfig apply. The request already models both raw
-native parameters and typed XPath operations so other projects and future
-doSPCX integration can reuse the same API.
+supported actions are bulk NVConfig apply and Blueprints plan generation. The
+request already models both raw native parameters and typed XPath operations so
+other projects and later doSPCX plan execution can reuse the same API.
 
 ```go
 type NVConfigXPathOperation struct {
@@ -332,6 +334,22 @@ func ApplyNVConfig(
     execInterface execUtils.Interface,
     request ApplyNVConfigRequest,
 ) (*ApplyNVConfigResult, error)
+
+type BlueprintPlanRequest struct {
+	BlueprintsRoot     string
+	BlueprintsStateDir string
+	Profile            string
+	Name               string
+	Stage              string
+	TargetMapFile      string
+	Params             []string // key=value; values must not contain commas
+}
+
+func GenerateBlueprintPlan(
+    ctx context.Context,
+    execInterface execUtils.Interface,
+    request BlueprintPlanRequest,
+) (*BlueprintPlanResult, error)
 ```
 
 The caller supplies the repository-standard `k8s.io/utils/exec.Interface`; this
@@ -353,11 +371,92 @@ populates only `Raw`, `WithDefault`, and `Force`; `ports` and `typed` are omitte
 until doSPCX planning and typed XPath generation are introduced in a later
 phase.
 
+Blueprint planning uses this command shape:
+
+```text
+dms-cli --json /nvidia/blueprints/plan profile=<profile> name=<name> \
+  stage=<prepare|configure> target-map-file=file:<path> \
+  params=deployment_mode=host-k8s,planes=<count>
+```
+
+For Blueprints planning, the wrapper sets `BLUEPRINTS_ROOT` and
+`BLUEPRINTS_STATE_DIR` only on the `dms-cli` child process.
+`SpectrumXConfigManager` supplies the fixed `/opt/nvidia/blueprints` path and
+creates its command executor internally. The daemon image must inject a
+compatible DMS Blueprints source tree there. The tree must contain `planner/`,
+`installer/`, `data/`, and `plugins/`, because that is the external-root layout
+expected by the DMS action wrapper. Existing process environment entries are
+preserved, and inherited entries for either variable are replaced.
+
+`pkg/dmscli` is the low-level command wrapper. `pkg/spectrumx.PlanManager` is the
+plan lifecycle abstraction included by `SpectrumXManager`; it owns
+target-map construction, generation, cache validation, persistence, and
+retrieval.
+
+`PreparePlan` writes a schema-v3 target map and the returned prepare or
+configure plan below `${BLUEPRINTS_STATE_DIR:-/var/lib/blueprints}`. Neither
+stage executes any generated operation. Target-map rails are assigned by sorting
+the participating function-zero PCI BDFs. Both stages receive the same
+pre-breakout map; the configure stage resolves post-breakout devices from the
+active hardware inventory. The NicDevice reconciler prepares one group plan
+before each existing concurrent per-device NV or runtime apply.
+`interfaceNameTemplate` is not an input to doSPCX planning.
+
+Each plan directory also contains `metadata.json`, a flat document with only the
+inputs used for that stage and the target-map digest. A later `PreparePlan` call
+reuses the saved plan when the metadata exactly matches the current inputs, the
+target-map file still has the recorded digest, and the plan passes the same
+structural validation as a newly generated plan. Missing, malformed, or changed
+cache artifacts cause normal regeneration through `dms-cli`. Individual
+Spectrum-X apply calls use `GetPreparedPlan` to require matching inputs and
+device membership before touching hardware.
+
 ---
 
 ### pkg/spectrumx/ — Spectrum-X Configuration
 
-Source: `pkg/spectrumx/spectrumx.go`
+Sources: `pkg/spectrumx/spectrumx.go`, `pkg/spectrumx/prepareplan.go`
+
+#### PlanManager Interface
+
+```go
+type PlanStage string
+
+const (
+    PlanStagePrepare   PlanStage = "prepare"
+    PlanStageConfigure PlanStage = "configure"
+)
+
+type Plan struct {
+    Name  string
+    Stage PlanStage
+    JSON  json.RawMessage
+}
+
+type PlanManager interface {
+    PreparePlan(ctx context.Context, devices []*v1alpha1.NicDevice, stage PlanStage) error
+    GetPreparedPlan(device *v1alpha1.NicDevice, stage PlanStage) (*Plan, error)
+}
+```
+
+`PreparePlan` generates or reuses the stage-specific plan for the supplied
+Spectrum-X device group. It is a no-op when none of the supplied devices enable
+Spectrum-X. `GetPreparedPlan` retrieves the persisted plan without invoking
+`dms-cli`, and rejects it unless its cached inputs and target map still match the
+supplied device. The existing Spectrum-X manager implementation provides both
+methods and creates the command executor internally:
+
+```go
+type SpectrumXManager interface {
+    PlanManager
+    // Existing Spectrum-X configuration methods...
+}
+
+func NewSpectrumXConfigManager(
+    dmsManager dms.DMSManager,
+    spectrumXConfigs map[string]*types.SpectrumXConfig,
+) SpectrumXManager
+```
 
 #### SpectrumXManager Interface
 
@@ -540,7 +639,7 @@ type ConfigurationParameter struct {
     AlternativeValue   string           // Alternative value representation accepted during checks
     DeviceId           string           // Device ID filter (e.g., "1023", "a2dc")
     Breakout           int              // Plane count filter (1, 2, 4)
-    Multiplane         string           // Multiplane mode filter (none, swplb, hwplb, uniplane)
+    Multiplane         string           // Multiplane mode filter (none, swplb, hwplb)
     IgnoreError        bool             // Suppress errors for this parameter in batch operations
     HwplbFirstPortOnly bool             // Limit DMS interface expansion to the first port in hwplb
 }
@@ -651,7 +750,7 @@ Source: `pkg/consts/consts.go`
 
 #### Multiplane Modes
 
-`MultiplaneModeNone` (`"none"`), `MultiplaneModeSwplb` (`"swplb"`), `MultiplaneModeHwplb` (`"hwplb"`), `MultiplaneModeUniplane` (`"uniplane"`)
+`MultiplaneModeNone` (`"none"`), `MultiplaneModeSwplb` (`"swplb"`), `MultiplaneModeHwplb` (`"hwplb"`)
 
 #### Trust Modes
 
@@ -752,8 +851,9 @@ type QosSpec struct {
 type SpectrumXOptimizedSpec struct {
     Enabled        bool
     Version        string // "RA1.3", "RA2.0", "RA2.1", "RA2.2"
+    PlatformType   string // Platform identifier defined by the supplied Blueprints profile
     Overlay        string // "l3" or "none"
-    MultiplaneMode string // "none", "swplb", "hwplb", "uniplane"
+    MultiplaneMode string // "none", "swplb", or "hwplb"
     NumberOfPlanes int    // 1, 2, or 4
 }
 ```

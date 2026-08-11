@@ -1346,6 +1346,12 @@ SpectrumXOptimizedSpec enables Spectrum-X specific optimizations
 <td><p>Version of the Spectrum-X architecture to optimize for. Should match the name of the config map with Spectrum-X profile</p></td>
 </tr>
 <tr>
+<td><code>platformType</code><br />
+<em>string</em></td>
+<td><em>(Optional)</em>
+<p>Platform type used by the doSPCX planner to select a recipe from the supplied profile.</p></td>
+</tr>
+<tr>
 <td><code>overlay</code><br />
 <em>string</em></td>
 <td><em>(Optional)</em>
@@ -1355,7 +1361,7 @@ SpectrumXOptimizedSpec enables Spectrum-X specific optimizations
 <td><code>multiplaneMode</code><br />
 <em>string</em></td>
 <td><em>(Optional)</em>
-<p>Multiplane mode to be configured Can be “none”, “swplb”, “hwplb”, or “uniplane”</p></td>
+<p>Multiplane mode to be configured Can be “none”, “swplb”, or “hwplb”</p></td>
 </tr>
 <tr>
 <td><code>numberOfPlanes</code><br />
@@ -1368,4 +1374,4 @@ SpectrumXOptimizedSpec enables Spectrum-X specific optimizations
 
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-*Generated with `gen-crd-api-reference-docs` on git commit `85f5e0d`.*
+*Generated with `gen-crd-api-reference-docs` on git commit `3b1c1e8`.*
