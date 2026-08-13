@@ -18,6 +18,7 @@ package spectrumx
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -155,7 +156,38 @@ var _ = Describe("doSPCX planning", func() {
 	planResponseForPlatform := func(name, profile, stage, platform string, planes, deviceCount int) []byte {
 		devices := make([]map[string]any, deviceCount)
 		for index := range devices {
-			devices[index] = map[string]any{"bdf": index}
+			bdf := fmt.Sprintf("0000:%02x:00.0", index+1)
+			devices[index] = map[string]any{
+				"bdf":        bdf,
+				"dms_target": "pci/" + bdf,
+				"network":    "ew",
+				"rail":       index,
+				"plane":      0,
+			}
+		}
+		groupName := "breakout"
+		groups := []any{}
+		if stage == configureStage {
+			groupName = "link-runtime"
+		}
+		operationID := "test." + groupName
+		groups = append(groups, map[string]any{
+			"name":           groupName,
+			"stage":          stage,
+			"order":          10,
+			"scope":          "per_device",
+			"operation_refs": []string{operationID},
+		})
+		if stage == prepareStage {
+			groups = append(groups, map[string]any{
+				"name":            "post-breakout",
+				"stage":           stage,
+				"order":           20,
+				"scope":           "mixed",
+				"device_view":     "post_breakout",
+				"requires_reboot": true,
+				"operation_refs":  []string{},
+			})
 		}
 		response, err := json.Marshal(map[string]any{
 			"plan":    name,
@@ -164,14 +196,27 @@ var _ = Describe("doSPCX planning", func() {
 			"stage":   stage,
 			"plan-json": map[string]any{
 				"plan": map[string]any{
-					"name":        name,
-					"family":      "spcx",
-					"profile":     profile,
-					"stage":       stage,
-					"params":      map[string]any{"deployment_mode": "host-k8s", "planes": planes},
-					"detected_hw": map[string]any{"platform_type": platform},
-					"devices":     devices,
-					"semantic":    map[string]any{"groups": []any{map[string]any{"name": stage}}},
+					"name":         name,
+					"family":       "spcx",
+					"profile":      profile,
+					"stage":        stage,
+					"path_dialect": semanticPathDialect,
+					"params":       map[string]any{"deployment_mode": "host-k8s", "planes": planes},
+					"detected_hw":  map[string]any{"platform_type": platform},
+					"devices":      devices,
+					"runtime_ctx":  map[string]any{"deployment_mode": "host-k8s", "rdma_topology": "per_pf"},
+					"operations": map[string]any{
+						operationID: map[string]any{
+							"path":            "/nvidia/test",
+							"values":          map[string]any{"enabled": true},
+							"source_feature":  "test",
+							"kind":            "set",
+							"target_class":    "pf_netdev_all",
+							"target_role":     "ew",
+							"execution_group": groupName,
+						},
+					},
+					"semantic": map[string]any{"groups": groups},
 				},
 				"artifacts": map[string]any{"manifest": []any{}},
 			},
@@ -203,6 +248,8 @@ var _ = Describe("doSPCX planning", func() {
 		Expect(plan.Name).To(Equal(planName))
 		Expect(plan.Stage).To(Equal(PlanStagePrepare))
 		Expect(plan.JSON).NotTo(BeEmpty())
+		Expect(plan.Semantic).NotTo(BeNil())
+		Expect(plan.Semantic.Groups).To(HaveLen(2))
 		planPath := filepath.Join(stateDir, "plans", planName, "plan.json")
 		planContent, err := os.ReadFile(planPath)
 		Expect(err).NotTo(HaveOccurred())
