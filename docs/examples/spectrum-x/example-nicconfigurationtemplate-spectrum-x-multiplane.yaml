@@ -33,6 +33,7 @@ spec:
       spectrumXOptimized:
           enabled: true
           version: "RA2.1"
+          platformType: "gb300"
           overlay: "none"
           multiplaneMode: "hwplb" # Hardware Packet Load Balancing, ConnectX-8 only
           numberOfPlanes: 4

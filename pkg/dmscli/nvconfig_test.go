@@ -30,6 +30,7 @@ import (
 type recordedCommand struct {
 	executable string
 	args       []string
+	command    *execTesting.FakeCmd
 }
 
 type capturedLogEntry struct {
@@ -89,6 +90,7 @@ func fakeExecutor(output []byte, commandErr error, commands *[]recordedCommand) 
 			*commands = append(*commands, recordedCommand{
 				executable: executable,
 				args:       append([]string(nil), args...),
+				command:    command,
 			})
 			return command
 		},

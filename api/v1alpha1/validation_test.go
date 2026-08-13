@@ -58,6 +58,9 @@ var _ = Describe("NicConfigurationTemplate CEL validation", func() {
 	})
 
 	newNicConfigurationTemplate := func(name string, linkType LinkTypeEnum, numVfs int, spectrumXSpec *SpectrumXOptimizedSpec) *NicConfigurationTemplate {
+		if spectrumXSpec != nil && spectrumXSpec.Enabled && spectrumXSpec.PlatformType == "" {
+			spectrumXSpec.PlatformType = "gb300"
+		}
 		return &NicConfigurationTemplate{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
@@ -86,6 +89,21 @@ var _ = Describe("NicConfigurationTemplate CEL validation", func() {
 
 	It("allows enabled SpectrumXOptimized only with Ethernet and numVfs==1", func() {
 		obj := newNicConfigurationTemplate("spcx-valid", "Ethernet", 1, &SpectrumXOptimizedSpec{Enabled: true, Version: "RA2.0"})
+		Expect(k8sClient.Create(ctx, obj)).To(Succeed())
+	})
+
+	It("requires platformType when SpectrumXOptimized is enabled", func() {
+		obj := newNicConfigurationTemplate("spcx-platform-required", "Ethernet", 1, &SpectrumXOptimizedSpec{Enabled: true, Version: "RA2.0"})
+		obj.Spec.Template.SpectrumXOptimized.PlatformType = ""
+		err := k8sClient.Create(ctx, obj)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("platformType is required"))
+	})
+
+	It("allows a platformType defined by a supplied profile", func() {
+		obj := newNicConfigurationTemplate("spcx-platform-custom", "Ethernet", 1, &SpectrumXOptimizedSpec{
+			Enabled: true, Version: "RA2.0", PlatformType: "custom-lab-platform",
+		})
 		Expect(k8sClient.Create(ctx, obj)).To(Succeed())
 	})
 
@@ -325,17 +343,6 @@ var _ = Describe("NicConfigurationTemplate CEL validation", func() {
 			Expect(err.Error()).To(ContainSubstring("when MultiplaneMode is not none, numberOfPlanes must not be 1"))
 		})
 
-		It("rejects MultiplaneMode=uniplane with numberOfPlanes=1", func() {
-			obj := newNicConfigurationTemplate("spcx-uniplane-1plane", "Ethernet", 1, &SpectrumXOptimizedSpec{
-				Enabled:        true,
-				Version:        "RA2.1",
-				MultiplaneMode: "uniplane",
-				NumberOfPlanes: 1,
-			})
-			err := k8sClient.Create(ctx, obj)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("when MultiplaneMode is not none, numberOfPlanes must not be 1"))
-		})
 	})
 
 	Context("custom profile name validation", func() {
@@ -398,7 +405,7 @@ var _ = Describe("NicConfigurationTemplate CEL validation", func() {
 			Expect(k8sClient.Create(ctx, obj)).To(Succeed())
 		})
 
-		It("allows uniplane with NicType a2dc (BlueField-3)", func() {
+		It("rejects removed uniplane mode", func() {
 			obj := newNicConfigurationTemplate("uniplane-bf3-valid", "Ethernet", 1, &SpectrumXOptimizedSpec{
 				Enabled:        true,
 				Version:        "RA2.1",
@@ -406,7 +413,9 @@ var _ = Describe("NicConfigurationTemplate CEL validation", func() {
 				NumberOfPlanes: 2,
 			})
 			obj.Spec.NicSelector.NicType = nicTypeBlueField3
-			Expect(k8sClient.Create(ctx, obj)).To(Succeed())
+			err := k8sClient.Create(ctx, obj)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("multiplaneMode"))
 		})
 
 		It("allows none with NicType a2dc (BlueField-3)", func() {

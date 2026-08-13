@@ -181,10 +181,9 @@ const (
 	SKIP_VM_CHECK                             = "SKIP_VM_CHECK"
 	SKIP_DEVICE_ON_DISCOVERY_ERROR            = "SKIP_DEVICE_ON_DISCOVERY_ERROR"
 
-	MultiplaneModeNone     = "none"
-	MultiplaneModeSwplb    = "swplb"
-	MultiplaneModeHwplb    = "hwplb"
-	MultiplaneModeUniplane = "uniplane"
+	MultiplaneModeNone  = "none"
+	MultiplaneModeSwplb = "swplb"
+	MultiplaneModeHwplb = "hwplb"
 
 	HostRestrictionLevelPrivileged = "privileged"
 	HostRestrictionLevelRestricted = "restricted"

@@ -45,6 +45,7 @@ const cnpDscpExpectedValue = "48"
 var mlxregBinary = "/usr/bin/mlxreg"
 
 type SpectrumXManager interface {
+	PlanManager
 	// GetBreakoutMlxConfig returns the breakout mlxconfig map for the device based on its SpectrumX spec
 	GetBreakoutMlxConfig(device *v1alpha1.NicDevice) (map[string]string, error)
 	// GetPostBreakoutMlxConfig returns the post-breakout mlxconfig map for the device
@@ -68,13 +69,18 @@ type SpectrumXManager interface {
 	RemoveConfig(version string)
 }
 
+var _ SpectrumXManager = (*spectrumXConfigManager)(nil)
+
 type spectrumXConfigManager struct {
 	// configMutex guards spectrumXConfigs, which is mutated at runtime by the
 	// SpectrumXProfileReconciler while being read from reconcile goroutines.
-	configMutex      sync.RWMutex
-	spectrumXConfigs map[string]*types.SpectrumXConfig
-	dmsManager       dms.DMSManager
-	execInterface    execUtils.Interface
+	configMutex        sync.RWMutex
+	spectrumXConfigs   map[string]*types.SpectrumXConfig
+	planMutex          sync.RWMutex
+	dmsManager         dms.DMSManager
+	execInterface      execUtils.Interface
+	blueprintsRoot     string
+	blueprintsStateDir string
 
 	ccProcesses       map[string]*ccProcess
 	ccTerminationChan chan string // buffered; carries RDMA iface name on unexpected exit
@@ -833,17 +839,22 @@ func (m *spectrumXConfigManager) GetCCTerminationChannel() <-chan string {
 	return m.ccTerminationChan
 }
 
-func NewSpectrumXConfigManager(dmsManager dms.DMSManager, spectrumXConfigs map[string]*types.SpectrumXConfig) SpectrumXManager {
+func NewSpectrumXConfigManager(
+	dmsManager dms.DMSManager,
+	spectrumXConfigs map[string]*types.SpectrumXConfig,
+) SpectrumXManager {
 	// Ensure the map is always usable so SetConfig is safe even when started with no configs
 	// (the operator daemon loads profiles at runtime from ConfigMaps via SetConfig).
 	if spectrumXConfigs == nil {
 		spectrumXConfigs = map[string]*types.SpectrumXConfig{}
 	}
 	return &spectrumXConfigManager{
-		dmsManager:        dmsManager,
-		spectrumXConfigs:  spectrumXConfigs,
-		execInterface:     execUtils.New(),
-		ccProcesses:       make(map[string]*ccProcess),
-		ccTerminationChan: make(chan string, 10),
+		dmsManager:         dmsManager,
+		spectrumXConfigs:   spectrumXConfigs,
+		execInterface:      execUtils.New(),
+		blueprintsRoot:     defaultBlueprintsRoot,
+		blueprintsStateDir: "",
+		ccProcesses:        make(map[string]*ccProcess),
+		ccTerminationChan:  make(chan string, 10),
 	}
 }

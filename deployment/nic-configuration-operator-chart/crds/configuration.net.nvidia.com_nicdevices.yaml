@@ -253,12 +253,11 @@ spec:
                             default: none
                             description: |-
                               Multiplane mode to be configured
-                              Can be "none", "swplb", "hwplb", or "uniplane"
+                              Can be "none", "swplb", or "hwplb"
                             enum:
                             - none
                             - swplb
                             - hwplb
-                            - uniplane
                             type: string
                           numberOfPlanes:
                             default: 1
@@ -276,6 +275,10 @@ spec:
                             enum:
                             - l3
                             - none
+                            type: string
+                          platformType:
+                            description: Platform type used by the doSPCX planner
+                              to select a recipe from the supplied profile.
                             type: string
                           version:
                             description: Version of the Spectrum-X architecture to
@@ -297,6 +300,9 @@ spec:
                           rule: '!has(self.multiplaneMode) || !has(self.numberOfPlanes)
                             || self.multiplaneMode == ''none'' || self.numberOfPlanes
                             != 1'
+                        - message: platformType is required when Spectrum-X optimization
+                            is enabled
+                          rule: '!self.enabled || has(self.platformType)'
                     required:
                     - numVfs
                     type: object

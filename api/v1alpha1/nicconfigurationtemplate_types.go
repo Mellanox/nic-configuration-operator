@@ -123,12 +123,16 @@ type GpuDirectOptimizedSpec struct {
 // SpectrumXOptimizedSpec enables Spectrum-X specific optimizations
 // +kubebuilder:validation:XValidation:rule="!has(self.multiplaneMode) || !has(self.numberOfPlanes) || self.multiplaneMode != 'none' || self.numberOfPlanes == 1",message="when MultiplaneMode is none, numberOfPlanes must be 1"
 // +kubebuilder:validation:XValidation:rule="!has(self.multiplaneMode) || !has(self.numberOfPlanes) || self.multiplaneMode == 'none' || self.numberOfPlanes != 1",message="when MultiplaneMode is not none, numberOfPlanes must not be 1"
+// +kubebuilder:validation:XValidation:rule="!self.enabled || has(self.platformType)",message="platformType is required when Spectrum-X optimization is enabled"
 type SpectrumXOptimizedSpec struct {
 	// Optimize Spectrum X
 	Enabled bool `json:"enabled"`
 	// Version of the Spectrum-X architecture to optimize for. Should match the name of the config map with Spectrum-X profile
 	// +required
 	Version string `json:"version"`
+	// Platform type used by the doSPCX planner to select a recipe from the supplied profile.
+	// +optional
+	PlatformType string `json:"platformType,omitempty"`
 	// Overlay mode to be configured
 	// Can be "l3" or "none"
 	// +kubebuilder:validation:Enum=l3;none
@@ -136,8 +140,8 @@ type SpectrumXOptimizedSpec struct {
 	// +optional
 	Overlay string `json:"overlay,omitempty"`
 	// Multiplane mode to be configured
-	// Can be "none", "swplb", "hwplb", or "uniplane"
-	// +kubebuilder:validation:Enum=none;swplb;hwplb;uniplane
+	// Can be "none", "swplb", or "hwplb"
+	// +kubebuilder:validation:Enum=none;swplb;hwplb
 	// +kubebuilder:default:=none
 	// +optional
 	MultiplaneMode string `json:"multiplaneMode,omitempty"`
