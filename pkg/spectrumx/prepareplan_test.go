@@ -233,7 +233,7 @@ var _ = Describe("doSPCX planning", func() {
 		Expect(string(targetMapContent)).NotTo(ContainSubstring("nic_index_in_rail"))
 
 		Expect(commands).To(HaveLen(1))
-		Expect(commands[0].executable).To(Equal("dms-cli"))
+		Expect(commands[0].executable).To(Equal("/opt/mellanox/doca/services/dms/dms-cli"))
 		Expect(commands[0].args).To(ContainElements(
 			"profile=hwmp",
 			"name="+planName,

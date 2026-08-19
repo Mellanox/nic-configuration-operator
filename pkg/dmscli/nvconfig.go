@@ -28,7 +28,7 @@ import (
 )
 
 const (
-	dmsCLIExecutable  = "dms-cli"
+	dmsCLIExecutable  = "/opt/mellanox/doca/services/dms/dms-cli"
 	nvConfigApplyPath = "/nvidia/nvconfig/apply"
 )
 
