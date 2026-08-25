@@ -104,7 +104,7 @@ spec:
   * Requires `linkType=Ethernet` and `numVfs=1`
   * Cannot be combined with `roceOptimized` (RoCE settings are included automatically)
   * Can be combined with `rawNvConfig` — raw params are merged as overrides on top of Spectrum-X calculated params
-  * Only supported on ConnectX-8 (`nicType: 1023`), ConnectX-9 (`nicType: 1025`) and BlueField-3 SuperNIC (`nicType: a2dc`)
+  * Only supported on ConnectX-7 (`nicType: 1021`), ConnectX-8 (`nicType: 1023`), ConnectX-9 (`nicType: 1025`) and BlueField-3 SuperNIC (`nicType: a2dc`)
   * `version`: Required. Must match the name of a Spectrum-X profile ConfigMap
   * `overlay`: Optional, default `none`. Set to `l3` for L3 EVPN overlay
   * `multiplaneMode`: Optional, default `none`. Options: `none`, `swplb`, `hwplb`, `uniplane`
@@ -176,6 +176,7 @@ spectrumXOptimized:
 ```
 
 Supported NIC types for Spectrum-X:
+* ConnectX-7 (device ID `1021`) -- supports `none` only (single-plane)
 * ConnectX-8 (device ID `1023`) -- supports all multiplane modes
 * ConnectX-9 (device ID `1025`) -- supports all multiplane modes (same configuration as ConnectX-8)
 * BlueField-3 SuperNIC (device ID `a2dc`) -- supports all multiplane modes except `hwplb`
@@ -184,7 +185,7 @@ Spectrum-X profiles can configure NICs with multiple data planes. Available mode
 
 | Mode | Description | Supported NICs | Planes |
 |------|-------------|----------------|--------|
-| `none` | Single plane (default) | ConnectX-8, ConnectX-9, BF3 SuperNIC | 1 |
+| `none` | Single plane (default) | ConnectX-7, ConnectX-8, ConnectX-9, BF3 SuperNIC | 1 |
 | `swplb` | Software Packet Load Balancing | ConnectX-8, ConnectX-9, BF3 SuperNIC | 2, 4 |
 | `hwplb` | Hardware Packet Load Balancing | ConnectX-8, ConnectX-9 only | 2, 4 |
 | `uniplane` | Uniplane mode | ConnectX-8, ConnectX-9, BF3 SuperNIC | 2 |
@@ -201,7 +202,7 @@ spec:
   nodeSelector:
       feature.node.kubernetes.io/network-sriov.capable: "true"
   nicSelector:
-      nicType: "1023" # ConnectX-8. Use "1025" for ConnectX-9, or "a2dc" for BlueField-3 SuperNIC (hwplb not supported on BF3)
+      nicType: "1023" # ConnectX-8. Use "1025" for ConnectX-9, or "a2dc" for BlueField-3 SuperNIC (hwplb not supported on BF3). ConnectX-7 (`1021`) is single-plane only.
       # partNumbers:
       #   - "MCX713106AEHEA_QP1"
   template:

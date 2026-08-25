@@ -29,6 +29,9 @@ data:
     docaCCVersion: "example-version"
     mlxConfig:
       none:
+        "1021":
+          postBreakout:
+            EXAMPLE_NVCONFIG_PARAMETER: "example-value"
         "1023":
           postBreakout:
             EXAMPLE_NVCONFIG_PARAMETER: "example-value"
