@@ -339,7 +339,7 @@ func NewSpectrumXConfigManager(
 2. **NV config** → filter by `DeviceId`, `Breakout`, `Multiplane` → split into MLXConfig params (`SetNvConfigParametersBatch`) and DMS params (`SetParameters`) → apply in batch → reboot
 3. **Runtime** → RoCE, Adaptive Routing, Congestion Control, InterPacketGap settings applied via DMS and sysfs — no reboot
 
-**Parameter filtering:** each `ConfigurationParameter` can be filtered by `DeviceId` (e.g., `"1023"` for CX8, `"1025"` for CX9, `"a2dc"` for BF3), `Breakout` (plane count), and `Multiplane` mode.
+**Parameter filtering:** each `ConfigurationParameter` can be filtered by `DeviceId` (e.g., `"1021"` for CX7, `"1023"` for CX8, `"1025"` for CX9, `"a2dc"` for BF3), `Breakout` (plane count), and `Multiplane` mode.
 
 #### CC Process Lifecycle
 
@@ -477,7 +477,7 @@ type ConfigurationParameter struct {
     DMSPath            string           // DMS path (e.g., "/interfaces/interface/nvidia/qos/config/trust-mode")
     MlxReg             *MlxRegParameter // Optional mlxreg runtime parameter
     AlternativeValue   string           // Alternative value representation accepted during checks
-    DeviceId           string           // Device ID filter (e.g., "1023", "a2dc")
+    DeviceId           string           // Device ID filter (e.g., "1021", "1023", "a2dc")
     Breakout           int              // Plane count filter (1, 2, 4)
     Multiplane         string           // Multiplane mode filter (none, swplb, hwplb, uniplane)
     IgnoreError        bool             // Suppress errors for this parameter in batch operations
