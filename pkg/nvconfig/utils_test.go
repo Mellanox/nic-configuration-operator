@@ -640,7 +640,7 @@ Result: Device configuration does NOT match the system configuration.
 				"A_PARAM": "1",
 			}, true, true)).To(Succeed())
 
-			Expect(commandName).To(Equal("dms-cli"))
+			Expect(commandName).To(Equal("/opt/mellanox/doca/services/dms/dms-cli"))
 			Expect(commandArgs[0:4]).To(Equal([]string{"--json", "-t", "pci/" + pciAddress, "--input"}))
 			Expect(commandArgs[5]).To(Equal("/nvidia/nvconfig/apply"))
 

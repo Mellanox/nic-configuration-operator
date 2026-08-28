@@ -361,10 +361,6 @@ through a `logr.Logger` carried by the context. The command shape is:
 dms-cli --json -t pci/<BDF> --input <payload-json> /nvidia/nvconfig/apply
 ```
 
-`dms-cli` must be available on the caller's `PATH`. The daemon image adds the
-standard DOCA installation directory, `/opt/mellanox/doca/services/dms`, to its
-runtime `PATH`.
-
 The payload supports `ports`, `typed`, `raw`, `with-default`, and `force`.
 `Target` is carried by `-t` and is not serialized. The operator currently
 populates only `Raw`, `WithDefault`, and `Force`; `ports` and `typed` are omitted
