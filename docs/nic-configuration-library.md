@@ -167,13 +167,13 @@ func NewConfigurationManager(
 2. **Query** current NV config via `nvConfigUtils.QueryNvConfig()`
 3. **Network Bay `set_system_conf` (baseline, applied first)** — for ConnectX-9 Network Bay devices (`template.networkBay` set and `status.networkBay` detected), the per-ASIC `set_system_conf <conf>[<asic>]` is applied **before** the regular / Spectrum-X params so those layer on top of it (override priority: `rawNvConfig` > Spectrum-X > system_conf). Drift is detected per-param via `nvconfig.ValidateSystemConf()`, which returns the overall match bit plus the names of the mismatched params; the manager ignores MISMATCH rows for params owned by a higher-priority layer (matched by exact per-index key — `rawNvConfig` index-range syntax like `MODULE_SPLIT_M0[0..3]` is rejected by CRD validation, so keys are always concrete); a change requires a reboot. Skipped for devices with `ResetToDefault`
 4. **Diff** desired vs current parameters. Params not present in the device's next-boot config are unsupported on this device (e.g. hidden because `ADVANCED_PCI_SETTINGS` is off) and are skipped — the operator does **not** auto-manage `ADVANCED_PCI_SETTINGS`; drive it explicitly via `template.rawNvConfig` if needed
-5. **Batch set** via `nvConfigUtils.SetNvConfigParametersBatch()` — one agentless `dms-cli` `/nvidia/nvconfig/apply` action per PCI target. The action carries the existing raw batch plus `with-default` and `force`; DMS compiles it into one `mlxconfig` invocation. Apply reports `ApplyStatusPartiallyApplied` when any desired param was skipped as unsupported
+5. **Batch set** via `nvConfigUtils.SetNvConfigParametersBatch()` — one agentless `dms-cli` `/nvidia/nvconfig/apply` action per PCI target. The action carries the existing raw batch plus `with-default` and `force`; DMS compiles it into one `mlxconfig` invocation. The DMS `requires-reset` result maps to `ApplyStatusSuccess` when true and `ApplyStatusNothingToDo` when false. Apply reports `ApplyStatusPartiallyApplied` when any desired param was skipped as unsupported
 6. **Optional reset** — `mlxfwreset` unless `ConfigurationOptions.SkipReset=true`
 
 **`ConfigurationOptions`:**
 - `SkipReset` — skip `mlxfwreset` after applying NV config
 - `WithDefault` — request `--with_default` through the DMS NVConfig apply action
-- `Force` — request `--force` through the DMS NVConfig apply action and add it to `set_system_conf` (lets mlxconfig accept a batch it would otherwise refuse due to implicit parameter dependencies)
+- `Force` — request `--force` through the DMS NVConfig apply action and add it to `set_system_conf` (lets mlxconfig accept a batch it would otherwise refuse due to implicit parameter dependencies). When `NUM_OF_PF` and a `_P1` value are present, force mode copies that value to missing higher ports up to the requested PF count before applying; explicit per-port values are preserved
 
 #### Runtime Configuration Flow
 
@@ -519,7 +519,7 @@ type NVConfigUtils interface {
     // params: map of paramName → paramValue
     // withDefault: request --with_default from DMS
     // force: request --force from DMS
-    SetNvConfigParametersBatch(port v1alpha1.NicDevicePortSpec, params map[string]string, withDefault bool, force bool) error
+    SetNvConfigParametersBatch(port v1alpha1.NicDevicePortSpec, params map[string]string, withDefault bool, force bool) (types.ApplyStatus, error)
 
     // ResetNvConfig resets NIC's NV config to defaults
     ResetNvConfig(port v1alpha1.NicDevicePortSpec) error
