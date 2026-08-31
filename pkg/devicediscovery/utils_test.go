@@ -360,9 +360,10 @@ var _ = Describe("HostUtils", func() {
 	})
 	//nolint:dupl
 	Describe("GetFirmwareVersionAndPSID", func() {
-		It("should return lowercased firmware version and psid", func() {
+		It("should return lowercased firmware version and PSID from flint", func() {
 			fwVersion := "VeRsIoN"
-			PSID := "PSID"
+			psid := "PSID"
+			devlinkCalled := false
 
 			fakeExec := &execTesting.FakeExec{}
 
@@ -383,54 +384,133 @@ var _ = Describe("HostUtils", func() {
 
 			h := &deviceDiscoveryUtils{
 				execInterface: fakeExec,
+				getDevlinkInfo: func(_, _ string) (map[string]string, error) {
+					devlinkCalled = true
+					return nil, errors.New("devlink should not be called")
+				},
 			}
 
-			part, serial, err := h.GetFirmwareVersionAndPSID(pciAddress)
+			firmwareVersion, actualPSID, err := h.GetFirmwareVersionAndPSID(pciAddress)
 
 			Expect(err).NotTo(HaveOccurred())
-			Expect(part).To(Equal(strings.ToLower(fwVersion)))
-			Expect(serial).To(Equal(strings.ToLower(PSID)))
+			Expect(firmwareVersion).To(Equal(strings.ToLower(fwVersion)))
+			Expect(actualPSID).To(Equal(strings.ToLower(psid)))
+			Expect(devlinkCalled).To(BeFalse())
 		})
-		It("should return empty string for both numbers if one is empty", func() {
+
+		It("should fall back to devlink when flint fails", func() {
 			fakeExec := &execTesting.FakeExec{}
 
 			fakeCmd := &execTesting.FakeCmd{}
 			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
-				return []byte("FW Version: VeRsIoN"), nil, nil
+				return nil, []byte("ICMD failed"), errors.New("exit status 1")
 			})
 
 			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
 				Expect(cmd).To(Equal("flint"))
-				Expect(args[1]).To(Equal(pciAddress))
+				Expect(args).To(Equal([]string{"-d", pciAddress, "q"}))
 				return fakeCmd
 			})
 
 			h := &deviceDiscoveryUtils{
 				execInterface: fakeExec,
+				getDevlinkInfo: func(bus, device string) (map[string]string, error) {
+					Expect(bus).To(Equal("pci"))
+					Expect(device).To(Equal(pciAddress))
+					return map[string]string{
+						"fw.version": "32.43.2026",
+						"fw.psid":    "MT_0000000742",
+					}, nil
+				},
 			}
 
-			part, serial, err := h.GetFirmwareVersionAndPSID(pciAddress)
+			firmwareVersion, actualPSID, err := h.GetFirmwareVersionAndPSID(pciAddress)
 
-			Expect(err).To(HaveOccurred())
-			Expect(part).To(Equal(""))
-			Expect(serial).To(Equal(""))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(firmwareVersion).To(Equal("32.43.2026"))
+			Expect(actualPSID).To(Equal("mt_0000000742"))
+		})
 
-			fakeCmd = &execTesting.FakeCmd{}
+		It("should fall back to the generic devlink FW key when flint output is incomplete", func() {
+			fakeExec := &execTesting.FakeExec{}
+
+			fakeCmd := &execTesting.FakeCmd{}
 			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
-				return []byte("PSID: PSID"), nil, nil
+				return []byte("FW Version: ignored-without-psid"), nil, nil
 			})
 
 			fakeExec.CommandScript = append(fakeExec.CommandScript, func(cmd string, args ...string) exec.Cmd {
 				Expect(cmd).To(Equal("flint"))
-				Expect(args[1]).To(Equal(pciAddress))
+				Expect(args).To(Equal([]string{"-d", pciAddress, "q"}))
 				return fakeCmd
 			})
 
-			part, serial, err = h.GetFirmwareVersionAndPSID(pciAddress)
+			h := &deviceDiscoveryUtils{
+				execInterface: fakeExec,
+				getDevlinkInfo: func(_, _ string) (map[string]string, error) {
+					return map[string]string{
+						"fw":      "32.43.2026",
+						"fw.psid": "MT_0000000742",
+					}, nil
+				},
+			}
 
-			Expect(err).To(HaveOccurred())
-			Expect(part).To(Equal(""))
-			Expect(serial).To(Equal(""))
+			firmwareVersion, actualPSID, err := h.GetFirmwareVersionAndPSID(pciAddress)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(firmwareVersion).To(Equal("32.43.2026"))
+			Expect(actualPSID).To(Equal("mt_0000000742"))
+		})
+
+		It("should return an error when both flint and devlink fail", func() {
+			fakeExec := &execTesting.FakeExec{}
+			fakeCmd := &execTesting.FakeCmd{}
+			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+				return nil, nil, errors.New("flint failure")
+			})
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(_ string, _ ...string) exec.Cmd {
+				return fakeCmd
+			})
+
+			h := &deviceDiscoveryUtils{
+				execInterface: fakeExec,
+				getDevlinkInfo: func(_, _ string) (map[string]string, error) {
+					return nil, errors.New("devlink failure")
+				},
+			}
+
+			firmwareVersion, actualPSID, err := h.GetFirmwareVersionAndPSID(pciAddress)
+
+			Expect(err).To(MatchError(And(
+				ContainSubstring("flint failure"),
+				ContainSubstring("devlink failure"),
+			)))
+			Expect(firmwareVersion).To(BeEmpty())
+			Expect(actualPSID).To(BeEmpty())
+		})
+
+		It("should return an error when devlink omits the PSID", func() {
+			fakeExec := &execTesting.FakeExec{}
+			fakeCmd := &execTesting.FakeCmd{}
+			fakeCmd.OutputScript = append(fakeCmd.OutputScript, func() ([]byte, []byte, error) {
+				return nil, nil, errors.New("flint failure")
+			})
+			fakeExec.CommandScript = append(fakeExec.CommandScript, func(_ string, _ ...string) exec.Cmd {
+				return fakeCmd
+			})
+
+			h := &deviceDiscoveryUtils{
+				execInterface: fakeExec,
+				getDevlinkInfo: func(_, _ string) (map[string]string, error) {
+					return map[string]string{"fw.version": "32.43.2026"}, nil
+				},
+			}
+
+			firmwareVersion, actualPSID, err := h.GetFirmwareVersionAndPSID(pciAddress)
+
+			Expect(err).To(MatchError(ContainSubstring("devlink info has empty firmware version")))
+			Expect(firmwareVersion).To(BeEmpty())
+			Expect(actualPSID).To(BeEmpty())
 		})
 	})
 
