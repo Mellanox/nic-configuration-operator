@@ -496,7 +496,7 @@ type MlxRegField struct {
 }
 ```
 
-A parameter with `MlxConfig` set is applied via `nvconfig.SetNvConfigParametersBatch()`. Runtime profile parameters with `DMSPath` set are applied via `dms.DMSClient.SetParameters()`. Runtime profile parameters with `MlxReg` set are applied with `mlxreg`; they preserve profile order and split surrounding DMS parameters into separate batches.
+A parameter with `MlxConfig` set is applied via `nvconfig.SetNvConfigParametersBatch()`. Runtime profile parameters are applied individually in profile order: parameters with `DMSPath` use `dms.DMSClient.SetParameters()`, while parameters with `MlxReg` use `mlxreg`. A failed runtime set of either type is retried with a one-second delay for up to 10 total attempts before runtime application returns an error. A single DMS profile parameter can still expand to multiple concrete interface or priority updates within its DMS call. For `mlxreg` sets, each port's `FwctlDevice` is preferred when available, with its PCI address used as the fallback target. Runtime DMS reads remain batched around `mlxreg` parameters.
 
 #### Spectrum-X Config Types
 
@@ -724,6 +724,7 @@ All external commands use `cmd.CombinedOutput()` (not `cmd.Output()`) and log un
 
 - **mlxconfig**: `SetNvConfigParametersBatch()` applies multiple params in single `mlxconfig set` call
 - **DMS**: `GetParameters()` batches `--path` entries per concrete interface (with a separate global batch), and `SetParameters()` sends all `--update` entries in a single `dmsc set` command with `--timeout 5m`
+- **Spectrum-X runtime application**: reads use batched `GetParameters()` calls; DMS and `mlxreg` writes are applied one profile parameter at a time, and returned errors are retried up to 10 total attempts
 - **IgnoreError**: per-parameter flag; in batch mode, errors are suppressed only if ALL params have `IgnoreError=true`
 
 ### Channel-Based Notifications

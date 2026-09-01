@@ -41,6 +41,11 @@ var cnpDscpSysfsPathTemplate = "/sys/class/net/%s/ecn/roce_np/cnp_dscp"
 // cnpDscpExpectedValue is the expected value for CNP DSCP
 const cnpDscpExpectedValue = "48"
 
+const setParamMaxAttempts = 10
+
+// setParamRetryInterval is a var to allow substitution in tests.
+var setParamRetryInterval = time.Second
+
 // mlxregBinary is the path to the mlxreg binary. This is a var to allow substitution in tests.
 var mlxregBinary = "/usr/bin/mlxreg"
 
@@ -332,6 +337,13 @@ func mlxRegSetValue(param types.ConfigurationParameter) string {
 	return strings.Join(fields, ",")
 }
 
+func resolveMlxRegTarget(port v1alpha1.NicDevicePortSpec) string {
+	if port.FwctlDevice != "" {
+		return port.FwctlDevice
+	}
+	return port.PCI
+}
+
 func (m *spectrumXConfigManager) checkMlxRegParamApplied(device *v1alpha1.NicDevice, param types.ConfigurationParameter) (bool, error) {
 	if err := validateMlxRegParam(param); err != nil {
 		return false, err
@@ -383,21 +395,25 @@ func (m *spectrumXConfigManager) setMlxRegParam(device *v1alpha1.NicDevice, para
 
 	log.Log.V(2).Info("SpectrumXConfigManager.setMlxRegParam()", "device", device.Name, "param", param.Name)
 	for _, port := range device.Status.Ports {
-		args := []string{"-d", port.PCI, "--reg_name", param.MlxReg.Register, "--set", setValue, "--yes"}
+		target := resolveMlxRegTarget(port)
+		args := []string{"-d", target, "--reg_name", param.MlxReg.Register, "--set", setValue, "--yes"}
 		command := commandLine(mlxregBinary, args)
 		log.Log.V(2).Info("setMlxRegParam(): running mlxreg set",
-			"device", device.Name, "pci", port.PCI, "param", param.Name, "register", param.MlxReg.Register,
+			"device", device.Name, "target", target, "pci", port.PCI, "fwctlDevice", port.FwctlDevice,
+			"param", param.Name, "register", param.MlxReg.Register,
 			"setValue", setValue, "command", command)
 
 		cmd := m.execInterface.Command(mlxregBinary, args...)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			log.Log.Error(err, "setMlxRegParam(): failed to run mlxreg set",
-				"device", device.Name, "pci", port.PCI, "param", param.Name, "command", command, "output", string(output))
-			return fmt.Errorf("failed to set mlxreg parameter %q for PF %s: %w", param.Name, port.PCI, err)
+				"device", device.Name, "target", target, "pci", port.PCI, "fwctlDevice", port.FwctlDevice,
+				"param", param.Name, "command", command, "output", string(output))
+			return fmt.Errorf("failed to set mlxreg parameter %q for target %s: %w", param.Name, target, err)
 		}
-		log.Log.V(2).Info("setMlxRegParam(): successfully set mlxreg parameter on PF",
-			"device", device.Name, "pci", port.PCI, "param", param.Name, "command", command, "output", string(output))
+		log.Log.V(2).Info("setMlxRegParam(): successfully set mlxreg parameter",
+			"device", device.Name, "target", target, "pci", port.PCI, "fwctlDevice", port.FwctlDevice,
+			"param", param.Name, "command", command, "output", string(output))
 	}
 	return nil
 }
@@ -465,33 +481,43 @@ func (m *spectrumXConfigManager) checkRuntimeParamsApplied(device *v1alpha1.NicD
 }
 
 func (m *spectrumXConfigManager) applyRuntimeParams(device *v1alpha1.NicDevice, params []types.ConfigurationParameter, dmsClient dms.DMSClient) error {
-	dmsBatch := []types.ConfigurationParameter{}
-	flushDMSBatch := func() error {
-		if len(dmsBatch) == 0 {
+	for _, param := range params {
+		if err := m.setParamWithRetry(device, param, dmsClient); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (m *spectrumXConfigManager) setParamWithRetry(device *v1alpha1.NicDevice, param types.ConfigurationParameter, dmsClient dms.DMSClient) error {
+	paramType := "DMS"
+	mlxRegParam := isMlxRegParam(param)
+	if mlxRegParam {
+		paramType = "mlxreg"
+	}
+
+	var err error
+	for attempt := 1; attempt <= setParamMaxAttempts; attempt++ {
+		if mlxRegParam {
+			err = m.setMlxRegParam(device, param)
+		} else {
+			err = dmsClient.SetParameters([]types.ConfigurationParameter{param})
+		}
+		if err == nil {
 			return nil
 		}
-		err := dmsClient.SetParameters(dmsBatch)
-		dmsBatch = nil
-		return err
-	}
 
-	for _, param := range params {
-		if isMlxRegParam(param) {
-			if err := validateMlxRegParam(param); err != nil {
-				return err
-			}
-			if err := flushDMSBatch(); err != nil {
-				return err
-			}
-			if err := m.setMlxRegParam(device, param); err != nil {
-				return err
-			}
-			continue
+		if attempt < setParamMaxAttempts {
+			log.Log.V(2).Info("failed to set runtime parameter, retrying",
+				"device", device.Name, "param", param.Name, "paramType", paramType, "path", param.DMSPath,
+				"attempt", attempt, "maxAttempts", setParamMaxAttempts, "error", err)
+			time.Sleep(setParamRetryInterval)
 		}
-		dmsBatch = append(dmsBatch, param)
 	}
 
-	return flushDMSBatch()
+	return fmt.Errorf("failed to set %s runtime parameter %q after %d attempts: %w",
+		paramType, param.Name, setParamMaxAttempts, err)
 }
 
 // RuntimeConfigApplied checks if the desired Spectrum-X runtime spec is applied to the device
