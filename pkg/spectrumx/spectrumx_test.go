@@ -166,6 +166,11 @@ var _ = Describe("SpectrumXConfigManager", func() {
 		dmsMgr = dmsmocks.DMSManager{}
 		dmsCli = dmsmocks.DMSClient{}
 		execFake = &fakeExec{}
+		originalSetParamRetryInterval := setParamRetryInterval
+		setParamRetryInterval = 0
+		DeferCleanup(func() {
+			setParamRetryInterval = originalSetParamRetryInterval
+		})
 
 		cfgs = map[string]*types.SpectrumXConfig{
 			"v1": {
@@ -393,10 +398,13 @@ var _ = Describe("SpectrumXConfigManager", func() {
 		})
 
 		It("bubbles up DMS errors", func() {
-			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.Roce).Return(errors.New("roce set error"))
+			dmsCli.On("SetParameters", cfgs["v1"].RuntimeConfig.Roce).
+				Return(errors.New("roce set error")).Times(setParamMaxAttempts)
 			_, err := manager.ApplyRuntimeConfig(device)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("roce set error"))
+			Expect(err.Error()).To(ContainSubstring("after 10 attempts"))
+			dmsCli.AssertNumberOfCalls(GinkgoT(), "SetParameters", setParamMaxAttempts)
 		})
 	})
 
@@ -1091,7 +1099,8 @@ var _ = Describe("SpectrumXConfigManager", func() {
 					{Name: "ipg_no_filter", Value: "500", DMSPath: "/ipg/nofilter"},
 				}
 
-				dmsCli.On("SetParameters", expectedIPG).Return(nil)
+				dmsCli.On("SetParameters", expectedIPG[:1]).Return(nil).Once()
+				dmsCli.On("SetParameters", expectedIPG[1:]).Return(nil).Once()
 				dmsCli.On("SetParameters", mock.MatchedBy(func(params []types.ConfigurationParameter) bool {
 					return len(params) == 1 && params[0].Name == shutdownInterfaceParamName
 				})).Return(nil)
@@ -1203,6 +1212,21 @@ cc_probe_mp_mode                               | 0x00000001
 			}))
 		})
 
+		It("prefers the fwctl device for mlxreg sets", func() {
+			device.Status.Ports[0].FwctlDevice = "/dev/fwctl/fwctl3"
+			execFake.cmds = []*fakeCmd{{output: []byte("ok"), err: nil}}
+
+			err := manager.setMlxRegParam(device, ccProbeMPModeParam())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(execFake.calls).To(HaveLen(1))
+			Expect(execFake.calls[0].args).To(Equal([]string{
+				"-d", "/dev/fwctl/fwctl3",
+				"--reg_name", "ROCE_ACCL",
+				"--set", "cc_probe_mp_mode=0x1,cc_probe_mp_mode_field_select=0x1",
+				"--yes",
+			}))
+		})
+
 		It("returns error when mlxreg set fails", func() {
 			execFake.cmds = []*fakeCmd{{output: []byte("failed"), err: errors.New("mlxreg set error")}}
 
@@ -1211,7 +1235,7 @@ cc_probe_mp_mode                               | 0x00000001
 			Expect(err.Error()).To(ContainSubstring("mlxreg"))
 		})
 
-		It("checks ordered runtime params with DMS batches split by mlxreg barriers", func() {
+		It("keeps ordered DMS reads batched around mlxreg barriers", func() {
 			params := []types.ConfigurationParameter{
 				{Name: "dms before 1", Value: "a", DMSPath: "/before/1"},
 				{Name: "dms before 2", Value: "b", DMSPath: "/before/2"},
@@ -1227,33 +1251,103 @@ cc_probe_mp_mode                               | 0x00000001
 			Expect(applied).To(BeTrue())
 		})
 
-		It("applies ordered runtime params with DMS batches split by mlxreg barriers", func() {
+		It("applies each DMS runtime parameter separately in profile order", func() {
 			params := []types.ConfigurationParameter{
 				{Name: "dms before 1", Value: "a", DMSPath: "/before/1"},
 				{Name: "dms before 2", Value: "b", DMSPath: "/before/2"},
 				ccProbeMPModeParam(),
 				{Name: "dms after", Value: "c", DMSPath: "/after"},
 			}
-			dmsCli.On("SetParameters", params[:2]).Return(nil).Once()
+			dmsCli.On("SetParameters", params[:1]).Return(nil).Once()
+			dmsCli.On("SetParameters", params[1:2]).Return(nil).Once()
 			dmsCli.On("SetParameters", params[3:]).Return(nil).Once()
 			execFake.cmds = []*fakeCmd{{output: []byte("ok"), err: nil}}
 
 			err := manager.applyRuntimeParams(device, params, &dmsCli)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(execFake.calls).To(HaveLen(1))
+			Expect(dmsCli.Calls).To(HaveLen(3))
+			Expect(dmsCli.Calls[0].Arguments.Get(0)).To(Equal(params[:1]))
+			Expect(dmsCli.Calls[1].Arguments.Get(0)).To(Equal(params[1:2]))
+			Expect(dmsCli.Calls[2].Arguments.Get(0)).To(Equal(params[3:]))
 		})
 
-		It("validates mlxreg parameters before flushing a pending DMS batch", func() {
+		It("retries only the failed DMS runtime parameter", func() {
+			params := []types.ConfigurationParameter{
+				{Name: "retry", Value: "a", DMSPath: "/retry"},
+				{Name: "next", Value: "b", DMSPath: "/next"},
+			}
+			temporaryErr := errors.New("temporary DMS set error")
+			dmsCli.On("SetParameters", params[:1]).Return(temporaryErr).Times(2)
+			dmsCli.On("SetParameters", params[:1]).Return(nil).Once()
+			dmsCli.On("SetParameters", params[1:]).Return(nil).Once()
+
+			err := manager.applyRuntimeParams(device, params, &dmsCli)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(dmsCli.Calls).To(HaveLen(4))
+			Expect(dmsCli.Calls[3].Arguments.Get(0)).To(Equal(params[1:]))
+		})
+
+		It("returns the DMS error after ten failed attempts", func() {
+			params := []types.ConfigurationParameter{
+				{Name: "persistent failure", Value: "a", DMSPath: "/failure"},
+			}
+			setErr := errors.New("persistent DMS set error")
+			dmsCli.On("SetParameters", params).Return(setErr).Times(setParamMaxAttempts)
+
+			err := manager.applyRuntimeParams(device, params, &dmsCli)
+			Expect(err).To(HaveOccurred())
+			Expect(errors.Is(err, setErr)).To(BeTrue())
+			Expect(err.Error()).To(ContainSubstring("after 10 attempts"))
+			dmsCli.AssertNumberOfCalls(GinkgoT(), "SetParameters", setParamMaxAttempts)
+		})
+
+		It("retries a failed mlxreg runtime parameter before continuing", func() {
+			params := []types.ConfigurationParameter{
+				ccProbeMPModeParam(),
+				{Name: "next", Value: "b", DMSPath: "/next"},
+			}
+			temporaryErr := errors.New("temporary mlxreg set error")
+			execFake.cmds = []*fakeCmd{
+				{output: []byte("failed"), err: temporaryErr},
+				{output: []byte("failed"), err: temporaryErr},
+				{output: []byte("ok"), err: nil},
+			}
+			dmsCli.On("SetParameters", params[1:]).Return(nil).Once()
+
+			err := manager.applyRuntimeParams(device, params, &dmsCli)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(execFake.calls).To(HaveLen(3))
+			dmsCli.AssertNumberOfCalls(GinkgoT(), "SetParameters", 1)
+		})
+
+		It("returns the mlxreg error after ten failed attempts", func() {
+			params := []types.ConfigurationParameter{ccProbeMPModeParam()}
+			setErr := errors.New("persistent mlxreg set error")
+			execFake.cmds = make([]*fakeCmd, setParamMaxAttempts)
+			for i := range execFake.cmds {
+				execFake.cmds[i] = &fakeCmd{output: []byte("failed"), err: setErr}
+			}
+
+			err := manager.applyRuntimeParams(device, params, &dmsCli)
+			Expect(err).To(HaveOccurred())
+			Expect(errors.Is(err, setErr)).To(BeTrue())
+			Expect(err.Error()).To(ContainSubstring("after 10 attempts"))
+			Expect(execFake.calls).To(HaveLen(setParamMaxAttempts))
+		})
+
+		It("validates mlxreg parameters when they are reached in profile order", func() {
 			mixedParam := ccProbeMPModeParam()
 			mixedParam.DMSPath = "/mixed"
 			params := []types.ConfigurationParameter{
 				{Name: "dms before", Value: "a", DMSPath: "/before"},
 				mixedParam,
 			}
+			dmsCli.On("SetParameters", params[:1]).Return(nil).Once()
 
 			err := manager.applyRuntimeParams(device, params, &dmsCli)
 			Expect(err).To(MatchError(ContainSubstring("cannot define both dmsPath and mlxreg")))
-			dmsCli.AssertNotCalled(GinkgoT(), "SetParameters", mock.Anything)
+			dmsCli.AssertNumberOfCalls(GinkgoT(), "SetParameters", 1)
 			Expect(execFake.calls).To(BeEmpty())
 		})
 
