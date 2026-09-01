@@ -3,7 +3,7 @@ module github.com/Mellanox/nic-configuration-operator
 go 1.25.0
 
 require (
-	github.com/Mellanox/maintenance-operator/api v0.3.0
+	github.com/Mellanox/maintenance-operator/api v0.4.0
 	github.com/Mellanox/rdmamap v1.2.0
 	github.com/jaypipes/ghw v0.24.0
 	github.com/jaypipes/pcidb v1.1.1
