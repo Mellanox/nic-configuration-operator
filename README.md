@@ -188,8 +188,8 @@ Spectrum-X profiles can configure NICs with multiple data planes. Available mode
 | Mode | Description | Supported NICs | Planes |
 |------|-------------|----------------|--------|
 | `none` | Single plane (default) | ConnectX-7, ConnectX-8, ConnectX-9, BF3 SuperNIC | 1 |
-| `swplb` | Software Packet Load Balancing | ConnectX-8, ConnectX-9, BF3 SuperNIC | 2, 4 |
-| `hwplb` | Hardware Packet Load Balancing | ConnectX-8, ConnectX-9 only | 2, 4 |
+| `swplb` | Software Plane Load Balancing | ConnectX-8, ConnectX-9, BF3 SuperNIC | 2, 4 |
+| `hwplb` | Hardware Plane Load Balancing | ConnectX-8, ConnectX-9 only | 2, 4 |
 
 `spectrumx.SpectrumXManager` includes the `spectrumx.PlanManager` interface. Before the controller
 starts its existing concurrent per-device NV apply, it calls `PreparePlan` once for the node's
@@ -244,9 +244,9 @@ spec:
       linkType: Ethernet
       spectrumXOptimized:
           enabled: true
-          version: "RA2.1"
+          version: "example-spectrum-x-profile"
           overlay: "none"
-          multiplaneMode: "hwplb" # Hardware Packet Load Balancing, ConnectX-8 only
+          multiplaneMode: "hwplb" # Hardware Plane Load Balancing, ConnectX-8, ConnectX-9 only
           numberOfPlanes: 4
 ```
 
