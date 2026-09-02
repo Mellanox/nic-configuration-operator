@@ -140,8 +140,12 @@ var _ = Describe("UdevManager", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			netContentStr := string(netContent)
-			Expect(netContentStr).To(ContainSubstring(`SUBSYSTEM=="net", ACTION=="add", KERNELS=="0000:1a:00.0", NAME="net0p0"`))
-			Expect(netContentStr).To(ContainSubstring(`SUBSYSTEM=="net", ACTION=="add", KERNELS=="0000:1a:00.1", NAME="net0p1"`))
+			Expect(netContentStr).To(ContainSubstring(`SUBSYSTEM=="net", ACTION=="add", ATTR{phys_port_name}=="p[0-9]*", KERNELS=="0000:1a:00.0", NAME="net0p0"`))
+			Expect(netContentStr).To(ContainSubstring(`SUBSYSTEM=="net", ACTION=="add", ATTR{phys_port_name}=="", KERNELS=="0000:1a:00.0", NAME="net0p0"`))
+			Expect(netContentStr).To(ContainSubstring(`SUBSYSTEM=="net", ACTION=="add", TEST!="phys_port_name", KERNELS=="0000:1a:00.0", NAME="net0p0"`))
+			Expect(netContentStr).To(ContainSubstring(`SUBSYSTEM=="net", ACTION=="add", ATTR{phys_port_name}=="p[0-9]*", KERNELS=="0000:1a:00.1", NAME="net0p1"`))
+			Expect(netContentStr).To(ContainSubstring(`SUBSYSTEM=="net", ACTION=="add", ATTR{phys_port_name}=="", KERNELS=="0000:1a:00.1", NAME="net0p1"`))
+			Expect(netContentStr).To(ContainSubstring(`SUBSYSTEM=="net", ACTION=="add", TEST!="phys_port_name", KERNELS=="0000:1a:00.1", NAME="net0p1"`))
 			Expect(netContentStr).NotTo(ContainSubstring(`infiniband`))
 
 			// Verify RDMA rules file was created
@@ -719,10 +723,12 @@ var _ = Describe("UdevManager", func() {
 		})
 	})
 
-	Describe("generateNetDeviceRule", func() {
-		It("should generate correct net device rule", func() {
-			rule := generateNetDeviceRule("0000:1a:00.0", "eth_nic1")
-			Expect(rule).To(Equal(`SUBSYSTEM=="net", ACTION=="add", KERNELS=="0000:1a:00.0", NAME="eth_nic1"`))
+	Describe("generateNetDeviceRules", func() {
+		It("should restrict rules to physical ports and preserve empty or missing attribute compatibility", func() {
+			rules := generateNetDeviceRules("0000:1a:00.0", "eth_nic1")
+			Expect(rules).To(Equal(`SUBSYSTEM=="net", ACTION=="add", ATTR{phys_port_name}=="p[0-9]*", KERNELS=="0000:1a:00.0", NAME="eth_nic1"
+SUBSYSTEM=="net", ACTION=="add", ATTR{phys_port_name}=="", KERNELS=="0000:1a:00.0", NAME="eth_nic1"
+SUBSYSTEM=="net", ACTION=="add", TEST!="phys_port_name", KERNELS=="0000:1a:00.0", NAME="eth_nic1"`))
 		})
 	})
 

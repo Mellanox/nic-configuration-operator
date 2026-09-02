@@ -254,7 +254,7 @@ func (m *udevManager) generateUdevRules(devices []*v1alpha1.NicDevice) (netRules
 				spec.RailIndex,
 			)
 			if netDeviceName != "" {
-				netRulesMap[pciAddr] = generateNetDeviceRule(pciAddr, netDeviceName)
+				netRulesMap[pciAddr] = generateNetDeviceRules(pciAddr, netDeviceName)
 			}
 
 			// Generate rdma device rule
@@ -350,10 +350,18 @@ func substituteTemplatePlaceholders(template string, nicIndex, planeIndex, railI
 	return result
 }
 
-// generateNetDeviceRule creates a udev rule for a network device
-func generateNetDeviceRule(pciAddress, deviceName string) string {
-	// Format: SUBSYSTEM=="net", ACTION=="add", KERNELS=="<pci>", NAME="<name>"
-	return fmt.Sprintf(`SUBSYSTEM=="net", ACTION=="add", KERNELS=="%s", NAME="%s"`, pciAddress, deviceName)
+// generateNetDeviceRules creates udev rules for a physical network port.
+// A PF and its VF/SF representors share the same parent PCI address, so matching
+// KERNELS alone would also assign the PF's requested name to representors. mlx5
+// physical ports use phys_port_name values such as p0 and p1, while representors
+// use values such as pf0vf0 and pf0sf0. The empty and missing attribute rules
+// preserve compatibility with devices that do not provide phys_port_name.
+func generateNetDeviceRules(pciAddress, deviceName string) string {
+	physicalPortRule := fmt.Sprintf(`SUBSYSTEM=="net", ACTION=="add", ATTR{phys_port_name}=="p[0-9]*", KERNELS=="%s", NAME="%s"`, pciAddress, deviceName)
+	emptyAttributeRule := fmt.Sprintf(`SUBSYSTEM=="net", ACTION=="add", ATTR{phys_port_name}=="", KERNELS=="%s", NAME="%s"`, pciAddress, deviceName)
+	missingAttributeRule := fmt.Sprintf(`SUBSYSTEM=="net", ACTION=="add", TEST!="phys_port_name", KERNELS=="%s", NAME="%s"`, pciAddress, deviceName)
+
+	return strings.Join([]string{physicalPortRule, emptyAttributeRule, missingAttributeRule}, "\n")
 }
 
 // generateRdmaDeviceRule creates a udev rule for an RDMA device
