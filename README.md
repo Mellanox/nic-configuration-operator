@@ -165,6 +165,34 @@ data:
                 value: "0x1"
 ```
 
+The same label also selects the doSPCX data bundle published by the
+`dospcx-data` repository. This ConfigMap uses a versioned format marker and a
+gzip-compressed tar archive instead of `data.profile`:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: doscpx-data-main
+  labels:
+    network.nvidia.com/operator.nic-configuration.spectrum-x-profile: ""
+data:
+  format: dospcx-data.tar.gz/v1
+binaryData:
+  dospcx-data.tar.gz: <base64-encoded-archive>
+```
+
+The Kubernetes API decodes `binaryData` before it reaches the daemon. The
+daemon validates and extracts the archive with the Go standard library, then
+replaces `/opt/mellanox/doca/services/dms/doSpcx/data` with the restored
+`data/` tree. Archive paths must remain under `data/`; links, special files,
+path traversal, oversized archives, and incomplete doSPCX layouts are rejected.
+A failed update leaves the previous valid tree in place. Exactly one labeled
+doSPCX data bundle may exist cluster-wide; multiple bundles are rejected instead
+of selecting one based on reconciliation order, and manager-installed data is
+deactivated while the conflict exists. Removing the active bundle removes the
+data installed from it and invalidates plans cached with its digest.
+
 Reference the profile from a `NicConfigurationTemplate` by using the ConfigMap name as the Spectrum-X version:
 
 ```yaml
@@ -202,9 +230,9 @@ translation remains execution-free. Configure groups `eswitch` and `vf-lifecycle
 current operation plan and reported as skipped; unknown groups fail closed.
 
 The manager creates its command executor internally and points the `dms-cli` child process at the
-Blueprints source tree fixed at `/opt/nvidia/blueprints`. The daemon image build must inject a
-compatible tree at that path, including `planner/`, `installer/`, `data/`, and `plugins/`. When
-`PreparePlan` is called, files are written to:
+Blueprints action tree fixed at `/opt/nvidia/blueprints`. The executable DMS planner remains part of
+the daemon base image, while the labeled doSPCX data ConfigMap restores its authored catalog under
+`/opt/mellanox/doca/services/dms/doSpcx/data`. When `PreparePlan` is called, files are written to:
 
 ```text
 /var/lib/blueprints/target-maps/nco-<node>-spcx.json
@@ -220,8 +248,9 @@ post-breakout inventory after NVConfig is active. The planner does not read `int
 interface naming remains an independent NCO capability.
 
 Each stage stores a flat metadata document containing only the planner inputs, including the
-platform, Spectrum-X settings, planner parameters, and target-map digest. A later `PreparePlan`
-call reuses the saved plan when that metadata still matches, the target-map digest is unchanged,
+platform, Spectrum-X settings, planner parameters, doSPCX data archive digest, and target-map
+digest. A later `PreparePlan` call reuses the saved plan when that metadata still matches, the
+target-map digest is unchanged,
 and the saved plan passes normal validation. Any input change or invalid saved artifact regenerates
 the plan through `dms-cli`. Before applying an individual Spectrum-X device, the configuration
 manager calls `GetPreparedPlan` and fails without changing the device if the stage-specific plan is

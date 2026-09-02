@@ -53,6 +53,8 @@ func newTestPlanManager(
 		execInterface:      execInterface,
 		blueprintsRoot:     blueprintsRoot,
 		blueprintsStateDir: stateDir,
+		dospcxDataRoot:     filepath.Join(stateDir, "dospcx-data"),
+		dospcxDataDigest:   "",
 		ccProcesses:        nil,
 		ccTerminationChan:  nil,
 	}
@@ -426,6 +428,36 @@ var _ = Describe("doSPCX planning", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(secondPath).To(Equal(firstPath))
 		Expect(secondCommands).To(BeEmpty())
+	})
+
+	It("regenerates a saved plan when the doSPCX data bundle changes", func() {
+		stateDir := GinkgoT().TempDir()
+		device := newDevice("rail-0", "0000:64:00.0", "hwplb")
+		generatedPlanName := planName(nodeName, prepareStage)
+		firstCommands := []preparePlanCommand{}
+		manager := newTestPlanManager(
+			preparePlanFakeExecutor(
+				planResponse(generatedPlanName, "hwmp", prepareStage, 2, 1), &firstCommands,
+			), blueprintsRoot, stateDir,
+		).(*spectrumXConfigManager)
+		manager.dospcxDataDigest = "first-bundle"
+
+		Expect(manager.PreparePlan(context.Background(), []*v1alpha1.NicDevice{device}, PlanStagePrepare)).To(Succeed())
+		Expect(firstCommands).To(HaveLen(1))
+
+		secondCommands := []preparePlanCommand{}
+		manager.execInterface = preparePlanFakeExecutor(
+			planResponse(generatedPlanName, "hwmp", prepareStage, 2, 1), &secondCommands,
+		)
+		manager.dospcxDataDigest = "second-bundle"
+
+		Expect(manager.PreparePlan(context.Background(), []*v1alpha1.NicDevice{device}, PlanStagePrepare)).To(Succeed())
+		Expect(secondCommands).To(HaveLen(1))
+		metadataContent, err := os.ReadFile(filepath.Join(stateDir, "plans", generatedPlanName, "metadata.json"))
+		Expect(err).NotTo(HaveOccurred())
+		var metadata planMetadata
+		Expect(json.Unmarshal(metadataContent, &metadata)).To(Succeed())
+		Expect(metadata.BlueprintsDataDigest).To(Equal("second-bundle"))
 	})
 
 	DescribeTable("rejects a cached plan that does not match the requesting device",
