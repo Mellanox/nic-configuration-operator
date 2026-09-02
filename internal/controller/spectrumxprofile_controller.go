@@ -18,6 +18,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -35,10 +36,9 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 )
 
-// SpectrumXProfileReconciler reconciles Spectrum-X profile ConfigMaps (selected by
-// consts.SpectrumXProfileLabel, in any namespace) and pushes the parsed profile into the
-// SpectrumXManager. The ConfigMap name is used as the Spectrum-X version key referenced by
-// template.spectrumXOptimized.version.
+// SpectrumXProfileReconciler reconciles Spectrum-X ConfigMaps selected by
+// consts.SpectrumXProfileLabel. Legacy profile ConfigMaps are loaded into SpectrumXManager by
+// version, while doSPCX data bundles are restored into the DMS data directory.
 type SpectrumXProfileReconciler struct {
 	client.Client
 	Scheme           *runtime.Scheme
@@ -50,6 +50,12 @@ type SpectrumXProfileReconciler struct {
 	// visible and ensures that deleting a non-owning duplicate does not wipe the active profile.
 	ownersMu sync.Mutex
 	owners   map[string]client.ObjectKey
+
+	// blueprintsSources tracks manager-wide doSPCX bundle ConfigMaps separately from versioned
+	// legacy profiles. Keeping the previous set lets delete and label-removal requests avoid the
+	// legacy RemoveConfig path even though the object is no longer available from the cache.
+	blueprintsMu      sync.Mutex
+	blueprintsSources map[client.ObjectKey]struct{}
 }
 
 //+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
@@ -58,12 +64,23 @@ type SpectrumXProfileReconciler struct {
 func (r *SpectrumXProfileReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	reqLog := log.FromContext(ctx)
 
+	// Reconcile the doSPCX data bundle from the complete selected ConfigMap set. The bundle is
+	// manager-wide rather than versioned, so accepting more than one source would make the active
+	// tree depend on informer event order. This also handles deletion and label-removal events,
+	// where the reconciled object itself is no longer available from the filtered cache.
+	blueprintsRequest, err := r.reconcileBlueprintsData(ctx, req.NamespacedName)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
 	cm := &corev1.ConfigMap{}
-	err := r.Get(ctx, req.NamespacedName, cm)
+	err = r.Get(ctx, req.NamespacedName, cm)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			// ConfigMap was deleted - drop the corresponding profile from the manager.
-			r.removeProfile(ctx, req.NamespacedName)
+			if !blueprintsRequest {
+				// A legacy profile ConfigMap was deleted - drop it from the manager.
+				r.removeProfile(ctx, req.NamespacedName)
+			}
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
@@ -73,8 +90,14 @@ func (r *SpectrumXProfileReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// cache informer is filtered by the label, so a label removal surfaces as a delete event,
 	// but a stale object could still reach us here.
 	if _, ok := cm.Labels[consts.SpectrumXProfileLabel]; !ok {
-		reqLog.Info("Spectrum-X profile label removed from ConfigMap, removing profile", "version", req.Name)
-		r.removeProfile(ctx, req.NamespacedName)
+		if !blueprintsRequest {
+			reqLog.Info("Spectrum-X profile label removed from ConfigMap, removing profile", "version", req.Name)
+			r.removeProfile(ctx, req.NamespacedName)
+		}
+		return ctrl.Result{}, nil
+	}
+
+	if isBlueprintsDataConfigMap(cm) {
 		return ctrl.Result{}, nil
 	}
 
@@ -109,6 +132,97 @@ func (r *SpectrumXProfileReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	return ctrl.Result{}, nil
 }
 
+func (r *SpectrumXProfileReconciler) reconcileBlueprintsData(
+	ctx context.Context,
+	requestKey client.ObjectKey,
+) (bool, error) {
+	r.blueprintsMu.Lock()
+	defer r.blueprintsMu.Unlock()
+
+	_, requestWasBlueprintsSource := r.blueprintsSources[requestKey]
+	configMaps := &corev1.ConfigMapList{}
+	if err := r.List(ctx, configMaps); err != nil {
+		return requestWasBlueprintsSource,
+			fmt.Errorf("list Spectrum-X ConfigMaps while reconciling doSPCX data: %w", err)
+	}
+
+	bundles := make([]*corev1.ConfigMap, 0, 1)
+	currentSources := map[client.ObjectKey]struct{}{}
+	for index := range configMaps.Items {
+		configMap := &configMaps.Items[index]
+		if _, selected := configMap.Labels[consts.SpectrumXProfileLabel]; selected && isBlueprintsDataConfigMap(configMap) {
+			bundles = append(bundles, configMap)
+			currentSources[client.ObjectKeyFromObject(configMap)] = struct{}{}
+		}
+	}
+	if _, requestIsBlueprintsSource := currentSources[requestKey]; requestIsBlueprintsSource {
+		requestWasBlueprintsSource = true
+	}
+	r.blueprintsSources = currentSources
+	sort.Slice(bundles, func(i, j int) bool {
+		if bundles[i].Namespace == bundles[j].Namespace {
+			return bundles[i].Name < bundles[j].Name
+		}
+		return bundles[i].Namespace < bundles[j].Namespace
+	})
+
+	if len(bundles) == 0 {
+		if err := r.SpectrumXManager.RemoveBlueprintsData(); err != nil {
+			return requestWasBlueprintsSource,
+				fmt.Errorf("remove doSPCX data after its ConfigMap was removed: %w", err)
+		}
+		return requestWasBlueprintsSource, nil
+	}
+	if len(bundles) > 1 {
+		sources := make([]string, 0, len(bundles))
+		for _, bundle := range bundles {
+			sources = append(sources, client.ObjectKeyFromObject(bundle).String())
+		}
+		if err := r.SpectrumXManager.RemoveBlueprintsData(); err != nil {
+			return requestWasBlueprintsSource, fmt.Errorf(
+				"multiple doSPCX data ConfigMaps are selected (%s) and the active bundle could not be deactivated: %w",
+				strings.Join(sources, ", "), err)
+		}
+		return requestWasBlueprintsSource, fmt.Errorf(
+			"multiple doSPCX data ConfigMaps are selected (%s); exactly one bundle is supported",
+			strings.Join(sources, ", "))
+	}
+
+	bundle := bundles[0]
+	format, hasFormat := bundle.Data[consts.SpectrumXBlueprintsConfigMapFormatKey]
+	if !hasFormat || strings.TrimSpace(format) != consts.SpectrumXBlueprintsConfigMapFormat {
+		return requestWasBlueprintsSource, fmt.Errorf(
+			"spectrum-x doSPCX data ConfigMap %s/%s has unsupported %q value %q",
+			bundle.Namespace, bundle.Name, consts.SpectrumXBlueprintsConfigMapFormatKey, format)
+	}
+	archive, hasArchive := bundle.BinaryData[consts.SpectrumXBlueprintsConfigMapArchiveKey]
+	if !hasArchive || len(archive) == 0 {
+		return requestWasBlueprintsSource, fmt.Errorf(
+			"spectrum-x doSPCX data ConfigMap %s/%s is missing or has an empty binaryData %q key",
+			bundle.Namespace, bundle.Name, consts.SpectrumXBlueprintsConfigMapArchiveKey)
+	}
+	if err := r.SpectrumXManager.InstallBlueprintsData(archive); err != nil {
+		return requestWasBlueprintsSource, fmt.Errorf(
+			"failed to install doSPCX data from ConfigMap %s/%s: %w", bundle.Namespace, bundle.Name, err)
+	}
+	log.FromContext(ctx).V(2).Info("Reconciled doSPCX data bundle",
+		"configMap", client.ObjectKeyFromObject(bundle).String(),
+		"format", format,
+		"sourceCommit", bundle.Annotations[consts.SpectrumXBlueprintsCommitAnnotation],
+		"sourceRef", bundle.Annotations[consts.SpectrumXBlueprintsRefAnnotation],
+		"sourceTree", bundle.Annotations[consts.SpectrumXBlueprintsTreeAnnotation])
+	return requestWasBlueprintsSource, nil
+}
+
+func isBlueprintsDataConfigMap(configMap *corev1.ConfigMap) bool {
+	if configMap == nil {
+		return false
+	}
+	_, hasFormat := configMap.Data[consts.SpectrumXBlueprintsConfigMapFormatKey]
+	_, hasArchive := configMap.BinaryData[consts.SpectrumXBlueprintsConfigMapArchiveKey]
+	return hasFormat || hasArchive
+}
+
 // removeProfile drops the profile for a version, but only when the reconciled ConfigMap is the
 // current owner (or no owner is recorded). This prevents a duplicate same-named ConfigMap in a
 // different namespace from wiping the profile that another ConfigMap is actively providing.
@@ -130,6 +244,9 @@ func (r *SpectrumXProfileReconciler) removeProfile(ctx context.Context, key clie
 func (r *SpectrumXProfileReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.owners == nil {
 		r.owners = map[string]client.ObjectKey{}
+	}
+	if r.blueprintsSources == nil {
+		r.blueprintsSources = map[client.ObjectKey]struct{}{}
 	}
 
 	// Only reconcile ConfigMaps carrying the Spectrum-X profile label. This predicate complements

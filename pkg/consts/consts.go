@@ -123,16 +123,28 @@ const (
 
 	SupportedNicFirmwareConfigmap = "nic-configuration-operator-supported-nic-firmware"
 
-	// SpectrumXProfileLabel selects ConfigMaps that carry a Spectrum-X profile.
+	// SpectrumXProfileLabel selects ConfigMaps that carry a Spectrum-X profile or doSPCX data bundle.
 	// Presence of the key selects the ConfigMap; its value is ignored.
 	SpectrumXProfileLabel = "network.nvidia.com/operator.nic-configuration.spectrum-x-profile"
 	// SpectrumXProfileConfigMapDataKey is the ConfigMap Data key holding the SpectrumXConfig YAML.
 	// The ConfigMap name is used as the Spectrum-X version key (template.spectrumXOptimized.version).
 	SpectrumXProfileConfigMapDataKey = "profile"
-	Mlx5ModuleVersionPath            = "/sys/bus/pci/drivers/mlx5_core/module/version"
-	Mlx5CoreDriverName               = "mlx5_core"
-	PCIDevicesSysfsPath              = "/sys/bus/pci/devices"
-	Mlx5CoreDriverBindPath           = "/sys/bus/pci/drivers/mlx5_core/bind"
+	// SpectrumXBlueprintsConfigMapFormatKey identifies the doSPCX data bundle format.
+	SpectrumXBlueprintsConfigMapFormatKey = "format"
+	// SpectrumXBlueprintsConfigMapFormat is the supported doSPCX data bundle format.
+	SpectrumXBlueprintsConfigMapFormat = "dospcx-data.tar.gz/v1"
+	// SpectrumXBlueprintsConfigMapArchiveKey holds the gzip-compressed doSPCX data tar archive.
+	SpectrumXBlueprintsConfigMapArchiveKey = "dospcx-data.tar.gz"
+	// SpectrumXBlueprintsCommitAnnotation records the dospcx-data source commit.
+	SpectrumXBlueprintsCommitAnnotation = "configuration.net.nvidia.com/dospcx-data-commit"
+	// SpectrumXBlueprintsRefAnnotation records the dospcx-data source ref.
+	SpectrumXBlueprintsRefAnnotation = "configuration.net.nvidia.com/dospcx-data-ref"
+	// SpectrumXBlueprintsTreeAnnotation records the Git tree containing the packaged data directory.
+	SpectrumXBlueprintsTreeAnnotation = "configuration.net.nvidia.com/dospcx-data-tree"
+	Mlx5ModuleVersionPath             = "/sys/bus/pci/drivers/mlx5_core/module/version"
+	Mlx5CoreDriverName                = "mlx5_core"
+	PCIDevicesSysfsPath               = "/sys/bus/pci/devices"
+	Mlx5CoreDriverBindPath            = "/sys/bus/pci/drivers/mlx5_core/bind"
 
 	FwConfigNotAppliedAfterRebootErrorMsg = "firmware configuration failed to apply after reboot"
 

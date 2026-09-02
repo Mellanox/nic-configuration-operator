@@ -44,8 +44,15 @@ const cnpDscpExpectedValue = "48"
 // mlxregBinary is the path to the mlxreg binary. This is a var to allow substitution in tests.
 var mlxregBinary = "/usr/bin/mlxreg"
 
+// BlueprintsDataManager installs the authored data consumed by the doSPCX planner.
+type BlueprintsDataManager interface {
+	InstallBlueprintsData(archive []byte) error
+	RemoveBlueprintsData() error
+}
+
 type SpectrumXManager interface {
 	PlanManager
+	BlueprintsDataManager
 	// GetBreakoutMlxConfig returns the breakout mlxconfig map for the device based on its SpectrumX spec
 	GetBreakoutMlxConfig(device *v1alpha1.NicDevice) (map[string]string, error)
 	// GetPostBreakoutMlxConfig returns the post-breakout mlxconfig map for the device
@@ -81,6 +88,8 @@ type spectrumXConfigManager struct {
 	execInterface      execUtils.Interface
 	blueprintsRoot     string
 	blueprintsStateDir string
+	dospcxDataRoot     string
+	dospcxDataDigest   string
 
 	ccProcesses       map[string]*ccProcess
 	ccTerminationChan chan string // buffered; carries RDMA iface name on unexpected exit
@@ -854,6 +863,8 @@ func NewSpectrumXConfigManager(
 		execInterface:      execUtils.New(),
 		blueprintsRoot:     defaultBlueprintsRoot,
 		blueprintsStateDir: "",
+		dospcxDataRoot:     defaultDospcxDataRoot,
+		dospcxDataDigest:   "",
 		ccProcesses:        make(map[string]*ccProcess),
 		ccTerminationChan:  make(chan string, 10),
 	}

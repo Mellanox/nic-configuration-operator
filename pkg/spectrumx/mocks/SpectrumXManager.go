@@ -18,6 +18,34 @@ type SpectrumXManager struct {
 	mock.Mock
 }
 
+// InstallBlueprintsData provides a mock function with given fields: archive.
+func (_m *SpectrumXManager) InstallBlueprintsData(archive []byte) error {
+	ret := _m.Called(archive)
+
+	if len(ret) == 0 {
+		panic("no return value specified for InstallBlueprintsData")
+	}
+
+	if rf, ok := ret.Get(0).(func([]byte) error); ok {
+		return rf(archive)
+	}
+	return ret.Error(0)
+}
+
+// RemoveBlueprintsData provides a mock function with no fields.
+func (_m *SpectrumXManager) RemoveBlueprintsData() error {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoveBlueprintsData")
+	}
+
+	if rf, ok := ret.Get(0).(func() error); ok {
+		return rf()
+	}
+	return ret.Error(0)
+}
+
 // PreparePlan provides a mock function with given fields: ctx, devices, stage.
 func (_m *SpectrumXManager) PreparePlan(ctx context.Context, devices []*v1alpha1.NicDevice, stage spectrumx.PlanStage) error {
 	ret := _m.Called(ctx, devices, stage)
