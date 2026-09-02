@@ -32,12 +32,9 @@ const (
 	nvConfigApplyPath = "/nvidia/nvconfig/apply"
 )
 
-// NVConfigXPathOperation describes typed NVConfig intent using a DMS XPath and
-// the values to apply below that path.
-type NVConfigXPathOperation struct {
-	Path   string         `json:"path"`
-	Values map[string]any `json:"values"`
-}
+// NVConfigXPathOperation is retained as a compatibility alias for the generic
+// XPathOperation used by dms-cli GET, SET, and NVConfig apply operations.
+type NVConfigXPathOperation = XPathOperation
 
 // NVConfigParam is one raw native NVConfig assignment.
 type NVConfigParam struct {

@@ -301,18 +301,26 @@ dmsc -a localhost:9339 --insecure --target 0000:08:00.0 set --timeout 5m \
 
 ### pkg/dmscli/ — Agentless DMS CLI API
 
-Sources: `pkg/dmscli/nvconfig.go`, `pkg/dmscli/blueprints.go`
+Sources: `pkg/dmscli/nvconfig.go`, `pkg/dmscli/blueprints.go`, `pkg/dmscli/xpath.go`
 
 `pkg/dmscli` wraps the local, agentless `dms-cli` executable with package-level
-functions; there is no client object or stored runtime state. Its first
-supported actions are bulk NVConfig apply and Blueprints plan generation. The
-request already models both raw native parameters and typed XPath operations so
-other projects and later doSPCX plan execution can reuse the same API.
+functions; there is no client object or stored runtime state. It supports bulk
+NVConfig apply, Blueprints plan generation, and generic typed XPath GET and SET.
+The same typed operation is shared by ordinary DMS SET and NVConfig apply so
+other projects can reuse the API without depending on NCO's Spectrum-X policy.
 
 ```go
-type NVConfigXPathOperation struct {
+type XPathOperation struct {
     Path   string
     Values map[string]any
+}
+
+// Compatibility alias used by ApplyNVConfigRequest.
+type NVConfigXPathOperation = XPathOperation
+
+type XPathQuery struct {
+    Path   string
+    Leaves []string
 }
 
 type NVConfigParam struct {
@@ -350,6 +358,20 @@ func GenerateBlueprintPlan(
     execInterface execUtils.Interface,
     request BlueprintPlanRequest,
 ) (*BlueprintPlanResult, error)
+
+func QueryXPaths(
+    ctx context.Context,
+    execInterface execUtils.Interface,
+    target string,
+    queries []XPathQuery,
+) (*QueryXPathsResult, error)
+
+func SetXPaths(
+    ctx context.Context,
+    execInterface execUtils.Interface,
+    target string,
+    operations []XPathOperation,
+) (*SetXPathsResult, error)
 ```
 
 The caller supplies the repository-standard `k8s.io/utils/exec.Interface`; this
@@ -363,9 +385,24 @@ dms-cli --json -t pci/<BDF> --input <payload-json> /nvidia/nvconfig/apply
 
 The payload supports `ports`, `typed`, `raw`, `with-default`, and `force`.
 `Target` is carried by `-t` and is not serialized. The operator currently
-populates only `Raw`, `WithDefault`, and `Force`; `ports` and `typed` are omitted
-until doSPCX planning and typed XPath generation are introduced in a later
-phase.
+populates only `Raw`, `WithDefault`, and `Force`; semantic prepare operations
+are parsed and translated but are not yet connected to NVConfig execution.
+
+Typed GET and SET preserve query/group order and use `;` as a literal argument
+between DMS containers:
+
+```text
+dms-cli --json -t pci/<BDF> /nvidia/link/ipg admin \
+  \; /nvidia/link/physical admin-status
+dms-cli --json -t pci/<BDF> /nvidia/link/physical admin-status=down \
+  \; /nvidia/link/physical admin-status=up
+```
+
+SET value keys are sorted for deterministic command lines. Scalar leaf-list
+values use repeated assignments (`lanes=0 lanes=1 ...`), avoiding the current
+DMS compact-list parsing limitation. GET normalizes flat, backend-wrapped, and
+container-keyed JSON responses and surfaces partial and `not-supported` results
+as errors while preserving their structured result.
 
 Blueprint planning uses this command shape:
 
@@ -411,7 +448,7 @@ device membership before touching hardware.
 
 ### pkg/spectrumx/ — Spectrum-X Configuration
 
-Sources: `pkg/spectrumx/spectrumx.go`, `pkg/spectrumx/prepareplan.go`
+Sources: `pkg/spectrumx/spectrumx.go`, `pkg/spectrumx/prepareplan.go`, `pkg/spectrumx/semanticplan.go`
 
 #### PlanManager Interface
 
@@ -424,9 +461,10 @@ const (
 )
 
 type Plan struct {
-    Name  string
-    Stage PlanStage
-    JSON  json.RawMessage
+    Name     string
+    Stage    PlanStage
+    JSON     json.RawMessage
+    Semantic *SemanticPlan
 }
 
 type PlanManager interface {
@@ -439,8 +477,20 @@ type PlanManager interface {
 Spectrum-X device group. It is a no-op when none of the supplied devices enable
 Spectrum-X. `GetPreparedPlan` retrieves the persisted plan without invoking
 `dms-cli`, and rejects it unless its cached inputs and target map still match the
-supplied device. The existing Spectrum-X manager implementation provides both
-methods and creates the command executor internally:
+supplied device. It also parses the host-k8s `plan.semantic.groups` surface and
+resolves every `operation_ref` through `plan.operations`. The parser preserves
+group and operation ordering, including repeated writes, and does not inspect
+bare-metal steps, services, or artifacts.
+
+`SemanticPlan.BuildDMSOperationPlan(ctx)` resolves `pf_netdev_all` and
+`pf_rdma_scope` to target-specific query and SET batches without executing
+them. Queries represent the final desired state; prepare-stage queries include
+both the current and `-pending` leaves used by the doSPCX NVConfig gate. SET
+operations preserve the complete transition sequence. `post-breakout` remains
+an ordered phase marker. Configure groups `eswitch` and `vf-lifecycle` are parsed and validated
+but explicitly reported as skipped; unknown groups fail closed. The existing
+Spectrum-X manager implementation provides both plan lifecycle methods and
+creates the command executor internally:
 
 ```go
 type SpectrumXManager interface {

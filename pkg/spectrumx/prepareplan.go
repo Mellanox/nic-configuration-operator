@@ -55,9 +55,10 @@ const (
 
 // Plan is a generated doSPCX plan retrieved from the local plan store.
 type Plan struct {
-	Name  string
-	Stage PlanStage
-	JSON  json.RawMessage
+	Name     string
+	Stage    PlanStage
+	JSON     json.RawMessage
+	Semantic *SemanticPlan
 }
 
 // PlanManager owns doSPCX target-map construction, plan generation, caching,
@@ -216,7 +217,7 @@ func (m *spectrumXConfigManager) PreparePlan(
 	if err != nil {
 		return err
 	}
-	if err := validateGeneratedPlan(result.PlanJSON, generatedPlanName, config, string(stage)); err != nil {
+	if _, err := validateGeneratedPlan(result.PlanJSON, generatedPlanName, config, string(stage)); err != nil {
 		return err
 	}
 
@@ -334,11 +335,17 @@ func (m *spectrumXConfigManager) GetPreparedPlan(device *v1alpha1.NicDevice, sta
 		targetMap:     savedTargetMap,
 		selectedCount: len(savedTargetMap.PreBreakout.Targets),
 	}
-	if err := validateGeneratedPlan(planContent, generatedPlanName, savedConfig, string(stage)); err != nil {
+	semanticPlan, err := validateGeneratedPlan(planContent, generatedPlanName, savedConfig, string(stage))
+	if err != nil {
 		return nil, fmt.Errorf("validate cached doSPCX %s plan: %w", stage, err)
 	}
 
-	return &Plan{Name: generatedPlanName, Stage: stage, JSON: append(json.RawMessage(nil), planContent...)}, nil
+	return &Plan{
+		Name:     generatedPlanName,
+		Stage:    stage,
+		JSON:     append(json.RawMessage(nil), planContent...),
+		Semantic: semanticPlan,
+	}, nil
 }
 
 func planParameters(config *planConfig) ([]string, error) {
@@ -445,7 +452,7 @@ func reusablePlan(
 	if err != nil {
 		return false, fmt.Sprintf("read plan: %v", err)
 	}
-	if err := validateGeneratedPlan(planContent, expectedMetadata.PlanName, config, expectedMetadata.Stage); err != nil {
+	if _, err := validateGeneratedPlan(planContent, expectedMetadata.PlanName, config, expectedMetadata.Stage); err != nil {
 		return false, fmt.Sprintf("validate plan: %v", err)
 	}
 	return true, ""
@@ -639,7 +646,12 @@ func boundedPlanName(name string) string {
 	return strings.TrimRight(name[:prefixLength], ".-") + "-" + hash
 }
 
-func validateGeneratedPlan(planJSON []byte, expectedName string, config *planConfig, expectedStage string) error {
+func validateGeneratedPlan(
+	planJSON []byte,
+	expectedName string,
+	config *planConfig,
+	expectedStage string,
+) (*SemanticPlan, error) {
 	var document struct {
 		Plan struct {
 			Name    string `json:"name"`
@@ -666,46 +678,50 @@ func validateGeneratedPlan(planJSON []byte, expectedName string, config *planCon
 		} `json:"artifacts"`
 	}
 	if err := json.Unmarshal(planJSON, &document); err != nil {
-		return fmt.Errorf("decode generated doSPCX %s plan: %w", expectedStage, err)
+		return nil, fmt.Errorf("decode generated doSPCX %s plan: %w", expectedStage, err)
 	}
 	if document.Plan.Name != expectedName {
-		return fmt.Errorf("generated doSPCX plan name is %q, expected %q", document.Plan.Name, expectedName)
+		return nil, fmt.Errorf("generated doSPCX plan name is %q, expected %q", document.Plan.Name, expectedName)
 	}
 	if document.Plan.Family != "spcx" {
-		return fmt.Errorf("generated doSPCX plan family is %q, expected %q", document.Plan.Family, "spcx")
+		return nil, fmt.Errorf("generated doSPCX plan family is %q, expected %q", document.Plan.Family, "spcx")
 	}
 	if document.Plan.Profile != config.profile {
-		return fmt.Errorf("generated doSPCX plan profile is %q, expected %q", document.Plan.Profile, config.profile)
+		return nil, fmt.Errorf("generated doSPCX plan profile is %q, expected %q", document.Plan.Profile, config.profile)
 	}
 	if document.Plan.Stage != expectedStage {
-		return fmt.Errorf("generated doSPCX plan stage is %q, expected %q", document.Plan.Stage, expectedStage)
+		return nil, fmt.Errorf("generated doSPCX plan stage is %q, expected %q", document.Plan.Stage, expectedStage)
 	}
 	if document.Plan.Params.DeploymentMode != deploymentModeHostK8s {
-		return fmt.Errorf("generated doSPCX plan deployment mode is %q, expected %q", document.Plan.Params.DeploymentMode, deploymentModeHostK8s)
+		return nil, fmt.Errorf("generated doSPCX plan deployment mode is %q, expected %q", document.Plan.Params.DeploymentMode, deploymentModeHostK8s)
 	}
 	if document.Plan.Params.Planes != config.planes {
-		return fmt.Errorf("generated doSPCX plan plane count is %d, expected %d", document.Plan.Params.Planes, config.planes)
+		return nil, fmt.Errorf("generated doSPCX plan plane count is %d, expected %d", document.Plan.Params.Planes, config.planes)
 	}
 	if document.Plan.DetectedHW.PlatformType != config.platformType {
-		return fmt.Errorf("generated doSPCX plan platform type is %q, expected %q", document.Plan.DetectedHW.PlatformType, config.platformType)
+		return nil, fmt.Errorf("generated doSPCX plan platform type is %q, expected %q", document.Plan.DetectedHW.PlatformType, config.platformType)
 	}
 	if document.Plan.Semantic == nil || len(document.Plan.Semantic.Groups) == 0 {
-		return fmt.Errorf("generated doSPCX %s plan does not contain semantic groups", expectedStage)
+		return nil, fmt.Errorf("generated doSPCX %s plan does not contain semantic groups", expectedStage)
 	}
 	if document.Plan.BareMetal != nil && len(document.Plan.BareMetal.Groups) > 0 {
-		return fmt.Errorf("generated doSPCX %s plan unexpectedly contains bare-metal groups", expectedStage)
+		return nil, fmt.Errorf("generated doSPCX %s plan unexpectedly contains bare-metal groups", expectedStage)
 	}
 	if len(document.Artifacts.Manifest) > 0 {
-		return fmt.Errorf("generated doSPCX %s plan unexpectedly contains rendered artifacts", expectedStage)
+		return nil, fmt.Errorf("generated doSPCX %s plan unexpectedly contains rendered artifacts", expectedStage)
 	}
 	expectedDeviceCount := config.selectedCount
 	if expectedStage == string(PlanStageConfigure) {
 		expectedDeviceCount *= config.planes
 	}
 	if len(document.Plan.Devices) != expectedDeviceCount {
-		return fmt.Errorf("generated doSPCX %s plan has %d devices, expected %d", expectedStage, len(document.Plan.Devices), expectedDeviceCount)
+		return nil, fmt.Errorf("generated doSPCX %s plan has %d devices, expected %d", expectedStage, len(document.Plan.Devices), expectedDeviceCount)
 	}
-	return nil
+	semanticPlan, err := ParseSemanticPlan(planJSON, PlanStage(expectedStage))
+	if err != nil {
+		return nil, fmt.Errorf("validate generated doSPCX %s semantic plan: %w", expectedStage, err)
+	}
+	return semanticPlan, nil
 }
 
 func writeJSONFileAtomic(path string, value any) error {

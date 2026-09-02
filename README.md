@@ -195,6 +195,11 @@ Spectrum-X profiles can configure NICs with multiple data planes. Available mode
 starts its existing concurrent per-device NV apply, it calls `PreparePlan` once for the node's
 Spectrum-X device group with the `prepare` stage. It does the same with the `configure` stage before
 the existing concurrent runtime apply. Plan preparation never executes generated plan operations.
+`GetPreparedPlan` parses the host-k8s `plan.semantic.groups` contract and makes the semantic plan
+available to library consumers. `BuildDMSOperationPlan` turns it into an ordered, target-resolved
+DMS operation plan, including current plus pending queries for prepare-stage NVConfig. This
+translation remains execution-free. Configure groups `eswitch` and `vf-lifecycle` are intentionally excluded from the
+current operation plan and reported as skipped; unknown groups fail closed.
 
 The manager creates its command executor internally and points the `dms-cli` child process at the
 Blueprints source tree fixed at `/opt/nvidia/blueprints`. The daemon image build must inject a
