@@ -29,10 +29,11 @@ import (
 )
 
 type blueprintsArchiveEntry struct {
-	name     string
-	typeFlag byte
-	mode     int64
-	content  string
+	name       string
+	typeFlag   byte
+	mode       int64
+	content    string
+	paxRecords map[string]string
 }
 
 type zeroReader struct{}
@@ -48,10 +49,11 @@ func blueprintsArchive(entries ...blueprintsArchiveEntry) []byte {
 	tarWriter := tar.NewWriter(gzipWriter)
 	for _, entry := range entries {
 		header := &tar.Header{
-			Name:     entry.name,
-			Typeflag: entry.typeFlag,
-			Mode:     entry.mode,
-			Size:     int64(len(entry.content)),
+			Name:       entry.name,
+			Typeflag:   entry.typeFlag,
+			Mode:       entry.mode,
+			Size:       int64(len(entry.content)),
+			PAXRecords: entry.paxRecords,
 		}
 		Expect(tarWriter.WriteHeader(header)).To(Succeed())
 		if entry.content != "" {
@@ -114,6 +116,19 @@ var _ = Describe("doSPCX data archive installation", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(info.Mode().Perm()).To(Equal(os.FileMode(0o755)))
 		Expect(manager.dospcxDataDigest).To(Equal(sha256Digest(archive)))
+	})
+
+	It("accepts the global PAX metadata emitted by git archive", func() {
+		dataRoot := filepath.Join(GinkgoT().TempDir(), "doSpcx", "data")
+		archive := validBlueprintsArchive(blueprintsArchiveEntry{
+			name:       "pax_global_header",
+			typeFlag:   tar.TypeXGlobalHeader,
+			paxRecords: map[string]string{"comment": "3656b4dff0ec9f9b6a00e049a7804eb7a64da671"},
+		})
+		manager := newBlueprintsDataManager(dataRoot)
+
+		Expect(manager.InstallBlueprintsData(archive)).To(Succeed())
+		Expect(filepath.Join(dataRoot, "platform-types.yaml")).To(BeAnExistingFile())
 	})
 
 	It("keeps the active tree when the archive is malformed", func() {

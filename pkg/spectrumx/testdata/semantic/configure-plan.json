@@ -2,7 +2,7 @@
   "plan": {
     "name": "nco-parser-semantic-configure",
     "family": "spcx",
-    "profile": "hwmp",
+    "profile": "SPX_Multiplane",
     "stage": "configure",
     "params": {
       "deployment_mode": "host-k8s",
@@ -101,7 +101,7 @@
     ],
     "runtime_ctx": {
       "deployment_mode": "host-k8s",
-      "multiplane_mode": "hwmp",
+      "multiplane_mode": "SPX_Multiplane",
       "esw_multiport": true,
       "num_vfs": 1,
       "post_breakout": true,
@@ -113,16 +113,12 @@
         {
           "rail": 0,
           "rdma_dev": "roce_r0",
-          "control_bdf": "0000:64:00.0",
-          "control_target": "pci/0000:64:00.0",
-          "source": "endpoint_contract"
+          "source": "post_breakout_topology"
         },
         {
           "rail": 1,
           "rdma_dev": "roce_r1",
-          "control_bdf": "0001:15:00.0",
-          "control_target": "pci/0001:15:00.0",
-          "source": "endpoint_contract"
+          "source": "post_breakout_topology"
         }
       ],
       "expected_names": {
@@ -184,10 +180,7 @@
           "admin": 25
         },
         "source_feature": "spcx-ipg-runtime",
-        "kind": "set",
-        "target_class": "pf_netdev_all",
-        "execution_group": "link-runtime",
-        "target_role": "ew"
+        "target_class": "pf_netdev_all"
       },
       "spcx-ipg-runtime.link-physical.admin-status": {
         "path": "/nvidia/link/physical",
@@ -195,10 +188,7 @@
           "admin-status": "down"
         },
         "source_feature": "spcx-ipg-runtime",
-        "kind": "set",
-        "target_class": "pf_netdev_all",
-        "execution_group": "link-runtime",
-        "target_role": "ew"
+        "target_class": "pf_netdev_all"
       },
       "spcx-ipg-runtime.link-physical.admin-status.2": {
         "path": "/nvidia/link/physical",
@@ -206,10 +196,7 @@
           "admin-status": "up"
         },
         "source_feature": "spcx-ipg-runtime",
-        "kind": "set",
-        "target_class": "pf_netdev_all",
-        "execution_group": "link-runtime",
-        "target_role": "ew"
+        "target_class": "pf_netdev_all"
       },
       "spcx-pf-mtu.link-netdev.mtu": {
         "path": "/nvidia/link/netdev",
@@ -217,10 +204,7 @@
           "mtu": 9216
         },
         "source_feature": "spcx-pf-mtu",
-        "kind": "set",
-        "target_class": "pf_netdev_all",
-        "execution_group": "link-runtime",
-        "target_role": "ew"
+        "target_class": "pf_netdev_all"
       },
       "spcx-eswitch.eswitch.mode": {
         "path": "/nvidia/eswitch",
@@ -228,9 +212,6 @@
           "mode": "legacy"
         },
         "source_feature": "spcx-eswitch",
-        "kind": "set",
-        "execution_group": "eswitch",
-        "target_role": "ew",
         "target_class": "pf_netdev_all"
       },
       "spcx-eswitch.eswitch.flow-steering-mode": {
@@ -239,9 +220,6 @@
           "flow-steering-mode": "hmfs"
         },
         "source_feature": "spcx-eswitch",
-        "kind": "set",
-        "execution_group": "eswitch",
-        "target_role": "ew",
         "target_class": "pf_netdev_all"
       },
       "spcx-eswitch.eswitch.mode.2": {
@@ -250,9 +228,6 @@
           "mode": "switchdev"
         },
         "source_feature": "spcx-eswitch",
-        "kind": "set",
-        "execution_group": "eswitch",
-        "target_role": "ew",
         "target_class": "pf_netdev_all"
       },
       "spcx-eswitch.eswitch.multiport": {
@@ -261,9 +236,7 @@
           "multiport": true
         },
         "source_feature": "spcx-eswitch",
-        "kind": "set",
         "target_class": "per_eswitch",
-        "execution_group": "eswitch",
         "condition": {
           "knob": "@params.multiport == True"
         },
@@ -273,8 +246,7 @@
             "ConnectX-8"
           ],
           "platform_type": "gb300"
-        },
-        "target_role": "ew"
+        }
       },
       "ra22-cc-runtime.cc-algo-slot-15.enabled": {
         "path": "/nvidia/cc/algo/slot/[15]",
@@ -282,10 +254,7 @@
           "enabled": false
         },
         "source_feature": "ra22-cc-runtime",
-        "kind": "set",
-        "target_class": "pf_rdma_scope",
-        "execution_group": "cc",
-        "target_role": "ew"
+        "target_class": "pf_rdma_scope"
       },
       "ra22-cc-runtime.cc-algo-slot-0-param-0.value": {
         "path": "/nvidia/cc/algo/slot/[0]/param/[0]",
@@ -293,9 +262,7 @@
           "value": 400
         },
         "source_feature": "ra22-cc-runtime",
-        "kind": "set",
         "target_class": "pf_rdma_scope",
-        "execution_group": "cc",
         "condition": {
           "knob": "@params.nic_type == '1023' and @params.planes == 2"
         },
@@ -305,8 +272,7 @@
             "ConnectX-8"
           ],
           "platform_type": "gb300"
-        },
-        "target_role": "ew"
+        }
       },
       "ra22-cc-runtime.cc-algo-slot-0-param-1.value": {
         "path": "/nvidia/cc/algo/slot/[0]/param/[1]",
@@ -314,10 +280,7 @@
           "value": 6553
         },
         "source_feature": "ra22-cc-runtime",
-        "kind": "set",
-        "target_class": "pf_rdma_scope",
-        "execution_group": "cc",
-        "target_role": "ew"
+        "target_class": "pf_rdma_scope"
       },
       "ra22-cc-runtime.cc-algo-slot-0-param-2.value": {
         "path": "/nvidia/cc/algo/slot/[0]/param/[2]",
@@ -325,10 +288,7 @@
           "value": 63570
         },
         "source_feature": "ra22-cc-runtime",
-        "kind": "set",
-        "target_class": "pf_rdma_scope",
-        "execution_group": "cc",
-        "target_role": "ew"
+        "target_class": "pf_rdma_scope"
       },
       "ra22-cc-runtime.cc-algo-slot-0-param-3.value": {
         "path": "/nvidia/cc/algo/slot/[0]/param/[3]",
@@ -336,10 +296,7 @@
           "value": 69468
         },
         "source_feature": "ra22-cc-runtime",
-        "kind": "set",
-        "target_class": "pf_rdma_scope",
-        "execution_group": "cc",
-        "target_role": "ew"
+        "target_class": "pf_rdma_scope"
       },
       "ra22-cc-runtime.cc-algo-slot-0-param-4.value": {
         "path": "/nvidia/cc/algo/slot/[0]/param/[4]",
@@ -347,10 +304,7 @@
           "value": 36
         },
         "source_feature": "ra22-cc-runtime",
-        "kind": "set",
-        "target_class": "pf_rdma_scope",
-        "execution_group": "cc",
-        "target_role": "ew"
+        "target_class": "pf_rdma_scope"
       },
       "ra22-cc-runtime.cc-algo-slot-0-param-5.value": {
         "path": "/nvidia/cc/algo/slot/[0]/param/[5]",
@@ -358,10 +312,7 @@
           "value": 1200
         },
         "source_feature": "ra22-cc-runtime",
-        "kind": "set",
-        "target_class": "pf_rdma_scope",
-        "execution_group": "cc",
-        "target_role": "ew"
+        "target_class": "pf_rdma_scope"
       },
       "ra22-cc-runtime.cc-algo-slot-0-param-6.value": {
         "path": "/nvidia/cc/algo/slot/[0]/param/[6]",
@@ -369,10 +320,7 @@
           "value": 7000000
         },
         "source_feature": "ra22-cc-runtime",
-        "kind": "set",
-        "target_class": "pf_rdma_scope",
-        "execution_group": "cc",
-        "target_role": "ew"
+        "target_class": "pf_rdma_scope"
       },
       "ra22-cc-runtime.cc-algo-slot-0-param-7.value": {
         "path": "/nvidia/cc/algo/slot/[0]/param/[7]",
@@ -380,10 +328,7 @@
           "value": 15000
         },
         "source_feature": "ra22-cc-runtime",
-        "kind": "set",
-        "target_class": "pf_rdma_scope",
-        "execution_group": "cc",
-        "target_role": "ew"
+        "target_class": "pf_rdma_scope"
       },
       "ra22-cc-runtime.cc-algo-slot-0-param-8.value": {
         "path": "/nvidia/cc/algo/slot/[0]/param/[8]",
@@ -391,10 +336,7 @@
           "value": 250000
         },
         "source_feature": "ra22-cc-runtime",
-        "kind": "set",
-        "target_class": "pf_rdma_scope",
-        "execution_group": "cc",
-        "target_role": "ew"
+        "target_class": "pf_rdma_scope"
       },
       "ra22-cc-runtime.cc-algo-slot-0-param-9.value": {
         "path": "/nvidia/cc/algo/slot/[0]/param/[9]",
@@ -402,10 +344,7 @@
           "value": 524288
         },
         "source_feature": "ra22-cc-runtime",
-        "kind": "set",
-        "target_class": "pf_rdma_scope",
-        "execution_group": "cc",
-        "target_role": "ew"
+        "target_class": "pf_rdma_scope"
       },
       "ra22-cc-runtime.cc-algo-slot-0-param-10.value": {
         "path": "/nvidia/cc/algo/slot/[0]/param/[10]",
@@ -413,10 +352,7 @@
           "value": 0
         },
         "source_feature": "ra22-cc-runtime",
-        "kind": "set",
-        "target_class": "pf_rdma_scope",
-        "execution_group": "cc",
-        "target_role": "ew"
+        "target_class": "pf_rdma_scope"
       },
       "ra22-cc-runtime.cc-algo-slot-0-param-11.value": {
         "path": "/nvidia/cc/algo/slot/[0]/param/[11]",
@@ -424,10 +360,7 @@
           "value": 1
         },
         "source_feature": "ra22-cc-runtime",
-        "kind": "set",
-        "target_class": "pf_rdma_scope",
-        "execution_group": "cc",
-        "target_role": "ew"
+        "target_class": "pf_rdma_scope"
       },
       "ra22-cc-runtime.cc-algo-slot-0-param-12.value": {
         "path": "/nvidia/cc/algo/slot/[0]/param/[12]",
@@ -435,10 +368,7 @@
           "value": 0
         },
         "source_feature": "ra22-cc-runtime",
-        "kind": "set",
-        "target_class": "pf_rdma_scope",
-        "execution_group": "cc",
-        "target_role": "ew"
+        "target_class": "pf_rdma_scope"
       },
       "ra22-cc-runtime.cc-algo-slot-0-param-13.value": {
         "path": "/nvidia/cc/algo/slot/[0]/param/[13]",
@@ -446,10 +376,7 @@
           "value": 0
         },
         "source_feature": "ra22-cc-runtime",
-        "kind": "set",
-        "target_class": "pf_rdma_scope",
-        "execution_group": "cc",
-        "target_role": "ew"
+        "target_class": "pf_rdma_scope"
       },
       "ra22-cc-runtime.cc-algo-slot-0-param-14.value": {
         "path": "/nvidia/cc/algo/slot/[0]/param/[14]",
@@ -457,10 +384,7 @@
           "value": 2097152
         },
         "source_feature": "ra22-cc-runtime",
-        "kind": "set",
-        "target_class": "pf_rdma_scope",
-        "execution_group": "cc",
-        "target_role": "ew"
+        "target_class": "pf_rdma_scope"
       },
       "ra22-cc-runtime.cc-algo-slot-0-param-15.value": {
         "path": "/nvidia/cc/algo/slot/[0]/param/[15]",
@@ -468,10 +392,7 @@
           "value": 2
         },
         "source_feature": "ra22-cc-runtime",
-        "kind": "set",
-        "target_class": "pf_rdma_scope",
-        "execution_group": "cc",
-        "target_role": "ew"
+        "target_class": "pf_rdma_scope"
       },
       "ra22-cc-runtime.cc-algo-slot-0-param-16.value": {
         "path": "/nvidia/cc/algo/slot/[0]/param/[16]",
@@ -479,10 +400,7 @@
           "value": 1
         },
         "source_feature": "ra22-cc-runtime",
-        "kind": "set",
-        "target_class": "pf_rdma_scope",
-        "execution_group": "cc",
-        "target_role": "ew"
+        "target_class": "pf_rdma_scope"
       },
       "ra22-cc-runtime.cc-algo-slot-0-param-17.value": {
         "path": "/nvidia/cc/algo/slot/[0]/param/[17]",
@@ -490,10 +408,7 @@
           "value": 0
         },
         "source_feature": "ra22-cc-runtime",
-        "kind": "set",
-        "target_class": "pf_rdma_scope",
-        "execution_group": "cc",
-        "target_role": "ew"
+        "target_class": "pf_rdma_scope"
       },
       "ra22-cc-runtime.cc-algo-slot-0-param-18.value": {
         "path": "/nvidia/cc/algo/slot/[0]/param/[18]",
@@ -501,10 +416,7 @@
           "value": 0
         },
         "source_feature": "ra22-cc-runtime",
-        "kind": "set",
-        "target_class": "pf_rdma_scope",
-        "execution_group": "cc",
-        "target_role": "ew"
+        "target_class": "pf_rdma_scope"
       },
       "ra22-cc-runtime.cc-algo-slot-0-param-22.value": {
         "path": "/nvidia/cc/algo/slot/[0]/param/[22]",
@@ -512,10 +424,7 @@
           "value": 1
         },
         "source_feature": "ra22-cc-runtime",
-        "kind": "set",
-        "target_class": "pf_rdma_scope",
-        "execution_group": "cc",
-        "target_role": "ew"
+        "target_class": "pf_rdma_scope"
       },
       "ra22-cc-runtime.cc-algo-slot-0-param-23.value": {
         "path": "/nvidia/cc/algo/slot/[0]/param/[23]",
@@ -523,10 +432,7 @@
           "value": 3
         },
         "source_feature": "ra22-cc-runtime",
-        "kind": "set",
-        "target_class": "pf_rdma_scope",
-        "execution_group": "cc",
-        "target_role": "ew"
+        "target_class": "pf_rdma_scope"
       },
       "ra22-cc-runtime.cc-algo-slot-0-param-24.value": {
         "path": "/nvidia/cc/algo/slot/[0]/param/[24]",
@@ -534,10 +440,7 @@
           "value": 1
         },
         "source_feature": "ra22-cc-runtime",
-        "kind": "set",
-        "target_class": "pf_rdma_scope",
-        "execution_group": "cc",
-        "target_role": "ew"
+        "target_class": "pf_rdma_scope"
       },
       "ra22-cc-runtime.cc-algo-slot-0.counters-enabled-enabled": {
         "path": "/nvidia/cc/algo/slot/[0]",
@@ -546,10 +449,7 @@
           "counters-enabled": true
         },
         "source_feature": "ra22-cc-runtime",
-        "kind": "set",
-        "target_class": "pf_rdma_scope",
-        "execution_group": "cc",
-        "target_role": "ew"
+        "target_class": "pf_rdma_scope"
       },
       "spcx-base-linkup.qos.trust-mode": {
         "path": "/nvidia/qos",
@@ -557,11 +457,8 @@
           "trust-mode": "dscp"
         },
         "source_feature": "spcx-base-linkup",
-        "kind": "set",
         "target_class": "pf_netdev_all",
-        "execution_group": "link-event",
-        "scope": "per_device",
-        "target_role": "ew"
+        "scope": "per_device"
       },
       "spcx-base-linkup.qos-pfc.enabled-priorities": {
         "path": "/nvidia/qos/pfc",
@@ -569,11 +466,8 @@
           "enabled-priorities": "3"
         },
         "source_feature": "spcx-base-linkup",
-        "kind": "set",
         "target_class": "pf_netdev_all",
-        "execution_group": "link-event",
-        "scope": "per_device",
-        "target_role": "ew"
+        "scope": "per_device"
       },
       "spcx-base-linkup.cc-np.cnp-dscp": {
         "path": "/nvidia/cc/np",
@@ -581,11 +475,8 @@
           "cnp-dscp": 48
         },
         "source_feature": "spcx-base-linkup",
-        "kind": "set",
         "target_class": "pf_rdma_scope",
-        "execution_group": "link-event",
-        "scope": "per_device",
-        "target_role": "ew"
+        "scope": "per_device"
       },
       "spcx-base-linkup.roce-tos.traffic-class": {
         "path": "/nvidia/roce/tos",
@@ -593,11 +484,8 @@
           "traffic-class": 96
         },
         "source_feature": "spcx-base-linkup",
-        "kind": "set",
         "target_class": "pf_rdma_scope",
-        "execution_group": "link-event",
-        "scope": "per_device",
-        "target_role": "ew"
+        "scope": "per_device"
       },
       "spcx-base-linkup.roce-accl.adaptive-retransmission-adaptive-routing-force-slow-restart-slow-restart-idle-tx-window": {
         "path": "/nvidia/roce/accl",
@@ -609,11 +497,8 @@
           "adaptive-routing-force": true
         },
         "source_feature": "spcx-base-linkup",
-        "kind": "set",
         "target_class": "pf_rdma_scope",
-        "execution_group": "link-event",
-        "scope": "per_device",
-        "target_role": "ew"
+        "scope": "per_device"
       },
       "ra22-cc-global-status.cc-global-status-rp-0.enabled": {
         "path": "/nvidia/cc/global-status/[rp,0]",
@@ -621,11 +506,8 @@
           "enabled": true
         },
         "source_feature": "ra22-cc-global-status",
-        "kind": "set",
         "target_class": "pf_rdma_scope",
-        "execution_group": "link-event",
-        "scope": "per_device",
-        "target_role": "ew"
+        "scope": "per_device"
       },
       "ra22-cc-global-status.cc-global-status-rp-1.enabled": {
         "path": "/nvidia/cc/global-status/[rp,1]",
@@ -633,11 +515,8 @@
           "enabled": true
         },
         "source_feature": "ra22-cc-global-status",
-        "kind": "set",
         "target_class": "pf_rdma_scope",
-        "execution_group": "link-event",
-        "scope": "per_device",
-        "target_role": "ew"
+        "scope": "per_device"
       },
       "ra22-cc-global-status.cc-global-status-rp-2.enabled": {
         "path": "/nvidia/cc/global-status/[rp,2]",
@@ -645,11 +524,8 @@
           "enabled": true
         },
         "source_feature": "ra22-cc-global-status",
-        "kind": "set",
         "target_class": "pf_rdma_scope",
-        "execution_group": "link-event",
-        "scope": "per_device",
-        "target_role": "ew"
+        "scope": "per_device"
       },
       "ra22-cc-global-status.cc-global-status-rp-3.enabled": {
         "path": "/nvidia/cc/global-status/[rp,3]",
@@ -657,11 +533,8 @@
           "enabled": true
         },
         "source_feature": "ra22-cc-global-status",
-        "kind": "set",
         "target_class": "pf_rdma_scope",
-        "execution_group": "link-event",
-        "scope": "per_device",
-        "target_role": "ew"
+        "scope": "per_device"
       },
       "ra22-cc-global-status.cc-global-status-rp-4.enabled": {
         "path": "/nvidia/cc/global-status/[rp,4]",
@@ -669,11 +542,8 @@
           "enabled": true
         },
         "source_feature": "ra22-cc-global-status",
-        "kind": "set",
         "target_class": "pf_rdma_scope",
-        "execution_group": "link-event",
-        "scope": "per_device",
-        "target_role": "ew"
+        "scope": "per_device"
       },
       "ra22-cc-global-status.cc-global-status-rp-5.enabled": {
         "path": "/nvidia/cc/global-status/[rp,5]",
@@ -681,11 +551,8 @@
           "enabled": true
         },
         "source_feature": "ra22-cc-global-status",
-        "kind": "set",
         "target_class": "pf_rdma_scope",
-        "execution_group": "link-event",
-        "scope": "per_device",
-        "target_role": "ew"
+        "scope": "per_device"
       },
       "ra22-cc-global-status.cc-global-status-rp-6.enabled": {
         "path": "/nvidia/cc/global-status/[rp,6]",
@@ -693,11 +560,8 @@
           "enabled": true
         },
         "source_feature": "ra22-cc-global-status",
-        "kind": "set",
         "target_class": "pf_rdma_scope",
-        "execution_group": "link-event",
-        "scope": "per_device",
-        "target_role": "ew"
+        "scope": "per_device"
       },
       "ra22-cc-global-status.cc-global-status-rp-7.enabled": {
         "path": "/nvidia/cc/global-status/[rp,7]",
@@ -705,11 +569,8 @@
           "enabled": true
         },
         "source_feature": "ra22-cc-global-status",
-        "kind": "set",
         "target_class": "pf_rdma_scope",
-        "execution_group": "link-event",
-        "scope": "per_device",
-        "target_role": "ew"
+        "scope": "per_device"
       },
       "ra22-cc-global-status.cc-global-status-np-0.enabled": {
         "path": "/nvidia/cc/global-status/[np,0]",
@@ -717,11 +578,8 @@
           "enabled": true
         },
         "source_feature": "ra22-cc-global-status",
-        "kind": "set",
         "target_class": "pf_rdma_scope",
-        "execution_group": "link-event",
-        "scope": "per_device",
-        "target_role": "ew"
+        "scope": "per_device"
       },
       "ra22-cc-global-status.cc-global-status-np-1.enabled": {
         "path": "/nvidia/cc/global-status/[np,1]",
@@ -729,11 +587,8 @@
           "enabled": true
         },
         "source_feature": "ra22-cc-global-status",
-        "kind": "set",
         "target_class": "pf_rdma_scope",
-        "execution_group": "link-event",
-        "scope": "per_device",
-        "target_role": "ew"
+        "scope": "per_device"
       },
       "ra22-cc-global-status.cc-global-status-np-2.enabled": {
         "path": "/nvidia/cc/global-status/[np,2]",
@@ -741,11 +596,8 @@
           "enabled": true
         },
         "source_feature": "ra22-cc-global-status",
-        "kind": "set",
         "target_class": "pf_rdma_scope",
-        "execution_group": "link-event",
-        "scope": "per_device",
-        "target_role": "ew"
+        "scope": "per_device"
       },
       "ra22-cc-global-status.cc-global-status-np-3.enabled": {
         "path": "/nvidia/cc/global-status/[np,3]",
@@ -753,11 +605,8 @@
           "enabled": true
         },
         "source_feature": "ra22-cc-global-status",
-        "kind": "set",
         "target_class": "pf_rdma_scope",
-        "execution_group": "link-event",
-        "scope": "per_device",
-        "target_role": "ew"
+        "scope": "per_device"
       },
       "ra22-cc-global-status.cc-global-status-np-4.enabled": {
         "path": "/nvidia/cc/global-status/[np,4]",
@@ -765,11 +614,8 @@
           "enabled": true
         },
         "source_feature": "ra22-cc-global-status",
-        "kind": "set",
         "target_class": "pf_rdma_scope",
-        "execution_group": "link-event",
-        "scope": "per_device",
-        "target_role": "ew"
+        "scope": "per_device"
       },
       "ra22-cc-global-status.cc-global-status-np-5.enabled": {
         "path": "/nvidia/cc/global-status/[np,5]",
@@ -777,11 +623,8 @@
           "enabled": true
         },
         "source_feature": "ra22-cc-global-status",
-        "kind": "set",
         "target_class": "pf_rdma_scope",
-        "execution_group": "link-event",
-        "scope": "per_device",
-        "target_role": "ew"
+        "scope": "per_device"
       },
       "ra22-cc-global-status.cc-global-status-np-6.enabled": {
         "path": "/nvidia/cc/global-status/[np,6]",
@@ -789,11 +632,8 @@
           "enabled": true
         },
         "source_feature": "ra22-cc-global-status",
-        "kind": "set",
         "target_class": "pf_rdma_scope",
-        "execution_group": "link-event",
-        "scope": "per_device",
-        "target_role": "ew"
+        "scope": "per_device"
       },
       "ra22-cc-global-status.cc-global-status-np-7.enabled": {
         "path": "/nvidia/cc/global-status/[np,7]",
@@ -801,11 +641,8 @@
           "enabled": true
         },
         "source_feature": "ra22-cc-global-status",
-        "kind": "set",
         "target_class": "pf_rdma_scope",
-        "execution_group": "link-event",
-        "scope": "per_device",
-        "target_role": "ew"
+        "scope": "per_device"
       },
       "ra22-hwmp-data-direct.data-direct.enabled": {
         "path": "/nvidia/data-direct",
@@ -813,11 +650,9 @@
           "enabled": true
         },
         "source_feature": "ra22-hwmp-data-direct",
-        "kind": "set",
         "target_class": "vf_rep",
         "lifecycle": "pre-vf-bind",
         "scope": "per_vf",
-        "execution_group": "vf-lifecycle",
         "condition": {
           "feature": "@params.multiplane_mode == 'hwmp' and @params.nic_type == '1023' and @params.data_direct == True"
         },

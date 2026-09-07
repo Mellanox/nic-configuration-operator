@@ -79,9 +79,16 @@ func (s *capturingLogSink) WithName(name string) logr.LogSink {
 }
 
 func fakeExecutor(output []byte, commandErr error, commands *[]recordedCommand) *execTesting.FakeExec {
+	return fakeExecutorWithStderr(output, nil, commandErr, commands)
+}
+
+func fakeExecutorWithStderr(stdout, stderr []byte, commandErr error, commands *[]recordedCommand) *execTesting.FakeExec {
 	command := &execTesting.FakeCmd{}
 	command.CombinedOutputScript = append(command.CombinedOutputScript, func() ([]byte, []byte, error) {
-		return output, nil, commandErr
+		return stdout, stderr, commandErr
+	})
+	command.RunScript = append(command.RunScript, func() ([]byte, []byte, error) {
+		return stdout, stderr, commandErr
 	})
 
 	executor := &execTesting.FakeExec{}

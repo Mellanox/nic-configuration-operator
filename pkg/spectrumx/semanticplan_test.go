@@ -46,7 +46,7 @@ var _ = Describe("doSPCX semantic plans", func() {
 			plan := parseFixture("prepare-plan.json", PlanStagePrepare)
 
 			Expect(plan.Name).To(Equal("nco-parser-semantic-prepare"))
-			Expect(plan.Profile).To(Equal("hwmp"))
+			Expect(plan.Profile).To(Equal("SPX_Multiplane"))
 			Expect(plan.PathDialect).To(Equal(semanticPathDialect))
 			Expect(plan.Devices).To(HaveLen(2))
 			Expect(plan.RuntimeContext.RDMATopology).To(Equal(rdmaTopologyPerPF))
@@ -55,6 +55,9 @@ var _ = Describe("doSPCX semantic plans", func() {
 			Expect(plan.Groups[0].Operations).To(HaveLen(15))
 			Expect(plan.Groups[0].Operations[0].ID).To(Equal("spcx-base-nvconfig.roce.adaptive-routing-cc-steering-ext-tx-sched-locality-mode"))
 			Expect(plan.Groups[0].Operations[0].Path).To(Equal("/nvidia/roce"))
+			Expect(plan.Groups[0].Operations[0].Kind).To(Equal("set"))
+			Expect(plan.Groups[0].Operations[0].ExecutionGroup).To(Equal("breakout"))
+			Expect(plan.Groups[0].Operations[0].TargetRole).To(BeEmpty())
 			Expect(plan.Groups[1].Name).To(Equal("post-breakout"))
 			Expect(plan.Groups[1].Operations).To(BeEmpty())
 			Expect(plan.Groups[1].RequiresReboot).To(BeTrue())
@@ -99,13 +102,6 @@ var _ = Describe("doSPCX semantic plans", func() {
 				groups := document["plan"].(map[string]any)["semantic"].(map[string]any)["groups"].([]any)
 				groups[0].(map[string]any)["operation_refs"] = []any{"missing-operation"}
 			}, "references missing operation"),
-			Entry("operation in another group", func(document map[string]any) {
-				operations := document["plan"].(map[string]any)["operations"].(map[string]any)
-				for _, value := range operations {
-					value.(map[string]any)["execution_group"] = "other"
-					break
-				}
-			}, "belongs to group"),
 			Entry("unsupported operation kind", func(document map[string]any) {
 				operations := document["plan"].(map[string]any)["operations"].(map[string]any)
 				for _, value := range operations {
@@ -151,6 +147,21 @@ var _ = Describe("doSPCX semantic plans", func() {
 
 			Expect(err).NotTo(HaveOccurred())
 			Expect(plan.Groups[0].Operations[0].TargetClass).To(Equal(targetClassPFNetdevAll))
+		})
+
+		It("uses semantic operation references as the authoritative group membership", func() {
+			var document map[string]any
+			Expect(json.Unmarshal(readFixture("prepare-plan.json"), &document)).To(Succeed())
+			planObject := document["plan"].(map[string]any)
+			firstRef := planObject["semantic"].(map[string]any)["groups"].([]any)[0].(map[string]any)["operation_refs"].([]any)[0].(string)
+			planObject["operations"].(map[string]any)[firstRef].(map[string]any)["execution_group"] = "ignored-producer-detail"
+			content, err := json.Marshal(document)
+			Expect(err).NotTo(HaveOccurred())
+
+			plan, err := ParseSemanticPlan(content, PlanStagePrepare)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(plan.Groups[0].Operations[0].ExecutionGroup).To(Equal("breakout"))
 		})
 
 		It("sorts semantic groups by their declared order", func() {
@@ -224,11 +235,13 @@ var _ = Describe("doSPCX semantic plans", func() {
 
 		It("preserves ordered SET transitions but queries only the final desired state", func() {
 			semantic := parseFixture("configure-plan.json", PlanStageConfigure)
+			semantic.Groups[0].FanoutOrder = "per_target"
 			plan, err := semantic.BuildDMSOperationPlan(context.Background())
 			Expect(err).NotTo(HaveOccurred())
 
 			linkRuntime := plan.Groups[0]
 			Expect(linkRuntime.Name).To(Equal("link-runtime"))
+			Expect(linkRuntime.FanoutOrder).To(Equal("per_target"))
 			Expect(linkRuntime.Targets).To(HaveLen(4))
 			batch := linkRuntime.Targets[0]
 			Expect(batch.Operations).To(HaveLen(4))
@@ -240,8 +253,12 @@ var _ = Describe("doSPCX semantic plans", func() {
 			Expect(batch.Queries[1]).To(Equal(dmsQuery("/nvidia/link/physical", "admin-status")))
 		})
 
-		It("resolves bonded RDMA operations only to the per-rail control targets", func() {
+		It("resolves bonded RDMA operations to each plane-zero target", func() {
 			semantic := parseFixture("configure-plan.json", PlanStageConfigure)
+			for _, endpoint := range semantic.RuntimeContext.ExpectedRDMA {
+				Expect(endpoint.ControlBDF).To(BeEmpty())
+				Expect(endpoint.ControlTarget).To(BeEmpty())
+			}
 			plan, err := semantic.BuildDMSOperationPlan(context.Background())
 			Expect(err).NotTo(HaveOccurred())
 
@@ -278,24 +295,44 @@ var _ = Describe("doSPCX semantic plans", func() {
 			Expect(err).To(MatchError(ContainSubstring(`unsupported doSPCX semantic group "new-runtime-phase"`)))
 		})
 
-		It("rejects a missing bonded RDMA control target", func() {
+		DescribeTable("does not allow excluded operation classes in executable groups",
+			func(mutate func(*SemanticOperation)) {
+				semantic := parseFixture("configure-plan.json", PlanStageConfigure)
+				mutate(&semantic.Groups[0].Operations[0])
+
+				plan, err := semantic.BuildDMSOperationPlan(context.Background())
+
+				Expect(plan).To(BeNil())
+				Expect(err).To(MatchError(ContainSubstring("outside the current NCO execution scope")))
+			},
+			Entry("eSwitch path", func(operation *SemanticOperation) {
+				operation.Path = "/nvidia/eswitch"
+			}),
+			Entry("eSwitch target class", func(operation *SemanticOperation) {
+				operation.TargetClass = targetClassPerESwitch
+			}),
+			Entry("VF target class", func(operation *SemanticOperation) {
+				operation.TargetClass = targetClassVFRepresentor
+			}),
+			Entry("per-VF scope", func(operation *SemanticOperation) {
+				operation.Scope = "per_vf"
+			}),
+		)
+
+		It("resolves per-PF RDMA operations only to devices with an RDMA endpoint", func() {
 			semantic := parseFixture("configure-plan.json", PlanStageConfigure)
-			semantic.RuntimeContext.ExpectedRDMA[0].ControlTarget = ""
+			semantic.RuntimeContext.RDMATopology = rdmaTopologyPerPF
+			semantic.Devices[1].RDMADevice = ""
+			semantic.Devices[3].RDMADevice = ""
 
 			plan, err := semantic.BuildDMSOperationPlan(context.Background())
 
-			Expect(plan).To(BeNil())
-			Expect(err).To(MatchError(ContainSubstring("rail 0 has no RDMA control target")))
-		})
-
-		It("rejects duplicated bonded RDMA rails", func() {
-			semantic := parseFixture("configure-plan.json", PlanStageConfigure)
-			semantic.RuntimeContext.ExpectedRDMA[1].Rail = 0
-
-			plan, err := semantic.BuildDMSOperationPlan(context.Background())
-
-			Expect(plan).To(BeNil())
-			Expect(err).To(MatchError(ContainSubstring("RDMA control rail 0 is duplicated")))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(plan.Groups[1].Name).To(Equal("cc"))
+			Expect(plan.Groups[1].Targets).To(HaveLen(2))
+			Expect([]string{plan.Groups[1].Targets[0].Target, plan.Groups[1].Targets[1].Target}).To(Equal([]string{
+				"pci/0000:64:00.0", "pci/0001:15:00.0",
+			}))
 		})
 
 		It("rejects a nil semantic plan", func() {

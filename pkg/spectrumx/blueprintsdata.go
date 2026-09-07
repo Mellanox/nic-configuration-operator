@@ -166,14 +166,14 @@ func extractBlueprintsDataArchive(archive []byte, destination string) error {
 		if entries > maxBlueprintsArchiveFiles {
 			return fmt.Errorf("archive exceeds the %d-entry limit", maxBlueprintsArchiveFiles)
 		}
+		// git archive adds a global PAX header containing the source commit before the
+		// archived files. It is metadata only and must not be treated as a filesystem path.
+		if header.Typeflag == tar.TypeXGlobalHeader {
+			continue
+		}
 		archivePath, pathErr := cleanBlueprintsArchivePath(header.Name)
 		if pathErr != nil {
 			return pathErr
-		}
-		// Keep this guard adjacent to the rooted file operations. cleanBlueprintsArchivePath
-		// already rejects traversal, and os.Root independently prevents escaping destination.
-		if strings.Contains(archivePath, "..") {
-			return fmt.Errorf("archive contains unsafe path %q", header.Name)
 		}
 		if _, exists := seen[archivePath]; exists {
 			return fmt.Errorf("archive contains duplicate path %q", header.Name)

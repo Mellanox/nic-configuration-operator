@@ -18,7 +18,6 @@ package spectrumx
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -106,7 +105,7 @@ func generateConfigurePlan(
 
 func preparePlanFakeExecutor(output []byte, commands *[]preparePlanCommand) *execTesting.FakeExec {
 	command := &execTesting.FakeCmd{}
-	command.CombinedOutputScript = append(command.CombinedOutputScript, func() ([]byte, []byte, error) {
+	command.RunScript = append(command.RunScript, func() ([]byte, []byte, error) {
 		return output, nil, nil
 	})
 	executor := &execTesting.FakeExec{}
@@ -127,6 +126,7 @@ var _ = Describe("doSPCX planning", func() {
 	const (
 		nodeName       = "worker-01"
 		blueprintsRoot = "/opt/nvidia/blueprints"
+		secondBDF      = "0000:65:00.0"
 	)
 
 	newDevice := func(name, bdf, mode string) *v1alpha1.NicDevice {
@@ -156,15 +156,29 @@ var _ = Describe("doSPCX planning", func() {
 	}
 
 	planResponseForPlatform := func(name, profile, stage, platform string, planes, deviceCount int) []byte {
+		prepareBDFs := []string{"0000:64:00.0", secondBDF, "0001:15:00.0"}
+		configureBDFs := []string{"0000:64:00.0", "0001:15:00.0"}
 		devices := make([]map[string]any, deviceCount)
 		for index := range devices {
-			bdf := fmt.Sprintf("0000:%02x:00.0", index+1)
+			rail := index
+			plane := 0
+			bdf := ""
+			if stage == configureStage {
+				rail = index / planes
+				plane = index % planes
+				var err error
+				bdf, err = bdfForPlane(configureBDFs[rail], plane)
+				Expect(err).NotTo(HaveOccurred())
+			} else {
+				bdf = prepareBDFs[index]
+			}
 			devices[index] = map[string]any{
 				"bdf":        bdf,
+				"device_id":  "0x1023",
 				"dms_target": "pci/" + bdf,
 				"network":    "ew",
-				"rail":       index,
-				"plane":      0,
+				"rail":       rail,
+				"plane":      plane,
 			}
 		}
 		groupName := "breakout"
@@ -209,13 +223,10 @@ var _ = Describe("doSPCX planning", func() {
 					"runtime_ctx":  map[string]any{"deployment_mode": "host-k8s", "rdma_topology": "per_pf"},
 					"operations": map[string]any{
 						operationID: map[string]any{
-							"path":            "/nvidia/test",
-							"values":          map[string]any{"enabled": true},
-							"source_feature":  "test",
-							"kind":            "set",
-							"target_class":    "pf_netdev_all",
-							"target_role":     "ew",
-							"execution_group": groupName,
+							"path":           "/nvidia/test",
+							"values":         map[string]any{"enabled": true},
+							"source_feature": "test",
+							"target_class":   "pf_netdev_all",
 						},
 					},
 					"semantic": map[string]any{"groups": groups},
@@ -230,14 +241,14 @@ var _ = Describe("doSPCX planning", func() {
 		return planResponseForPlatform(name, profile, stage, "gb300", planes, deviceCount)
 	}
 
-	It("builds a schema-v3 target map and saves the returned prepare plan", func() {
+	It("builds a schema-v1 target map and saves the returned prepare plan", func() {
 		stateDir := GinkgoT().TempDir()
 		commands := []preparePlanCommand{}
 		planName := planName(nodeName, prepareStage)
-		executor := preparePlanFakeExecutor(planResponse(planName, "hwmp", prepareStage, 2, 3), &commands)
+		executor := preparePlanFakeExecutor(planResponse(planName, "SPX_Multiplane", prepareStage, 2, 3), &commands)
 		devices := []*v1alpha1.NicDevice{
 			newDevice("last-by-bdf", "0001:15:00.0", "hwplb"),
-			newDevice("second-by-bdf", "0000:65:00.0", "hwplb"),
+			newDevice("second-by-bdf", secondBDF, "hwplb"),
 			newDevice("first-by-bdf", "0000:64:00.0", "hwplb"),
 		}
 
@@ -255,7 +266,7 @@ var _ = Describe("doSPCX planning", func() {
 		planPath := filepath.Join(stateDir, "plans", planName, "plan.json")
 		planContent, err := os.ReadFile(planPath)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(string(planContent)).To(ContainSubstring(`"profile": "hwmp"`))
+		Expect(string(planContent)).To(ContainSubstring(`"profile": "SPX_Multiplane"`))
 		storedPlan, err := manager.GetPreparedPlan(devices[0], PlanStagePrepare)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(storedPlan).To(Equal(plan))
@@ -268,23 +279,21 @@ var _ = Describe("doSPCX planning", func() {
 		Expect(err).NotTo(HaveOccurred())
 		var generated targetMap
 		Expect(json.Unmarshal(targetMapContent, &generated)).To(Succeed())
-		Expect(generated.SchemaVersion).To(Equal(3))
+		Expect(generated.SchemaVersion).To(Equal(1))
 		Expect(generated.PlatformType).To(Equal("gb300"))
-		Expect(generated.DefaultRole).To(Equal("ew"))
-		Expect(generated.TargetConstraints).To(Equal(map[string]targetConstraint{
-			"ew": {HCATypes: []string{"ConnectX-8"}, Topology: targetTopology{PortsPerTarget: 1}},
-		}))
 		Expect(generated.PreBreakout.Targets).To(Equal([]preBreakoutTarget{
-			{BDF: "0000:64:00.0", Rail: 0},
-			{BDF: "0000:65:00.0", Rail: 1},
-			{BDF: "0001:15:00.0", Rail: 2},
+			{ID: "ew-rail0-prebreakout", BDF: "0000:64:00.0", DeviceID: "0x1023", Role: "ew", Rail: 0},
+			{ID: "ew-rail1-prebreakout", BDF: secondBDF, DeviceID: "0x1023", Role: "ew", Rail: 1},
+			{ID: "ew-rail2-prebreakout", BDF: "0001:15:00.0", DeviceID: "0x1023", Role: "ew", Rail: 2},
 		}))
+		Expect(string(targetMapContent)).NotTo(ContainSubstring("default_role"))
+		Expect(string(targetMapContent)).NotTo(ContainSubstring("target_constraints"))
 		Expect(string(targetMapContent)).NotTo(ContainSubstring("nic_index_in_rail"))
 
 		Expect(commands).To(HaveLen(1))
 		Expect(commands[0].executable).To(Equal("/opt/mellanox/doca/services/dms/dms-cli"))
 		Expect(commands[0].args).To(ContainElements(
-			"profile=hwmp",
+			"profile=SPX_Multiplane",
 			"name="+planName,
 			"stage=prepare",
 			"target-map-file=file:"+targetMapPath,
@@ -292,7 +301,7 @@ var _ = Describe("doSPCX planning", func() {
 		))
 		Expect(commands[0].args).NotTo(ContainElement("params=deployment_mode=host-k8s,planes=2,overlay=none"))
 		Expect(commands[0].command.Env).To(ContainElement("BLUEPRINTS_ROOT=" + blueprintsRoot))
-		Expect(commands[0].command.Env).To(ContainElement("BLUEPRINTS_STATE_DIR=" + stateDir))
+		Expect(commands[0].command.Env).To(ContainElement("BP_STATE_DIR=" + stateDir))
 
 		metadataPath := filepath.Join(stateDir, "plans", planName, "metadata.json")
 		metadataContent, err := os.ReadFile(metadataPath)
@@ -304,7 +313,7 @@ var _ = Describe("doSPCX planning", func() {
 			BlueprintsStateDir: stateDir,
 			PlanName:           planName,
 			Stage:              prepareStage,
-			Profile:            "hwmp",
+			Profile:            "SPX_Multiplane",
 			PlatformType:       "gb300",
 			SpectrumXVersion:   "RA2.2",
 			MultiplaneMode:     "hwplb",
@@ -343,7 +352,7 @@ var _ = Describe("doSPCX planning", func() {
 			commands := []preparePlanCommand{}
 			generatedPlanName := planName(otherNode, stage)
 			executor := preparePlanFakeExecutor(
-				planResponse(generatedPlanName, "hwmp", string(stage), 2, deviceCount), &commands,
+				planResponse(generatedPlanName, "SPX_Multiplane", string(stage), 2, deviceCount), &commands,
 			)
 			device := newDevice("rail-0", "0000:64:00.0", "hwplb")
 
@@ -373,7 +382,7 @@ var _ = Describe("doSPCX planning", func() {
 		commands := []preparePlanCommand{}
 		configurePlanName := planName(nodeName, configureStage)
 		executor := preparePlanFakeExecutor(
-			planResponse(configurePlanName, "hwmp", configureStage, 2, 4), &commands,
+			planResponse(configurePlanName, "SPX_Multiplane", configureStage, 2, 4), &commands,
 		)
 		devices := []*v1alpha1.NicDevice{
 			newDevice("rail-1", "0001:15:00.0", "hwplb"),
@@ -409,7 +418,7 @@ var _ = Describe("doSPCX planning", func() {
 		generatedPlanName := planName(nodeName, prepareStage)
 		firstCommands := []preparePlanCommand{}
 		firstExecutor := preparePlanFakeExecutor(
-			planResponse(generatedPlanName, "hwmp", prepareStage, 2, 1), &firstCommands,
+			planResponse(generatedPlanName, "SPX_Multiplane", prepareStage, 2, 1), &firstCommands,
 		)
 
 		firstPath, err := generatePreparePlan(
@@ -437,7 +446,7 @@ var _ = Describe("doSPCX planning", func() {
 		firstCommands := []preparePlanCommand{}
 		manager := newTestPlanManager(
 			preparePlanFakeExecutor(
-				planResponse(generatedPlanName, "hwmp", prepareStage, 2, 1), &firstCommands,
+				planResponse(generatedPlanName, "SPX_Multiplane", prepareStage, 2, 1), &firstCommands,
 			), blueprintsRoot, stateDir,
 		).(*spectrumXConfigManager)
 		manager.dospcxDataDigest = "first-bundle"
@@ -447,7 +456,7 @@ var _ = Describe("doSPCX planning", func() {
 
 		secondCommands := []preparePlanCommand{}
 		manager.execInterface = preparePlanFakeExecutor(
-			planResponse(generatedPlanName, "hwmp", prepareStage, 2, 1), &secondCommands,
+			planResponse(generatedPlanName, "SPX_Multiplane", prepareStage, 2, 1), &secondCommands,
 		)
 		manager.dospcxDataDigest = "second-bundle"
 
@@ -468,7 +477,7 @@ var _ = Describe("doSPCX planning", func() {
 			commands := []preparePlanCommand{}
 			manager := newTestPlanManager(
 				preparePlanFakeExecutor(
-					planResponse(generatedPlanName, "hwmp", prepareStage, 2, 1), &commands,
+					planResponse(generatedPlanName, "SPX_Multiplane", prepareStage, 2, 1), &commands,
 				), blueprintsRoot, stateDir,
 			)
 			Expect(manager.PreparePlan(context.Background(), []*v1alpha1.NicDevice{device}, PlanStagePrepare)).To(Succeed())
@@ -482,8 +491,11 @@ var _ = Describe("doSPCX planning", func() {
 			device.Spec.Configuration.Template.SpectrumXOptimized.PlatformType = "b300"
 		}, "does not match"),
 		Entry("device is absent from the target map", func(device *v1alpha1.NicDevice) {
-			device.Status.Ports[0].PCI = "0000:65:00.0"
+			device.Status.Ports[0].PCI = secondBDF
 		}, "is absent from the target map"),
+		Entry("device type differs from the target map", func(device *v1alpha1.NicDevice) {
+			device.Status.Type = "1025"
+		}, "device ID"),
 	)
 
 	DescribeTable("regenerates a saved plan when an input changes",
@@ -494,18 +506,26 @@ var _ = Describe("doSPCX planning", func() {
 			firstCommands := []preparePlanCommand{}
 			_, err := generatePreparePlan(
 				context.Background(), preparePlanFakeExecutor(
-					planResponse(generatedPlanName, "hwmp", prepareStage, 2, 1), &firstCommands,
+					planResponse(generatedPlanName, "SPX_Multiplane", prepareStage, 2, 1), &firstCommands,
 				), nodeName, []*v1alpha1.NicDevice{device}, blueprintsRoot, stateDir,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
 			mutate(device)
 			secondCommands := []preparePlanCommand{}
+			secondResponse := planResponseForPlatform(
+				generatedPlanName, "SPX_Multiplane", prepareStage, expectedPlatform, expectedPlanes, 1,
+			)
+			var responseDocument map[string]any
+			Expect(json.Unmarshal(secondResponse, &responseDocument)).To(Succeed())
+			planDevices := responseDocument["plan-json"].(map[string]any)["plan"].(map[string]any)["devices"].([]any)
+			planDevices[0].(map[string]any)["bdf"] = device.Status.Ports[0].PCI
+			planDevices[0].(map[string]any)["dms_target"] = "pci/" + device.Status.Ports[0].PCI
+			secondResponse, err = json.Marshal(responseDocument)
+			Expect(err).NotTo(HaveOccurred())
 			_, err = generatePreparePlan(
 				context.Background(), preparePlanFakeExecutor(
-					planResponseForPlatform(
-						generatedPlanName, "hwmp", prepareStage, expectedPlatform, expectedPlanes, 1,
-					), &secondCommands,
+					secondResponse, &secondCommands,
 				), nodeName, []*v1alpha1.NicDevice{device}, blueprintsRoot, stateDir,
 			)
 
@@ -527,7 +547,7 @@ var _ = Describe("doSPCX planning", func() {
 			device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = 4
 		}, "gb300", 4),
 		Entry("target-map topology", func(device *v1alpha1.NicDevice) {
-			device.Status.Ports[0].PCI = "0000:65:00.0"
+			device.Status.Ports[0].PCI = secondBDF
 		}, "gb300", 2),
 	)
 
@@ -539,7 +559,7 @@ var _ = Describe("doSPCX planning", func() {
 			firstCommands := []preparePlanCommand{}
 			_, err := generatePreparePlan(
 				context.Background(), preparePlanFakeExecutor(
-					planResponse(generatedPlanName, "hwmp", prepareStage, 2, 1), &firstCommands,
+					planResponse(generatedPlanName, "SPX_Multiplane", prepareStage, 2, 1), &firstCommands,
 				), nodeName, []*v1alpha1.NicDevice{device}, blueprintsRoot, stateDir,
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -548,7 +568,7 @@ var _ = Describe("doSPCX planning", func() {
 			secondCommands := []preparePlanCommand{}
 			_, err = generatePreparePlan(
 				context.Background(), preparePlanFakeExecutor(
-					planResponse(generatedPlanName, "hwmp", prepareStage, 2, 1), &secondCommands,
+					planResponse(generatedPlanName, "SPX_Multiplane", prepareStage, 2, 1), &secondCommands,
 				), nodeName, []*v1alpha1.NicDevice{device}, blueprintsRoot, stateDir,
 			)
 
@@ -572,12 +592,12 @@ var _ = Describe("doSPCX planning", func() {
 		}),
 	)
 
-	It("maps swplb to swmp and passes its overlay", func() {
+	It("maps swplb to SPX_NetPlugin and passes its overlay", func() {
 		stateDir := GinkgoT().TempDir()
 		commands := []preparePlanCommand{}
 		planName := planName(nodeName, prepareStage)
-		executor := preparePlanFakeExecutor(planResponse(planName, "swmp", prepareStage, 2, 1), &commands)
-		device := newDevice("swmp", "0000:64:00.0", "swplb")
+		executor := preparePlanFakeExecutor(planResponse(planName, "SPX_NetPlugin", prepareStage, 2, 1), &commands)
+		device := newDevice("SPX_NetPlugin", "0000:64:00.0", "swplb")
 
 		_, err := generatePreparePlan(
 			context.Background(), executor, nodeName, []*v1alpha1.NicDevice{device}, blueprintsRoot, stateDir,
@@ -585,7 +605,7 @@ var _ = Describe("doSPCX planning", func() {
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(commands).To(HaveLen(1))
-		Expect(commands[0].args).To(ContainElements("profile=swmp", "params=deployment_mode=host-k8s,planes=2,overlay=none"))
+		Expect(commands[0].args).To(ContainElements("profile=SPX_NetPlugin", "params=deployment_mode=host-k8s,planes=2,overlay=none"))
 	})
 
 	It("maps an omitted multiplane mode to a one-plane plan", func() {
@@ -605,7 +625,7 @@ var _ = Describe("doSPCX planning", func() {
 		Expect(commands[0].args).To(ContainElements("profile=single-plane", "params=deployment_mode=host-k8s,planes=1,overlay=none"))
 	})
 
-	It("rejects an unsupported HWMP overlay before writing the target map", func() {
+	It("rejects an unsupported SPX_Multiplane overlay before writing the target map", func() {
 		stateDir := GinkgoT().TempDir()
 		commands := []preparePlanCommand{}
 		device := newDevice("hwmp-l3", "0000:64:00.0", "hwplb")
@@ -647,8 +667,8 @@ var _ = Describe("doSPCX planning", func() {
 		},
 		Entry("default", "", "single-plane"),
 		Entry("none", "none", "single-plane"),
-		Entry("software multiplane", "swplb", "swmp"),
-		Entry("hardware multiplane", "hwplb", "hwmp"),
+		Entry("software multiplane", "swplb", "SPX_NetPlugin"),
+		Entry("hardware multiplane", "hwplb", "SPX_Multiplane"),
 	)
 
 	It("rejects unsupported multiplane modes", func() {
@@ -656,16 +676,16 @@ var _ = Describe("doSPCX planning", func() {
 		Expect(err).To(MatchError(ContainSubstring("unsupported")))
 	})
 
-	DescribeTable("maps NCO device types to doSPCX HCA names",
+	DescribeTable("maps NCO device types to doSPCX device IDs",
 		func(deviceType, expected string) {
-			hcaType, err := blueprintHCAType(deviceType)
+			deviceID, err := blueprintDeviceID(deviceType)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(hcaType).To(Equal(expected))
+			Expect(deviceID).To(Equal(expected))
 		},
-		Entry("ConnectX-7", "1021", "ConnectX-7"),
-		Entry("ConnectX-8", "1023", "ConnectX-8"),
-		Entry("ConnectX-9", "1025", "ConnectX-9"),
-		Entry("BlueField-3", "a2dc", "BlueField-3"),
+		Entry("ConnectX-7", "1021", "0x1021"),
+		Entry("ConnectX-8", "1023", "0x1023"),
+		Entry("ConnectX-9", "1025", "0x1025"),
+		Entry("BlueField-3", "A2DC", "0xa2dc"),
 	)
 
 	DescribeTable("rejects incomplete or inconsistent target-map inputs",
@@ -680,10 +700,6 @@ var _ = Describe("doSPCX planning", func() {
 
 			Expect(err).To(MatchError(ContainSubstring(expected)))
 		},
-		Entry("missing platform type", func(devices []*v1alpha1.NicDevice) {
-			devices[0].Spec.Configuration.Template.SpectrumXOptimized.PlatformType = ""
-			devices[1].Spec.Configuration.Template.SpectrumXOptimized.PlatformType = ""
-		}, "platformType"),
 		Entry("inconsistent platform type", func(devices []*v1alpha1.NicDevice) {
 			devices[1].Spec.Configuration.Template.SpectrumXOptimized.PlatformType = "b300"
 		}, "must use the same"),
@@ -713,6 +729,21 @@ var _ = Describe("doSPCX planning", func() {
 		}, "same pre-breakout BDF"),
 	)
 
+	It("uses gb300 when platformType is absent", func() {
+		devices := []*v1alpha1.NicDevice{
+			newDevice("first", "0000:64:00.0", "hwplb"),
+			newDevice("second", "0001:15:00.0", "hwplb"),
+		}
+		devices[0].Spec.Configuration.Template.SpectrumXOptimized.PlatformType = ""
+		devices[1].Spec.Configuration.Template.SpectrumXOptimized.PlatformType = " "
+
+		config, err := buildPlanConfig(devices)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(config.platformType).To(Equal("gb300"))
+		Expect(config.targetMap.PlatformType).To(Equal("gb300"))
+	})
+
 	It("ignores interface-name configuration when assigning target-map rails", func() {
 		first := newDevice("first", "0000:64:00.0", "hwplb")
 		first.Spec.InterfaceNameTemplate = &v1alpha1.NicDeviceInterfaceNameSpec{
@@ -725,8 +756,8 @@ var _ = Describe("doSPCX planning", func() {
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(config.targetMap.PreBreakout.Targets).To(Equal([]preBreakoutTarget{
-			{BDF: "0000:64:00.0", Rail: 0},
-			{BDF: "0001:15:00.0", Rail: 1},
+			{ID: "ew-rail0-prebreakout", BDF: "0000:64:00.0", DeviceID: "0x1023", Role: "ew", Rail: 0},
+			{ID: "ew-rail1-prebreakout", BDF: "0001:15:00.0", DeviceID: "0x1023", Role: "ew", Rail: 1},
 		}))
 	})
 
@@ -734,7 +765,7 @@ var _ = Describe("doSPCX planning", func() {
 		stateDir := GinkgoT().TempDir()
 		commands := []preparePlanCommand{}
 		planName := planName(nodeName, prepareStage)
-		response := planResponse(planName, "hwmp", prepareStage, 2, 1)
+		response := planResponse(planName, "SPX_Multiplane", prepareStage, 2, 1)
 		var document map[string]any
 		Expect(json.Unmarshal(response, &document)).To(Succeed())
 		document["plan-json"].(map[string]any)["plan"].(map[string]any)["stage"] = "configure"
@@ -758,7 +789,7 @@ var _ = Describe("doSPCX planning", func() {
 			stateDir := GinkgoT().TempDir()
 			commands := []preparePlanCommand{}
 			generatedPlanName := planName(nodeName, prepareStage)
-			response := planResponse(generatedPlanName, "hwmp", prepareStage, 2, 1)
+			response := planResponse(generatedPlanName, "SPX_Multiplane", prepareStage, 2, 1)
 			var document map[string]any
 			Expect(json.Unmarshal(response, &document)).To(Succeed())
 			mutate(document["plan-json"].(map[string]any))
@@ -789,5 +820,24 @@ var _ = Describe("doSPCX planning", func() {
 		Entry("rendered artifacts", func(bundle map[string]any) {
 			bundle["artifacts"] = map[string]any{"manifest": []any{map[string]any{"type": "systemd-unit"}}}
 		}, "rendered artifacts"),
+		Entry("unexpected device BDF", func(bundle map[string]any) {
+			device := bundle["plan"].(map[string]any)["devices"].([]any)[0].(map[string]any)
+			device["bdf"] = secondBDF
+			device["dms_target"] = "pci/" + secondBDF
+		}, "unexpected device BDF"),
+		Entry("wrong device rail", func(bundle map[string]any) {
+			device := bundle["plan"].(map[string]any)["devices"].([]any)[0].(map[string]any)
+			device["rail"] = 1
+		}, "topology does not match"),
+		Entry("unknown semantic group", func(bundle map[string]any) {
+			group := bundle["plan"].(map[string]any)["semantic"].(map[string]any)["groups"].([]any)[0].(map[string]any)
+			group["name"] = "unknown-prepare-group"
+		}, "unsupported doSPCX semantic group"),
+		Entry("eSwitch operation in an executable group", func(bundle map[string]any) {
+			plan := bundle["plan"].(map[string]any)
+			group := plan["semantic"].(map[string]any)["groups"].([]any)[0].(map[string]any)
+			operationID := group["operation_refs"].([]any)[0].(string)
+			plan["operations"].(map[string]any)[operationID].(map[string]any)["path"] = "/nvidia/eswitch"
+		}, "outside the current NCO execution scope"),
 	)
 })

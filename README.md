@@ -223,11 +223,18 @@ Spectrum-X profiles can configure NICs with multiple data planes. Available mode
 starts its existing concurrent per-device NV apply, it calls `PreparePlan` once for the node's
 Spectrum-X device group with the `prepare` stage. It does the same with the `configure` stage before
 the existing concurrent runtime apply. Plan preparation never executes generated plan operations.
-`GetPreparedPlan` parses the host-k8s `plan.semantic.groups` contract and makes the semantic plan
-available to library consumers. `BuildDMSOperationPlan` turns it into an ordered, target-resolved
-DMS operation plan, including current plus pending queries for prepare-stage NVConfig. This
-translation remains execution-free. Configure groups `eswitch` and `vf-lifecycle` are intentionally excluded from the
-current operation plan and reported as skipped; unknown groups fail closed.
+`GetPreparedPlan` parses the host-k8s `plan.semantic.groups` contract and returns its validated
+semantic source to library consumers. Plans are accepted only when `BuildDMSOperationPlan` can
+compile them into an ordered, target-resolved operation plan. That compiled form includes current
+plus pending queries for prepare-stage NVConfig and retains the planner's fanout order. This
+translation remains execution-free. Semantic group references are authoritative; public doSPCX
+operations do not need to repeat group or network-role fields, and an omitted operation kind means
+`set`, matching DMS. Configure groups `eswitch` and `vf-lifecycle` are intentionally excluded from
+the current operation plan and reported as skipped; unknown groups fail closed.
+
+NCO translates its CRD multiplane modes to the public profiles supplied by the doSPCX data bundle:
+`none` selects `single-plane`, `swplb` selects `SPX_NetPlugin`, and `hwplb` selects
+`SPX_Multiplane`.
 
 The manager creates its command executor internally and points the `dms-cli` child process at the
 Blueprints action tree fixed at `/opt/nvidia/blueprints`. The executable DMS planner remains part of
@@ -242,16 +249,19 @@ the daemon base image, while the labeled doSPCX data ConfigMap restores its auth
 /var/lib/blueprints/plans/nco-<node>-spcx-configure/metadata.json
 ```
 
-NICs are sorted by function-zero BDF and assigned deterministic target-map rail IDs. The same
-pre-breakout target map is passed to both stages; during `configure`, doSPCX resolves the
-post-breakout inventory after NVConfig is active. The planner does not read `interfaceNameTemplate`;
-interface naming remains an independent NCO capability.
+NICs are sorted by function-zero BDF and assigned deterministic target-map rail IDs. NCO writes the
+doSPCX schema-v1 target-map contract: every pre-breakout target has an ID, function-zero BDF,
+hexadecimal device ID, `ew` role, and rail. The same pre-breakout target map is passed to both
+stages; during `configure`, doSPCX resolves the post-breakout inventory after NVConfig is active.
+The planner does not read `interfaceNameTemplate`; interface naming remains an independent NCO
+capability.
 
 Each stage stores a flat metadata document containing only the planner inputs, including the
 platform, Spectrum-X settings, planner parameters, doSPCX data archive digest, and target-map
 digest. A later `PreparePlan` call reuses the saved plan when that metadata still matches, the
-target-map digest is unchanged,
-and the saved plan passes normal validation. Any input change or invalid saved artifact regenerates
+target-map digest is unchanged, the generated devices exactly match the target-map-derived BDF,
+DMS-target, device-ID, rail, plane, and role set, and the semantic operations compile under NCO's
+execution policy. Any input change or invalid saved artifact regenerates
 the plan through `dms-cli`. Before applying an individual Spectrum-X device, the configuration
 manager calls `GetPreparedPlan` and fails without changing the device if the stage-specific plan is
 missing, stale, or does not contain that device.

@@ -61,7 +61,9 @@ type PlanDevice struct {
 	TargetID       string   `json:"target_id"`
 }
 
-// ExpectedRDMA identifies the control target selected for one rail.
+// ExpectedRDMA describes one expected RDMA endpoint emitted by the planner.
+// ControlBDF and ControlTarget are retained for compatibility with older,
+// enriched plans; public doSPCX plans do not require them.
 type ExpectedRDMA struct {
 	Rail          int    `json:"rail"`
 	RDMADevice    string `json:"rdma_dev"`
@@ -144,6 +146,7 @@ type DMSOperationGroup struct {
 	Order          int
 	Scope          string
 	DeviceView     string
+	FanoutOrder    string
 	RequiresReboot bool
 	PhaseMarker    bool
 	Targets        []DMSTargetOperations
@@ -302,12 +305,16 @@ func (p *SemanticPlan) BuildDMSOperationPlan(ctx context.Context) (*DMSOperation
 				Order:          group.Order,
 				Scope:          group.Scope,
 				DeviceView:     group.DeviceView,
+				FanoutOrder:    group.FanoutOrder,
 				RequiresReboot: group.RequiresReboot,
 				PhaseMarker:    true,
 				Targets:        nil,
 			})
 			continue
 		case groupDispositionExecute:
+			if err := validateExecutableGroupPolicy(group); err != nil {
+				return nil, err
+			}
 			targets, err := p.resolveGroupTargets(group)
 			if err != nil {
 				return nil, fmt.Errorf("resolve doSPCX semantic group %q: %w", group.Name, err)
@@ -317,6 +324,7 @@ func (p *SemanticPlan) BuildDMSOperationPlan(ctx context.Context) (*DMSOperation
 				Order:          group.Order,
 				Scope:          group.Scope,
 				DeviceView:     group.DeviceView,
+				FanoutOrder:    group.FanoutOrder,
 				RequiresReboot: group.RequiresReboot,
 				PhaseMarker:    false,
 				Targets:        targets,
@@ -326,6 +334,20 @@ func (p *SemanticPlan) BuildDMSOperationPlan(ctx context.Context) (*DMSOperation
 		}
 	}
 	return result, nil
+}
+
+func validateExecutableGroupPolicy(group SemanticGroup) error {
+	for _, operation := range group.Operations {
+		if operation.TargetClass == targetClassPerESwitch ||
+			operation.TargetClass == targetClassVFRepresentor ||
+			operation.Scope == "per_vf" ||
+			strings.HasPrefix(operation.Path, "/nvidia/eswitch") {
+			return fmt.Errorf(
+				"doSPCX semantic group %q contains operation %q outside the current NCO execution scope",
+				group.Name, operation.ID)
+		}
+	}
+	return nil
 }
 
 func validateSemanticPlanHeader(document *semanticPlanDocument, expectedStage PlanStage) error {
@@ -423,10 +445,19 @@ func resolveSemanticGroups(
 			if !found {
 				return nil, fmt.Errorf("doSPCX semantic group %q references missing operation %q", record.Name, ref)
 			}
+			if operation.Kind == "" {
+				// DMS treats an omitted kind as a SET operation. The planner only
+				// emits kind when YANG-based classification is available.
+				operation.Kind = "set"
+			}
 			if operation.TargetClass == "" {
 				operation.TargetClass = targetClassPFNetdevAll
 			}
-			if err := validateSemanticOperation(ref, record.Name, operation); err != nil {
+			// Group membership is defined by semantic.groups.operation_refs in
+			// the public plan. Keep the derived value on the exported operation
+			// for compatibility with callers of this package.
+			operation.ExecutionGroup = record.Name
+			if err := validateSemanticOperation(ref, operation); err != nil {
 				return nil, err
 			}
 			group.Operations = append(group.Operations, SemanticOperation{
@@ -454,12 +485,9 @@ func resolveSemanticGroups(
 	return groups, nil
 }
 
-func validateSemanticOperation(id, group string, operation semanticOperationRecord) error {
+func validateSemanticOperation(id string, operation semanticOperationRecord) error {
 	if operation.Kind != "set" {
 		return fmt.Errorf("doSPCX semantic operation %q has unsupported kind %q", id, operation.Kind)
-	}
-	if operation.ExecutionGroup != group {
-		return fmt.Errorf("doSPCX semantic operation %q belongs to group %q, not %q", id, operation.ExecutionGroup, group)
 	}
 	if !strings.HasPrefix(operation.Path, "/nvidia/") || strings.ContainsAny(operation.Path, " \t\r\n;") {
 		return fmt.Errorf("doSPCX semantic operation %q has invalid path %q", id, operation.Path)
@@ -479,9 +507,6 @@ func validateSemanticOperation(id, group string, operation semanticOperationReco
 	case targetClassPFNetdevAll, targetClassPFRDMAScope, targetClassPerESwitch, targetClassVFRepresentor:
 	default:
 		return fmt.Errorf("doSPCX semantic operation %q has unsupported target class %q", id, operation.TargetClass)
-	}
-	if operation.TargetClass != targetClassVFRepresentor && strings.TrimSpace(operation.TargetRole) == "" {
-		return fmt.Errorf("doSPCX semantic operation %q has no target role", id)
 	}
 	return nil
 }
@@ -589,13 +614,19 @@ func (p *SemanticPlan) resolveGroupTargets(group SemanticGroup) ([]DMSTargetOper
 func (p *SemanticPlan) resolveOperationTargets(operation SemanticOperation) ([]string, error) {
 	eligible := make([]PlanDevice, 0, len(p.Devices))
 	for _, device := range p.Devices {
-		if device.Network != operation.TargetRole {
+		// target_role is not part of the public doSPCX operation schema. If
+		// an enriched plan supplies it, retain the historical filtering;
+		// otherwise the operation targets all plan devices.
+		if operation.TargetRole != "" && device.Network != operation.TargetRole {
 			continue
 		}
 		eligible = append(eligible, device)
 	}
 	if len(eligible) == 0 {
-		return nil, fmt.Errorf("no plan devices match target role %q", operation.TargetRole)
+		if operation.TargetRole != "" {
+			return nil, fmt.Errorf("no plan devices match target role %q", operation.TargetRole)
+		}
+		return nil, fmt.Errorf("doSPCX plan does not contain eligible devices")
 	}
 
 	switch operation.TargetClass {
@@ -610,47 +641,22 @@ func (p *SemanticPlan) resolveOperationTargets(operation SemanticOperation) ([]s
 		case rdmaTopologyPerPF:
 			result := make([]string, 0, len(eligible))
 			for _, device := range eligible {
+				if strings.TrimSpace(device.RDMADevice) == "" {
+					continue
+				}
 				result = append(result, device.DMSTarget)
 			}
 			return result, nil
 		case rdmaTopologyPerRailBond:
-			expected := append([]ExpectedRDMA(nil), p.RuntimeContext.ExpectedRDMA...)
-			sort.SliceStable(expected, func(left, right int) bool {
-				return expected[left].Rail < expected[right].Rail
-			})
-			if len(expected) == 0 {
-				return nil, fmt.Errorf("per-rail-bond topology does not define expected RDMA controls")
-			}
-			seenTargets := make(map[string]struct{}, len(expected))
-			seenRails := make(map[int]struct{}, len(expected))
-			eligibleDevices := make(map[string]PlanDevice, len(eligible))
+			// This mirrors DMS FilterOpsForDevice: a per-rail bond is
+			// controlled through the plane-zero PF. expected_rdma describes
+			// the bond but does not carry a DMS control target in the public
+			// plan schema.
+			result := make([]string, 0, len(eligible))
 			for _, device := range eligible {
-				eligibleDevices[device.DMSTarget] = device
-			}
-			result := make([]string, 0, len(expected))
-			for _, control := range expected {
-				if _, found := seenRails[control.Rail]; found {
-					return nil, fmt.Errorf("RDMA control rail %d is duplicated", control.Rail)
+				if device.Plane == 0 {
+					result = append(result, device.DMSTarget)
 				}
-				seenRails[control.Rail] = struct{}{}
-				if strings.TrimSpace(control.ControlTarget) == "" {
-					return nil, fmt.Errorf("rail %d has no RDMA control target", control.Rail)
-				}
-				device, found := eligibleDevices[control.ControlTarget]
-				if !found {
-					return nil, fmt.Errorf("RDMA control target %q is not a plan device for role %q", control.ControlTarget, operation.TargetRole)
-				}
-				if control.ControlBDF == "" || control.ControlTarget != "pci/"+control.ControlBDF {
-					return nil, fmt.Errorf("RDMA control target %q does not match control BDF %q", control.ControlTarget, control.ControlBDF)
-				}
-				if device.Rail != control.Rail {
-					return nil, fmt.Errorf("RDMA control target %q belongs to rail %d, not rail %d", control.ControlTarget, device.Rail, control.Rail)
-				}
-				if _, found := seenTargets[control.ControlTarget]; found {
-					return nil, fmt.Errorf("RDMA control target %q is duplicated", control.ControlTarget)
-				}
-				seenTargets[control.ControlTarget] = struct{}{}
-				result = append(result, control.ControlTarget)
 			}
 			return result, nil
 		default:

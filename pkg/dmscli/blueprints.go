@@ -28,7 +28,10 @@ import (
 	execUtils "k8s.io/utils/exec"
 )
 
-const blueprintsPlanPath = "/nvidia/blueprints/plan"
+const (
+	blueprintsPlanPath       = "/nvidia/blueprints/plan"
+	maxBlueprintLogOutputLen = 4096
+)
 
 // BlueprintPlanRequest describes one DMS Blueprints planning action.
 type BlueprintPlanRequest struct {
@@ -44,16 +47,9 @@ type BlueprintPlanRequest struct {
 // BlueprintPlanResult is the normalized result of /nvidia/blueprints/plan.
 // PlanJSON contains the complete JSON document returned in the plan-json field.
 type BlueprintPlanResult struct {
-	Status             string
-	PlanName           string
-	Family             string
-	Profile            string
-	Stage              string
-	Devices            int
-	Operations         int
-	SemanticGroupCount int
-	PlanJSON           json.RawMessage
-	ErrorMessage       string
+	Status       string
+	PlanJSON     json.RawMessage
+	ErrorMessage string
 }
 
 // GenerateBlueprintPlan invokes the agentless DMS Blueprints planner.
@@ -87,22 +83,23 @@ func GenerateBlueprintPlan(
 
 	command := execInterface.CommandContext(ctx, dmsCLIExecutable, args...)
 	environment := environmentWithOverride(os.Environ(), "BLUEPRINTS_ROOT", request.BlueprintsRoot)
-	environment = environmentWithOverride(environment, "BLUEPRINTS_STATE_DIR", request.BlueprintsStateDir)
+	environment = environmentWithOverride(environment, "BP_STATE_DIR", request.BlueprintsStateDir)
 	command.SetEnv(environment)
-	output, commandErr := command.CombinedOutput()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	command.SetStdout(&stdout)
+	command.SetStderr(&stderr)
+	commandErr := command.Run()
 	commandAndArgs := append([]string{dmsCLIExecutable}, args...)
-	logr.FromContextOrDiscard(ctx).V(2).Info("command output",
-		"command", commandAndArgs,
-		"plan", request.Name,
-		"blueprintsRoot", request.BlueprintsRoot,
-		"blueprintsStateDir", request.BlueprintsStateDir,
-		"output", string(output))
 
-	result, decodeErr := decodeBlueprintPlanResult(output)
+	result, decodeErr := decodeBlueprintPlanResult(stdout.Bytes())
+	logBlueprintPlanResult(ctx, request, commandAndArgs, result, stdout.String(), stderr.String(), commandErr, decodeErr)
 	if commandErr != nil {
-		detail := strings.TrimSpace(string(output))
+		detail := strings.TrimSpace(stderr.String())
 		if result != nil && result.ErrorMessage != "" {
 			detail = result.ErrorMessage
+		} else if detail == "" {
+			detail = strings.TrimSpace(stdout.String())
 		}
 		if detail != "" {
 			return result, fmt.Errorf("generate Blueprint plan %q: %w: %s", request.Name, commandErr, detail)
@@ -119,11 +116,44 @@ func GenerateBlueprintPlan(
 		}
 		return result, fmt.Errorf("generate Blueprint plan %q: %s", request.Name, detail)
 	}
-	if result.PlanName != "" && result.PlanName != request.Name {
-		return result, fmt.Errorf("generate Blueprint plan %q: response contains plan %q", request.Name, result.PlanName)
-	}
-
 	return result, nil
+}
+
+func logBlueprintPlanResult(
+	ctx context.Context,
+	request BlueprintPlanRequest,
+	command []string,
+	result *BlueprintPlanResult,
+	stdout string,
+	stderr string,
+	commandErr error,
+	decodeErr error,
+) {
+	fields := []any{
+		"command", command,
+		"plan", request.Name,
+		"blueprintsRoot", request.BlueprintsRoot,
+		"blueprintsStateDir", request.BlueprintsStateDir,
+	}
+	if result != nil {
+		fields = append(fields,
+			"status", result.Status,
+			"planJSONBytes", len(result.PlanJSON))
+	}
+	if commandErr != nil || decodeErr != nil {
+		fields = append(fields, "stdout", boundedBlueprintLogOutput(stdout))
+	}
+	if stderr != "" {
+		fields = append(fields, "stderr", boundedBlueprintLogOutput(stderr))
+	}
+	logr.FromContextOrDiscard(ctx).V(2).Info("command output", fields...)
+}
+
+func boundedBlueprintLogOutput(output string) string {
+	if len(output) <= maxBlueprintLogOutputLen {
+		return output
+	}
+	return output[:maxBlueprintLogOutputLen] + "... [truncated]"
 }
 
 func validateBlueprintPlanRequest(request BlueprintPlanRequest) error {
@@ -180,32 +210,18 @@ func decodeBlueprintPlanResult(output []byte) (*BlueprintPlanResult, error) {
 	}
 
 	var response struct {
-		Status             string          `json:"status"`
-		PlanName           string          `json:"plan"`
-		Family             string          `json:"family"`
-		Profile            string          `json:"profile"`
-		Stage              string          `json:"stage"`
-		Devices            int             `json:"devices"`
-		Operations         int             `json:"operations"`
-		SemanticGroupCount int             `json:"semantic_group_count"`
-		PlanJSON           json.RawMessage `json:"plan-json"`
-		Error              string          `json:"error"`
-		ErrorMessage       string          `json:"error_msg"`
+		Status       string          `json:"status"`
+		PlanJSON     json.RawMessage `json:"plan-json"`
+		Error        string          `json:"error"`
+		ErrorMessage string          `json:"error_msg"`
 	}
 	if err := json.Unmarshal(output, &response); err != nil {
 		return nil, fmt.Errorf("invalid dms-cli JSON response: %w", err)
 	}
 
 	result := &BlueprintPlanResult{
-		Status:             response.Status,
-		PlanName:           response.PlanName,
-		Family:             response.Family,
-		Profile:            response.Profile,
-		Stage:              response.Stage,
-		Devices:            response.Devices,
-		Operations:         response.Operations,
-		SemanticGroupCount: response.SemanticGroupCount,
-		ErrorMessage:       response.ErrorMessage,
+		Status:       response.Status,
+		ErrorMessage: response.ErrorMessage,
 	}
 	if result.ErrorMessage == "" {
 		result.ErrorMessage = response.Error
