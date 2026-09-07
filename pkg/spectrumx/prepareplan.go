@@ -42,6 +42,12 @@ const (
 	defaultBlueprintsStateDir = "/var/lib/blueprints"
 	defaultDospcxDataRoot     = "/opt/mellanox/doca/services/dms/doSpcx/data"
 	deploymentModeHostK8s     = "host-k8s"
+	targetMapSchemaVersion    = 1
+	targetRoleEW              = "ew"
+	dospcxProfileSinglePlane  = "single-plane"
+	dospcxProfileNetPlugin    = "SPX_NetPlugin"
+	dospcxProfileMultiplane   = "SPX_Multiplane"
+	defaultDospcxPlatformType = "gb300"
 )
 
 // PlanStage identifies the doSPCX configuration phase represented by a plan.
@@ -72,20 +78,9 @@ type PlanManager interface {
 var canonicalFunctionZeroBDF = regexp.MustCompile(`^[0-9a-f]{4}:[0-9a-f]{2}:([0-9a-f]{2})\.0$`)
 
 type targetMap struct {
-	SchemaVersion     int                         `json:"schema_version"`
-	PlatformType      string                      `json:"platform_type"`
-	DefaultRole       string                      `json:"default_role"`
-	TargetConstraints map[string]targetConstraint `json:"target_constraints"`
-	PreBreakout       targetMapTarget             `json:"pre_breakout"`
-}
-
-type targetTopology struct {
-	PortsPerTarget int `json:"ports_per_target"`
-}
-
-type targetConstraint struct {
-	HCATypes []string       `json:"hca_types"`
-	Topology targetTopology `json:"topology"`
+	SchemaVersion int             `json:"schema_version"`
+	PlatformType  string          `json:"platform_type"`
+	PreBreakout   targetMapTarget `json:"pre_breakout"`
 }
 
 type targetMapTarget struct {
@@ -93,8 +88,11 @@ type targetMapTarget struct {
 }
 
 type preBreakoutTarget struct {
-	BDF  string `json:"bdf"`
-	Rail int    `json:"rail"`
+	ID       string `json:"id"`
+	BDF      string `json:"bdf"`
+	DeviceID string `json:"device_id"`
+	Role     string `json:"role"`
+	Rail     int    `json:"rail"`
 }
 
 type planConfig struct {
@@ -360,9 +358,9 @@ func planParameters(config *planConfig) ([]string, error) {
 	if config.overlay == "" {
 		return params, nil
 	}
-	if config.profile == "hwmp" {
+	if config.profile == dospcxProfileMultiplane {
 		if config.overlay != consts.OverlayNone {
-			return nil, fmt.Errorf("doSPCX profile hwmp does not support overlay %q", config.overlay)
+			return nil, fmt.Errorf("doSPCX profile %s does not support overlay %q", config.profile, config.overlay)
 		}
 		return params, nil
 	}
@@ -370,31 +368,25 @@ func planParameters(config *planConfig) ([]string, error) {
 }
 
 func validateDeviceInTargetMap(config *planConfig, saved targetMap) error {
-	if saved.SchemaVersion != 3 || saved.PlatformType != config.platformType || saved.DefaultRole != "ew" {
+	if saved.SchemaVersion != targetMapSchemaVersion || saved.PlatformType != config.platformType {
 		return fmt.Errorf("target map identity changed")
 	}
-	constraint, found := saved.TargetConstraints[saved.DefaultRole]
-	if !found || constraint.Topology.PortsPerTarget != 1 {
-		return fmt.Errorf("target map constraint changed")
-	}
-	expectedHCA := config.targetMap.TargetConstraints[config.targetMap.DefaultRole].HCATypes[0]
-	hcaFound := false
-	for _, hcaType := range constraint.HCATypes {
-		if hcaType == expectedHCA {
-			hcaFound = true
-			break
-		}
-	}
-	if !hcaFound {
-		return fmt.Errorf("HCA type %q is absent from the target map", expectedHCA)
-	}
-	expectedBDF := config.targetMap.PreBreakout.Targets[0].BDF
+	expectedTarget := config.targetMap.PreBreakout.Targets[0]
 	for _, target := range saved.PreBreakout.Targets {
-		if target.BDF == expectedBDF {
+		if target.BDF == expectedTarget.BDF {
+			if strings.TrimSpace(target.ID) == "" {
+				return fmt.Errorf("BDF %q has no target ID", expectedTarget.BDF)
+			}
+			if target.DeviceID != expectedTarget.DeviceID {
+				return fmt.Errorf("BDF %q device ID is %q, expected %q", expectedTarget.BDF, target.DeviceID, expectedTarget.DeviceID)
+			}
+			if target.Role != targetRoleEW {
+				return fmt.Errorf("BDF %q role is %q, expected %q", expectedTarget.BDF, target.Role, targetRoleEW)
+			}
 			return nil
 		}
 	}
-	return fmt.Errorf("BDF %q is absent from the target map", expectedBDF)
+	return fmt.Errorf("BDF %q is absent from the target map", expectedTarget.BDF)
 }
 
 func (m *spectrumXConfigManager) resolvedStateDir() string {
@@ -486,9 +478,13 @@ func buildPlanConfig(devices []*v1alpha1.NicDevice) (*planConfig, error) {
 	if planes == 0 {
 		planes = 1
 	}
+	platformType := strings.TrimSpace(firstSpec.PlatformType)
+	if platformType == "" {
+		platformType = defaultDospcxPlatformType
+	}
 	config := &planConfig{
 		nodeName:      nodeName,
-		platformType:  firstSpec.PlatformType,
+		platformType:  platformType,
 		profile:       profile,
 		version:       firstSpec.Version,
 		multiplane:    normalizedMultiplaneMode(firstSpec.MultiplaneMode),
@@ -496,25 +492,17 @@ func buildPlanConfig(devices []*v1alpha1.NicDevice) (*planConfig, error) {
 		planes:        planes,
 		selectedCount: len(selected),
 		targetMap: targetMap{
-			SchemaVersion: 3,
-			PlatformType:  firstSpec.PlatformType,
-			DefaultRole:   "ew",
-			TargetConstraints: map[string]targetConstraint{
-				"ew": {Topology: targetTopology{PortsPerTarget: 1}},
-			},
-			PreBreakout: targetMapTarget{Targets: make([]preBreakoutTarget, 0, len(selected))},
+			SchemaVersion: targetMapSchemaVersion,
+			PlatformType:  platformType,
+			PreBreakout:   targetMapTarget{Targets: make([]preBreakoutTarget, 0, len(selected))},
 		},
 	}
-	if strings.TrimSpace(config.platformType) == "" {
-		return nil, fmt.Errorf("Spectrum-X platformType must not be empty")
-	}
-
 	type orderedDevice struct {
-		bdf string
+		bdf      string
+		deviceID string
 	}
 	ordered := make([]orderedDevice, 0, len(selected))
 	seenBDFs := map[string]string{}
-	hcaTypes := map[string]struct{}{}
 	for _, device := range selected {
 		if strings.TrimSpace(device.Status.Node) != config.nodeName {
 			return nil, fmt.Errorf("Spectrum-X devices in one plan must belong to the same node; device %q belongs to %q", device.Name, device.Status.Node)
@@ -528,7 +516,11 @@ func buildPlanConfig(devices []*v1alpha1.NicDevice) (*planConfig, error) {
 		if devicePlanes == 0 {
 			devicePlanes = 1
 		}
-		if spec.PlatformType != config.platformType ||
+		devicePlatformType := strings.TrimSpace(spec.PlatformType)
+		if devicePlatformType == "" {
+			devicePlatformType = defaultDospcxPlatformType
+		}
+		if devicePlatformType != config.platformType ||
 			deviceProfile != config.profile ||
 			spec.Version != config.version ||
 			normalizedMultiplaneMode(spec.MultiplaneMode) != config.multiplane ||
@@ -539,11 +531,10 @@ func buildPlanConfig(devices []*v1alpha1.NicDevice) (*planConfig, error) {
 		if len(device.Status.Ports) == 0 {
 			return nil, fmt.Errorf("device %q has no discovered PCI ports", device.Name)
 		}
-		hcaType, hcaTypeErr := blueprintHCAType(device.Status.Type)
-		if hcaTypeErr != nil {
-			return nil, fmt.Errorf("device %q: %w", device.Name, hcaTypeErr)
+		deviceID, deviceIDErr := blueprintDeviceID(device.Status.Type)
+		if deviceIDErr != nil {
+			return nil, fmt.Errorf("device %q: %w", device.Name, deviceIDErr)
 		}
-		hcaTypes[hcaType] = struct{}{}
 		bdf := strings.ToLower(strings.TrimSpace(device.Status.Ports[0].PCI))
 		if !isCanonicalFunctionZeroBDF(bdf) {
 			return nil, fmt.Errorf("device %q first PCI port %q is not a canonical function-zero BDF", device.Name, device.Status.Ports[0].PCI)
@@ -552,24 +543,19 @@ func buildPlanConfig(devices []*v1alpha1.NicDevice) (*planConfig, error) {
 			return nil, fmt.Errorf("devices %q and %q resolve to the same pre-breakout BDF %q", otherDevice, device.Name, bdf)
 		}
 		seenBDFs[bdf] = device.Name
-		ordered = append(ordered, orderedDevice{bdf: bdf})
+		ordered = append(ordered, orderedDevice{bdf: bdf, deviceID: deviceID})
 	}
-	orderedHCATypes := make([]string, 0, len(hcaTypes))
-	for hcaType := range hcaTypes {
-		orderedHCATypes = append(orderedHCATypes, hcaType)
-	}
-	sort.Strings(orderedHCATypes)
-	ewConstraint := config.targetMap.TargetConstraints[config.targetMap.DefaultRole]
-	ewConstraint.HCATypes = orderedHCATypes
-	config.targetMap.TargetConstraints[config.targetMap.DefaultRole] = ewConstraint
 
 	sort.Slice(ordered, func(i, j int) bool {
 		return ordered[i].bdf < ordered[j].bdf
 	})
 	for rail, item := range ordered {
 		config.targetMap.PreBreakout.Targets = append(config.targetMap.PreBreakout.Targets, preBreakoutTarget{
-			BDF:  item.bdf,
-			Rail: rail,
+			ID:       fmt.Sprintf("ew-rail%d-prebreakout", rail),
+			BDF:      item.bdf,
+			DeviceID: item.deviceID,
+			Role:     targetRoleEW,
+			Rail:     rail,
 		})
 	}
 
@@ -603,26 +589,21 @@ func normalizedMultiplaneMode(mode string) string {
 func blueprintProfile(mode string) (string, error) {
 	switch normalizedMultiplaneMode(mode) {
 	case consts.MultiplaneModeNone:
-		return "single-plane", nil
+		return dospcxProfileSinglePlane, nil
 	case consts.MultiplaneModeSwplb:
-		return "swmp", nil
+		return dospcxProfileNetPlugin, nil
 	case consts.MultiplaneModeHwplb:
-		return "hwmp", nil
+		return dospcxProfileMultiplane, nil
 	default:
 		return "", fmt.Errorf("unsupported Spectrum-X multiplaneMode %q", mode)
 	}
 }
 
-func blueprintHCAType(deviceType string) (string, error) {
-	switch strings.ToLower(strings.TrimSpace(deviceType)) {
-	case "1021":
-		return "ConnectX-7", nil
-	case "1023":
-		return "ConnectX-8", nil
-	case "1025":
-		return "ConnectX-9", nil
-	case consts.BlueField3DeviceID:
-		return "BlueField-3", nil
+func blueprintDeviceID(deviceType string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(deviceType))
+	switch normalized {
+	case "1021", "1023", "1025", consts.BlueField3DeviceID:
+		return "0x" + normalized, nil
 	default:
 		return "", fmt.Errorf("unsupported device type %q for doSPCX target mapping", deviceType)
 	}
@@ -669,7 +650,7 @@ func validateGeneratedPlan(
 			DetectedHW struct {
 				PlatformType string `json:"platform_type"`
 			} `json:"detected_hw"`
-			Devices  []json.RawMessage `json:"devices"`
+			Devices  []PlanDevice `json:"devices"`
 			Semantic *struct {
 				Groups []json.RawMessage `json:"groups"`
 			} `json:"semantic"`
@@ -714,18 +695,65 @@ func validateGeneratedPlan(
 	if len(document.Artifacts.Manifest) > 0 {
 		return nil, fmt.Errorf("generated doSPCX %s plan unexpectedly contains rendered artifacts", expectedStage)
 	}
-	expectedDeviceCount := config.selectedCount
-	if expectedStage == string(PlanStageConfigure) {
-		expectedDeviceCount *= config.planes
-	}
-	if len(document.Plan.Devices) != expectedDeviceCount {
-		return nil, fmt.Errorf("generated doSPCX %s plan has %d devices, expected %d", expectedStage, len(document.Plan.Devices), expectedDeviceCount)
+	if err := validateGeneratedPlanDevices(document.Plan.Devices, config, PlanStage(expectedStage)); err != nil {
+		return nil, err
 	}
 	semanticPlan, err := ParseSemanticPlan(planJSON, PlanStage(expectedStage))
 	if err != nil {
 		return nil, fmt.Errorf("validate generated doSPCX %s semantic plan: %w", expectedStage, err)
 	}
+	if _, err := semanticPlan.BuildDMSOperationPlan(context.Background()); err != nil {
+		return nil, fmt.Errorf("compile generated doSPCX %s semantic plan: %w", expectedStage, err)
+	}
 	return semanticPlan, nil
+}
+
+func validateGeneratedPlanDevices(actual []PlanDevice, config *planConfig, stage PlanStage) error {
+	expected := make(map[string]PlanDevice, config.selectedCount*config.planes)
+	for _, target := range config.targetMap.PreBreakout.Targets {
+		planes := 1
+		if stage == PlanStageConfigure {
+			planes = config.planes
+		}
+		for plane := 0; plane < planes; plane++ {
+			bdf, err := bdfForPlane(target.BDF, plane)
+			if err != nil {
+				return err
+			}
+			expected[bdf] = PlanDevice{
+				BDF:       bdf,
+				DeviceID:  target.DeviceID,
+				DMSTarget: "pci/" + bdf,
+				Rail:      target.Rail,
+				Plane:     plane,
+				Network:   target.Role,
+			}
+		}
+	}
+	if len(actual) != len(expected) {
+		return fmt.Errorf("generated doSPCX %s plan has %d devices, expected %d", stage, len(actual), len(expected))
+	}
+	for _, device := range actual {
+		want, found := expected[device.BDF]
+		if !found {
+			return fmt.Errorf("generated doSPCX %s plan contains unexpected device BDF %q", stage, device.BDF)
+		}
+		if device.DMSTarget != want.DMSTarget || device.DeviceID != want.DeviceID ||
+			device.Rail != want.Rail || device.Plane != want.Plane || device.Network != want.Network {
+			return fmt.Errorf("generated doSPCX %s plan device %q topology does not match the target map", stage, device.BDF)
+		}
+	}
+	return nil
+}
+
+func bdfForPlane(baseBDF string, plane int) (string, error) {
+	if !isCanonicalFunctionZeroBDF(baseBDF) {
+		return "", fmt.Errorf("cannot derive plane %d from non-canonical function-zero BDF %q", plane, baseBDF)
+	}
+	if plane < 0 || plane > 7 {
+		return "", fmt.Errorf("cannot derive PCI function for plane %d", plane)
+	}
+	return strings.TrimSuffix(baseBDF, ".0") + "." + strconv.Itoa(plane), nil
 }
 
 func writeJSONFileAtomic(path string, value any) error {

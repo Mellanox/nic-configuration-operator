@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
@@ -38,7 +39,7 @@ var _ = Describe("Blueprint plan", func() {
 		return BlueprintPlanRequest{
 			BlueprintsRoot:     blueprintsRoot,
 			BlueprintsStateDir: blueprintsStateDir,
-			Profile:            "hwmp",
+			Profile:            "SPX_Multiplane",
 			Name:               planName,
 			Stage:              "prepare",
 			TargetMapFile:      "/var/lib/blueprints/target-maps/nco-node-1.json",
@@ -48,26 +49,14 @@ var _ = Describe("Blueprint plan", func() {
 
 	It("generates a prepare plan through the agentless action", func() {
 		executor := fakeExecutor([]byte(`{
-			"plan":"nco-node-1-spcx-prepare",
-			"family":"spcx",
-			"profile":"hwmp",
-			"stage":"prepare",
-			"devices":2,
-			"operations":5,
-			"semantic_group_count":2,
+			"status":"ok",
 			"plan-json":{"plan":{"name":"nco-node-1-spcx-prepare","stage":"prepare"},"artifacts":{"manifest":[]}}
 		}`), nil, &commands)
 
 		result, err := GenerateBlueprintPlan(context.Background(), executor, newRequest())
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.PlanName).To(Equal(planName))
-		Expect(result.Family).To(Equal("spcx"))
-		Expect(result.Profile).To(Equal("hwmp"))
-		Expect(result.Stage).To(Equal("prepare"))
-		Expect(result.Devices).To(Equal(2))
-		Expect(result.Operations).To(Equal(5))
-		Expect(result.SemanticGroupCount).To(Equal(2))
+		Expect(result.Status).To(Equal("ok"))
 		Expect(json.Valid(result.PlanJSON)).To(BeTrue())
 
 		Expect(commands).To(HaveLen(1))
@@ -75,14 +64,16 @@ var _ = Describe("Blueprint plan", func() {
 		Expect(commands[0].args).To(Equal([]string{
 			"--json",
 			blueprintsPlanPath,
-			"profile=hwmp",
+			"profile=SPX_Multiplane",
 			"name=" + planName,
 			"stage=prepare",
 			"target-map-file=file:/var/lib/blueprints/target-maps/nco-node-1.json",
 			"params=deployment_mode=host-k8s,planes=2",
 		}))
+		Expect(commands[0].command.RunCalls).To(Equal(1))
+		Expect(commands[0].command.CombinedOutputCalls).To(BeZero())
 		Expect(commands[0].command.Env).To(ContainElement("BLUEPRINTS_ROOT=" + blueprintsRoot))
-		Expect(commands[0].command.Env).To(ContainElement("BLUEPRINTS_STATE_DIR=" + blueprintsStateDir))
+		Expect(commands[0].command.Env).To(ContainElement("BP_STATE_DIR=" + blueprintsStateDir))
 	})
 
 	It("accepts the YANG string encoding of plan-json", func() {
@@ -98,12 +89,26 @@ var _ = Describe("Blueprint plan", func() {
 		Expect(string(result.PlanJSON)).To(Equal(`{"plan":{"name":"nco-node-1-spcx-prepare","stage":"prepare"}}`))
 	})
 
-	It("logs the exact command and combined output", func() {
-		executor := fakeExecutor([]byte(`{"plan":"nco-node-1-spcx-prepare","plan-json":{"plan":{"name":"nco-node-1-spcx-prepare"}}}`), nil, &commands)
+	It("decodes JSON stdout independently from DMS diagnostics on stderr", func() {
+		stdout := []byte(`{"status":"ok","plan":"nco-node-1-spcx-prepare","plan-json":{"plan":{"name":"nco-node-1-spcx-prepare"}}}`)
+		stderr := []byte("[2026-09-07 11:10:40][DOCA][WRN] Ignoring unknown batch_op 'GET-CAPS'\n")
+		executor := fakeExecutorWithStderr(stdout, stderr, nil, &commands)
+
+		result, err := GenerateBlueprintPlan(context.Background(), executor, newRequest())
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Status).To(Equal("ok"))
+		Expect(json.Valid(result.PlanJSON)).To(BeTrue())
+	})
+
+	It("logs the exact command, structured result, and stderr without the full plan JSON", func() {
+		stdout := []byte(`{"status":"ok","plan-json":{"plan":{"name":"nco-node-1-spcx-prepare"}},"error":""}`)
+		stderr := []byte("DMS diagnostic\n")
+		executor := fakeExecutorWithStderr(stdout, stderr, nil, &commands)
 		entries := []capturedLogEntry{}
 		ctx := logr.NewContext(context.Background(), logr.New(&capturingLogSink{entries: &entries}))
 
-		_, err := GenerateBlueprintPlan(ctx, executor, newRequest())
+		result, err := GenerateBlueprintPlan(ctx, executor, newRequest())
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(entries).To(HaveLen(1))
@@ -112,7 +117,24 @@ var _ = Describe("Blueprint plan", func() {
 		Expect(entries[0].fields).To(HaveKeyWithValue("plan", planName))
 		Expect(entries[0].fields).To(HaveKeyWithValue("blueprintsRoot", blueprintsRoot))
 		Expect(entries[0].fields).To(HaveKeyWithValue("blueprintsStateDir", blueprintsStateDir))
-		Expect(entries[0].fields["output"]).To(ContainSubstring(`"plan-json"`))
+		Expect(entries[0].fields).NotTo(HaveKey("stdout"))
+		Expect(entries[0].fields).To(HaveKeyWithValue("status", "ok"))
+		Expect(entries[0].fields).To(HaveKeyWithValue("planJSONBytes", len(result.PlanJSON)))
+		Expect(entries[0].fields).To(HaveKeyWithValue("stderr", string(stderr)))
+	})
+
+	It("bounds malformed stdout in diagnostics", func() {
+		stdout := []byte("not-json-" + strings.Repeat("x", maxBlueprintLogOutputLen))
+		executor := fakeExecutor(stdout, nil, &commands)
+		entries := []capturedLogEntry{}
+		ctx := logr.NewContext(context.Background(), logr.New(&capturingLogSink{entries: &entries}))
+
+		_, err := GenerateBlueprintPlan(ctx, executor, newRequest())
+
+		Expect(err).To(HaveOccurred())
+		Expect(entries).To(HaveLen(1))
+		Expect(entries[0].fields["stdout"]).To(HaveLen(maxBlueprintLogOutputLen + len("... [truncated]")))
+		Expect(entries[0].fields["stdout"]).To(HaveSuffix("... [truncated]"))
 	})
 
 	It("returns the structured planner error", func() {
@@ -172,15 +194,6 @@ var _ = Describe("Blueprint plan", func() {
 		Expect(err).To(MatchError(ContainSubstring("does not contain plan-json")))
 	})
 
-	It("rejects a response for a different plan", func() {
-		executor := fakeExecutor([]byte(`{"plan":"other-plan","plan-json":{"plan":{"name":"other-plan"}}}`), nil, &commands)
-
-		result, err := GenerateBlueprintPlan(context.Background(), executor, newRequest())
-
-		Expect(result).NotTo(BeNil())
-		Expect(err).To(MatchError(ContainSubstring(`response contains plan "other-plan"`)))
-	})
-
 	It("replaces an inherited Blueprints root without duplicating it", func() {
 		environment := environmentWithOverride([]string{
 			"PATH=/usr/bin",
@@ -192,6 +205,20 @@ var _ = Describe("Blueprint plan", func() {
 			"PATH=/usr/bin",
 			"HOME=/tmp/test-home",
 			"BLUEPRINTS_ROOT=" + blueprintsRoot,
+		}))
+	})
+
+	It("replaces an inherited DMS state directory without duplicating it", func() {
+		environment := environmentWithOverride([]string{
+			"PATH=/usr/bin",
+			"BP_STATE_DIR=/old/blueprints-state",
+			"HOME=/tmp/test-home",
+		}, "BP_STATE_DIR", blueprintsStateDir)
+
+		Expect(environment).To(Equal([]string{
+			"PATH=/usr/bin",
+			"HOME=/tmp/test-home",
+			"BP_STATE_DIR=" + blueprintsStateDir,
 		}))
 	})
 })

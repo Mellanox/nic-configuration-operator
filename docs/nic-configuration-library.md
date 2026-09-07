@@ -412,8 +412,12 @@ dms-cli --json /nvidia/blueprints/plan profile=<profile> name=<name> \
   params=deployment_mode=host-k8s,planes=<count>
 ```
 
-For Blueprints planning, the wrapper sets `BLUEPRINTS_ROOT` and
-`BLUEPRINTS_STATE_DIR` only on the `dms-cli` child process.
+For Blueprints planning, the wrapper sets `BLUEPRINTS_ROOT` and the DMS
+`BP_STATE_DIR` variable only on the `dms-cli` child process.
+Planner stdout and stderr are captured separately because stdout is the JSON
+protocol while DMS diagnostics are written to stderr. Successful calls log the
+exact command, result status, and plan size without repeating the embedded plan;
+failure output is bounded before logging.
 `SpectrumXConfigManager` supplies the fixed `/opt/nvidia/blueprints` path and
 creates its command executor internally. The executable DMS Blueprints action
 tree remains part of the daemon image. Authored doSPCX data is supplied
@@ -426,21 +430,25 @@ plan lifecycle abstraction included by `SpectrumXManager`; it owns
 target-map construction, generation, cache validation, persistence, and
 retrieval.
 
-`PreparePlan` writes a schema-v3 target map and the returned prepare or
+`PreparePlan` writes a schema-v1 target map and the returned prepare or
 configure plan below `${BLUEPRINTS_STATE_DIR:-/var/lib/blueprints}`. Neither
-stage executes any generated operation. Target-map rails are assigned by sorting
-the participating function-zero PCI BDFs. Both stages receive the same
-pre-breakout map; the configure stage resolves post-breakout devices from the
-active hardware inventory. The NicDevice reconciler prepares one group plan
-before each existing concurrent per-device NV or runtime apply.
+stage executes any generated operation. Each pre-breakout target contains a
+deterministic ID, function-zero BDF, hexadecimal device ID, `ew` role, and rail.
+Target-map rails are assigned by sorting the participating function-zero PCI
+BDFs. Both stages receive the same pre-breakout map; the configure stage resolves
+post-breakout devices from the active hardware inventory. NCO maps `none` to the
+`single-plane` profile, `swplb` to `SPX_NetPlugin`, and `hwplb` to
+`SPX_Multiplane`. The NicDevice reconciler prepares one group plan before each
+existing concurrent per-device NV or runtime apply.
 `interfaceNameTemplate` is not an input to doSPCX planning.
 
 Each plan directory also contains `metadata.json`, a flat document with only the
 inputs used for that stage, the installed doSPCX data archive digest, and the
 target-map digest. A later `PreparePlan` call reuses the saved plan when the
 metadata exactly matches the current inputs, the
-target-map file still has the recorded digest, and the plan passes the same
-structural validation as a newly generated plan. Missing, malformed, or changed
+target-map file still has the recorded digest, the generated devices exactly
+match the target-map-derived topology, and the plan passes the same structural
+and execution-policy compilation as a newly generated plan. Missing, malformed, or changed
 cache artifacts cause normal regeneration through `dms-cli`. Individual
 Spectrum-X apply calls use `GetPreparedPlan` to require matching inputs and
 device membership before touching hardware.
@@ -499,18 +507,27 @@ image is not removed when no ConfigMap bundle was installed.
 `PreparePlan` generates or reuses the stage-specific plan for the supplied
 Spectrum-X device group. It is a no-op when none of the supplied devices enable
 Spectrum-X. `GetPreparedPlan` retrieves the persisted plan without invoking
-`dms-cli`, and rejects it unless its cached inputs and target map still match the
-supplied device. It also parses the host-k8s `plan.semantic.groups` surface and
-resolves every `operation_ref` through `plan.operations`. The parser preserves
-group and operation ordering, including repeated writes, and does not inspect
-bare-metal steps, services, or artifacts.
+`dms-cli`, and rejects it unless its cached inputs, exact generated device
+topology, and target map still match the supplied device. It also parses the
+host-k8s `plan.semantic.groups` surface and resolves every `operation_ref`
+through `plan.operations`. A generated or cached plan is accepted only when
+`BuildDMSOperationPlan` can compile its execution policy and targets. The parser
+preserves group and operation ordering, including repeated writes, and does not
+inspect bare-metal steps, services, or artifacts.
 
 `SemanticPlan.BuildDMSOperationPlan(ctx)` resolves `pf_netdev_all` and
 `pf_rdma_scope` to target-specific query and SET batches without executing
 them. Queries represent the final desired state; prepare-stage queries include
 both the current and `-pending` leaves used by the doSPCX NVConfig gate. SET
-operations preserve the complete transition sequence. `post-breakout` remains
-an ordered phase marker. Configure groups `eswitch` and `vf-lifecycle` are parsed and validated
+operations preserve the complete transition sequence. Public operations may
+omit `kind` (`set` is the DMS default), `execution_group`, and `target_role`;
+group membership comes from `semantic.groups[].operation_refs`, and operations
+without a role apply to all plan devices. For `pf_rdma_scope`, `per_pf` selects
+devices with an RDMA endpoint and `per_rail_bond` selects each rail's plane-zero
+PF, matching DMS lifecycle targeting. Compiled groups retain `fanout_order`, and
+eSwitch or per-VF operations are rejected if they appear under an executable
+group instead of an explicitly skipped group. `post-breakout` remains an ordered phase
+marker. Configure groups `eswitch` and `vf-lifecycle` are parsed and validated
 but explicitly reported as skipped; unknown groups fail closed. The existing
 Spectrum-X manager implementation provides both plan lifecycle methods and
 creates the command executor internally:
@@ -949,7 +966,10 @@ Methods support two modes via option structs:
 
 ### Command Execution Logging
 
-All external commands use `cmd.CombinedOutput()` (not `cmd.Output()`) and log unconditionally at `log.Log.V(2)`. Output is not duplicated in error-level logs.
+External commands normally use `cmd.CombinedOutput()` and log at `log.Log.V(2)`.
+JSON protocol commands that can emit DMS diagnostics on stderr, such as
+Blueprint plan generation, capture the streams separately and parse stdout
+only. Output is not duplicated in error-level logs.
 
 ### Batch Operations
 

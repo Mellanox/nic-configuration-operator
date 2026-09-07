@@ -2,7 +2,7 @@
   "plan": {
     "name": "nco-parser-semantic-prepare",
     "family": "spcx",
-    "profile": "hwmp",
+    "profile": "SPX_Multiplane",
     "stage": "prepare",
     "params": {
       "deployment_mode": "host-k8s",
@@ -137,7 +137,7 @@
     ],
     "runtime_ctx": {
       "deployment_mode": "host-k8s",
-      "multiplane_mode": "hwmp",
+      "multiplane_mode": "SPX_Multiplane",
       "esw_multiport": false,
       "num_vfs": 1,
       "post_breakout": true,
@@ -146,16 +146,12 @@
         {
           "rail": 0,
           "rdma_dev": "roce_r0",
-          "control_bdf": "0000:64:00.0",
-          "control_target": "pci/0000:64:00.0",
-          "source": "endpoint_contract"
+          "source": "device_inventory"
         },
         {
           "rail": 1,
           "rdma_dev": "roce_r1",
-          "control_bdf": "0001:15:00.0",
-          "control_target": "pci/0001:15:00.0",
-          "source": "endpoint_contract"
+          "source": "device_inventory"
         }
       ],
       "expected_names": {
@@ -219,15 +215,7 @@
           "cc-steering-ext": "enabled"
         },
         "source_feature": "spcx-base-nvconfig",
-        "kind": "set",
-        "target_class": "pf_netdev_all",
-        "execution_group": "breakout",
-        "reset": {
-          "action": "host-reboot",
-          "owner": "host-operator",
-          "postcondition": "all pending Spectrum-X NVConfig values become current"
-        },
-        "target_role": "ew"
+        "target_class": "pf_netdev_all"
       },
       "spcx-base-nvconfig.cc-config.user-programmable": {
         "path": "/nvidia/cc/config",
@@ -235,15 +223,7 @@
           "user-programmable": true
         },
         "source_feature": "spcx-base-nvconfig",
-        "kind": "set",
-        "target_class": "pf_netdev_all",
-        "execution_group": "breakout",
-        "reset": {
-          "action": "host-reboot",
-          "owner": "host-operator",
-          "postcondition": "all pending Spectrum-X NVConfig values become current"
-        },
-        "target_role": "ew"
+        "target_class": "pf_netdev_all"
       },
       "ra22-hwmp-breakout-delta.pci.num-pfs": {
         "path": "/nvidia/pci",
@@ -251,15 +231,7 @@
           "num-pfs": 2
         },
         "source_feature": "ra22-hwmp-breakout-delta",
-        "kind": "set",
-        "target_class": "pf_netdev_all",
-        "execution_group": "breakout",
-        "reset": {
-          "action": "host-reboot",
-          "owner": "host-operator",
-          "postcondition": "post-breakout PF topology and XPlane NVConfig become current"
-        },
-        "target_role": "ew"
+        "target_class": "pf_netdev_all"
       },
       "ra22-hwmp-breakout-delta.multiplane.num-planes": {
         "path": "/nvidia/multiplane",
@@ -267,15 +239,7 @@
           "num-planes": 2
         },
         "source_feature": "ra22-hwmp-breakout-delta",
-        "kind": "set",
-        "target_class": "pf_netdev_all",
-        "execution_group": "breakout",
-        "reset": {
-          "action": "host-reboot",
-          "owner": "host-operator",
-          "postcondition": "post-breakout PF topology and XPlane NVConfig become current"
-        },
-        "target_role": "ew"
+        "target_class": "pf_netdev_all"
       },
       "ra22-hwmp-breakout-delta.link-breakout-module-0-port-1.lanes": {
         "path": "/nvidia/link/breakout/module/[0]/port/[1]",
@@ -292,14 +256,7 @@
           ]
         },
         "source_feature": "ra22-hwmp-breakout-delta",
-        "kind": "set",
         "target_class": "pf_netdev_all",
-        "execution_group": "breakout",
-        "reset": {
-          "action": "host-reboot",
-          "owner": "host-operator",
-          "postcondition": "post-breakout PF topology and XPlane NVConfig become current"
-        },
         "condition": {
           "knob": "@params.nic_type == '1023'"
         },
@@ -309,8 +266,7 @@
             "ConnectX-8"
           ],
           "platform_type": "gb300"
-        },
-        "target_role": "ew"
+        }
       },
       "ra22-hwmp-breakout-delta.link-breakout-module-0-port-255.lanes": {
         "path": "/nvidia/link/breakout/module/[0]/port/[255]",
@@ -327,14 +283,7 @@
           ]
         },
         "source_feature": "ra22-hwmp-breakout-delta",
-        "kind": "set",
         "target_class": "pf_netdev_all",
-        "execution_group": "breakout",
-        "reset": {
-          "action": "host-reboot",
-          "owner": "host-operator",
-          "postcondition": "post-breakout PF topology and XPlane NVConfig become current"
-        },
         "condition": {
           "knob": "@params.nic_type == '1023'"
         },
@@ -344,8 +293,7 @@
             "ConnectX-8"
           ],
           "platform_type": "gb300"
-        },
-        "target_role": "ew"
+        }
       },
       "ra22-hwmp-prepare-delta.link-policy.keep-eth-link-up": {
         "path": "/nvidia/link/policy",
@@ -353,15 +301,7 @@
           "keep-eth-link-up": false
         },
         "source_feature": "ra22-hwmp-prepare-delta",
-        "kind": "set",
-        "target_class": "pf_netdev_all",
-        "execution_group": "breakout",
-        "reset": {
-          "action": "device-reset",
-          "owner": "DMS-or-operator",
-          "postcondition": "pending value becomes current"
-        },
-        "target_role": "ew"
+        "target_class": "pf_netdev_all"
       },
       "ra22-hwmp-prepare-delta.multiplane.load-balance-mode": {
         "path": "/nvidia/multiplane",
@@ -369,15 +309,7 @@
           "load-balance-mode": "transport"
         },
         "source_feature": "ra22-hwmp-prepare-delta",
-        "kind": "set",
-        "target_class": "pf_netdev_all",
-        "execution_group": "breakout",
-        "reset": {
-          "action": "device-reset",
-          "owner": "DMS-or-operator",
-          "postcondition": "pending value becomes current"
-        },
-        "target_role": "ew"
+        "target_class": "pf_netdev_all"
       },
       "ra22-hwmp-prepare-delta.lag.resource-allocation": {
         "path": "/nvidia/lag",
@@ -385,15 +317,7 @@
           "resource-allocation": "pre-allocation"
         },
         "source_feature": "ra22-hwmp-prepare-delta",
-        "kind": "set",
-        "target_class": "pf_netdev_all",
-        "execution_group": "breakout",
-        "reset": {
-          "action": "device-reset",
-          "owner": "DMS-or-operator",
-          "postcondition": "pending value becomes current"
-        },
-        "target_role": "ew"
+        "target_class": "pf_netdev_all"
       },
       "spcx-hwmp-sriov-nvconfig.pci-sriov.enabled-max-vfs": {
         "path": "/nvidia/pci/sriov",
@@ -402,15 +326,7 @@
           "max-vfs": 1
         },
         "source_feature": "spcx-hwmp-sriov-nvconfig",
-        "kind": "set",
-        "target_class": "pf_netdev_all",
-        "execution_group": "breakout",
-        "reset": {
-          "action": "device-reset",
-          "owner": "DMS-or-operator",
-          "postcondition": "pending value becomes current"
-        },
-        "target_role": "ew"
+        "target_class": "pf_netdev_all"
       },
       "ra22-hwmp-nvconfig-delta.link-type.value": {
         "path": "/nvidia/link/type",
@@ -418,14 +334,6 @@
           "value": "ETH"
         },
         "source_feature": "ra22-hwmp-nvconfig-delta",
-        "kind": "set",
-        "execution_group": "breakout",
-        "reset": {
-          "action": "device-reset",
-          "owner": "DMS-or-operator",
-          "postcondition": "pending value becomes current"
-        },
-        "target_role": "ew",
         "target_class": "pf_netdev_all"
       },
       "ra22-hwmp-nvconfig-delta.roce-rtt.dscp-dscp-mode": {
@@ -435,14 +343,6 @@
           "dscp-mode": "fixed"
         },
         "source_feature": "ra22-hwmp-nvconfig-delta",
-        "kind": "set",
-        "execution_group": "breakout",
-        "reset": {
-          "action": "device-reset",
-          "owner": "DMS-or-operator",
-          "postcondition": "pending value becomes current"
-        },
-        "target_role": "ew",
         "target_class": "pf_netdev_all"
       },
       "ra22-hwmp-nvconfig-delta.misc-parser.flex-parser-profile": {
@@ -451,14 +351,6 @@
           "flex-parser-profile": 10
         },
         "source_feature": "ra22-hwmp-nvconfig-delta",
-        "kind": "set",
-        "execution_group": "breakout",
-        "reset": {
-          "action": "device-reset",
-          "owner": "DMS-or-operator",
-          "postcondition": "pending value becomes current"
-        },
-        "target_role": "ew",
         "target_class": "pf_netdev_all"
       },
       "ra22-hwmp-nvconfig-delta.pci.rde-disable": {
@@ -467,14 +359,6 @@
           "rde-disable": true
         },
         "source_feature": "ra22-hwmp-nvconfig-delta",
-        "kind": "set",
-        "execution_group": "breakout",
-        "reset": {
-          "action": "device-reset",
-          "owner": "DMS-or-operator",
-          "postcondition": "pending value becomes current"
-        },
-        "target_role": "ew",
         "target_class": "pf_netdev_all"
       },
       "ra22-hwmp-nvconfig-delta.pci-sriov.vf-log-bar-size": {
@@ -483,14 +367,6 @@
           "vf-log-bar-size": 5
         },
         "source_feature": "ra22-hwmp-nvconfig-delta",
-        "kind": "set",
-        "execution_group": "breakout",
-        "reset": {
-          "action": "device-reset",
-          "owner": "DMS-or-operator",
-          "postcondition": "pending value becomes current"
-        },
-        "target_role": "ew",
         "target_class": "pf_netdev_all"
       }
     },
