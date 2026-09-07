@@ -415,11 +415,11 @@ dms-cli --json /nvidia/blueprints/plan profile=<profile> name=<name> \
 For Blueprints planning, the wrapper sets `BLUEPRINTS_ROOT` and
 `BLUEPRINTS_STATE_DIR` only on the `dms-cli` child process.
 `SpectrumXConfigManager` supplies the fixed `/opt/nvidia/blueprints` path and
-creates its command executor internally. The daemon image must inject a
-compatible DMS Blueprints source tree there. The tree must contain `planner/`,
-`installer/`, `data/`, and `plugins/`, because that is the external-root layout
-expected by the DMS action wrapper. Existing process environment entries are
-preserved, and inherited entries for either variable are replaced.
+creates its command executor internally. The executable DMS Blueprints action
+tree remains part of the daemon image. Authored doSPCX data is supplied
+separately through a labeled ConfigMap and installed at
+`/opt/mellanox/doca/services/dms/doSpcx/data`. Existing process environment
+entries are preserved, and inherited entries for either variable are replaced.
 
 `pkg/dmscli` is the low-level command wrapper. `pkg/spectrumx.PlanManager` is the
 plan lifecycle abstraction included by `SpectrumXManager`; it owns
@@ -436,8 +436,9 @@ before each existing concurrent per-device NV or runtime apply.
 `interfaceNameTemplate` is not an input to doSPCX planning.
 
 Each plan directory also contains `metadata.json`, a flat document with only the
-inputs used for that stage and the target-map digest. A later `PreparePlan` call
-reuses the saved plan when the metadata exactly matches the current inputs, the
+inputs used for that stage, the installed doSPCX data archive digest, and the
+target-map digest. A later `PreparePlan` call reuses the saved plan when the
+metadata exactly matches the current inputs, the
 target-map file still has the recorded digest, and the plan passes the same
 structural validation as a newly generated plan. Missing, malformed, or changed
 cache artifacts cause normal regeneration through `dms-cli`. Individual
@@ -448,7 +449,8 @@ device membership before touching hardware.
 
 ### pkg/spectrumx/ — Spectrum-X Configuration
 
-Sources: `pkg/spectrumx/spectrumx.go`, `pkg/spectrumx/prepareplan.go`, `pkg/spectrumx/semanticplan.go`
+Sources: `pkg/spectrumx/spectrumx.go`, `pkg/spectrumx/blueprintsdata.go`,
+`pkg/spectrumx/prepareplan.go`, `pkg/spectrumx/semanticplan.go`
 
 #### PlanManager Interface
 
@@ -473,6 +475,27 @@ type PlanManager interface {
 }
 ```
 
+Blueprint data installation is a separate capability embedded by
+`SpectrumXManager`:
+
+```go
+type BlueprintsDataManager interface {
+    InstallBlueprintsData(archive []byte) error
+    RemoveBlueprintsData() error
+}
+```
+
+`InstallBlueprintsData` accepts the decoded `dospcx-data.tar.gz/v1` archive,
+validates and stages its `data/` tree, and activates it under the DMS
+installation directory. It rejects paths outside `data/`, non-regular archive
+entries, oversized payloads, and incomplete layouts. Activation retains the
+previous valid tree when an update fails. The installed archive digest is part
+of plan metadata, so changing or removing the bundle invalidates cached plans.
+The controller accepts exactly one labeled doSPCX data bundle cluster-wide.
+Manager-installed data is deactivated while multiple bundles conflict and is
+removed when the active ConfigMap is deleted. Data already present in the daemon
+image is not removed when no ConfigMap bundle was installed.
+
 `PreparePlan` generates or reuses the stage-specific plan for the supplied
 Spectrum-X device group. It is a no-op when none of the supplied devices enable
 Spectrum-X. `GetPreparedPlan` retrieves the persisted plan without invoking
@@ -495,6 +518,7 @@ creates the command executor internally:
 ```go
 type SpectrumXManager interface {
     PlanManager
+    BlueprintsDataManager
     // Existing Spectrum-X configuration methods...
 }
 

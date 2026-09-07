@@ -40,6 +40,7 @@ import (
 const (
 	defaultBlueprintsRoot     = "/opt/nvidia/blueprints"
 	defaultBlueprintsStateDir = "/var/lib/blueprints"
+	defaultDospcxDataRoot     = "/opt/mellanox/doca/services/dms/doSpcx/data"
 	deploymentModeHostK8s     = "host-k8s"
 )
 
@@ -111,20 +112,21 @@ type planConfig struct {
 // planMetadata contains only the inputs used to generate a doSPCX plan.
 // Exact equality with the current inputs allows the saved plan to be reused.
 type planMetadata struct {
-	BlueprintsRoot     string   `json:"blueprints_root"`
-	BlueprintsStateDir string   `json:"blueprints_state_dir"`
-	PlanName           string   `json:"plan_name"`
-	Stage              string   `json:"stage"`
-	Profile            string   `json:"profile"`
-	PlatformType       string   `json:"platform_type"`
-	SpectrumXVersion   string   `json:"spectrum_x_version"`
-	MultiplaneMode     string   `json:"multiplane_mode"`
-	Overlay            string   `json:"overlay"`
-	Planes             int      `json:"planes"`
-	DeploymentMode     string   `json:"deployment_mode"`
-	Parameters         []string `json:"parameters"`
-	TargetMapFile      string   `json:"target_map_file"`
-	TargetMapDigest    string   `json:"target_map_digest"`
+	BlueprintsRoot       string   `json:"blueprints_root"`
+	BlueprintsStateDir   string   `json:"blueprints_state_dir"`
+	BlueprintsDataDigest string   `json:"blueprints_data_digest,omitempty"`
+	PlanName             string   `json:"plan_name"`
+	Stage                string   `json:"stage"`
+	Profile              string   `json:"profile"`
+	PlatformType         string   `json:"platform_type"`
+	SpectrumXVersion     string   `json:"spectrum_x_version"`
+	MultiplaneMode       string   `json:"multiplane_mode"`
+	Overlay              string   `json:"overlay"`
+	Planes               int      `json:"planes"`
+	DeploymentMode       string   `json:"deployment_mode"`
+	Parameters           []string `json:"parameters"`
+	TargetMapFile        string   `json:"target_map_file"`
+	TargetMapDigest      string   `json:"target_map_digest"`
 }
 
 // PreparePlan ensures that a matching node-scoped plan is cached for the
@@ -172,20 +174,21 @@ func (m *spectrumXConfigManager) PreparePlan(
 	planPath := filepath.Join(stateDir, "plans", generatedPlanName, "plan.json")
 	metadataPath := filepath.Join(filepath.Dir(planPath), "metadata.json")
 	metadata := planMetadata{
-		BlueprintsRoot:     m.blueprintsRoot,
-		BlueprintsStateDir: stateDir,
-		PlanName:           generatedPlanName,
-		Stage:              string(stage),
-		Profile:            config.profile,
-		PlatformType:       config.platformType,
-		SpectrumXVersion:   config.version,
-		MultiplaneMode:     config.multiplane,
-		Overlay:            config.overlay,
-		Planes:             config.planes,
-		DeploymentMode:     deploymentModeHostK8s,
-		Parameters:         append([]string(nil), params...),
-		TargetMapFile:      targetMapPath,
-		TargetMapDigest:    sha256Digest(targetMapContent),
+		BlueprintsRoot:       m.blueprintsRoot,
+		BlueprintsStateDir:   stateDir,
+		BlueprintsDataDigest: m.dospcxDataDigest,
+		PlanName:             generatedPlanName,
+		Stage:                string(stage),
+		Profile:              config.profile,
+		PlatformType:         config.platformType,
+		SpectrumXVersion:     config.version,
+		MultiplaneMode:       config.multiplane,
+		Overlay:              config.overlay,
+		Planes:               config.planes,
+		DeploymentMode:       deploymentModeHostK8s,
+		Parameters:           append([]string(nil), params...),
+		TargetMapFile:        targetMapPath,
+		TargetMapDigest:      sha256Digest(targetMapContent),
 	}
 	if reusable, reason := reusablePlan(planPath, metadataPath, targetMapPath, metadata, config); reusable {
 		log.FromContext(ctx).V(2).Info("reusing saved doSPCX plan",
@@ -285,20 +288,21 @@ func (m *spectrumXConfigManager) GetPreparedPlan(device *v1alpha1.NicDevice, sta
 		return nil, fmt.Errorf("decode doSPCX %s plan metadata %q: %w", stage, metadataPath, err)
 	}
 	expectedMetadata := planMetadata{
-		BlueprintsRoot:     m.blueprintsRoot,
-		BlueprintsStateDir: stateDir,
-		PlanName:           generatedPlanName,
-		Stage:              string(stage),
-		Profile:            config.profile,
-		PlatformType:       config.platformType,
-		SpectrumXVersion:   config.version,
-		MultiplaneMode:     config.multiplane,
-		Overlay:            config.overlay,
-		Planes:             config.planes,
-		DeploymentMode:     deploymentModeHostK8s,
-		Parameters:         params,
-		TargetMapFile:      targetMapPath,
-		TargetMapDigest:    metadata.TargetMapDigest,
+		BlueprintsRoot:       m.blueprintsRoot,
+		BlueprintsStateDir:   stateDir,
+		BlueprintsDataDigest: m.dospcxDataDigest,
+		PlanName:             generatedPlanName,
+		Stage:                string(stage),
+		Profile:              config.profile,
+		PlatformType:         config.platformType,
+		SpectrumXVersion:     config.version,
+		MultiplaneMode:       config.multiplane,
+		Overlay:              config.overlay,
+		Planes:               config.planes,
+		DeploymentMode:       deploymentModeHostK8s,
+		Parameters:           params,
+		TargetMapFile:        targetMapPath,
+		TargetMapDigest:      metadata.TargetMapDigest,
 	}
 	if metadata.TargetMapDigest == "" || !reflect.DeepEqual(metadata, expectedMetadata) {
 		return nil, fmt.Errorf("cached doSPCX %s plan does not match device %q inputs", stage, device.Name)
