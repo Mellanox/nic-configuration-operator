@@ -360,6 +360,10 @@ func (v *configValidationImpl) RuntimeConfigApplied(device *v1alpha1.NicDevice) 
 	ports := device.Status.Ports
 	desired := v.CalculateDesiredRuntimeConfig(device)
 
+	if err := v.validatePortCarrierState(device); err != nil {
+		return false, err
+	}
+
 	if desired.MaxReadRequestSize != 0 {
 		for _, port := range ports {
 			actualMaxReadReqSize, err := v.utils.GetMaxReadRequestSize(port.PCI)
@@ -425,6 +429,27 @@ func (v *configValidationImpl) RuntimeConfigApplied(device *v1alpha1.NicDevice) 
 	}
 
 	return true, nil
+}
+
+func (v *configValidationImpl) validatePortCarrierState(device *v1alpha1.NicDevice) error {
+	for _, port := range device.Status.Ports {
+		if port.NetworkInterface == "" {
+			continue
+		}
+
+		noCarrier, err := v.utils.HasNoCarrier(port.NetworkInterface)
+		if err != nil {
+			log.Log.Error(err, "can't check link state", "device", device.Name, "port", port.PCI)
+			return err
+		}
+		if noCarrier {
+			return fmt.Errorf(
+				"network interface %s for device port %s has NO-CARRIER",
+				port.NetworkInterface, port.PCI)
+		}
+	}
+
+	return nil
 }
 
 // CalculateDesiredRuntimeConfig returns desired values for runtime config

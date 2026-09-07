@@ -584,6 +584,28 @@ var _ = Describe("NicDeviceReconciler", func() {
 			configurationManager.AssertExpectations(GinkgoT())
 			maintenanceManager.AssertExpectations(GinkgoT())
 		})
+		It("Should reflect a NO-CARRIER runtime config error in status and not release maintenance", func() {
+			errorText := "network interface interface1 for device port 0000:03:00.1 has NO-CARRIER"
+			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil, nil)
+			configurationManager.On("ApplyRuntimeConfiguration", mock.Anything, mock.Anything).Return((*types.RuntimeConfigurationApplyResult)(nil), errors.New(errorText))
+
+			createDevice(false, nil)
+
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.ConfigUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.RuntimeConfigUpdateFailedReason,
+				Message: errorText,
+			}))
+
+			maintenanceManager.AssertNotCalled(GinkgoT(), "ScheduleMaintenance", mock.Anything)
+			maintenanceManager.AssertNotCalled(GinkgoT(), "MaintenanceAllowed", mock.Anything)
+			configurationManager.AssertNotCalled(GinkgoT(), "ApplyNVConfiguration", mock.Anything, mock.Anything, mock.Anything)
+			maintenanceManager.AssertNotCalled(GinkgoT(), "Reboot")
+			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
+			configurationManager.AssertExpectations(GinkgoT())
+			maintenanceManager.AssertExpectations(GinkgoT())
+		})
 		It("Should request maintenance if runtime config needs to be reset", func() {
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil, nil)
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
