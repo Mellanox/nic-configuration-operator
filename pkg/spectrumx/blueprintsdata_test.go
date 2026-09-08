@@ -86,6 +86,7 @@ func validBlueprintsArchive(extra ...blueprintsArchiveEntry) []byte {
 func newBlueprintsDataManager(dataRoot string) *spectrumXConfigManager {
 	return &spectrumXConfigManager{
 		spectrumXConfigs:   nil,
+		preparedPlans:      make(map[string]*preparedPlan),
 		dmsManager:         nil,
 		execInterface:      nil,
 		blueprintsRoot:     "",
@@ -104,6 +105,7 @@ var _ = Describe("doSPCX data archive installation", func() {
 		Expect(os.WriteFile(filepath.Join(dataRoot, "obsolete"), []byte("old"), 0o644)).To(Succeed())
 		archive := validBlueprintsArchive()
 		manager := newBlueprintsDataManager(dataRoot)
+		manager.preparedPlans["old-plan"] = &preparedPlan{plan: &Plan{Name: "old-plan"}}
 
 		Expect(manager.InstallBlueprintsData(archive)).To(Succeed())
 
@@ -116,6 +118,7 @@ var _ = Describe("doSPCX data archive installation", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(info.Mode().Perm()).To(Equal(os.FileMode(0o755)))
 		Expect(manager.dospcxDataDigest).To(Equal(sha256Digest(archive)))
+		Expect(manager.preparedPlans).To(BeEmpty())
 	})
 
 	It("accepts the global PAX metadata emitted by git archive", func() {
@@ -228,6 +231,7 @@ var _ = Describe("doSPCX data archive installation", func() {
 		dataRoot := filepath.Join(GinkgoT().TempDir(), "doSpcx", "data")
 		manager := newBlueprintsDataManager(dataRoot)
 		Expect(manager.InstallBlueprintsData(validBlueprintsArchive())).To(Succeed())
+		manager.preparedPlans["old-plan"] = &preparedPlan{plan: &Plan{Name: "old-plan"}}
 		updatedArchive := validBlueprintsArchive(blueprintsArchiveEntry{
 			name: "data/new-profile-marker", typeFlag: tar.TypeReg, mode: 0o644, content: "new",
 		})
@@ -244,16 +248,19 @@ var _ = Describe("doSPCX data archive installation", func() {
 		Expect(cleanupAttempted).To(BeTrue())
 		Expect(filepath.Join(dataRoot, "new-profile-marker")).To(BeAnExistingFile())
 		Expect(manager.dospcxDataDigest).To(Equal(sha256Digest(updatedArchive)))
+		Expect(manager.preparedPlans).To(BeEmpty())
 	})
 
 	It("removes data installed from a ConfigMap and clears its digest", func() {
 		dataRoot := filepath.Join(GinkgoT().TempDir(), "doSpcx", "data")
 		manager := newBlueprintsDataManager(dataRoot)
 		Expect(manager.InstallBlueprintsData(validBlueprintsArchive())).To(Succeed())
+		manager.preparedPlans["old-plan"] = &preparedPlan{plan: &Plan{Name: "old-plan"}}
 
 		Expect(manager.RemoveBlueprintsData()).To(Succeed())
 		Expect(dataRoot).NotTo(BeADirectory())
 		Expect(manager.dospcxDataDigest).To(BeEmpty())
+		Expect(manager.preparedPlans).To(BeEmpty())
 	})
 
 	It("keeps the active digest when removing installed data fails", func() {
@@ -261,6 +268,7 @@ var _ = Describe("doSPCX data archive installation", func() {
 		manager := newBlueprintsDataManager(dataRoot)
 		archive := validBlueprintsArchive()
 		Expect(manager.InstallBlueprintsData(archive)).To(Succeed())
+		manager.preparedPlans["active-plan"] = &preparedPlan{plan: &Plan{Name: "active-plan"}}
 
 		originalRemove := removeBlueprintsDataDirectory
 		DeferCleanup(func() { removeBlueprintsDataDirectory = originalRemove })
@@ -271,6 +279,7 @@ var _ = Describe("doSPCX data archive installation", func() {
 		Expect(manager.RemoveBlueprintsData()).To(MatchError(ContainSubstring("injected removal failure")))
 		Expect(dataRoot).To(BeADirectory())
 		Expect(manager.dospcxDataDigest).To(Equal(sha256Digest(archive)))
+		Expect(manager.preparedPlans).To(HaveKey("active-plan"))
 	})
 
 	It("does not remove image-provided data when no ConfigMap bundle was installed", func() {

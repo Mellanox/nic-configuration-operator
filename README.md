@@ -223,11 +223,12 @@ Spectrum-X profiles can configure NICs with multiple data planes. Available mode
 starts its existing concurrent per-device NV apply, it calls `PreparePlan` once for the node's
 Spectrum-X device group with the `prepare` stage. It does the same with the `configure` stage before
 the existing concurrent runtime apply. Plan preparation never executes generated plan operations.
-`GetPreparedPlan` parses the host-k8s `plan.semantic.groups` contract and returns its validated
-semantic source to library consumers. Plans are accepted only when `BuildDMSOperationPlan` can
-compile them into an ordered, target-resolved operation plan. That compiled form includes current
-plus pending queries for prepare-stage NVConfig and retains the planner's fanout order. This
-translation remains execution-free. Semantic group references are authoritative; public doSPCX
+`PreparePlan` parses the host-k8s `plan.semantic.groups` contract once and caches its ordered,
+target-resolved operation groups in memory. `GetPreparedPlan` only validates the requesting
+device's inputs and membership against that cache; it does not reread or reparse files for every
+per-device apply. The compiled form includes current plus pending queries for prepare-stage
+NVConfig and retains the planner's fanout order. This translation remains execution-free. Semantic
+group references are authoritative; public doSPCX
 operations do not need to repeat group or network-role fields, and an omitted operation kind means
 `set`, matching DMS. Configure groups `eswitch` and `vf-lifecycle` are intentionally excluded from
 the current operation plan and reported as skipped; unknown groups fail closed.
@@ -258,7 +259,8 @@ capability.
 
 Each stage stores a flat metadata document containing only the planner inputs, including the
 platform, Spectrum-X settings, planner parameters, doSPCX data archive digest, and target-map
-digest. A later `PreparePlan` call reuses the saved plan when that metadata still matches, the
+digest. Repeated calls in the same process reuse the in-memory plan. After a process restart,
+`PreparePlan` loads and compiles the saved plan once when that metadata still matches, the
 target-map digest is unchanged, the generated devices exactly match the target-map-derived BDF,
 DMS-target, device-ID, rail, plane, and role set, and the semantic operations compile under NCO's
 execution policy. Any input change or invalid saved artifact regenerates

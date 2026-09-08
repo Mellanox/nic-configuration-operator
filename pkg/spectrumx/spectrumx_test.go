@@ -226,6 +226,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 		manager = &spectrumXConfigManager{
 			dmsManager:         &dmsMgr,
 			spectrumXConfigs:   cfgs,
+			preparedPlans:      make(map[string]*preparedPlan),
 			execInterface:      execFake,
 			blueprintsRoot:     defaultBlueprintsRoot,
 			blueprintsStateDir: "",

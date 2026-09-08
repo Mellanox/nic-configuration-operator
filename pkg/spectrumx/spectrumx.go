@@ -84,6 +84,7 @@ type spectrumXConfigManager struct {
 	configMutex        sync.RWMutex
 	spectrumXConfigs   map[string]*types.SpectrumXConfig
 	planMutex          sync.RWMutex
+	preparedPlans      map[string]*preparedPlan
 	dmsManager         dms.DMSManager
 	execInterface      execUtils.Interface
 	blueprintsRoot     string
@@ -860,6 +861,7 @@ func NewSpectrumXConfigManager(
 	return &spectrumXConfigManager{
 		dmsManager:         dmsManager,
 		spectrumXConfigs:   spectrumXConfigs,
+		preparedPlans:      make(map[string]*preparedPlan),
 		execInterface:      execUtils.New(),
 		blueprintsRoot:     defaultBlueprintsRoot,
 		blueprintsStateDir: "",

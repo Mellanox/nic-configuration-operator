@@ -29,11 +29,8 @@ import (
 
 	"github.com/go-logr/logr"
 	execUtils "k8s.io/utils/exec"
-)
 
-const (
-	xpathStatusError   = "error"
-	xpathStatusPartial = "partial"
+	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
 
 // XPathOperation describes typed intent below one DMS XPath.
@@ -48,30 +45,22 @@ type XPathQuery struct {
 	Leaves []string
 }
 
-// XPathStatus is one normalized per-path DMS result.
-type XPathStatus struct {
-	Path         string `json:"path"`
-	Status       string `json:"status"`
-	ErrorCode    int    `json:"error_code,omitempty"`
-	Error        string `json:"error,omitempty"`
-	ErrorMessage string `json:"error_msg,omitempty"`
-}
-
-// QueryXPathsResult is the normalized result of a typed DMS GET. Values and
-// NotSupported are keyed by the requested container or keyed-list XPath.
+// QueryXPathsResult is the normalized result of a typed DMS GET.
 type QueryXPathsResult struct {
 	Status       string
 	Values       map[string]map[string]any
-	NotSupported map[string][]string
-	Results      []XPathStatus
+	Failures     map[string]any
 	ErrorMessage string
+	ErrorCode    any
 }
 
 // SetXPathsResult is the normalized result of a typed DMS SET.
 type SetXPathsResult struct {
 	Status       string
-	Results      []XPathStatus
+	Successes    map[string]any
+	Failures     map[string]any
 	ErrorMessage string
+	ErrorCode    any
 }
 
 // QueryXPaths reads one or more leaf batches from a DMS target.
@@ -88,38 +77,23 @@ func QueryXPaths(
 		return nil, err
 	}
 
-	args := []string{"--json", "-t", target}
-	for index, query := range queries {
-		if index > 0 {
-			args = append(args, ";")
-		}
-		args = append(args, query.Path)
-		args = append(args, query.Leaves...)
-	}
-
+	args := xpathQueryArgs(target, queries)
 	command := execInterface.CommandContext(ctx, dmsCLIExecutable, args...)
-	output, commandErr := command.CombinedOutput()
-	commandAndArgs := append([]string{dmsCLIExecutable}, args...)
-	logr.FromContextOrDiscard(ctx).V(2).Info("command output",
-		"command", commandAndArgs,
-		"target", target,
-		"output", string(output))
+	output, commandErr := utils.RunCommandWithStreams(command)
+	logDMSCLIOutput(ctx, append([]string{dmsCLIExecutable}, args...), target, output)
 
-	result, decodeErr := decodeQueryXPathsResult(output, queries)
 	if commandErr != nil {
-		return result, xpathCommandError("query", target, output, resultErrorMessage(result), commandErr)
-	}
-	if decodeErr != nil {
-		return nil, fmt.Errorf("decode XPath query result for target %q: %w", target, decodeErr)
-	}
-	if queryResultFailed(result) {
-		detail := result.ErrorMessage
-		if detail == "" {
-			detail = fmt.Sprintf("unexpected status %q", result.Status)
+		result, _ := decodeXPathFailure(output.Stdout, queries)
+		detail := ""
+		if result != nil {
+			detail = result.ErrorMessage
 		}
-		return result, fmt.Errorf("query XPaths from target %q: %s", target, detail)
+		return result, xpathCommandError("query", target, commandErrorDetail(output.Stdout, output.Stderr, detail), commandErr)
 	}
-
+	result, err := decodeXPathQuerySuccess(output.Stdout, queries)
+	if err != nil {
+		return nil, fmt.Errorf("decode XPath query result for target %q: %w", target, err)
+	}
 	return result, nil
 }
 
@@ -139,29 +113,42 @@ func SetXPaths(
 	}
 
 	command := execInterface.CommandContext(ctx, dmsCLIExecutable, args...)
-	output, commandErr := command.CombinedOutput()
-	commandAndArgs := append([]string{dmsCLIExecutable}, args...)
-	logr.FromContextOrDiscard(ctx).V(2).Info("command output",
-		"command", commandAndArgs,
-		"target", target,
-		"output", string(output))
+	output, commandErr := utils.RunCommandWithStreams(command)
+	logDMSCLIOutput(ctx, append([]string{dmsCLIExecutable}, args...), target, output)
 
-	result, decodeErr := decodeSetXPathsResult(output)
 	if commandErr != nil {
-		return result, xpathCommandError("set", target, output, setResultErrorMessage(result), commandErr)
-	}
-	if decodeErr != nil {
-		return nil, fmt.Errorf("decode XPath set result for target %q: %w", target, decodeErr)
-	}
-	if setResultFailed(result) {
-		detail := result.ErrorMessage
-		if detail == "" {
-			detail = fmt.Sprintf("unexpected status %q", result.Status)
+		result, _ := decodeXPathSetFailure(output.Stdout)
+		detail := ""
+		if result != nil {
+			detail = result.ErrorMessage
 		}
-		return result, fmt.Errorf("set XPaths on target %q: %s", target, detail)
+		return result, xpathCommandError("set", target, commandErrorDetail(output.Stdout, output.Stderr, detail), commandErr)
 	}
-
+	result, err := decodeXPathSetSuccess(output.Stdout)
+	if err != nil {
+		return nil, fmt.Errorf("decode XPath set result for target %q: %w", target, err)
+	}
 	return result, nil
+}
+
+func logDMSCLIOutput(ctx context.Context, command []string, target string, output utils.CommandOutput) {
+	logr.FromContextOrDiscard(ctx).V(2).Info("command output",
+		"command", command,
+		"target", target,
+		"stdout", boundedCommandOutput(output.Stdout),
+		"stderr", boundedCommandOutput(output.Stderr))
+}
+
+func xpathQueryArgs(target string, queries []XPathQuery) []string {
+	args := []string{"--json", "-t", target}
+	for index, query := range queries {
+		if index > 0 {
+			args = append(args, ";")
+		}
+		args = append(args, query.Path)
+		args = append(args, query.Leaves...)
+	}
+	return args
 }
 
 func validateXPathQueries(target string, queries []XPathQuery) error {
@@ -321,190 +308,148 @@ func formatXPathScalar(value any) (string, error) {
 	}
 }
 
-type xpathResponse struct {
+type xpathFailureEnvelope struct {
 	Status       string         `json:"status"`
-	Values       map[string]any `json:"values"`
-	NotSupported []string       `json:"not-supported"`
-	Results      []XPathStatus  `json:"results"`
-	Error        string         `json:"error"`
+	Successes    map[string]any `json:"successes"`
+	Failures     map[string]any `json:"failures"`
 	ErrorMessage string         `json:"error_msg"`
+	ErrorCode    any            `json:"error_code"`
 }
 
-func decodeQueryXPathsResult(output []byte, queries []XPathQuery) (*QueryXPathsResult, error) {
-	root, err := decodeXPathResponseObject(output)
+func decodeXPathQuerySuccess(output []byte, queries []XPathQuery) (*QueryXPathsResult, error) {
+	root, err := decodeJSONObject(output)
 	if err != nil {
 		return nil, err
 	}
-	result := &QueryXPathsResult{
-		Status:       "ok",
-		Values:       map[string]map[string]any{},
-		NotSupported: map[string][]string{},
-		Results:      nil,
-		ErrorMessage: "",
-	}
-
-	if isXPathResponseEnvelope(root) {
-		response, err := decodeXPathResponse(root)
+	result := &QueryXPathsResult{Status: "ok", Values: make(map[string]map[string]any, len(queries))}
+	if len(queries) == 1 {
+		values, err := decodeValues(output)
 		if err != nil {
 			return nil, err
 		}
-		if len(queries) != 1 {
-			if response.Status == "ok" {
-				return nil, fmt.Errorf("unkeyed successful dms-cli response is ambiguous for %d query paths", len(queries))
-			}
-			result.Status = response.Status
-			result.Results = append(result.Results, response.Results...)
-			result.ErrorMessage = responseErrorMessage(response)
-			return result, nil
-		}
-		mergeQueryResponse(result, queries[0].Path, response)
-		result.Status = response.Status
-		if result.Status == "ok" && len(response.NotSupported) > 0 {
-			result.Status = xpathStatusPartial
-		}
+		result.Values[queries[0].Path] = values
 		return result, nil
 	}
-	if len(queries) == 1 {
-		if _, found := root[queries[0].Path]; !found && !hasXPathKey(root) {
-			values := map[string]any{}
-			if err := decodeJSON(output, &values); err != nil {
-				return nil, err
-			}
-			result.Values[queries[0].Path] = values
-			return result, nil
-		}
-	}
-
-	succeeded := 0
-	failed := 0
-	hasPartial := false
 	for _, query := range queries {
 		raw, found := root[query.Path]
 		if !found {
 			return nil, fmt.Errorf("dms-cli response does not contain query path %q", query.Path)
 		}
-		response, err := decodeKeyedQueryResponse(raw)
+		values, err := decodeValues(raw)
 		if err != nil {
 			return nil, fmt.Errorf("decode response for query path %q: %w", query.Path, err)
 		}
-		mergeQueryResponse(result, query.Path, response)
-		if queryResponseFailed(response) {
-			failed++
-			hasPartial = hasPartial || response.Status == xpathStatusPartial
-		} else {
-			succeeded++
-		}
-	}
-	switch {
-	case failed == 0:
-		result.Status = "ok"
-	case succeeded > 0 || hasPartial:
-		result.Status = xpathStatusPartial
-	default:
-		result.Status = xpathStatusError
+		result.Values[query.Path] = values
 	}
 	return result, nil
 }
 
-func hasXPathKey(object map[string]json.RawMessage) bool {
-	for key := range object {
-		if strings.HasPrefix(key, "/") {
-			return true
-		}
+func decodeXPathSetSuccess(output []byte) (*SetXPathsResult, error) {
+	var response struct {
+		Status string `json:"status"`
 	}
-	return false
+	if err := decodeJSON(output, &response); err != nil {
+		return nil, err
+	}
+	if response.Status != "ok" {
+		return nil, fmt.Errorf("dms-cli response has unexpected status %q", response.Status)
+	}
+	return &SetXPathsResult{Status: response.Status}, nil
 }
 
-func isXPathResponseEnvelope(object map[string]json.RawMessage) bool {
-	if rawStatus, found := object["status"]; found {
-		var status string
-		if err := json.Unmarshal(rawStatus, &status); err == nil {
-			switch status {
-			case "ok", xpathStatusError, xpathStatusPartial:
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func decodeKeyedQueryResponse(raw json.RawMessage) (xpathResponse, error) {
-	object := map[string]json.RawMessage{}
-	if err := decodeJSON(raw, &object); err != nil {
-		return xpathResponse{}, err
-	}
-	if isXPathResponseEnvelope(object) {
-		var response xpathResponse
-		if err := decodeJSON(raw, &response); err != nil {
-			return xpathResponse{}, err
-		}
-		return response, nil
-	}
-
-	values := map[string]any{}
-	if err := decodeJSON(raw, &values); err != nil {
-		return xpathResponse{}, err
-	}
-	return xpathResponse{Status: "ok", Values: values}, nil
-}
-
-func decodeSetXPathsResult(output []byte) (*SetXPathsResult, error) {
-	root, err := decodeXPathResponseObject(output)
+func decodeXPathFailure(output []byte, queries []XPathQuery) (*QueryXPathsResult, error) {
+	envelope, err := decodeFailureEnvelope(output)
 	if err != nil {
 		return nil, err
 	}
-	result := &SetXPathsResult{Status: "ok", Results: nil, ErrorMessage: ""}
-	if _, hasStatus := root["status"]; hasStatus {
-		response, err := decodeXPathResponse(root)
-		if err != nil {
-			return nil, err
-		}
-		result.Status = response.Status
-		result.Results = response.Results
-		result.ErrorMessage = response.ErrorMessage
-		if result.ErrorMessage == "" {
-			result.ErrorMessage = response.Error
-		}
-		return result, nil
+	result := &QueryXPathsResult{
+		Status:       envelope.Status,
+		Values:       make(map[string]map[string]any, len(queries)),
+		Failures:     envelope.Failures,
+		ErrorMessage: failureMessage(envelope),
+		ErrorCode:    envelope.ErrorCode,
 	}
-
-	paths := make([]string, 0, len(root))
-	for path := range root {
-		paths = append(paths, path)
+	for _, query := range queries {
+		result.Values[query.Path] = map[string]any{}
 	}
-	sort.Strings(paths)
-	failed := 0
-	for _, path := range paths {
-		var response xpathResponse
-		if err := decodeJSON(root[path], &response); err != nil {
-			return nil, fmt.Errorf("decode response for set path %q: %w", path, err)
+	for path, value := range envelope.Successes {
+		queryPath, leaf, found := matchingQuery(path, queries)
+		if !found {
+			return nil, fmt.Errorf("dms-cli response contains unexpected success path %q", path)
 		}
-		status := XPathStatus{
-			Path:         path,
-			Status:       response.Status,
-			Error:        response.Error,
-			ErrorMessage: response.ErrorMessage,
-		}
-		result.Results = append(result.Results, status)
-		if response.Status != "ok" {
-			failed++
-			if result.ErrorMessage == "" {
-				result.ErrorMessage = response.ErrorMessage
-				if result.ErrorMessage == "" {
-					result.ErrorMessage = response.Error
-				}
-			}
-		}
-	}
-	if failed == len(paths) {
-		result.Status = xpathStatusError
-	} else if failed > 0 {
-		result.Status = xpathStatusPartial
+		result.Values[queryPath][leaf] = value
 	}
 	return result, nil
 }
 
-func decodeXPathResponseObject(output []byte) (map[string]json.RawMessage, error) {
+func decodeXPathSetFailure(output []byte) (*SetXPathsResult, error) {
+	envelope, err := decodeFailureEnvelope(output)
+	if err != nil {
+		return nil, err
+	}
+	return &SetXPathsResult{
+		Status:       envelope.Status,
+		Successes:    envelope.Successes,
+		Failures:     envelope.Failures,
+		ErrorMessage: failureMessage(envelope),
+		ErrorCode:    envelope.ErrorCode,
+	}, nil
+}
+
+func decodeFailureEnvelope(output []byte) (xpathFailureEnvelope, error) {
+	var envelope xpathFailureEnvelope
+	if err := decodeJSON(output, &envelope); err != nil {
+		return envelope, err
+	}
+	if envelope.Status != "error" && envelope.Status != "partial" {
+		return envelope, fmt.Errorf("dms-cli failure response has unexpected status %q", envelope.Status)
+	}
+	return envelope, nil
+}
+
+func failureMessage(envelope xpathFailureEnvelope) string {
+	if envelope.ErrorMessage != "" {
+		return envelope.ErrorMessage
+	}
+	if len(envelope.Failures) == 0 {
+		return ""
+	}
+	paths := make([]string, 0, len(envelope.Failures))
+	for path := range envelope.Failures {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	return formatFailureValue(envelope.Failures[paths[0]])
+}
+
+func formatFailureValue(value any) string {
+	if message, ok := value.(string); ok {
+		return message
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Sprint(value)
+	}
+	return string(encoded)
+}
+
+func matchingQuery(path string, queries []XPathQuery) (string, string, bool) {
+	for _, query := range queries {
+		prefix := query.Path + "/"
+		if !strings.HasPrefix(path, prefix) {
+			continue
+		}
+		leaf := strings.TrimPrefix(path, prefix)
+		for _, requestedLeaf := range query.Leaves {
+			if leaf == requestedLeaf {
+				return query.Path, leaf, true
+			}
+		}
+	}
+	return "", "", false
+}
+
+func decodeJSONObject(output []byte) (map[string]json.RawMessage, error) {
 	if len(bytes.TrimSpace(output)) == 0 {
 		return nil, fmt.Errorf("dms-cli returned an empty response")
 	}
@@ -512,22 +457,15 @@ func decodeXPathResponseObject(output []byte) (map[string]json.RawMessage, error
 	if err := decodeJSON(output, &root); err != nil {
 		return nil, fmt.Errorf("invalid dms-cli JSON response: %w", err)
 	}
-	if len(root) == 0 {
-		return nil, fmt.Errorf("dms-cli returned an empty JSON object")
-	}
 	return root, nil
 }
 
-func decodeXPathResponse(root map[string]json.RawMessage) (xpathResponse, error) {
-	encoded, err := json.Marshal(root)
-	if err != nil {
-		return xpathResponse{}, err
+func decodeValues(raw []byte) (map[string]any, error) {
+	values := map[string]any{}
+	if err := decodeJSON(raw, &values); err != nil {
+		return nil, err
 	}
-	var response xpathResponse
-	if err := decodeJSON(encoded, &response); err != nil {
-		return xpathResponse{}, err
-	}
-	return response, nil
+	return values, nil
 }
 
 func decodeJSON(content []byte, value any) error {
@@ -546,86 +484,7 @@ func decodeJSON(content []byte, value any) error {
 	return nil
 }
 
-func mergeQueryResponse(result *QueryXPathsResult, path string, response xpathResponse) {
-	result.Values[path] = response.Values
-	if len(response.NotSupported) > 0 {
-		result.NotSupported[path] = append([]string(nil), response.NotSupported...)
-	}
-	result.Results = append(result.Results, response.Results...)
-	if response.ErrorMessage != "" && result.ErrorMessage == "" {
-		result.ErrorMessage = response.ErrorMessage
-	}
-	if response.Error != "" && result.ErrorMessage == "" {
-		result.ErrorMessage = response.Error
-	}
-}
-
-func queryResponseFailed(response xpathResponse) bool {
-	if response.Status != "ok" || len(response.NotSupported) > 0 {
-		return true
-	}
-	for _, result := range response.Results {
-		if result.Status != "ok" {
-			return true
-		}
-	}
-	return false
-}
-
-func responseErrorMessage(response xpathResponse) string {
-	if response.ErrorMessage != "" {
-		return response.ErrorMessage
-	}
-	return response.Error
-}
-
-func queryResultFailed(result *QueryXPathsResult) bool {
-	if result == nil || result.Status != "ok" {
-		return true
-	}
-	for _, unsupported := range result.NotSupported {
-		if len(unsupported) > 0 {
-			return true
-		}
-	}
-	for _, status := range result.Results {
-		if status.Status != "ok" {
-			return true
-		}
-	}
-	return false
-}
-
-func setResultFailed(result *SetXPathsResult) bool {
-	if result == nil || result.Status != "ok" {
-		return true
-	}
-	for _, status := range result.Results {
-		if status.Status != "ok" {
-			return true
-		}
-	}
-	return false
-}
-
-func resultErrorMessage(result *QueryXPathsResult) string {
-	if result == nil {
-		return ""
-	}
-	return result.ErrorMessage
-}
-
-func setResultErrorMessage(result *SetXPathsResult) string {
-	if result == nil {
-		return ""
-	}
-	return result.ErrorMessage
-}
-
-func xpathCommandError(operation, target string, output []byte, detail string, commandErr error) error {
-	if detail == "" {
-		detail = strings.TrimSpace(string(output))
-	}
+func xpathCommandError(operation, target, detail string, commandErr error) error {
 	if detail != "" {
 		return fmt.Errorf("%s XPaths on target %q: %w: %s", operation, target, commandErr, detail)
 	}

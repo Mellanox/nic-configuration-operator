@@ -42,104 +42,6 @@ const (
 	rdmaTopologyPerRailBond = "per_rail_bond"
 )
 
-// PlanDevice is one DMS-addressable device emitted by the doSPCX planner.
-type PlanDevice struct {
-	BDF            string   `json:"bdf"`
-	DeviceID       string   `json:"device_id"`
-	HCAType        string   `json:"hca_type"`
-	Netdev         string   `json:"netdev"`
-	RDMADevice     string   `json:"rdma_dev"`
-	DMSTarget      string   `json:"dms_target"`
-	PFIndex        int      `json:"pf_index"`
-	Rail           int      `json:"rail"`
-	Plane          int      `json:"plane"`
-	PlaneExplicit  bool     `json:"plane_explicit"`
-	Network        string   `json:"network"`
-	PhysicalLabel  string   `json:"physical_label"`
-	ResetDomain    string   `json:"reset_domain"`
-	EndpointLabels []string `json:"endpoint_labels"`
-	TargetID       string   `json:"target_id"`
-}
-
-// ExpectedRDMA describes one expected RDMA endpoint emitted by the planner.
-// ControlBDF and ControlTarget are retained for compatibility with older,
-// enriched plans; public doSPCX plans do not require them.
-type ExpectedRDMA struct {
-	Rail          int    `json:"rail"`
-	RDMADevice    string `json:"rdma_dev"`
-	ControlBDF    string `json:"control_bdf"`
-	ControlTarget string `json:"control_target"`
-	Source        string `json:"source"`
-}
-
-// SemanticRuntimeContext contains topology needed to resolve semantic target
-// classes without interpreting rendered bare-metal artifacts.
-type SemanticRuntimeContext struct {
-	DeploymentMode   string         `json:"deployment_mode"`
-	MultiplaneMode   string         `json:"multiplane_mode"`
-	ESwitchMultiport bool           `json:"esw_multiport"`
-	NumVFs           int            `json:"num_vfs"`
-	PostBreakout     bool           `json:"post_breakout"`
-	RDMATopology     string         `json:"rdma_topology"`
-	ExpectedRDMA     []ExpectedRDMA `json:"expected_rdma"`
-}
-
-// ResetPolicy records the reset boundary associated with a semantic operation.
-type ResetPolicy struct {
-	Action        string `json:"action"`
-	Owner         string `json:"owner"`
-	Postcondition string `json:"postcondition"`
-}
-
-// SemanticOperation is one referenced typed operation from plan.operations.
-type SemanticOperation struct {
-	ID             string
-	Path           string
-	Values         map[string]any
-	SourceFeature  string
-	Kind           string
-	TargetClass    string
-	TargetRole     string
-	ExecutionGroup string
-	Scope          string
-	Lifecycle      string
-	Reset          *ResetPolicy
-	Condition      json.RawMessage
-	Context        json.RawMessage
-}
-
-// SemanticGroup preserves the planner's ordered semantic execution boundary.
-type SemanticGroup struct {
-	Name           string
-	Stage          PlanStage
-	Order          int
-	Scope          string
-	DeviceView     string
-	FanoutOrder    string
-	RequiresReboot bool
-	Operations     []SemanticOperation
-}
-
-// SemanticPlan is the NCO-facing doSPCX plan surface. It intentionally omits
-// bare-metal steps, services, and rendered artifacts.
-type SemanticPlan struct {
-	Name           string
-	Profile        string
-	Stage          PlanStage
-	PathDialect    string
-	Devices        []PlanDevice
-	RuntimeContext SemanticRuntimeContext
-	Groups         []SemanticGroup
-}
-
-// DMSOperationPlan contains ordered, target-resolved operations ready for the
-// generic dms-cli query/set transport. It does not execute any operation.
-type DMSOperationPlan struct {
-	Stage         PlanStage
-	Groups        []DMSOperationGroup
-	SkippedGroups []SkippedSemanticGroup
-}
-
 // DMSOperationGroup is one executable group or ordered phase marker.
 type DMSOperationGroup struct {
 	Name           string
@@ -168,7 +70,7 @@ type SkippedSemanticGroup struct {
 	Reason string
 }
 
-type semanticPlanDocument struct {
+type planDocument struct {
 	Plan struct {
 		Name        string `json:"name"`
 		Family      string `json:"family"`
@@ -177,14 +79,38 @@ type semanticPlanDocument struct {
 		PathDialect string `json:"path_dialect"`
 		Params      struct {
 			DeploymentMode string `json:"deployment_mode"`
+			Planes         int    `json:"planes"`
 		} `json:"params"`
-		Devices        []PlanDevice                       `json:"devices"`
-		RuntimeContext SemanticRuntimeContext             `json:"runtime_ctx"`
+		DetectedHW struct {
+			PlatformType string `json:"platform_type"`
+		} `json:"detected_hw"`
+		Devices        []planDevice                       `json:"devices"`
+		RuntimeContext planRuntimeContext                 `json:"runtime_ctx"`
 		Operations     map[string]semanticOperationRecord `json:"operations"`
 		Semantic       *struct {
 			Groups []semanticGroupRecord `json:"groups"`
 		} `json:"semantic"`
+		BareMetal *struct {
+			Groups []json.RawMessage `json:"groups"`
+		} `json:"bare_metal"`
 	} `json:"plan"`
+	Artifacts struct {
+		Manifest []json.RawMessage `json:"manifest"`
+	} `json:"artifacts"`
+}
+
+type planDevice struct {
+	BDF        string `json:"bdf"`
+	DeviceID   string `json:"device_id"`
+	RDMADevice string `json:"rdma_dev"`
+	DMSTarget  string `json:"dms_target"`
+	Rail       int    `json:"rail"`
+	Plane      int    `json:"plane"`
+	Network    string `json:"network"`
+}
+
+type planRuntimeContext struct {
+	RDMATopology string `json:"rdma_topology"`
 }
 
 type semanticGroupRecord struct {
@@ -199,31 +125,20 @@ type semanticGroupRecord struct {
 }
 
 type semanticOperationRecord struct {
-	Path           string          `json:"path"`
-	Values         map[string]any  `json:"values"`
-	SourceFeature  string          `json:"source_feature"`
-	Kind           string          `json:"kind"`
-	TargetClass    string          `json:"target_class"`
-	TargetRole     string          `json:"target_role"`
-	ExecutionGroup string          `json:"execution_group"`
-	Scope          string          `json:"scope"`
-	Lifecycle      string          `json:"lifecycle"`
-	Reset          *ResetPolicy    `json:"reset"`
-	Condition      json.RawMessage `json:"condition"`
-	Context        json.RawMessage `json:"context"`
+	ID          string         `json:"-"`
+	Path        string         `json:"path"`
+	Values      map[string]any `json:"values"`
+	Kind        string         `json:"kind"`
+	TargetClass string         `json:"target_class"`
+	TargetRole  string         `json:"target_role"`
+	Scope       string         `json:"scope"`
 }
 
-// ParseSemanticPlan parses and validates the semantic consumer surface of a
-// generated host-k8s doSPCX plan.
-func ParseSemanticPlan(planJSON json.RawMessage, expectedStage PlanStage) (*SemanticPlan, error) {
-	if err := validatePlanStage(expectedStage); err != nil {
-		return nil, err
-	}
+func decodePlanDocument(planJSON []byte) (*planDocument, error) {
 	if len(bytes.TrimSpace(planJSON)) == 0 {
 		return nil, fmt.Errorf("doSPCX plan must not be empty")
 	}
-
-	var document semanticPlanDocument
+	var document planDocument
 	decoder := json.NewDecoder(bytes.NewReader(planJSON))
 	decoder.UseNumber()
 	if err := decoder.Decode(&document); err != nil {
@@ -236,121 +151,83 @@ func ParseSemanticPlan(planJSON json.RawMessage, expectedStage PlanStage) (*Sema
 		}
 		return nil, fmt.Errorf("decode doSPCX semantic plan trailing data: %w", err)
 	}
-
-	if err := validateSemanticPlanHeader(&document, expectedStage); err != nil {
-		return nil, err
-	}
-	if err := validatePlanDevices(document.Plan.Devices); err != nil {
-		return nil, err
-	}
-
-	groups, err := resolveSemanticGroups(
-		document.Plan.Semantic.Groups,
-		document.Plan.Operations,
-		expectedStage,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	return &SemanticPlan{
-		Name:           document.Plan.Name,
-		Profile:        document.Plan.Profile,
-		Stage:          expectedStage,
-		PathDialect:    document.Plan.PathDialect,
-		Devices:        append([]PlanDevice(nil), document.Plan.Devices...),
-		RuntimeContext: document.Plan.RuntimeContext,
-		Groups:         groups,
-	}, nil
+	return &document, nil
 }
 
-// BuildDMSOperationPlan applies NCO execution policy and resolves semantic
-// target classes. The eswitch and vf-lifecycle groups are intentionally skipped
-// in this phase; unknown groups fail closed.
-func (p *SemanticPlan) BuildDMSOperationPlan(ctx context.Context) (*DMSOperationPlan, error) {
-	if p == nil {
-		return nil, fmt.Errorf("semantic plan must not be nil")
-	}
-	if err := validatePlanStage(p.Stage); err != nil {
+func buildDMSPlan(ctx context.Context, document *planDocument, expectedStage PlanStage) (*Plan, error) {
+	if err := validateSemanticPlan(document, expectedStage); err != nil {
 		return nil, err
 	}
 
-	result := &DMSOperationPlan{
-		Stage:         p.Stage,
-		Groups:        make([]DMSOperationGroup, 0, len(p.Groups)),
+	records := append([]semanticGroupRecord(nil), document.Plan.Semantic.Groups...)
+	sort.SliceStable(records, func(left, right int) bool {
+		return records[left].Order < records[right].Order
+	})
+	result := &Plan{
+		Name:          document.Plan.Name,
+		Stage:         expectedStage,
+		Groups:        make([]DMSOperationGroup, 0, len(records)),
 		SkippedGroups: nil,
 	}
-	for _, group := range p.Groups {
-		disposition, reason, err := semanticGroupDisposition(p.Stage, group.Name)
+	names := make(map[string]struct{}, len(records))
+	for index, group := range records {
+		if err := validateSemanticGroup(group, index, expectedStage, names); err != nil {
+			return nil, err
+		}
+		operations, err := resolveGroupOperations(group, document.Plan.Operations)
 		if err != nil {
 			return nil, err
 		}
-		switch disposition {
-		case groupDispositionSkip:
-			skipped := SkippedSemanticGroup{Name: group.Name, Order: group.Order, Reason: reason}
-			result.SkippedGroups = append(result.SkippedGroups, skipped)
+		disposition, reason, err := semanticGroupDisposition(expectedStage, group.Name)
+		if err != nil {
+			return nil, err
+		}
+		if disposition == groupDispositionSkip {
+			result.SkippedGroups = append(result.SkippedGroups, SkippedSemanticGroup{
+				Name: group.Name, Order: group.Order, Reason: reason,
+			})
 			logr.FromContextOrDiscard(ctx).V(2).Info("skipping doSPCX semantic group",
-				"plan", p.Name,
-				"stage", p.Stage,
-				"group", group.Name,
-				"order", group.Order,
-				"reason", reason)
+				"plan", document.Plan.Name, "stage", expectedStage,
+				"group", group.Name, "order", group.Order, "reason", reason)
 			continue
-		case groupDispositionMarker:
-			if len(group.Operations) != 0 {
+		}
+
+		compiled := DMSOperationGroup{
+			Name:           group.Name,
+			Order:          group.Order,
+			Scope:          group.Scope,
+			DeviceView:     group.DeviceView,
+			FanoutOrder:    group.FanoutOrder,
+			RequiresReboot: group.RequiresReboot,
+			PhaseMarker:    disposition == groupDispositionMarker,
+		}
+		if compiled.PhaseMarker {
+			if len(operations) != 0 {
 				return nil, fmt.Errorf("doSPCX semantic phase marker %q unexpectedly contains operations", group.Name)
 			}
-			result.Groups = append(result.Groups, DMSOperationGroup{
-				Name:           group.Name,
-				Order:          group.Order,
-				Scope:          group.Scope,
-				DeviceView:     group.DeviceView,
-				FanoutOrder:    group.FanoutOrder,
-				RequiresReboot: group.RequiresReboot,
-				PhaseMarker:    true,
-				Targets:        nil,
-			})
-			continue
-		case groupDispositionExecute:
-			if err := validateExecutableGroupPolicy(group); err != nil {
+		} else {
+			if err := validateExecutableOperations(group.Name, operations); err != nil {
 				return nil, err
 			}
-			targets, err := p.resolveGroupTargets(group)
+			compiled.Targets, err = resolveGroupTargets(
+				document.Plan.Devices, document.Plan.RuntimeContext.RDMATopology,
+				operations, expectedStage)
 			if err != nil {
 				return nil, fmt.Errorf("resolve doSPCX semantic group %q: %w", group.Name, err)
 			}
-			result.Groups = append(result.Groups, DMSOperationGroup{
-				Name:           group.Name,
-				Order:          group.Order,
-				Scope:          group.Scope,
-				DeviceView:     group.DeviceView,
-				FanoutOrder:    group.FanoutOrder,
-				RequiresReboot: group.RequiresReboot,
-				PhaseMarker:    false,
-				Targets:        targets,
-			})
-		default:
-			return nil, fmt.Errorf("unsupported doSPCX semantic group disposition %q", disposition)
 		}
+		result.Groups = append(result.Groups, compiled)
 	}
 	return result, nil
 }
 
-func validateExecutableGroupPolicy(group SemanticGroup) error {
-	for _, operation := range group.Operations {
-		if operation.TargetClass == targetClassPerESwitch ||
-			operation.TargetClass == targetClassVFRepresentor ||
-			operation.Scope == "per_vf" ||
-			strings.HasPrefix(operation.Path, "/nvidia/eswitch") {
-			return fmt.Errorf(
-				"doSPCX semantic group %q contains operation %q outside the current NCO execution scope",
-				group.Name, operation.ID)
-		}
+func validateSemanticPlan(document *planDocument, expectedStage PlanStage) error {
+	if document == nil {
+		return fmt.Errorf("doSPCX plan must not be nil")
 	}
-	return nil
-}
-
-func validateSemanticPlanHeader(document *semanticPlanDocument, expectedStage PlanStage) error {
+	if err := validatePlanStage(expectedStage); err != nil {
+		return err
+	}
 	if strings.TrimSpace(document.Plan.Name) == "" {
 		return fmt.Errorf("doSPCX semantic plan name must not be empty")
 	}
@@ -375,10 +252,10 @@ func validateSemanticPlanHeader(document *semanticPlanDocument, expectedStage Pl
 	if document.Plan.Semantic == nil || len(document.Plan.Semantic.Groups) == 0 {
 		return fmt.Errorf("doSPCX semantic plan does not contain semantic groups")
 	}
-	return nil
+	return validatePlanDevices(document.Plan.Devices)
 }
 
-func validatePlanDevices(devices []PlanDevice) error {
+func validatePlanDevices(devices []planDevice) error {
 	bdfs := make(map[string]struct{}, len(devices))
 	targets := make(map[string]struct{}, len(devices))
 	for index, device := range devices {
@@ -389,7 +266,7 @@ func validatePlanDevices(devices []PlanDevice) error {
 			return fmt.Errorf("doSPCX plan device BDF %q is duplicated", device.BDF)
 		}
 		bdfs[device.BDF] = struct{}{}
-		if !strings.HasPrefix(device.DMSTarget, "pci/") || strings.TrimPrefix(device.DMSTarget, "pci/") != device.BDF {
+		if device.DMSTarget != "pci/"+device.BDF {
 			return fmt.Errorf("doSPCX plan device %q has invalid DMS target %q", device.BDF, device.DMSTarget)
 		}
 		if _, found := targets[device.DMSTarget]; found {
@@ -403,86 +280,56 @@ func validatePlanDevices(devices []PlanDevice) error {
 	return nil
 }
 
-func resolveSemanticGroups(
-	records []semanticGroupRecord,
-	operations map[string]semanticOperationRecord,
+func validateSemanticGroup(
+	group semanticGroupRecord,
+	index int,
 	expectedStage PlanStage,
-) ([]SemanticGroup, error) {
-	groups := make([]SemanticGroup, 0, len(records))
-	names := make(map[string]struct{}, len(records))
-	for groupIndex, record := range records {
-		if strings.TrimSpace(record.Name) == "" {
-			return nil, fmt.Errorf("doSPCX semantic group at index %d has no name", groupIndex)
-		}
-		if _, found := names[record.Name]; found {
-			return nil, fmt.Errorf("doSPCX semantic group %q is duplicated", record.Name)
-		}
-		names[record.Name] = struct{}{}
-		if record.Stage != string(expectedStage) {
-			return nil, fmt.Errorf("doSPCX semantic group %q stage is %q, expected %q", record.Name, record.Stage, expectedStage)
-		}
-
-		group := SemanticGroup{
-			Name:           record.Name,
-			Stage:          expectedStage,
-			Order:          record.Order,
-			Scope:          record.Scope,
-			DeviceView:     record.DeviceView,
-			FanoutOrder:    record.FanoutOrder,
-			RequiresReboot: record.RequiresReboot,
-			Operations:     make([]SemanticOperation, 0, len(record.OperationRefs)),
-		}
-		refs := make(map[string]struct{}, len(record.OperationRefs))
-		for refIndex, ref := range record.OperationRefs {
-			if strings.TrimSpace(ref) == "" {
-				return nil, fmt.Errorf("doSPCX semantic group %q operation reference at index %d is empty", record.Name, refIndex)
-			}
-			if _, found := refs[ref]; found {
-				return nil, fmt.Errorf("doSPCX semantic group %q operation reference %q is duplicated", record.Name, ref)
-			}
-			refs[ref] = struct{}{}
-			operation, found := operations[ref]
-			if !found {
-				return nil, fmt.Errorf("doSPCX semantic group %q references missing operation %q", record.Name, ref)
-			}
-			if operation.Kind == "" {
-				// DMS treats an omitted kind as a SET operation. The planner only
-				// emits kind when YANG-based classification is available.
-				operation.Kind = "set"
-			}
-			if operation.TargetClass == "" {
-				operation.TargetClass = targetClassPFNetdevAll
-			}
-			// Group membership is defined by semantic.groups.operation_refs in
-			// the public plan. Keep the derived value on the exported operation
-			// for compatibility with callers of this package.
-			operation.ExecutionGroup = record.Name
-			if err := validateSemanticOperation(ref, operation); err != nil {
-				return nil, err
-			}
-			group.Operations = append(group.Operations, SemanticOperation{
-				ID:             ref,
-				Path:           operation.Path,
-				Values:         cloneValueMap(operation.Values),
-				SourceFeature:  operation.SourceFeature,
-				Kind:           operation.Kind,
-				TargetClass:    operation.TargetClass,
-				TargetRole:     operation.TargetRole,
-				ExecutionGroup: operation.ExecutionGroup,
-				Scope:          operation.Scope,
-				Lifecycle:      operation.Lifecycle,
-				Reset:          operation.Reset,
-				Condition:      append(json.RawMessage(nil), operation.Condition...),
-				Context:        append(json.RawMessage(nil), operation.Context...),
-			})
-		}
-		groups = append(groups, group)
+	names map[string]struct{},
+) error {
+	if strings.TrimSpace(group.Name) == "" {
+		return fmt.Errorf("doSPCX semantic group at index %d has no name", index)
 	}
+	if _, found := names[group.Name]; found {
+		return fmt.Errorf("doSPCX semantic group %q is duplicated", group.Name)
+	}
+	names[group.Name] = struct{}{}
+	if group.Stage != string(expectedStage) {
+		return fmt.Errorf("doSPCX semantic group %q stage is %q, expected %q", group.Name, group.Stage, expectedStage)
+	}
+	return nil
+}
 
-	sort.SliceStable(groups, func(left, right int) bool {
-		return groups[left].Order < groups[right].Order
-	})
-	return groups, nil
+func resolveGroupOperations(
+	group semanticGroupRecord,
+	operations map[string]semanticOperationRecord,
+) ([]semanticOperationRecord, error) {
+	result := make([]semanticOperationRecord, 0, len(group.OperationRefs))
+	refs := make(map[string]struct{}, len(group.OperationRefs))
+	for index, ref := range group.OperationRefs {
+		if strings.TrimSpace(ref) == "" {
+			return nil, fmt.Errorf("doSPCX semantic group %q operation reference at index %d is empty", group.Name, index)
+		}
+		if _, found := refs[ref]; found {
+			return nil, fmt.Errorf("doSPCX semantic group %q operation reference %q is duplicated", group.Name, ref)
+		}
+		refs[ref] = struct{}{}
+		operation, found := operations[ref]
+		if !found {
+			return nil, fmt.Errorf("doSPCX semantic group %q references missing operation %q", group.Name, ref)
+		}
+		if operation.Kind == "" {
+			operation.Kind = "set"
+		}
+		if operation.TargetClass == "" {
+			operation.TargetClass = targetClassPFNetdevAll
+		}
+		operation.ID = ref
+		if err := validateSemanticOperation(ref, operation); err != nil {
+			return nil, err
+		}
+		result = append(result, operation)
+	}
+	return result, nil
 }
 
 func validateSemanticOperation(id string, operation semanticOperationRecord) error {
@@ -511,6 +358,20 @@ func validateSemanticOperation(id string, operation semanticOperationRecord) err
 	return nil
 }
 
+func validateExecutableOperations(group string, operations []semanticOperationRecord) error {
+	for _, operation := range operations {
+		if operation.TargetClass == targetClassPerESwitch ||
+			operation.TargetClass == targetClassVFRepresentor ||
+			operation.Scope == "per_vf" ||
+			strings.HasPrefix(operation.Path, "/nvidia/eswitch") {
+			return fmt.Errorf(
+				"doSPCX semantic group %q contains operation %q outside the current NCO execution scope",
+				group, operation.ID)
+		}
+	}
+	return nil
+}
+
 func validSemanticValue(value any) bool {
 	if value == nil {
 		return false
@@ -526,13 +387,17 @@ func validSemanticValue(value any) bool {
 		reflect.Float32, reflect.Float64:
 		return true
 	case reflect.Array, reflect.Slice:
+		if reflected.Len() == 0 {
+			return false
+		}
 		for index := 0; index < reflected.Len(); index++ {
 			item := reflected.Index(index).Interface()
 			if item == nil {
 				return false
 			}
 			kind := reflect.ValueOf(item).Kind()
-			if kind == reflect.Array || kind == reflect.Slice || kind == reflect.Map || kind == reflect.Struct || kind == reflect.Pointer {
+			if kind == reflect.Array || kind == reflect.Slice || kind == reflect.Map ||
+				kind == reflect.Struct || kind == reflect.Pointer {
 				return false
 			}
 			if !validSemanticValue(item) {
@@ -575,11 +440,16 @@ func semanticGroupDisposition(stage PlanStage, name string) (groupDisposition, s
 	return "", "", fmt.Errorf("unsupported doSPCX semantic group %q for stage %q", name, stage)
 }
 
-func (p *SemanticPlan) resolveGroupTargets(group SemanticGroup) ([]DMSTargetOperations, error) {
-	targetOrder := make([]string, 0, len(p.Devices))
-	operationsByTarget := make(map[string][]dmscli.XPathOperation, len(p.Devices))
-	for _, operation := range group.Operations {
-		targets, err := p.resolveOperationTargets(operation)
+func resolveGroupTargets(
+	devices []planDevice,
+	rdmaTopology string,
+	operations []semanticOperationRecord,
+	stage PlanStage,
+) ([]DMSTargetOperations, error) {
+	targetOrder := make([]string, 0, len(devices))
+	operationsByTarget := make(map[string][]dmscli.XPathOperation, len(devices))
+	for _, operation := range operations {
+		targets, err := resolveOperationTargets(devices, rdmaTopology, operation)
 		if err != nil {
 			return nil, fmt.Errorf("operation %q: %w", operation.ID, err)
 		}
@@ -588,83 +458,60 @@ func (p *SemanticPlan) resolveGroupTargets(group SemanticGroup) ([]DMSTargetOper
 				targetOrder = append(targetOrder, target)
 			}
 			operationsByTarget[target] = append(operationsByTarget[target], dmscli.XPathOperation{
-				Path:   operation.Path,
-				Values: cloneValueMap(operation.Values),
+				Path: operation.Path, Values: cloneValueMap(operation.Values),
 			})
 		}
 	}
-
-	if len(group.Operations) > 0 && len(targetOrder) == 0 {
+	if len(operations) > 0 && len(targetOrder) == 0 {
 		return nil, fmt.Errorf("no DMS targets resolved")
 	}
 	result := make([]DMSTargetOperations, 0, len(targetOrder))
 	for _, target := range targetOrder {
-		operations := operationsByTarget[target]
-		desired := finalDesiredState(operations)
+		ordered := operationsByTarget[target]
+		desired := finalDesiredState(ordered)
 		result = append(result, DMSTargetOperations{
-			Target:     target,
-			Queries:    queriesForDesiredState(desired, p.Stage == PlanStagePrepare),
-			Desired:    desired,
-			Operations: operations,
+			Target: target, Queries: queriesForDesiredState(desired, stage == PlanStagePrepare),
+			Desired: desired, Operations: ordered,
 		})
 	}
 	return result, nil
 }
 
-func (p *SemanticPlan) resolveOperationTargets(operation SemanticOperation) ([]string, error) {
-	eligible := make([]PlanDevice, 0, len(p.Devices))
-	for _, device := range p.Devices {
-		// target_role is not part of the public doSPCX operation schema. If
-		// an enriched plan supplies it, retain the historical filtering;
-		// otherwise the operation targets all plan devices.
+func resolveOperationTargets(
+	devices []planDevice,
+	rdmaTopology string,
+	operation semanticOperationRecord,
+) ([]string, error) {
+	result := make([]string, 0, len(devices))
+	for _, device := range devices {
 		if operation.TargetRole != "" && device.Network != operation.TargetRole {
 			continue
 		}
-		eligible = append(eligible, device)
+		switch operation.TargetClass {
+		case targetClassPFNetdevAll:
+			result = append(result, device.DMSTarget)
+		case targetClassPFRDMAScope:
+			switch rdmaTopology {
+			case rdmaTopologyPerPF:
+				if strings.TrimSpace(device.RDMADevice) != "" {
+					result = append(result, device.DMSTarget)
+				}
+			case rdmaTopologyPerRailBond:
+				if device.Plane == 0 {
+					result = append(result, device.DMSTarget)
+				}
+			default:
+				return nil, fmt.Errorf("unsupported RDMA topology %q", rdmaTopology)
+			}
+		}
 	}
-	if len(eligible) == 0 {
+	if len(result) == 0 {
 		if operation.TargetRole != "" {
 			return nil, fmt.Errorf("no plan devices match target role %q", operation.TargetRole)
 		}
 		return nil, fmt.Errorf("doSPCX plan does not contain eligible devices")
 	}
-
-	switch operation.TargetClass {
-	case targetClassPFNetdevAll:
-		result := make([]string, 0, len(eligible))
-		for _, device := range eligible {
-			result = append(result, device.DMSTarget)
-		}
-		return result, nil
-	case targetClassPFRDMAScope:
-		switch p.RuntimeContext.RDMATopology {
-		case rdmaTopologyPerPF:
-			result := make([]string, 0, len(eligible))
-			for _, device := range eligible {
-				if strings.TrimSpace(device.RDMADevice) == "" {
-					continue
-				}
-				result = append(result, device.DMSTarget)
-			}
-			return result, nil
-		case rdmaTopologyPerRailBond:
-			// This mirrors DMS FilterOpsForDevice: a per-rail bond is
-			// controlled through the plane-zero PF. expected_rdma describes
-			// the bond but does not carry a DMS control target in the public
-			// plan schema.
-			result := make([]string, 0, len(eligible))
-			for _, device := range eligible {
-				if device.Plane == 0 {
-					result = append(result, device.DMSTarget)
-				}
-			}
-			return result, nil
-		default:
-			return nil, fmt.Errorf("unsupported RDMA topology %q", p.RuntimeContext.RDMATopology)
-		}
-	default:
-		return nil, fmt.Errorf("target class %q is not executable in this phase", operation.TargetClass)
-	}
+	return result, nil
 }
 
 func finalDesiredState(operations []dmscli.XPathOperation) []dmscli.XPathOperation {
@@ -692,11 +539,7 @@ func finalDesiredState(operations []dmscli.XPathOperation) []dmscli.XPathOperati
 func queriesForDesiredState(desired []dmscli.XPathOperation, includePending bool) []dmscli.XPathQuery {
 	result := make([]dmscli.XPathQuery, 0, len(desired))
 	for _, operation := range desired {
-		leafCapacity := len(operation.Values)
-		if includePending {
-			leafCapacity *= 2
-		}
-		leaves := make([]string, 0, leafCapacity)
+		leaves := make([]string, 0, len(operation.Values)*2)
 		for leaf := range operation.Values {
 			leaves = append(leaves, leaf)
 			if includePending {
@@ -710,9 +553,6 @@ func queriesForDesiredState(desired []dmscli.XPathOperation, includePending bool
 }
 
 func cloneValueMap(values map[string]any) map[string]any {
-	if values == nil {
-		return nil
-	}
 	result := make(map[string]any, len(values))
 	for key, value := range values {
 		result[key] = cloneSemanticValue(value)
@@ -721,15 +561,12 @@ func cloneValueMap(values map[string]any) map[string]any {
 }
 
 func cloneSemanticValue(value any) any {
-	if value == nil {
-		return nil
-	}
 	reflected := reflect.ValueOf(value)
 	if reflected.Kind() != reflect.Array && reflected.Kind() != reflect.Slice {
 		return value
 	}
 	result := make([]any, reflected.Len())
-	for index := 0; index < reflected.Len(); index++ {
+	for index := range result {
 		result[index] = cloneSemanticValue(reflected.Index(index).Interface())
 	}
 	return result

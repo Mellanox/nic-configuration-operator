@@ -60,12 +60,12 @@ const (
 	PlanStageConfigure PlanStage = "configure"
 )
 
-// Plan is a generated doSPCX plan retrieved from the local plan store.
+// Plan is a compiled, execution-ready view of a generated doSPCX plan.
 type Plan struct {
-	Name     string
-	Stage    PlanStage
-	JSON     json.RawMessage
-	Semantic *SemanticPlan
+	Name          string
+	Stage         PlanStage
+	Groups        []DMSOperationGroup
+	SkippedGroups []SkippedSemanticGroup
 }
 
 // PlanManager owns doSPCX target-map construction, plan generation, caching,
@@ -96,15 +96,14 @@ type preBreakoutTarget struct {
 }
 
 type planConfig struct {
-	nodeName      string
-	platformType  string
-	profile       string
-	version       string
-	multiplane    string
-	overlay       string
-	planes        int
-	targetMap     targetMap
-	selectedCount int
+	nodeName     string
+	platformType string
+	profile      string
+	version      string
+	multiplane   string
+	overlay      string
+	planes       int
+	targetMap    targetMap
 }
 
 // planMetadata contains only the inputs used to generate a doSPCX plan.
@@ -125,6 +124,12 @@ type planMetadata struct {
 	Parameters           []string `json:"parameters"`
 	TargetMapFile        string   `json:"target_map_file"`
 	TargetMapDigest      string   `json:"target_map_digest"`
+}
+
+type preparedPlan struct {
+	metadata  planMetadata
+	targetMap targetMap
+	plan      *Plan
 }
 
 // PreparePlan ensures that a matching node-scoped plan is cached for the
@@ -171,24 +176,20 @@ func (m *spectrumXConfigManager) PreparePlan(
 	}
 	planPath := filepath.Join(stateDir, "plans", generatedPlanName, "plan.json")
 	metadataPath := filepath.Join(filepath.Dir(planPath), "metadata.json")
-	metadata := planMetadata{
-		BlueprintsRoot:       m.blueprintsRoot,
-		BlueprintsStateDir:   stateDir,
-		BlueprintsDataDigest: m.dospcxDataDigest,
-		PlanName:             generatedPlanName,
-		Stage:                string(stage),
-		Profile:              config.profile,
-		PlatformType:         config.platformType,
-		SpectrumXVersion:     config.version,
-		MultiplaneMode:       config.multiplane,
-		Overlay:              config.overlay,
-		Planes:               config.planes,
-		DeploymentMode:       deploymentModeHostK8s,
-		Parameters:           append([]string(nil), params...),
-		TargetMapFile:        targetMapPath,
-		TargetMapDigest:      sha256Digest(targetMapContent),
+	metadata := newPlanMetadata(
+		m, config, stage, stateDir, targetMapPath, params, sha256Digest(targetMapContent))
+	if m.preparedPlans == nil {
+		m.preparedPlans = make(map[string]*preparedPlan)
 	}
-	if reusable, reason := reusablePlan(planPath, metadataPath, targetMapPath, metadata, config); reusable {
+	if cached, found := m.preparedPlans[generatedPlanName]; found && cached != nil && cached.plan != nil &&
+		reflect.DeepEqual(cached.metadata, metadata) {
+		log.FromContext(ctx).V(2).Info("reusing in-memory doSPCX plan",
+			"node", config.nodeName,
+			"stage", stage)
+		return nil
+	}
+	if cached, reason := loadSavedPlan(planPath, metadataPath, targetMapPath, metadata, config); cached != nil {
+		m.preparedPlans[generatedPlanName] = cached
 		log.FromContext(ctx).V(2).Info("reusing saved doSPCX plan",
 			"node", config.nodeName,
 			"stage", stage,
@@ -218,7 +219,8 @@ func (m *spectrumXConfigManager) PreparePlan(
 	if err != nil {
 		return err
 	}
-	if _, err := validateGeneratedPlan(result.PlanJSON, generatedPlanName, config, string(stage)); err != nil {
+	plan, err := validateGeneratedPlan(result.PlanJSON, generatedPlanName, config, stage)
+	if err != nil {
 		return err
 	}
 
@@ -228,12 +230,17 @@ func (m *spectrumXConfigManager) PreparePlan(
 	if err := writeJSONFileAtomic(metadataPath, metadata); err != nil {
 		return fmt.Errorf("write doSPCX %s plan metadata %q: %w", stage, metadataPath, err)
 	}
+	m.preparedPlans[generatedPlanName] = &preparedPlan{
+		metadata:  metadata,
+		targetMap: config.targetMap,
+		plan:      plan,
+	}
 	log.FromContext(ctx).Info("generated doSPCX plan",
 		"node", config.nodeName,
 		"stage", stage,
 		"profile", config.profile,
 		"platformType", config.platformType,
-		"devices", config.selectedCount,
+		"devices", len(config.targetMap.PreBreakout.Targets),
 		"blueprintsRoot", m.blueprintsRoot,
 		"targetMap", targetMapPath,
 		"plan", planPath,
@@ -276,20 +283,82 @@ func (m *spectrumXConfigManager) GetPreparedPlan(device *v1alpha1.NicDevice, sta
 	}
 	generatedPlanName := planName(config.nodeName, stage)
 	targetMapPath := filepath.Join(stateDir, "target-maps", targetMapName(config.nodeName)+".json")
-	metadataPath := filepath.Join(stateDir, "plans", generatedPlanName, "metadata.json")
-	metadataContent, err := os.ReadFile(metadataPath)
-	if err != nil {
-		return nil, fmt.Errorf("read doSPCX %s plan metadata %q: %w", stage, metadataPath, err)
+	cached, found := m.preparedPlans[generatedPlanName]
+	if !found || cached == nil || cached.plan == nil {
+		return nil, fmt.Errorf("doSPCX %s plan is not prepared for device %q", stage, device.Name)
 	}
-	var metadata planMetadata
-	if err := json.Unmarshal(metadataContent, &metadata); err != nil {
-		return nil, fmt.Errorf("decode doSPCX %s plan metadata %q: %w", stage, metadataPath, err)
+	expectedMetadata := newPlanMetadata(
+		m, config, stage, stateDir, targetMapPath, params, cached.metadata.TargetMapDigest)
+	if cached.metadata.TargetMapDigest == "" || !reflect.DeepEqual(cached.metadata, expectedMetadata) {
+		return nil, fmt.Errorf("cached doSPCX %s plan does not match device %q inputs", stage, device.Name)
 	}
-	expectedMetadata := planMetadata{
+	if err := validateDeviceInTargetMap(config, cached.targetMap); err != nil {
+		return nil, fmt.Errorf("cached doSPCX %s plan does not match device %q: %w", stage, device.Name, err)
+	}
+	return clonePlan(cached.plan), nil
+}
+
+func clonePlan(source *Plan) *Plan {
+	if source == nil {
+		return nil
+	}
+	result := &Plan{
+		Name:          source.Name,
+		Stage:         source.Stage,
+		Groups:        make([]DMSOperationGroup, len(source.Groups)),
+		SkippedGroups: append([]SkippedSemanticGroup(nil), source.SkippedGroups...),
+	}
+	for groupIndex, group := range source.Groups {
+		result.Groups[groupIndex] = group
+		result.Groups[groupIndex].Targets = make([]DMSTargetOperations, len(group.Targets))
+		for targetIndex, target := range group.Targets {
+			result.Groups[groupIndex].Targets[targetIndex] = DMSTargetOperations{
+				Target:     target.Target,
+				Queries:    cloneXPathQueries(target.Queries),
+				Desired:    cloneXPathOperations(target.Desired),
+				Operations: cloneXPathOperations(target.Operations),
+			}
+		}
+	}
+	return result
+}
+
+func cloneXPathQueries(source []dmscli.XPathQuery) []dmscli.XPathQuery {
+	result := make([]dmscli.XPathQuery, len(source))
+	for index, query := range source {
+		result[index] = dmscli.XPathQuery{
+			Path:   query.Path,
+			Leaves: append([]string(nil), query.Leaves...),
+		}
+	}
+	return result
+}
+
+func cloneXPathOperations(source []dmscli.XPathOperation) []dmscli.XPathOperation {
+	result := make([]dmscli.XPathOperation, len(source))
+	for index, operation := range source {
+		result[index] = dmscli.XPathOperation{
+			Path:   operation.Path,
+			Values: cloneValueMap(operation.Values),
+		}
+	}
+	return result
+}
+
+func newPlanMetadata(
+	m *spectrumXConfigManager,
+	config *planConfig,
+	stage PlanStage,
+	stateDir string,
+	targetMapPath string,
+	params []string,
+	targetMapDigest string,
+) planMetadata {
+	return planMetadata{
 		BlueprintsRoot:       m.blueprintsRoot,
 		BlueprintsStateDir:   stateDir,
 		BlueprintsDataDigest: m.dospcxDataDigest,
-		PlanName:             generatedPlanName,
+		PlanName:             planName(config.nodeName, stage),
 		Stage:                string(stage),
 		Profile:              config.profile,
 		PlatformType:         config.platformType,
@@ -298,56 +367,10 @@ func (m *spectrumXConfigManager) GetPreparedPlan(device *v1alpha1.NicDevice, sta
 		Overlay:              config.overlay,
 		Planes:               config.planes,
 		DeploymentMode:       deploymentModeHostK8s,
-		Parameters:           params,
+		Parameters:           append([]string(nil), params...),
 		TargetMapFile:        targetMapPath,
-		TargetMapDigest:      metadata.TargetMapDigest,
+		TargetMapDigest:      targetMapDigest,
 	}
-	if metadata.TargetMapDigest == "" || !reflect.DeepEqual(metadata, expectedMetadata) {
-		return nil, fmt.Errorf("cached doSPCX %s plan does not match device %q inputs", stage, device.Name)
-	}
-
-	targetMapContent, err := os.ReadFile(targetMapPath)
-	if err != nil {
-		return nil, fmt.Errorf("read doSPCX target map %q: %w", targetMapPath, err)
-	}
-	if sha256Digest(targetMapContent) != metadata.TargetMapDigest {
-		return nil, fmt.Errorf("cached doSPCX %s plan target map digest does not match", stage)
-	}
-	var savedTargetMap targetMap
-	if err := json.Unmarshal(targetMapContent, &savedTargetMap); err != nil {
-		return nil, fmt.Errorf("decode doSPCX target map %q: %w", targetMapPath, err)
-	}
-	if err := validateDeviceInTargetMap(config, savedTargetMap); err != nil {
-		return nil, fmt.Errorf("cached doSPCX %s plan does not match device %q: %w", stage, device.Name, err)
-	}
-
-	planPath := filepath.Join(stateDir, "plans", generatedPlanName, "plan.json")
-	planContent, err := os.ReadFile(planPath)
-	if err != nil {
-		return nil, fmt.Errorf("read doSPCX %s plan %q: %w", stage, planPath, err)
-	}
-	savedConfig := &planConfig{
-		nodeName:      config.nodeName,
-		platformType:  metadata.PlatformType,
-		profile:       metadata.Profile,
-		version:       metadata.SpectrumXVersion,
-		multiplane:    metadata.MultiplaneMode,
-		overlay:       metadata.Overlay,
-		planes:        metadata.Planes,
-		targetMap:     savedTargetMap,
-		selectedCount: len(savedTargetMap.PreBreakout.Targets),
-	}
-	semanticPlan, err := validateGeneratedPlan(planContent, generatedPlanName, savedConfig, string(stage))
-	if err != nil {
-		return nil, fmt.Errorf("validate cached doSPCX %s plan: %w", stage, err)
-	}
-
-	return &Plan{
-		Name:     generatedPlanName,
-		Stage:    stage,
-		JSON:     append(json.RawMessage(nil), planContent...),
-		Semantic: semanticPlan,
-	}, nil
 }
 
 func planParameters(config *planConfig) ([]string, error) {
@@ -417,41 +440,46 @@ func hasSpectrumXEnabledDevice(devices []*v1alpha1.NicDevice) bool {
 	return false
 }
 
-func reusablePlan(
+func loadSavedPlan(
 	planPath string,
 	metadataPath string,
 	targetMapPath string,
 	expectedMetadata planMetadata,
 	config *planConfig,
-) (bool, string) {
+) (*preparedPlan, string) {
 	metadataContent, err := os.ReadFile(metadataPath)
 	if err != nil {
-		return false, fmt.Sprintf("read metadata: %v", err)
+		return nil, fmt.Sprintf("read metadata: %v", err)
 	}
 	var savedMetadata planMetadata
 	if err := json.Unmarshal(metadataContent, &savedMetadata); err != nil {
-		return false, fmt.Sprintf("decode metadata: %v", err)
+		return nil, fmt.Sprintf("decode metadata: %v", err)
 	}
 	if !reflect.DeepEqual(savedMetadata, expectedMetadata) {
-		return false, "planner inputs changed"
+		return nil, "planner inputs changed"
 	}
 
 	targetMapContent, err := os.ReadFile(targetMapPath)
 	if err != nil {
-		return false, fmt.Sprintf("read target map: %v", err)
+		return nil, fmt.Sprintf("read target map: %v", err)
 	}
 	if sha256Digest(targetMapContent) != expectedMetadata.TargetMapDigest {
-		return false, "target map content changed"
+		return nil, "target map content changed"
+	}
+	var savedTargetMap targetMap
+	if err := json.Unmarshal(targetMapContent, &savedTargetMap); err != nil {
+		return nil, fmt.Sprintf("decode target map: %v", err)
 	}
 
 	planContent, err := os.ReadFile(planPath)
 	if err != nil {
-		return false, fmt.Sprintf("read plan: %v", err)
+		return nil, fmt.Sprintf("read plan: %v", err)
 	}
-	if _, err := validateGeneratedPlan(planContent, expectedMetadata.PlanName, config, expectedMetadata.Stage); err != nil {
-		return false, fmt.Sprintf("validate plan: %v", err)
+	plan, err := validateGeneratedPlan(planContent, expectedMetadata.PlanName, config, PlanStage(expectedMetadata.Stage))
+	if err != nil {
+		return nil, fmt.Sprintf("validate plan: %v", err)
 	}
-	return true, ""
+	return &preparedPlan{metadata: savedMetadata, targetMap: savedTargetMap, plan: plan}, ""
 }
 
 func buildPlanConfig(devices []*v1alpha1.NicDevice) (*planConfig, error) {
@@ -483,14 +511,13 @@ func buildPlanConfig(devices []*v1alpha1.NicDevice) (*planConfig, error) {
 		platformType = defaultDospcxPlatformType
 	}
 	config := &planConfig{
-		nodeName:      nodeName,
-		platformType:  platformType,
-		profile:       profile,
-		version:       firstSpec.Version,
-		multiplane:    normalizedMultiplaneMode(firstSpec.MultiplaneMode),
-		overlay:       firstSpec.Overlay,
-		planes:        planes,
-		selectedCount: len(selected),
+		nodeName:     nodeName,
+		platformType: platformType,
+		profile:      profile,
+		version:      firstSpec.Version,
+		multiplane:   normalizedMultiplaneMode(firstSpec.MultiplaneMode),
+		overlay:      firstSpec.Overlay,
+		planes:       planes,
 		targetMap: targetMap{
 			SchemaVersion: targetMapSchemaVersion,
 			PlatformType:  platformType,
@@ -635,50 +662,21 @@ func validateGeneratedPlan(
 	planJSON []byte,
 	expectedName string,
 	config *planConfig,
-	expectedStage string,
-) (*SemanticPlan, error) {
-	var document struct {
-		Plan struct {
-			Name    string `json:"name"`
-			Family  string `json:"family"`
-			Profile string `json:"profile"`
-			Stage   string `json:"stage"`
-			Params  struct {
-				DeploymentMode string `json:"deployment_mode"`
-				Planes         int    `json:"planes"`
-			} `json:"params"`
-			DetectedHW struct {
-				PlatformType string `json:"platform_type"`
-			} `json:"detected_hw"`
-			Devices  []PlanDevice `json:"devices"`
-			Semantic *struct {
-				Groups []json.RawMessage `json:"groups"`
-			} `json:"semantic"`
-			BareMetal *struct {
-				Groups []json.RawMessage `json:"groups"`
-			} `json:"bare_metal"`
-		} `json:"plan"`
-		Artifacts struct {
-			Manifest []json.RawMessage `json:"manifest"`
-		} `json:"artifacts"`
-	}
-	if err := json.Unmarshal(planJSON, &document); err != nil {
+	expectedStage PlanStage,
+) (*Plan, error) {
+	document, err := decodePlanDocument(planJSON)
+	if err != nil {
 		return nil, fmt.Errorf("decode generated doSPCX %s plan: %w", expectedStage, err)
+	}
+	plan, err := buildDMSPlan(context.Background(), document, expectedStage)
+	if err != nil {
+		return nil, fmt.Errorf("compile generated doSPCX %s semantic plan: %w", expectedStage, err)
 	}
 	if document.Plan.Name != expectedName {
 		return nil, fmt.Errorf("generated doSPCX plan name is %q, expected %q", document.Plan.Name, expectedName)
 	}
-	if document.Plan.Family != "spcx" {
-		return nil, fmt.Errorf("generated doSPCX plan family is %q, expected %q", document.Plan.Family, "spcx")
-	}
 	if document.Plan.Profile != config.profile {
 		return nil, fmt.Errorf("generated doSPCX plan profile is %q, expected %q", document.Plan.Profile, config.profile)
-	}
-	if document.Plan.Stage != expectedStage {
-		return nil, fmt.Errorf("generated doSPCX plan stage is %q, expected %q", document.Plan.Stage, expectedStage)
-	}
-	if document.Plan.Params.DeploymentMode != deploymentModeHostK8s {
-		return nil, fmt.Errorf("generated doSPCX plan deployment mode is %q, expected %q", document.Plan.Params.DeploymentMode, deploymentModeHostK8s)
 	}
 	if document.Plan.Params.Planes != config.planes {
 		return nil, fmt.Errorf("generated doSPCX plan plane count is %d, expected %d", document.Plan.Params.Planes, config.planes)
@@ -686,30 +684,20 @@ func validateGeneratedPlan(
 	if document.Plan.DetectedHW.PlatformType != config.platformType {
 		return nil, fmt.Errorf("generated doSPCX plan platform type is %q, expected %q", document.Plan.DetectedHW.PlatformType, config.platformType)
 	}
-	if document.Plan.Semantic == nil || len(document.Plan.Semantic.Groups) == 0 {
-		return nil, fmt.Errorf("generated doSPCX %s plan does not contain semantic groups", expectedStage)
-	}
 	if document.Plan.BareMetal != nil && len(document.Plan.BareMetal.Groups) > 0 {
 		return nil, fmt.Errorf("generated doSPCX %s plan unexpectedly contains bare-metal groups", expectedStage)
 	}
 	if len(document.Artifacts.Manifest) > 0 {
 		return nil, fmt.Errorf("generated doSPCX %s plan unexpectedly contains rendered artifacts", expectedStage)
 	}
-	if err := validateGeneratedPlanDevices(document.Plan.Devices, config, PlanStage(expectedStage)); err != nil {
+	if err := validateGeneratedPlanDevices(document.Plan.Devices, config, expectedStage); err != nil {
 		return nil, err
 	}
-	semanticPlan, err := ParseSemanticPlan(planJSON, PlanStage(expectedStage))
-	if err != nil {
-		return nil, fmt.Errorf("validate generated doSPCX %s semantic plan: %w", expectedStage, err)
-	}
-	if _, err := semanticPlan.BuildDMSOperationPlan(context.Background()); err != nil {
-		return nil, fmt.Errorf("compile generated doSPCX %s semantic plan: %w", expectedStage, err)
-	}
-	return semanticPlan, nil
+	return plan, nil
 }
 
-func validateGeneratedPlanDevices(actual []PlanDevice, config *planConfig, stage PlanStage) error {
-	expected := make(map[string]PlanDevice, config.selectedCount*config.planes)
+func validateGeneratedPlanDevices(actual []planDevice, config *planConfig, stage PlanStage) error {
+	expected := make(map[string]planDevice, len(config.targetMap.PreBreakout.Targets)*config.planes)
 	for _, target := range config.targetMap.PreBreakout.Targets {
 		planes := 1
 		if stage == PlanStageConfigure {
@@ -720,7 +708,7 @@ func validateGeneratedPlanDevices(actual []PlanDevice, config *planConfig, stage
 			if err != nil {
 				return err
 			}
-			expected[bdf] = PlanDevice{
+			expected[bdf] = planDevice{
 				BDF:       bdf,
 				DeviceID:  target.DeviceID,
 				DMSTarget: "pci/" + bdf,

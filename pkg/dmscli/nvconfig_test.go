@@ -165,7 +165,7 @@ var _ = Describe("NVConfig apply", func() {
 		}))
 	})
 
-	It("logs the exact command argv, target, and combined output", func() {
+	It("logs the exact command argv, target, and separate output streams", func() {
 		entries := []capturedLogEntry{}
 		ctx := logr.NewContext(context.Background(), logr.New(&capturingLogSink{entries: &entries}))
 
@@ -183,7 +183,27 @@ var _ = Describe("NVConfig apply", func() {
 		Expect(entries[0].message).To(Equal("command output"))
 		Expect(entries[0].fields).To(HaveKeyWithValue("command", append([]string{dmsCLIExecutable}, commands[0].args...)))
 		Expect(entries[0].fields).To(HaveKeyWithValue("target", target))
-		Expect(entries[0].fields["output"]).To(ContainSubstring(`"compiled-count":2`))
+		Expect(entries[0].fields["stdout"]).To(ContainSubstring(`"compiled-count":2`))
+		Expect(entries[0].fields).To(HaveKeyWithValue("stderr", ""))
+	})
+
+	It("decodes JSON stdout independently from diagnostics on stderr", func() {
+		executor = fakeExecutorWithStderr(
+			[]byte(`{"status":"ok","primary-target":"pci/0000:3b:00.0","compiled-count":1}`),
+			[]byte("DMS warning\n"), nil, &commands)
+
+		result, err := ApplyNVConfig(context.Background(), executor, ApplyNVConfigRequest{
+			Target:      target,
+			Ports:       nil,
+			Typed:       nil,
+			Raw:         []NVConfigParam{{Param: "A", Value: "1"}},
+			WithDefault: false,
+			Force:       false,
+		})
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Status).To(Equal("ok"))
+		Expect(result.CompiledCount).To(Equal(1))
 	})
 
 	It("serializes typed XPath operations, port fanout, arrays, and raw overrides", func() {

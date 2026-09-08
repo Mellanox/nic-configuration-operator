@@ -83,6 +83,7 @@ func (m *spectrumXConfigManager) InstallBlueprintsData(archive []byte) error {
 	if err := installBlueprintsDataArchive(archive, m.dospcxDataRoot); err != nil {
 		return err
 	}
+	clear(m.preparedPlans)
 	m.dospcxDataDigest = digest
 	return nil
 }
@@ -105,6 +106,7 @@ func (m *spectrumXConfigManager) RemoveBlueprintsData() error {
 	if err := removeBlueprintsDataDirectory(m.dospcxDataRoot); err != nil {
 		return fmt.Errorf("remove doSPCX data directory %q: %w", m.dospcxDataRoot, err)
 	}
+	clear(m.preparedPlans)
 	m.dospcxDataDigest = ""
 	return nil
 }

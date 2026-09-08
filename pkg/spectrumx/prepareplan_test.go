@@ -48,6 +48,7 @@ func newTestPlanManager(
 ) PlanManager {
 	return &spectrumXConfigManager{
 		spectrumXConfigs:   nil,
+		preparedPlans:      make(map[string]*preparedPlan),
 		dmsManager:         nil,
 		execInterface:      execInterface,
 		blueprintsRoot:     blueprintsRoot,
@@ -260,9 +261,8 @@ var _ = Describe("doSPCX planning", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(plan.Name).To(Equal(planName))
 		Expect(plan.Stage).To(Equal(PlanStagePrepare))
-		Expect(plan.JSON).NotTo(BeEmpty())
-		Expect(plan.Semantic).NotTo(BeNil())
-		Expect(plan.Semantic.Groups).To(HaveLen(2))
+		Expect(plan.Groups).To(HaveLen(2))
+		Expect(plan.Groups[0].Name).To(Equal("breakout"))
 		planPath := filepath.Join(stateDir, "plans", planName, "plan.json")
 		planContent, err := os.ReadFile(planPath)
 		Expect(err).NotTo(HaveOccurred())
@@ -327,6 +327,33 @@ var _ = Describe("doSPCX planning", func() {
 		Expect(string(metadataContent)).NotTo(ContainSubstring(`"inputs"`))
 	})
 
+	It("serves prepared plans from memory without rereading persisted files", func() {
+		stateDir := GinkgoT().TempDir()
+		commands := []preparePlanCommand{}
+		generatedPlanName := planName(nodeName, prepareStage)
+		manager := newTestPlanManager(
+			preparePlanFakeExecutor(
+				planResponse(generatedPlanName, "SPX_Multiplane", prepareStage, 2, 1), &commands,
+			), blueprintsRoot, stateDir,
+		)
+		device := newDevice("rail-0", "0000:64:00.0", "hwplb")
+		Expect(manager.PreparePlan(context.Background(), []*v1alpha1.NicDevice{device}, PlanStagePrepare)).To(Succeed())
+
+		Expect(os.RemoveAll(filepath.Join(stateDir, "plans"))).To(Succeed())
+		Expect(os.RemoveAll(filepath.Join(stateDir, "target-maps"))).To(Succeed())
+		Expect(manager.PreparePlan(context.Background(), []*v1alpha1.NicDevice{device}, PlanStagePrepare)).To(Succeed())
+		Expect(commands).To(HaveLen(1))
+		plan, err := manager.GetPreparedPlan(device, PlanStagePrepare)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(plan.Name).To(Equal(generatedPlanName))
+		Expect(plan.Groups).To(HaveLen(2))
+		plan.Groups[0].Name = "mutated-by-caller"
+		plan, err = manager.GetPreparedPlan(device, PlanStagePrepare)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(plan.Groups[0].Name).To(Equal("breakout"))
+	})
+
 	It("does not generate a plan when Spectrum-X is not enabled", func() {
 		commands := []preparePlanCommand{}
 		manager := newTestPlanManager(preparePlanFakeExecutor(nil, &commands), blueprintsRoot, GinkgoT().TempDir())
@@ -343,6 +370,16 @@ var _ = Describe("doSPCX planning", func() {
 		_, err := manager.GetPreparedPlan(newDevice("device", "0000:64:00.0", "hwplb"), PlanStage("unknown"))
 
 		Expect(err).To(MatchError(ContainSubstring("unsupported")))
+	})
+
+	It("does not load a persisted plan through the per-device retrieval path", func() {
+		manager := newTestPlanManager(nil, blueprintsRoot, GinkgoT().TempDir())
+		device := newDevice("device", "0000:64:00.0", "hwplb")
+
+		plan, err := manager.GetPreparedPlan(device, PlanStagePrepare)
+
+		Expect(plan).To(BeNil())
+		Expect(err).To(MatchError(ContainSubstring("is not prepared")))
 	})
 
 	DescribeTable("scopes generated plans to the requested node",

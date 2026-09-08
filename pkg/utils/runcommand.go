@@ -24,6 +24,24 @@ import (
 	execUtils "k8s.io/utils/exec"
 )
 
+// CommandOutput contains the two output streams produced by a command.
+type CommandOutput struct {
+	Stdout []byte
+	Stderr []byte
+}
+
+// RunCommandWithStreams executes a command while keeping stdout and stderr
+// separate. This is required for commands whose stdout is a machine-readable
+// protocol and whose stderr contains diagnostics.
+func RunCommandWithStreams(cmd execUtils.Cmd) (CommandOutput, error) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.SetStdout(&stdout)
+	cmd.SetStderr(&stderr)
+	err := cmd.Run()
+	return CommandOutput{Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}, err
+}
+
 // RunCommand runs a command and captures stderr separately for better error reporting
 // Returns stdout, error (with stderr included in the error message if command fails)
 func RunCommand(cmd execUtils.Cmd) ([]byte, error) {
