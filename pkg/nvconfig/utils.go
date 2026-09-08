@@ -57,8 +57,8 @@ type NVConfigUtils interface {
 	// SetNvConfigParameter sets a nv config parameter for a mellanox device
 	SetNvConfigParameter(port v1alpha1.NicDevicePortSpec, paramName string, paramValue string) error
 	// SetNvConfigParametersBatch sets multiple NVConfig parameters in one DMS NVConfig action.
-	// withDefault and force are forwarded to DMS, which applies them to the compiled mlxconfig batch.
-	SetNvConfigParametersBatch(port v1alpha1.NicDevicePortSpec, params map[string]string, withDefault bool, force bool) error
+	// withDefault and force are forwarded to DMS, and the returned status reflects its requires-reset result.
+	SetNvConfigParametersBatch(port v1alpha1.NicDevicePortSpec, params map[string]string, withDefault bool, force bool) (types.ApplyStatus, error)
 	// ResetNvConfig resets NIC's nv config
 	ResetNvConfig(port v1alpha1.NicDevicePortSpec) error
 	// SetSystemConf applies a ConnectX-9 Network Bay system configuration for a single ASIC via
@@ -210,12 +210,12 @@ func (h *nvConfigUtils) SetNvConfigParameter(port v1alpha1.NicDevicePortSpec, pa
 }
 
 // SetNvConfigParametersBatch sets multiple nv config parameters for a Mellanox device in one DMS NVConfig action.
-func (h *nvConfigUtils) SetNvConfigParametersBatch(port v1alpha1.NicDevicePortSpec, params map[string]string, withDefault bool, force bool) error {
+func (h *nvConfigUtils) SetNvConfigParametersBatch(port v1alpha1.NicDevicePortSpec, params map[string]string, withDefault bool, force bool) (types.ApplyStatus, error) {
 	if len(params) == 0 {
-		return nil
+		return types.ApplyStatusNothingToDo, nil
 	}
 	if h.execInterface == nil {
-		return fmt.Errorf("command executor must not be nil")
+		return types.ApplyStatusFailed, fmt.Errorf("command executor must not be nil")
 	}
 
 	target := "pci/" + port.PCI
@@ -242,7 +242,7 @@ func (h *nvConfigUtils) SetNvConfigParametersBatch(port v1alpha1.NicDevicePortSp
 	})
 	if err != nil {
 		log.Log.Error(err, "SetNvConfigParametersBatch(): DMS NVConfig apply failed", "target", target)
-		return err
+		return types.ApplyStatusFailed, err
 	}
 	log.Log.V(2).Info("DMS NVConfig apply succeeded",
 		"target", target,
@@ -252,7 +252,10 @@ func (h *nvConfigUtils) SetNvConfigParametersBatch(port v1alpha1.NicDevicePortSp
 		"withDefault", result.WithDefault,
 		"force", result.Force,
 		"params", result.Params)
-	return nil
+	if result.RequiresReset {
+		return types.ApplyStatusSuccess, nil
+	}
+	return types.ApplyStatusNothingToDo, nil
 }
 
 // systemConfToken builds the `<conf>[<asic>]` argument for set/validate_system_conf, e.g. conf3[0].
