@@ -34,7 +34,6 @@ const blueprintsPlanPath = "/nvidia/blueprints/plan"
 
 // BlueprintPlanRequest describes one DMS Blueprints planning action.
 type BlueprintPlanRequest struct {
-	BlueprintsRoot     string
 	BlueprintsStateDir string
 	Profile            string
 	Name               string
@@ -81,8 +80,7 @@ func GenerateBlueprintPlan(
 	}
 
 	command := execInterface.CommandContext(ctx, dmsCLIExecutable, args...)
-	environment := environmentWithOverride(os.Environ(), "BLUEPRINTS_ROOT", request.BlueprintsRoot)
-	environment = environmentWithOverride(environment, "BP_STATE_DIR", request.BlueprintsStateDir)
+	environment := environmentWithOverride(os.Environ(), "BP_STATE_DIR", request.BlueprintsStateDir)
 	command.SetEnv(environment)
 	output, commandErr := utils.RunCommandWithStreams(command)
 	commandAndArgs := append([]string{dmsCLIExecutable}, args...)
@@ -125,7 +123,6 @@ func logBlueprintPlanResult(
 	fields := []any{
 		"command", command,
 		"plan", request.Name,
-		"blueprintsRoot", request.BlueprintsRoot,
 		"blueprintsStateDir", request.BlueprintsStateDir,
 	}
 	if result != nil {
@@ -143,12 +140,6 @@ func logBlueprintPlanResult(
 }
 
 func validateBlueprintPlanRequest(request BlueprintPlanRequest) error {
-	if strings.TrimSpace(request.BlueprintsRoot) == "" {
-		return fmt.Errorf("blueprints root must not be empty")
-	}
-	if !filepath.IsAbs(request.BlueprintsRoot) {
-		return fmt.Errorf("blueprints root must be an absolute path")
-	}
 	if strings.TrimSpace(request.BlueprintsStateDir) == "" {
 		return fmt.Errorf("blueprints state directory must not be empty")
 	}

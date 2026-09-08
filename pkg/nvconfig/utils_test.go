@@ -636,7 +636,7 @@ Result: Device configuration does NOT match the system configuration.
 		})
 
 		It("sends a sorted raw batch and forwards with-default and force", func() {
-			status, err := h.SetNvConfigParametersBatch(nvconfigPort(pciAddress), map[string]string{
+			status, err := h.SetNvConfigParametersBatchWithContext(context.Background(), nvconfigPort(pciAddress), map[string]string{
 				"Z_PARAM": "2",
 				"A_PARAM": "1",
 			}, true, true)
@@ -673,7 +673,7 @@ Result: Device configuration does NOT match the system configuration.
 		})
 
 		It("forwards false flag values explicitly", func() {
-			status, err := h.SetNvConfigParametersBatch(nvconfigPort(pciAddress), map[string]string{"PARAM": "1"}, false, false)
+			status, err := h.SetNvConfigParametersBatchWithContext(context.Background(), nvconfigPort(pciAddress), map[string]string{"PARAM": "1"}, false, false)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(status).To(Equal(types.ApplyStatusSuccess))
 
@@ -685,7 +685,7 @@ Result: Device configuration does NOT match the system configuration.
 
 		It("passes the PCI target and does not use fwctl metadata", func() {
 			port := v1alpha1.NicDevicePortSpec{PCI: pciAddress, FwctlDevice: "/dev/fwctl/fwctl3"}
-			status, err := h.SetNvConfigParametersBatch(port, map[string]string{"PARAM": "1"}, false, false)
+			status, err := h.SetNvConfigParametersBatchWithContext(context.Background(), port, map[string]string{"PARAM": "1"}, false, false)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(status).To(Equal(types.ApplyStatusSuccess))
 
@@ -693,7 +693,7 @@ Result: Device configuration does NOT match the system configuration.
 		})
 
 		It("does not invoke DMS for an empty batch", func() {
-			status, err := h.SetNvConfigParametersBatch(nvconfigPort(pciAddress), map[string]string{}, true, true)
+			status, err := h.SetNvConfigParametersBatchWithContext(context.Background(), nvconfigPort(pciAddress), map[string]string{}, true, true)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(status).To(Equal(types.ApplyStatusNothingToDo))
 			Expect(fakeExec.CommandCalls).To(BeZero())
@@ -712,7 +712,7 @@ Result: Device configuration does NOT match the system configuration.
 			commandOutput = []byte(`{"status":"error","error_msg":"DMS apply failed"}`)
 			commandErr = applyErr
 
-			status, err := h.SetNvConfigParametersBatch(nvconfigPort(pciAddress), map[string]string{"PARAM": "1"}, false, false)
+			status, err := h.SetNvConfigParametersBatchWithContext(context.Background(), nvconfigPort(pciAddress), map[string]string{"PARAM": "1"}, false, false)
 			Expect(status).To(Equal(types.ApplyStatusFailed))
 			Expect(err).To(MatchError(ContainSubstring("DMS apply failed")))
 			Expect(errors.Is(err, applyErr)).To(BeTrue())
@@ -721,7 +721,7 @@ Result: Device configuration does NOT match the system configuration.
 		It("returns an error when the command executor is not initialized", func() {
 			h.execInterface = nil
 
-			status, err := h.SetNvConfigParametersBatch(nvconfigPort(pciAddress), map[string]string{"PARAM": "1"}, false, false)
+			status, err := h.SetNvConfigParametersBatchWithContext(context.Background(), nvconfigPort(pciAddress), map[string]string{"PARAM": "1"}, false, false)
 			Expect(status).To(Equal(types.ApplyStatusFailed))
 			Expect(err).To(MatchError("command executor must not be nil"))
 		})

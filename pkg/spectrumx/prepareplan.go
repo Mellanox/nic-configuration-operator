@@ -38,7 +38,6 @@ import (
 )
 
 const (
-	defaultBlueprintsRoot     = "/opt/nvidia/blueprints"
 	defaultBlueprintsStateDir = "/var/lib/blueprints"
 	defaultDospcxDataRoot     = "/opt/mellanox/doca/services/dms/doSpcx/data"
 	deploymentModeHostK8s     = "host-k8s"
@@ -109,7 +108,6 @@ type planConfig struct {
 // planMetadata contains only the inputs used to generate a doSPCX plan.
 // Exact equality with the current inputs allows the saved plan to be reused.
 type planMetadata struct {
-	BlueprintsRoot       string   `json:"blueprints_root"`
 	BlueprintsStateDir   string   `json:"blueprints_state_dir"`
 	BlueprintsDataDigest string   `json:"blueprints_data_digest,omitempty"`
 	PlanName             string   `json:"plan_name"`
@@ -147,9 +145,6 @@ func (m *spectrumXConfigManager) PreparePlan(
 	}
 	if err := validatePlanStage(stage); err != nil {
 		return err
-	}
-	if strings.TrimSpace(m.blueprintsRoot) == "" || !filepath.IsAbs(m.blueprintsRoot) {
-		return fmt.Errorf("blueprints root must be a non-empty absolute path")
 	}
 	stateDir := m.resolvedStateDir()
 	if !filepath.IsAbs(stateDir) {
@@ -208,7 +203,6 @@ func (m *spectrumXConfigManager) PreparePlan(
 	}
 
 	result, err := dmscli.GenerateBlueprintPlan(ctx, m.execInterface, dmscli.BlueprintPlanRequest{
-		BlueprintsRoot:     m.blueprintsRoot,
 		BlueprintsStateDir: stateDir,
 		Profile:            config.profile,
 		Name:               generatedPlanName,
@@ -241,7 +235,6 @@ func (m *spectrumXConfigManager) PreparePlan(
 		"profile", config.profile,
 		"platformType", config.platformType,
 		"devices", len(config.targetMap.PreBreakout.Targets),
-		"blueprintsRoot", m.blueprintsRoot,
 		"targetMap", targetMapPath,
 		"plan", planPath,
 		"metadata", metadataPath)
@@ -257,9 +250,6 @@ func (m *spectrumXConfigManager) GetPreparedPlan(device *v1alpha1.NicDevice, sta
 	}
 	if err := validatePlanStage(stage); err != nil {
 		return nil, err
-	}
-	if strings.TrimSpace(m.blueprintsRoot) == "" || !filepath.IsAbs(m.blueprintsRoot) {
-		return nil, fmt.Errorf("blueprints root must be a non-empty absolute path")
 	}
 	if !spectrumXEnabledForPlan(device) {
 		return nil, fmt.Errorf("device does not enable Spectrum-X optimization")
@@ -355,7 +345,6 @@ func newPlanMetadata(
 	targetMapDigest string,
 ) planMetadata {
 	return planMetadata{
-		BlueprintsRoot:       m.blueprintsRoot,
 		BlueprintsStateDir:   stateDir,
 		BlueprintsDataDigest: m.dospcxDataDigest,
 		PlanName:             planName(config.nodeName, stage),
@@ -693,16 +682,43 @@ func validateGeneratedPlan(
 	if err := validateGeneratedPlanDevices(document.Plan.Devices, config, expectedStage); err != nil {
 		return nil, err
 	}
+	if len(document.Plan.PostBreakoutDevices) > 0 {
+		if err := validateGeneratedPostBreakoutDevices(document.Plan.PostBreakoutDevices, config); err != nil {
+			return nil, err
+		}
+	}
 	return plan, nil
 }
 
 func validateGeneratedPlanDevices(actual []planDevice, config *planConfig, stage PlanStage) error {
+	planes := 1
+	if stage == PlanStageConfigure {
+		planes = config.planes
+	}
+	return validateGeneratedDeviceView(actual, config, planes, string(stage), false)
+}
+
+func validateGeneratedPostBreakoutDevices(actual []planDevice, config *planConfig) error {
+	if err := validateGeneratedDeviceView(actual, config, config.planes, "post-breakout", true); err != nil {
+		return err
+	}
+	for _, device := range actual {
+		if !device.PlaneExplicit {
+			return fmt.Errorf("generated doSPCX post-breakout device %q does not identify an explicit plane", device.BDF)
+		}
+	}
+	return nil
+}
+
+func validateGeneratedDeviceView(
+	actual []planDevice,
+	config *planConfig,
+	planes int,
+	view string,
+	allowMissingDeviceID bool,
+) error {
 	expected := make(map[string]planDevice, len(config.targetMap.PreBreakout.Targets)*config.planes)
 	for _, target := range config.targetMap.PreBreakout.Targets {
-		planes := 1
-		if stage == PlanStageConfigure {
-			planes = config.planes
-		}
 		for plane := 0; plane < planes; plane++ {
 			bdf, err := bdfForPlane(target.BDF, plane)
 			if err != nil {
@@ -719,16 +735,17 @@ func validateGeneratedPlanDevices(actual []planDevice, config *planConfig, stage
 		}
 	}
 	if len(actual) != len(expected) {
-		return fmt.Errorf("generated doSPCX %s plan has %d devices, expected %d", stage, len(actual), len(expected))
+		return fmt.Errorf("generated doSPCX %s device view has %d devices, expected %d", view, len(actual), len(expected))
 	}
 	for _, device := range actual {
 		want, found := expected[device.BDF]
 		if !found {
-			return fmt.Errorf("generated doSPCX %s plan contains unexpected device BDF %q", stage, device.BDF)
+			return fmt.Errorf("generated doSPCX %s device view contains unexpected device BDF %q", view, device.BDF)
 		}
-		if device.DMSTarget != want.DMSTarget || device.DeviceID != want.DeviceID ||
+		deviceIDMatches := device.DeviceID == want.DeviceID || (allowMissingDeviceID && device.DeviceID == "")
+		if device.DMSTarget != want.DMSTarget || !deviceIDMatches ||
 			device.Rail != want.Rail || device.Plane != want.Plane || device.Network != want.Network {
-			return fmt.Errorf("generated doSPCX %s plan device %q topology does not match the target map", stage, device.BDF)
+			return fmt.Errorf("generated doSPCX %s device %q topology does not match the target map", view, device.BDF)
 		}
 	}
 	return nil

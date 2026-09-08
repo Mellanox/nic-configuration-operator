@@ -209,8 +209,27 @@ func (h *nvConfigUtils) SetNvConfigParameter(port v1alpha1.NicDevicePortSpec, pa
 	return nil
 }
 
-// SetNvConfigParametersBatch sets multiple nv config parameters for a Mellanox device in one DMS NVConfig action.
-func (h *nvConfigUtils) SetNvConfigParametersBatch(port v1alpha1.NicDevicePortSpec, params map[string]string, withDefault bool, force bool) (types.ApplyStatus, error) {
+// SetNvConfigParametersBatch preserves the NVConfigUtils interface. New internal callers should
+// use SetNvConfigParametersBatchWithContext so cancellation reaches dms-cli.
+func (h *nvConfigUtils) SetNvConfigParametersBatch(
+	port v1alpha1.NicDevicePortSpec,
+	params map[string]string,
+	withDefault bool,
+	force bool,
+) (types.ApplyStatus, error) {
+	ctx := logr.NewContext(context.Background(), log.Log)
+	return h.SetNvConfigParametersBatchWithContext(ctx, port, params, withDefault, force)
+}
+
+// SetNvConfigParametersBatchWithContext sets multiple NVConfig parameters in one DMS NVConfig action
+// and propagates cancellation to the command.
+func (h *nvConfigUtils) SetNvConfigParametersBatchWithContext(
+	ctx context.Context,
+	port v1alpha1.NicDevicePortSpec,
+	params map[string]string,
+	withDefault bool,
+	force bool,
+) (types.ApplyStatus, error) {
 	if len(params) == 0 {
 		return types.ApplyStatusNothingToDo, nil
 	}
@@ -233,7 +252,6 @@ func (h *nvConfigUtils) SetNvConfigParametersBatch(port v1alpha1.NicDevicePortSp
 		raw = append(raw, dmscli.NVConfigParam{Param: name, Value: params[name]})
 	}
 
-	ctx := logr.NewContext(context.Background(), log.Log)
 	result, err := dmscli.ApplyNVConfig(ctx, h.execInterface, dmscli.ApplyNVConfigRequest{
 		Target:      target,
 		Raw:         raw,

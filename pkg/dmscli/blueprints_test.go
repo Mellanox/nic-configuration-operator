@@ -29,7 +29,6 @@ import (
 var _ = Describe("Blueprint plan", func() {
 	const (
 		planName           = "nco-node-1-spcx-prepare"
-		blueprintsRoot     = "/opt/nvidia/blueprints"
 		blueprintsStateDir = "/var/lib/blueprints"
 	)
 
@@ -37,7 +36,6 @@ var _ = Describe("Blueprint plan", func() {
 
 	newRequest := func() BlueprintPlanRequest {
 		return BlueprintPlanRequest{
-			BlueprintsRoot:     blueprintsRoot,
 			BlueprintsStateDir: blueprintsStateDir,
 			Profile:            "SPX_Multiplane",
 			Name:               planName,
@@ -72,7 +70,6 @@ var _ = Describe("Blueprint plan", func() {
 		}))
 		Expect(commands[0].command.RunCalls).To(Equal(1))
 		Expect(commands[0].command.CombinedOutputCalls).To(BeZero())
-		Expect(commands[0].command.Env).To(ContainElement("BLUEPRINTS_ROOT=" + blueprintsRoot))
 		Expect(commands[0].command.Env).To(ContainElement("BP_STATE_DIR=" + blueprintsStateDir))
 	})
 
@@ -115,7 +112,6 @@ var _ = Describe("Blueprint plan", func() {
 		Expect(entries[0].message).To(Equal("command output"))
 		Expect(entries[0].fields).To(HaveKeyWithValue("command", append([]string{dmsCLIExecutable}, commands[0].args...)))
 		Expect(entries[0].fields).To(HaveKeyWithValue("plan", planName))
-		Expect(entries[0].fields).To(HaveKeyWithValue("blueprintsRoot", blueprintsRoot))
 		Expect(entries[0].fields).To(HaveKeyWithValue("blueprintsStateDir", blueprintsStateDir))
 		Expect(entries[0].fields).NotTo(HaveKey("stdout"))
 		Expect(entries[0].fields).To(HaveKeyWithValue("status", "ok"))
@@ -185,8 +181,6 @@ var _ = Describe("Blueprint plan", func() {
 			Expect(result).To(BeNil())
 			Expect(err).To(MatchError(ContainSubstring(expected)))
 		},
-		Entry("empty Blueprints root", func(request *BlueprintPlanRequest) { request.BlueprintsRoot = "" }, "blueprints root"),
-		Entry("relative Blueprints root", func(request *BlueprintPlanRequest) { request.BlueprintsRoot = "blueprints" }, "absolute path"),
 		Entry("empty Blueprints state directory", func(request *BlueprintPlanRequest) { request.BlueprintsStateDir = "" }, "state directory"),
 		Entry("relative Blueprints state directory", func(request *BlueprintPlanRequest) { request.BlueprintsStateDir = "blueprints-state" }, "absolute path"),
 		Entry("empty profile", func(request *BlueprintPlanRequest) { request.Profile = "" }, "profile"),
@@ -204,20 +198,6 @@ var _ = Describe("Blueprint plan", func() {
 
 		Expect(result).To(BeNil())
 		Expect(err).To(MatchError(ContainSubstring("does not contain plan-json")))
-	})
-
-	It("replaces an inherited Blueprints root without duplicating it", func() {
-		environment := environmentWithOverride([]string{
-			"PATH=/usr/bin",
-			"BLUEPRINTS_ROOT=/old/blueprints",
-			"HOME=/tmp/test-home",
-		}, "BLUEPRINTS_ROOT", blueprintsRoot)
-
-		Expect(environment).To(Equal([]string{
-			"PATH=/usr/bin",
-			"HOME=/tmp/test-home",
-			"BLUEPRINTS_ROOT=" + blueprintsRoot,
-		}))
 	})
 
 	It("replaces an inherited DMS state directory without duplicating it", func() {

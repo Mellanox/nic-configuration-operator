@@ -344,7 +344,6 @@ func ApplyNVConfig(
 ) (*ApplyNVConfigResult, error)
 
 type BlueprintPlanRequest struct {
-	BlueprintsRoot     string
 	BlueprintsStateDir string
 	Profile            string
 	Name               string
@@ -415,18 +414,18 @@ dms-cli --json /nvidia/blueprints/plan profile=<profile> name=<name> \
   params=deployment_mode=host-k8s,planes=<count>
 ```
 
-For Blueprints planning, the wrapper sets `BLUEPRINTS_ROOT` and the DMS
-`BP_STATE_DIR` variable only on the `dms-cli` child process.
+For Blueprints planning, the wrapper sets the DMS `BP_STATE_DIR` variable only
+on the `dms-cli` child process.
 All JSON-based `dms-cli` wrappers capture stdout and stderr separately because
 stdout is the protocol while DMS diagnostics are written to stderr. Successful calls log the
 exact command, result status, and plan size without repeating the embedded plan;
 failure output is bounded before logging or adding it to a returned error.
-`SpectrumXConfigManager` supplies the fixed `/opt/nvidia/blueprints` path and
-creates its command executor internally. The executable DMS Blueprints action
-tree remains part of the daemon image. Authored doSPCX data is supplied
-separately through a labeled ConfigMap and installed at
+`SpectrumXConfigManager` creates its command executor internally. The executable
+DMS Blueprints action tree remains part of the daemon image. Authored doSPCX
+data is supplied separately through a labeled ConfigMap and installed at the
+DMS planner's native data location,
 `/opt/mellanox/doca/services/dms/doSpcx/data`. Existing process environment
-entries are preserved, and inherited entries for either variable are replaced.
+entries are preserved, and an inherited `BP_STATE_DIR` entry is replaced.
 
 `pkg/dmscli` is the low-level command wrapper. `pkg/spectrumx.PlanManager` is the
 plan lifecycle abstraction included by `SpectrumXManager`; it owns
@@ -632,6 +631,12 @@ type NVConfigUtils interface {
 ```go
 func NewNVConfigUtils() NVConfigUtils
 ```
+
+The built-in implementation also provides
+`SetNvConfigParametersBatchWithContext(ctx, port, params, withDefault, force) (types.ApplyStatus, error)`.
+`ConfigurationManager` uses that optional extension so reconcile cancellation reaches
+`dms-cli`, while retaining the public `NVConfigUtils` interface for existing library
+implementations. Implementations without the extension continue through the legacy method.
 
 **Batch command format:**
 ```

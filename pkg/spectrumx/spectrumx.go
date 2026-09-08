@@ -87,7 +87,6 @@ type spectrumXConfigManager struct {
 	preparedPlans      map[string]*preparedPlan
 	dmsManager         dms.DMSManager
 	execInterface      execUtils.Interface
-	blueprintsRoot     string
 	blueprintsStateDir string
 	dospcxDataRoot     string
 	dospcxDataDigest   string
@@ -863,7 +862,6 @@ func NewSpectrumXConfigManager(
 		spectrumXConfigs:   spectrumXConfigs,
 		preparedPlans:      make(map[string]*preparedPlan),
 		execInterface:      execUtils.New(),
-		blueprintsRoot:     defaultBlueprintsRoot,
 		blueprintsStateDir: "",
 		dospcxDataRoot:     defaultDospcxDataRoot,
 		dospcxDataDigest:   "",

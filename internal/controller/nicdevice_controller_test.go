@@ -370,7 +370,11 @@ var _ = Describe("NicDeviceReconciler", func() {
 	})
 
 	Describe("reconcile a single device without firmware spec", func() {
-		var createDevice = func(setLastSpecAnnotation bool, initialStatusCondition *metav1.Condition) *v1alpha1.NicDevice {
+		var createDevice = func(
+			setLastSpecAnnotation bool,
+			initialStatusCondition *metav1.Condition,
+			spectrumXEnabled ...bool,
+		) *v1alpha1.NicDevice {
 			device := &v1alpha1.NicDevice{
 				ObjectMeta: metav1.ObjectMeta{Name: deviceName, Namespace: namespaceName},
 				Spec: v1alpha1.NicDeviceSpec{
@@ -387,11 +391,18 @@ var _ = Describe("NicDeviceReconciler", func() {
 					},
 				},
 			}
+			if len(spectrumXEnabled) > 0 && spectrumXEnabled[0] {
+				device.Spec.Configuration.Template.NumVfs = 1
+				device.Spec.Configuration.Template.SpectrumXOptimized = &v1alpha1.SpectrumXOptimizedSpec{
+					Enabled:      true,
+					PlatformType: "gb300",
+				}
+			}
 			if setLastSpecAnnotation {
 				device.SetAnnotations(map[string]string{consts.LastAppliedStateAnnotation: "some-state"})
 			}
 
-			Expect(k8sClient.Create(ctx, device))
+			Expect(k8sClient.Create(ctx, device)).To(Succeed())
 			device.Status = v1alpha1.NicDeviceStatus{
 				Node: nodeName,
 				Ports: []v1alpha1.NicDevicePortSpec{{
@@ -526,6 +537,25 @@ var _ = Describe("NicDeviceReconciler", func() {
 			}))
 
 			configurationManager.AssertNotCalled(GinkgoT(), "ResetNicFirmware", mock.Anything, mock.Anything)
+		})
+		It("Should prepare the Spectrum-X NV plan before requesting maintenance", func() {
+			planErr := errors.New("plan generation failed")
+			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(true, false, nil, nil)
+			spectrumXManager.On("PreparePlan", mock.Anything, mock.Anything, spectrumx.PlanStagePrepare).
+				Return(planErr).Maybe()
+
+			createDevice(false, nil, true)
+
+			Eventually(func() bool {
+				for _, call := range spectrumXManager.Calls {
+					if call.Method == "PreparePlan" {
+						return true
+					}
+				}
+				return false
+			}, timeout).Should(BeTrue())
+			maintenanceManager.AssertNotCalled(GinkgoT(), "ScheduleMaintenance", mock.Anything)
+			maintenanceManager.AssertNotCalled(GinkgoT(), "MaintenanceAllowed", mock.Anything)
 		})
 		It("Should keep in UpdateStarted status if maintenance fails to schedule", func() {
 			errorText := "maintenance request failed"

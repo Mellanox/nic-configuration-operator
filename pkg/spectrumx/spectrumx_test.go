@@ -169,7 +169,6 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 		Expect(ok).To(BeTrue())
 		Expect(internalManager.execInterface).NotTo(BeNil())
-		Expect(internalManager.blueprintsRoot).To(Equal(defaultBlueprintsRoot))
 		Expect(internalManager.blueprintsStateDir).To(BeEmpty())
 		Expect(internalManager.dospcxDataRoot).To(Equal(defaultDospcxDataRoot))
 		Expect(internalManager.dospcxDataDigest).To(BeEmpty())
@@ -228,7 +227,6 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			spectrumXConfigs:   cfgs,
 			preparedPlans:      make(map[string]*preparedPlan),
 			execInterface:      execFake,
-			blueprintsRoot:     defaultBlueprintsRoot,
 			blueprintsStateDir: "",
 			dospcxDataRoot:     defaultDospcxDataRoot,
 			dospcxDataDigest:   "",

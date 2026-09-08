@@ -66,6 +66,18 @@ type configurationManager struct {
 	spectrumXConfigManager spectrumx.SpectrumXManager
 }
 
+// contextualNVConfigBatchSetter is an optional extension implemented by the built-in NVConfig
+// utility. Keeping it separate preserves the public NVConfigUtils contract for library consumers.
+type contextualNVConfigBatchSetter interface {
+	SetNvConfigParametersBatchWithContext(
+		ctx context.Context,
+		port v1alpha1.NicDevicePortSpec,
+		params map[string]string,
+		withDefault bool,
+		force bool,
+	) (types.ApplyStatus, error)
+}
+
 // ValidateDeviceNvSpec will validate device's non-volatile spec against already applied configuration on the host
 // returns bool - nv config update required
 // returns bool - reboot required
@@ -321,7 +333,7 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 			continue
 		}
 		log.Log.V(2).Info("applying nv config batch", "device", device.Name, "target", target, "params", batch, "force", options.Force)
-		applyStatus, err := h.nvConfigUtils.SetNvConfigParametersBatch(port, batch, options.WithDefault, options.Force)
+		applyStatus, err := h.setNvConfigParametersBatch(ctx, port, batch, options.WithDefault, options.Force)
 		if err != nil {
 			log.Log.Error(err, "Failed to apply nv config parameters", "device", device.Name, "params", batch)
 			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
@@ -373,6 +385,19 @@ func extrapolatePortParamsFromNumOfPF(params map[string]string) {
 			}
 		}
 	}
+}
+
+func (h configurationManager) setNvConfigParametersBatch(
+	ctx context.Context,
+	port v1alpha1.NicDevicePortSpec,
+	params map[string]string,
+	withDefault bool,
+	force bool,
+) (types.ApplyStatus, error) {
+	if contextual, ok := h.nvConfigUtils.(contextualNVConfigBatchSetter); ok {
+		return contextual.SetNvConfigParametersBatchWithContext(ctx, port, params, withDefault, force)
+	}
+	return h.nvConfigUtils.SetNvConfigParametersBatch(port, params, withDefault, force)
 }
 
 // setSystemConf stages the requested Network Bay set_system_conf for the device's ASIC (the

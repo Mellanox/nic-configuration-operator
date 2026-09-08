@@ -108,6 +108,34 @@ func (_m *NVConfigUtils) SetNvConfigParametersBatch(port v1alpha1.NicDevicePortS
 	return r0, r1
 }
 
+// SetNvConfigParametersBatchWithContext provides a mock function with given fields: ctx, port, params, withDefault, force
+func (_m *NVConfigUtils) SetNvConfigParametersBatchWithContext(ctx context.Context, port v1alpha1.NicDevicePortSpec, params map[string]string, withDefault bool, force bool) (types.ApplyStatus, error) {
+	ret := _m.Called(ctx, port, params, withDefault, force)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetNvConfigParametersBatchWithContext")
+	}
+
+	var r0 types.ApplyStatus
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, v1alpha1.NicDevicePortSpec, map[string]string, bool, bool) (types.ApplyStatus, error)); ok {
+		return rf(ctx, port, params, withDefault, force)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, v1alpha1.NicDevicePortSpec, map[string]string, bool, bool) types.ApplyStatus); ok {
+		r0 = rf(ctx, port, params, withDefault, force)
+	} else {
+		r0 = ret.Get(0).(types.ApplyStatus)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, v1alpha1.NicDevicePortSpec, map[string]string, bool, bool) error); ok {
+		r1 = rf(ctx, port, params, withDefault, force)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // SetSystemConf provides a mock function with given fields: ctx, port, conf, asic, force
 func (_m *NVConfigUtils) SetSystemConf(ctx context.Context, port v1alpha1.NicDevicePortSpec, conf string, asic int, force bool) error {
 	ret := _m.Called(ctx, port, conf, asic, force)
