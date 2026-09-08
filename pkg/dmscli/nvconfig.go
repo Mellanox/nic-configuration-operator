@@ -25,6 +25,8 @@ import (
 
 	"github.com/go-logr/logr"
 	execUtils "k8s.io/utils/exec"
+
+	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
 
 const (
@@ -88,19 +90,21 @@ func ApplyNVConfig(ctx context.Context, execInterface execUtils.Interface, reque
 		nvConfigApplyPath,
 	}
 	command := execInterface.CommandContext(ctx, dmsCLIExecutable, args...)
-	output, commandErr := command.CombinedOutput()
+	output, commandErr := utils.RunCommandWithStreams(command)
 	commandAndArgs := append([]string{dmsCLIExecutable}, args...)
 	logr.FromContextOrDiscard(ctx).V(2).Info("command output",
 		"command", commandAndArgs,
 		"target", request.Target,
-		"output", string(output))
+		"stdout", boundedCommandOutput(output.Stdout),
+		"stderr", boundedCommandOutput(output.Stderr))
 
-	result, decodeErr := decodeApplyNVConfigResult(output)
+	result, decodeErr := decodeApplyNVConfigResult(output.Stdout)
 	if commandErr != nil {
-		detail := strings.TrimSpace(string(output))
-		if result != nil && result.ErrorMessage != "" {
-			detail = result.ErrorMessage
+		structured := ""
+		if result != nil {
+			structured = result.ErrorMessage
 		}
+		detail := commandErrorDetail(output.Stdout, output.Stderr, structured)
 		if detail != "" {
 			return result, fmt.Errorf("apply NVConfig to target %q: %w: %s", request.Target, commandErr, detail)
 		}
@@ -110,7 +114,7 @@ func ApplyNVConfig(ctx context.Context, execInterface execUtils.Interface, reque
 		return nil, fmt.Errorf("decode NVConfig apply result for target %q: %w", request.Target, decodeErr)
 	}
 	if result.Status != "ok" {
-		detail := result.ErrorMessage
+		detail := boundedCommandOutput([]byte(result.ErrorMessage))
 		if detail == "" {
 			detail = fmt.Sprintf("unexpected status %q", result.Status)
 		}

@@ -26,12 +26,11 @@ import (
 
 	"github.com/go-logr/logr"
 	execUtils "k8s.io/utils/exec"
+
+	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
 
-const (
-	blueprintsPlanPath       = "/nvidia/blueprints/plan"
-	maxBlueprintLogOutputLen = 4096
-)
+const blueprintsPlanPath = "/nvidia/blueprints/plan"
 
 // BlueprintPlanRequest describes one DMS Blueprints planning action.
 type BlueprintPlanRequest struct {
@@ -85,22 +84,17 @@ func GenerateBlueprintPlan(
 	environment := environmentWithOverride(os.Environ(), "BLUEPRINTS_ROOT", request.BlueprintsRoot)
 	environment = environmentWithOverride(environment, "BP_STATE_DIR", request.BlueprintsStateDir)
 	command.SetEnv(environment)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	command.SetStdout(&stdout)
-	command.SetStderr(&stderr)
-	commandErr := command.Run()
+	output, commandErr := utils.RunCommandWithStreams(command)
 	commandAndArgs := append([]string{dmsCLIExecutable}, args...)
 
-	result, decodeErr := decodeBlueprintPlanResult(stdout.Bytes())
-	logBlueprintPlanResult(ctx, request, commandAndArgs, result, stdout.String(), stderr.String(), commandErr, decodeErr)
+	result, decodeErr := decodeBlueprintPlanResult(output.Stdout)
+	logBlueprintPlanResult(ctx, request, commandAndArgs, result, output, commandErr, decodeErr)
 	if commandErr != nil {
-		detail := strings.TrimSpace(stderr.String())
-		if result != nil && result.ErrorMessage != "" {
-			detail = result.ErrorMessage
-		} else if detail == "" {
-			detail = strings.TrimSpace(stdout.String())
+		structured := ""
+		if result != nil {
+			structured = result.ErrorMessage
 		}
+		detail := commandErrorDetail(output.Stdout, output.Stderr, structured)
 		if detail != "" {
 			return result, fmt.Errorf("generate Blueprint plan %q: %w: %s", request.Name, commandErr, detail)
 		}
@@ -110,7 +104,7 @@ func GenerateBlueprintPlan(
 		return nil, fmt.Errorf("decode Blueprint plan result %q: %w", request.Name, decodeErr)
 	}
 	if result.Status != "" && result.Status != "ok" {
-		detail := result.ErrorMessage
+		detail := boundedCommandOutput([]byte(result.ErrorMessage))
 		if detail == "" {
 			detail = fmt.Sprintf("unexpected status %q", result.Status)
 		}
@@ -124,8 +118,7 @@ func logBlueprintPlanResult(
 	request BlueprintPlanRequest,
 	command []string,
 	result *BlueprintPlanResult,
-	stdout string,
-	stderr string,
+	output utils.CommandOutput,
 	commandErr error,
 	decodeErr error,
 ) {
@@ -141,19 +134,12 @@ func logBlueprintPlanResult(
 			"planJSONBytes", len(result.PlanJSON))
 	}
 	if commandErr != nil || decodeErr != nil {
-		fields = append(fields, "stdout", boundedBlueprintLogOutput(stdout))
+		fields = append(fields, "stdout", boundedCommandOutput(output.Stdout))
 	}
-	if stderr != "" {
-		fields = append(fields, "stderr", boundedBlueprintLogOutput(stderr))
+	if len(output.Stderr) > 0 {
+		fields = append(fields, "stderr", boundedCommandOutput(output.Stderr))
 	}
 	logr.FromContextOrDiscard(ctx).V(2).Info("command output", fields...)
-}
-
-func boundedBlueprintLogOutput(output string) string {
-	if len(output) <= maxBlueprintLogOutputLen {
-		return output
-	}
-	return output[:maxBlueprintLogOutputLen] + "... [truncated]"
 }
 
 func validateBlueprintPlanRequest(request BlueprintPlanRequest) error {

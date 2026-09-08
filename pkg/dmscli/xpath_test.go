@@ -35,10 +35,10 @@ var _ = Describe("typed XPath operations", func() {
 	})
 
 	Describe("QueryXPaths", func() {
-		It("batches query paths and decodes keyed values", func() {
+		It("batches query paths and decodes the public keyed response", func() {
 			executor := fakeExecutor([]byte(`{
-				"/nvidia/link/ipg":{"status":"ok","values":{"admin":25}},
-				"/nvidia/link/physical":{"status":"ok","values":{"admin-status":"up"}}
+				"/nvidia/link/ipg":{"admin":25},
+				"/nvidia/link/physical":{"admin-status":"up"}
 			}`), nil, &commands)
 
 			result, err := QueryXPaths(context.Background(), executor, target, []XPathQuery{
@@ -50,7 +50,6 @@ var _ = Describe("typed XPath operations", func() {
 			Expect(result.Status).To(Equal("ok"))
 			Expect(result.Values).To(HaveKeyWithValue("/nvidia/link/ipg", map[string]any{"admin": json.Number("25")}))
 			Expect(result.Values).To(HaveKeyWithValue("/nvidia/link/physical", map[string]any{"admin-status": "up"}))
-			Expect(result.NotSupported).To(BeEmpty())
 			Expect(commands).To(HaveLen(1))
 			Expect(commands[0].args).To(Equal([]string{
 				"--json", "-t", target,
@@ -59,120 +58,85 @@ var _ = Describe("typed XPath operations", func() {
 			}))
 		})
 
-		It("decodes one unkeyed query response", func() {
-			executor := fakeExecutor([]byte(`{"status":"ok","values":{"enabled":true}}`), nil, &commands)
+		It("decodes the public flat single-container response", func() {
+			executor := fakeExecutor([]byte(`{"operating-mode":"dpu","status":"ready"}`), nil, &commands)
 
 			result, err := QueryXPaths(context.Background(), executor, target, []XPathQuery{
-				{Path: "/nvidia/data-direct", Leaves: []string{"enabled"}},
+				{Path: "/nvidia/mode", Leaves: []string{"operating-mode", "status"}},
 			})
 
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.Values).To(Equal(map[string]map[string]any{
-				"/nvidia/data-direct": {"enabled": true},
+				"/nvidia/mode": {"operating-mode": "dpu", "status": "ready"},
 			}))
 		})
 
-		It("decodes the documented flat single-container JSON response", func() {
-			executor := fakeExecutor([]byte(`{"operating-mode":"dpu"}`), nil, &commands)
+		It("decodes JSON stdout independently from diagnostics on stderr", func() {
+			executor := fakeExecutorWithStderr(
+				[]byte(`{"admin":25}`), []byte("DMS warning\n"), nil, &commands)
 
 			result, err := QueryXPaths(context.Background(), executor, target, []XPathQuery{
-				{Path: "/nvidia/mode", Leaves: []string{"operating-mode"}},
+				{Path: "/nvidia/link/ipg", Leaves: []string{"admin"}},
 			})
 
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Values).To(Equal(map[string]map[string]any{
-				"/nvidia/mode": {"operating-mode": "dpu"},
-			}))
+			Expect(result.Values["/nvidia/link/ipg"]).To(HaveKeyWithValue("admin", json.Number("25")))
 		})
 
-		It("does not confuse a flat status leaf with response metadata", func() {
-			executor := fakeExecutor([]byte(`{"status":"ready"}`), nil, &commands)
-
-			result, err := QueryXPaths(context.Background(), executor, target, []XPathQuery{
-				{Path: "/nvidia/reset", Leaves: []string{"status"}},
-			})
-
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Values).To(Equal(map[string]map[string]any{
-				"/nvidia/reset": {"status": "ready"},
-			}))
-		})
-
-		It("decodes flat values nested below keyed query paths", func() {
-			executor := fakeExecutor([]byte(`{
-				"/nvidia/pci":{"sriov-enabled":true},
-				"/nvidia/roce":{"adaptive-routing":true}
-			}`), nil, &commands)
-
-			result, err := QueryXPaths(context.Background(), executor, target, []XPathQuery{
-				{Path: "/nvidia/pci", Leaves: []string{"sriov-enabled"}},
-				{Path: "/nvidia/roce", Leaves: []string{"adaptive-routing"}},
-			})
-
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Values).To(HaveKeyWithValue("/nvidia/pci", map[string]any{"sriov-enabled": true}))
-			Expect(result.Values).To(HaveKeyWithValue("/nvidia/roce", map[string]any{"adaptive-routing": true}))
-		})
-
-		It("returns capability filtering as a query error", func() {
-			executor := fakeExecutor([]byte(`{
-				"status":"ok",
-				"values":{"adaptive-routing":true},
-				"not-supported":["cc-steering-ext"]
-			}`), nil, &commands)
-
-			result, err := QueryXPaths(context.Background(), executor, target, []XPathQuery{
-				{Path: "/nvidia/roce", Leaves: []string{"adaptive-routing", "cc-steering-ext"}},
-			})
-
-			Expect(result.Status).To(Equal("partial"))
-			Expect(result.NotSupported).To(HaveKeyWithValue("/nvidia/roce", []string{"cc-steering-ext"}))
-			Expect(err).To(MatchError(ContainSubstring("unexpected status \"partial\"")))
-		})
-
-		It("preserves a structured partial result and command error", func() {
+		It("preserves successes and failures from a partial response", func() {
 			commandErr := errors.New("exit status 10")
 			executor := fakeExecutor([]byte(`{
 				"status":"partial",
-				"results":[
-					{"path":"/nvidia/mode/operating-mode","status":"error","error_code":4,"error":"not-supported"},
-					{"path":"/nvidia/pci/sriov-enabled","status":"ok"}
-				]
+				"successes":{"/nvidia/pci/sriov-enabled":true},
+				"failures":{"/nvidia/lag/resource-allocation":"not-supported"},
+				"error_code":"E10"
 			}`), commandErr, &commands)
-
-			result, err := QueryXPaths(context.Background(), executor, target, []XPathQuery{
-				{Path: "/nvidia/mode", Leaves: []string{"operating-mode"}},
-				{Path: "/nvidia/pci", Leaves: []string{"sriov-enabled"}},
-			})
-
-			Expect(result.Status).To(Equal("partial"))
-			Expect(result.Results).To(HaveLen(2))
-			Expect(errors.Is(err, commandErr)).To(BeTrue())
-		})
-
-		It("normalizes mixed keyed query results as partial", func() {
-			executor := fakeExecutor([]byte(`{
-				"/nvidia/pci":{"status":"ok","values":{"sriov-enabled":true}},
-				"/nvidia/lag":{"status":"error","error":"not-supported","values":{}}
-			}`), nil, &commands)
 
 			result, err := QueryXPaths(context.Background(), executor, target, []XPathQuery{
 				{Path: "/nvidia/pci", Leaves: []string{"sriov-enabled"}},
 				{Path: "/nvidia/lag", Leaves: []string{"resource-allocation"}},
 			})
 
+			Expect(errors.Is(err, commandErr)).To(BeTrue())
 			Expect(result.Status).To(Equal("partial"))
-			Expect(result.Values).To(HaveKey("/nvidia/pci"))
-			Expect(result.Values).To(HaveKey("/nvidia/lag"))
-			Expect(err).To(MatchError(ContainSubstring("not-supported")))
+			Expect(result.Values["/nvidia/pci"]).To(HaveKeyWithValue("sriov-enabled", true))
+			Expect(result.Failures).To(Equal(map[string]any{
+				"/nvidia/lag/resource-allocation": "not-supported",
+			}))
+			Expect(result.ErrorCode).To(Equal("E10"))
+		})
+
+		It("returns the structured total failure and preserves the command error", func() {
+			commandErr := errors.New("exit status 7")
+			executor := fakeExecutor(
+				[]byte(`{"status":"error","error_msg":"device unavailable","error_code":5}`),
+				commandErr, &commands)
+
+			result, err := QueryXPaths(context.Background(), executor, target, []XPathQuery{
+				{Path: "/nvidia/pci", Leaves: []string{"sriov-enabled"}},
+			})
+
+			Expect(errors.Is(err, commandErr)).To(BeTrue())
+			Expect(err).To(MatchError(ContainSubstring("device unavailable")))
+			Expect(result.Status).To(Equal("error"))
+			Expect(result.ErrorMessage).To(Equal("device unavailable"))
+		})
+
+		It("rejects malformed JSON returned by a successful command", func() {
+			executor := fakeExecutor([]byte("not-json"), nil, &commands)
+
+			result, err := QueryXPaths(context.Background(), executor, target, []XPathQuery{
+				{Path: "/nvidia/pci", Leaves: []string{"sriov-enabled"}},
+			})
+
+			Expect(result).To(BeNil())
+			Expect(err).To(MatchError(ContainSubstring("invalid dms-cli JSON response")))
 		})
 
 		DescribeTable("validates query input before execution",
 			func(targetValue string, queries []XPathQuery, expected string) {
-				executor := fakeExecutor([]byte(`{"status":"ok","values":{}}`), nil, &commands)
-
+				executor := fakeExecutor([]byte(`{}`), nil, &commands)
 				result, err := QueryXPaths(context.Background(), executor, targetValue, queries)
-
 				Expect(result).To(BeNil())
 				Expect(err).To(MatchError(ContainSubstring(expected)))
 				Expect(commands).To(BeEmpty())
@@ -193,7 +157,6 @@ var _ = Describe("typed XPath operations", func() {
 			result, err := QueryXPaths(context.Background(), nil, target, []XPathQuery{
 				{Path: "/nvidia/pci", Leaves: []string{"num-pfs"}},
 			})
-
 			Expect(result).To(BeNil())
 			Expect(err).To(MatchError("command executor must not be nil"))
 		})
@@ -204,13 +167,9 @@ var _ = Describe("typed XPath operations", func() {
 			executor := fakeExecutor([]byte(`{"status":"ok"}`), nil, &commands)
 
 			result, err := SetXPaths(context.Background(), executor, target, []XPathOperation{
-				{
-					Path: "/nvidia/roce",
-					Values: map[string]any{
-						"tx-sched-locality-mode": "accumulative",
-						"adaptive-routing":       true,
-					},
-				},
+				{Path: "/nvidia/roce", Values: map[string]any{
+					"tx-sched-locality-mode": "accumulative", "adaptive-routing": true,
+				}},
 				{Path: "/nvidia/link/physical", Values: map[string]any{"admin-status": "down"}},
 				{Path: "/nvidia/link/physical", Values: map[string]any{"admin-status": "up"}},
 				{Path: "/nvidia/link/breakout/module/[0]/port/[1]", Values: map[string]any{"lanes": []int{0, 1, 2, 3}}},
@@ -218,7 +177,6 @@ var _ = Describe("typed XPath operations", func() {
 
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.Status).To(Equal("ok"))
-			Expect(commands).To(HaveLen(1))
 			Expect(commands[0].args).To(Equal([]string{
 				"--json", "-t", target,
 				"/nvidia/roce", "adaptive-routing=true", "tx-sched-locality-mode=accumulative",
@@ -228,43 +186,32 @@ var _ = Describe("typed XPath operations", func() {
 			}))
 		})
 
-		It("returns a partial set result with the command error", func() {
+		It("returns a normalized partial failure", func() {
 			commandErr := errors.New("exit status 10")
 			executor := fakeExecutor([]byte(`{
 				"status":"partial",
-				"results":[
-					{"path":"/nvidia/roce/cc-steering-ext","status":"error","error_code":4,"error":"not-supported"},
-					{"path":"/nvidia/roce/adaptive-routing","status":"ok"}
-				]
+				"successes":{"/nvidia/roce/adaptive-routing":true},
+				"failures":{"/nvidia/roce/cc-steering-ext":"not-supported"}
 			}`), commandErr, &commands)
 
 			result, err := SetXPaths(context.Background(), executor, target, []XPathOperation{
-				{Path: "/nvidia/roce", Values: map[string]any{"adaptive-routing": true, "cc-steering-ext": "enabled"}},
+				{Path: "/nvidia/roce", Values: map[string]any{
+					"adaptive-routing": true, "cc-steering-ext": "enabled",
+				}},
 			})
 
-			Expect(result.Status).To(Equal("partial"))
-			Expect(result.Results).To(HaveLen(2))
 			Expect(errors.Is(err, commandErr)).To(BeTrue())
-		})
-
-		It("normalizes keyed multi-container statuses", func() {
-			executor := fakeExecutor([]byte(`{
-				"/nvidia/pci":{"status":"ok"},
-				"/nvidia/lag":{"status":"error","error":"not-supported"}
-			}`), nil, &commands)
-
-			result, err := SetXPaths(context.Background(), executor, target, []XPathOperation{
-				{Path: "/nvidia/pci", Values: map[string]any{"sriov-enabled": true}},
-				{Path: "/nvidia/lag", Values: map[string]any{"resource-allocation": "pre-allocation"}},
-			})
-
 			Expect(result.Status).To(Equal("partial"))
-			Expect(result.Results).To(HaveLen(2))
-			Expect(err).To(MatchError(ContainSubstring("not-supported")))
+			Expect(result.Successes).To(Equal(map[string]any{
+				"/nvidia/roce/adaptive-routing": true,
+			}))
+			Expect(result.Failures).To(Equal(map[string]any{
+				"/nvidia/roce/cc-steering-ext": "not-supported",
+			}))
 		})
 
-		It("logs the exact command and combined output", func() {
-			executor := fakeExecutor([]byte(`{"status":"ok"}`), nil, &commands)
+		It("logs the exact command and separate output streams", func() {
+			executor := fakeExecutorWithStderr([]byte(`{"status":"ok"}`), []byte("warning\n"), nil, &commands)
 			entries := []capturedLogEntry{}
 			ctx := logr.NewContext(context.Background(), logr.New(&capturingLogSink{entries: &entries}))
 
@@ -276,15 +223,14 @@ var _ = Describe("typed XPath operations", func() {
 			Expect(entries).To(HaveLen(1))
 			Expect(entries[0].fields).To(HaveKeyWithValue("command", append([]string{dmsCLIExecutable}, commands[0].args...)))
 			Expect(entries[0].fields).To(HaveKeyWithValue("target", target))
-			Expect(entries[0].fields).To(HaveKeyWithValue("output", `{"status":"ok"}`))
+			Expect(entries[0].fields).To(HaveKeyWithValue("stdout", `{"status":"ok"}`))
+			Expect(entries[0].fields).To(HaveKeyWithValue("stderr", "warning"))
 		})
 
 		DescribeTable("rejects invalid set input before execution",
 			func(targetValue string, operations []XPathOperation, expected string) {
 				executor := fakeExecutor([]byte(`{"status":"ok"}`), nil, &commands)
-
 				result, err := SetXPaths(context.Background(), executor, targetValue, operations)
-
 				Expect(result).To(BeNil())
 				Expect(err).To(MatchError(ContainSubstring(expected)))
 				Expect(commands).To(BeEmpty())
@@ -304,7 +250,6 @@ var _ = Describe("typed XPath operations", func() {
 			result, err := SetXPaths(context.Background(), nil, target, []XPathOperation{
 				{Path: "/nvidia/pci", Values: map[string]any{"num-pfs": 2}},
 			})
-
 			Expect(result).To(BeNil())
 			Expect(err).To(MatchError("command executor must not be nil"))
 		})

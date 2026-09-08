@@ -620,7 +620,7 @@ Result: Device configuration does NOT match the system configuration.
 			commandErr = nil
 
 			cmd := &execTesting.FakeCmd{}
-			cmd.CombinedOutputScript = append(cmd.CombinedOutputScript, func() ([]byte, []byte, error) {
+			cmd.RunScript = append(cmd.RunScript, func() ([]byte, []byte, error) {
 				return commandOutput, nil, commandErr
 			})
 			fakeExec = &execTesting.FakeExec{}

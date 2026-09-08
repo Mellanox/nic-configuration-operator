@@ -120,11 +120,11 @@ var _ = Describe("Blueprint plan", func() {
 		Expect(entries[0].fields).NotTo(HaveKey("stdout"))
 		Expect(entries[0].fields).To(HaveKeyWithValue("status", "ok"))
 		Expect(entries[0].fields).To(HaveKeyWithValue("planJSONBytes", len(result.PlanJSON)))
-		Expect(entries[0].fields).To(HaveKeyWithValue("stderr", string(stderr)))
+		Expect(entries[0].fields).To(HaveKeyWithValue("stderr", strings.TrimSpace(string(stderr))))
 	})
 
 	It("bounds malformed stdout in diagnostics", func() {
-		stdout := []byte("not-json-" + strings.Repeat("x", maxBlueprintLogOutputLen))
+		stdout := []byte("not-json-" + strings.Repeat("x", maxCommandOutputLen))
 		executor := fakeExecutor(stdout, nil, &commands)
 		entries := []capturedLogEntry{}
 		ctx := logr.NewContext(context.Background(), logr.New(&capturingLogSink{entries: &entries}))
@@ -133,8 +133,20 @@ var _ = Describe("Blueprint plan", func() {
 
 		Expect(err).To(HaveOccurred())
 		Expect(entries).To(HaveLen(1))
-		Expect(entries[0].fields["stdout"]).To(HaveLen(maxBlueprintLogOutputLen + len("... [truncated]")))
+		Expect(entries[0].fields["stdout"]).To(HaveLen(maxCommandOutputLen + len("... [truncated]")))
 		Expect(entries[0].fields["stdout"]).To(HaveSuffix("... [truncated]"))
+	})
+
+	It("bounds raw command output returned in errors", func() {
+		commandErr := errors.New("exit status 1")
+		stdout := []byte(strings.Repeat("x", maxCommandOutputLen+100))
+		executor := fakeExecutor(stdout, commandErr, &commands)
+
+		_, err := GenerateBlueprintPlan(context.Background(), executor, newRequest())
+
+		Expect(err).To(HaveOccurred())
+		Expect(len(err.Error())).To(BeNumerically("<", maxCommandOutputLen+300))
+		Expect(err.Error()).To(ContainSubstring("... [truncated]"))
 	})
 
 	It("returns the structured planner error", func() {

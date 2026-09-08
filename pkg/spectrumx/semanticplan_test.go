@@ -17,7 +17,6 @@ package spectrumx
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,323 +34,252 @@ var _ = Describe("doSPCX semantic plans", func() {
 		return content
 	}
 
-	parseFixture := func(name string, stage PlanStage) *SemanticPlan {
-		plan, err := ParseSemanticPlan(readFixture(name), stage)
+	decodeFixture := func(name string) *planDocument {
+		document, err := decodePlanDocument(readFixture(name))
+		Expect(err).NotTo(HaveOccurred())
+		return document
+	}
+
+	compileFixture := func(name string, stage PlanStage) *Plan {
+		document := decodeFixture(name)
+		plan, err := buildDMSPlan(context.Background(), document, stage)
 		Expect(err).NotTo(HaveOccurred())
 		return plan
 	}
 
-	Describe("ParseSemanticPlan", func() {
-		It("parses the generated host-k8s prepare semantic surface", func() {
-			plan := parseFixture("prepare-plan.json", PlanStagePrepare)
+	It("builds prepare batches and retains the post-breakout phase marker", func() {
+		plan := compileFixture("prepare-plan.json", PlanStagePrepare)
 
-			Expect(plan.Name).To(Equal("nco-parser-semantic-prepare"))
-			Expect(plan.Profile).To(Equal("SPX_Multiplane"))
-			Expect(plan.PathDialect).To(Equal(semanticPathDialect))
-			Expect(plan.Devices).To(HaveLen(2))
-			Expect(plan.RuntimeContext.RDMATopology).To(Equal(rdmaTopologyPerPF))
-			Expect(plan.Groups).To(HaveLen(2))
-			Expect(plan.Groups[0].Name).To(Equal("breakout"))
-			Expect(plan.Groups[0].Operations).To(HaveLen(15))
-			Expect(plan.Groups[0].Operations[0].ID).To(Equal("spcx-base-nvconfig.roce.adaptive-routing-cc-steering-ext-tx-sched-locality-mode"))
-			Expect(plan.Groups[0].Operations[0].Path).To(Equal("/nvidia/roce"))
-			Expect(plan.Groups[0].Operations[0].Kind).To(Equal("set"))
-			Expect(plan.Groups[0].Operations[0].ExecutionGroup).To(Equal("breakout"))
-			Expect(plan.Groups[0].Operations[0].TargetRole).To(BeEmpty())
-			Expect(plan.Groups[1].Name).To(Equal("post-breakout"))
-			Expect(plan.Groups[1].Operations).To(BeEmpty())
-			Expect(plan.Groups[1].RequiresReboot).To(BeTrue())
-		})
-
-		It("parses all generated configure groups before applying execution policy", func() {
-			plan := parseFixture("configure-plan.json", PlanStageConfigure)
-
-			Expect(plan.Devices).To(HaveLen(4))
-			Expect(plan.RuntimeContext.RDMATopology).To(Equal(rdmaTopologyPerRailBond))
-			Expect(plan.Groups).To(HaveLen(5))
-			Expect(groupNames(plan.Groups)).To(Equal([]string{
-				"link-runtime", "eswitch", "vf-lifecycle", "cc", "link-event",
-			}))
-			Expect(plan.Groups[0].Operations).To(HaveLen(4))
-			Expect(plan.Groups[0].Operations[1].Values).To(HaveKeyWithValue("admin-status", "down"))
-			Expect(plan.Groups[0].Operations[2].Values).To(HaveKeyWithValue("admin-status", "up"))
-			Expect(plan.Groups[1].FanoutOrder).To(Equal("per_step_barrier"))
-			Expect(plan.Groups[2].Operations[0].TargetClass).To(Equal(targetClassVFRepresentor))
-		})
-
-		DescribeTable("rejects malformed semantic contracts",
-			func(mutate func(map[string]any), expected string) {
-				var document map[string]any
-				Expect(json.Unmarshal(readFixture("prepare-plan.json"), &document)).To(Succeed())
-				mutate(document)
-				content, err := json.Marshal(document)
-				Expect(err).NotTo(HaveOccurred())
-
-				plan, err := ParseSemanticPlan(content, PlanStagePrepare)
-
-				Expect(plan).To(BeNil())
-				Expect(err).To(MatchError(ContainSubstring(expected)))
-			},
-			Entry("missing semantic groups", func(document map[string]any) {
-				delete(document["plan"].(map[string]any), "semantic")
-			}, "semantic groups"),
-			Entry("wrong path dialect", func(document map[string]any) {
-				document["plan"].(map[string]any)["path_dialect"] = "legacy"
-			}, "path dialect"),
-			Entry("missing operation reference", func(document map[string]any) {
-				groups := document["plan"].(map[string]any)["semantic"].(map[string]any)["groups"].([]any)
-				groups[0].(map[string]any)["operation_refs"] = []any{"missing-operation"}
-			}, "references missing operation"),
-			Entry("unsupported operation kind", func(document map[string]any) {
-				operations := document["plan"].(map[string]any)["operations"].(map[string]any)
-				for _, value := range operations {
-					value.(map[string]any)["kind"] = "delete"
-					break
-				}
-			}, "unsupported kind"),
-			Entry("unsupported target class", func(document map[string]any) {
-				operations := document["plan"].(map[string]any)["operations"].(map[string]any)
-				for _, value := range operations {
-					value.(map[string]any)["target_class"] = "host_global"
-					break
-				}
-			}, "unsupported target class"),
-			Entry("duplicated group", func(document map[string]any) {
-				semantic := document["plan"].(map[string]any)["semantic"].(map[string]any)
-				groups := semantic["groups"].([]any)
-				semantic["groups"] = append(groups, groups[0])
-			}, "group \"breakout\" is duplicated"),
-			Entry("invalid device target", func(document map[string]any) {
-				devices := document["plan"].(map[string]any)["devices"].([]any)
-				devices[0].(map[string]any)["dms_target"] = "pci/0000:ff:00.0"
-			}, "invalid DMS target"),
-		)
-
-		It("rejects a stage mismatch", func() {
-			plan, err := ParseSemanticPlan(readFixture("configure-plan.json"), PlanStagePrepare)
-
-			Expect(plan).To(BeNil())
-			Expect(err).To(MatchError(ContainSubstring(`stage is "configure", expected "prepare"`)))
-		})
-
-		It("uses the documented pf_netdev_all default when target_class is omitted", func() {
-			var document map[string]any
-			Expect(json.Unmarshal(readFixture("prepare-plan.json"), &document)).To(Succeed())
-			planObject := document["plan"].(map[string]any)
-			firstRef := planObject["semantic"].(map[string]any)["groups"].([]any)[0].(map[string]any)["operation_refs"].([]any)[0].(string)
-			delete(planObject["operations"].(map[string]any)[firstRef].(map[string]any), "target_class")
-			content, err := json.Marshal(document)
-			Expect(err).NotTo(HaveOccurred())
-
-			plan, err := ParseSemanticPlan(content, PlanStagePrepare)
-
-			Expect(err).NotTo(HaveOccurred())
-			Expect(plan.Groups[0].Operations[0].TargetClass).To(Equal(targetClassPFNetdevAll))
-		})
-
-		It("uses semantic operation references as the authoritative group membership", func() {
-			var document map[string]any
-			Expect(json.Unmarshal(readFixture("prepare-plan.json"), &document)).To(Succeed())
-			planObject := document["plan"].(map[string]any)
-			firstRef := planObject["semantic"].(map[string]any)["groups"].([]any)[0].(map[string]any)["operation_refs"].([]any)[0].(string)
-			planObject["operations"].(map[string]any)[firstRef].(map[string]any)["execution_group"] = "ignored-producer-detail"
-			content, err := json.Marshal(document)
-			Expect(err).NotTo(HaveOccurred())
-
-			plan, err := ParseSemanticPlan(content, PlanStagePrepare)
-
-			Expect(err).NotTo(HaveOccurred())
-			Expect(plan.Groups[0].Operations[0].ExecutionGroup).To(Equal("breakout"))
-		})
-
-		It("sorts semantic groups by their declared order", func() {
-			var document map[string]any
-			Expect(json.Unmarshal(readFixture("prepare-plan.json"), &document)).To(Succeed())
-			semantic := document["plan"].(map[string]any)["semantic"].(map[string]any)
-			groups := semantic["groups"].([]any)
-			semantic["groups"] = []any{groups[1], groups[0]}
-			content, err := json.Marshal(document)
-			Expect(err).NotTo(HaveOccurred())
-
-			plan, err := ParseSemanticPlan(content, PlanStagePrepare)
-
-			Expect(err).NotTo(HaveOccurred())
-			Expect(groupNames(plan.Groups)).To(Equal([]string{"breakout", "post-breakout"}))
-		})
-
-		It("rejects nil input without panicking", func() {
-			plan, err := ParseSemanticPlan(nil, PlanStagePrepare)
-
-			Expect(plan).To(BeNil())
-			Expect(err).To(MatchError("doSPCX plan must not be empty"))
-		})
-	})
-
-	Describe("BuildDMSOperationPlan", func() {
-		It("builds prepare batches and retains the post-breakout phase marker", func() {
-			semantic := parseFixture("prepare-plan.json", PlanStagePrepare)
-
-			plan, err := semantic.BuildDMSOperationPlan(context.Background())
-
-			Expect(err).NotTo(HaveOccurred())
-			Expect(plan.Stage).To(Equal(PlanStagePrepare))
-			Expect(plan.SkippedGroups).To(BeEmpty())
-			Expect(plan.Groups).To(HaveLen(2))
-			Expect(plan.Groups[0].Name).To(Equal("breakout"))
-			Expect(plan.Groups[0].Targets).To(HaveLen(2))
-			for _, target := range plan.Groups[0].Targets {
-				Expect(target.Operations).To(HaveLen(15))
-				Expect(target.Desired).To(HaveLen(12))
-				Expect(target.Queries).To(HaveLen(12))
-				for _, query := range target.Queries {
-					desired := findDesiredOperation(target.Desired, query.Path)
-					Expect(desired.Path).To(Equal(query.Path))
-					Expect(query.Leaves).To(HaveLen(2 * len(desired.Values)))
-					for _, leaf := range query.Leaves {
-						if strings.HasSuffix(leaf, "-pending") {
-							continue
-						}
+		Expect(plan.Name).To(Equal("nco-parser-semantic-prepare"))
+		Expect(plan.Stage).To(Equal(PlanStagePrepare))
+		Expect(plan.SkippedGroups).To(BeEmpty())
+		Expect(plan.Groups).To(HaveLen(2))
+		Expect(plan.Groups[0].Name).To(Equal("breakout"))
+		Expect(plan.Groups[0].Targets).To(HaveLen(2))
+		for _, target := range plan.Groups[0].Targets {
+			Expect(target.Operations).To(HaveLen(15))
+			Expect(target.Desired).To(HaveLen(12))
+			Expect(target.Queries).To(HaveLen(12))
+			for _, query := range target.Queries {
+				desired := findDesiredOperation(target.Desired, query.Path)
+				Expect(desired.Path).To(Equal(query.Path))
+				Expect(query.Leaves).To(HaveLen(2 * len(desired.Values)))
+				for _, leaf := range query.Leaves {
+					if !strings.HasSuffix(leaf, "-pending") {
 						Expect(query.Leaves).To(ContainElement(leaf + "-pending"))
 					}
 				}
 			}
-			Expect(plan.Groups[1].Name).To(Equal("post-breakout"))
-			Expect(plan.Groups[1].PhaseMarker).To(BeTrue())
-			Expect(plan.Groups[1].Targets).To(BeEmpty())
-		})
+		}
+		Expect(plan.Groups[1].Name).To(Equal("post-breakout"))
+		Expect(plan.Groups[1].RequiresReboot).To(BeTrue())
+		Expect(plan.Groups[1].PhaseMarker).To(BeTrue())
+		Expect(plan.Groups[1].Targets).To(BeEmpty())
+	})
 
-		It("skips eswitch and vf-lifecycle while compiling the remaining configure groups", func() {
-			semantic := parseFixture("configure-plan.json", PlanStageConfigure)
+	It("skips eswitch and vf-lifecycle while compiling configure groups", func() {
+		plan := compileFixture("configure-plan.json", PlanStageConfigure)
 
-			plan, err := semantic.BuildDMSOperationPlan(context.Background())
+		Expect(groupOperationNames(plan.Groups)).To(Equal([]string{"link-runtime", "cc", "link-event"}))
+		Expect(plan.SkippedGroups).To(Equal([]SkippedSemanticGroup{
+			{Name: "eswitch", Order: 40, Reason: "eSwitch lifecycle is outside the current NCO plan execution scope"},
+			{Name: "vf-lifecycle", Order: 60, Reason: "VF representor lifecycle is outside the current NCO plan execution scope"},
+		}))
+	})
 
-			Expect(err).NotTo(HaveOccurred())
-			Expect(groupOperationNames(plan.Groups)).To(Equal([]string{"link-runtime", "cc", "link-event"}))
-			Expect(plan.SkippedGroups).To(Equal([]SkippedSemanticGroup{
-				{Name: "eswitch", Order: 40, Reason: "eSwitch lifecycle is outside the current NCO plan execution scope"},
-				{Name: "vf-lifecycle", Order: 60, Reason: "VF representor lifecycle is outside the current NCO plan execution scope"},
-			}))
-		})
+	It("preserves ordered SET transitions but queries only final desired state", func() {
+		document := decodeFixture("configure-plan.json")
+		findGroupRecord(document, "link-runtime").FanoutOrder = "per_target"
 
-		It("preserves ordered SET transitions but queries only the final desired state", func() {
-			semantic := parseFixture("configure-plan.json", PlanStageConfigure)
-			semantic.Groups[0].FanoutOrder = "per_target"
-			plan, err := semantic.BuildDMSOperationPlan(context.Background())
-			Expect(err).NotTo(HaveOccurred())
+		plan, err := buildDMSPlan(context.Background(), document, PlanStageConfigure)
 
-			linkRuntime := plan.Groups[0]
-			Expect(linkRuntime.Name).To(Equal("link-runtime"))
-			Expect(linkRuntime.FanoutOrder).To(Equal("per_target"))
-			Expect(linkRuntime.Targets).To(HaveLen(4))
-			batch := linkRuntime.Targets[0]
-			Expect(batch.Operations).To(HaveLen(4))
-			Expect(batch.Operations[1].Values).To(HaveKeyWithValue("admin-status", "down"))
-			Expect(batch.Operations[2].Values).To(HaveKeyWithValue("admin-status", "up"))
-			Expect(batch.Desired).To(HaveLen(3))
-			Expect(batch.Desired[1].Path).To(Equal("/nvidia/link/physical"))
-			Expect(batch.Desired[1].Values).To(HaveKeyWithValue("admin-status", "up"))
-			Expect(batch.Queries[1]).To(Equal(dmsQuery("/nvidia/link/physical", "admin-status")))
-		})
+		Expect(err).NotTo(HaveOccurred())
+		linkRuntime := plan.Groups[0]
+		Expect(linkRuntime.FanoutOrder).To(Equal("per_target"))
+		Expect(linkRuntime.Targets).To(HaveLen(4))
+		batch := linkRuntime.Targets[0]
+		Expect(batch.Operations).To(HaveLen(4))
+		Expect(batch.Operations[1].Values).To(HaveKeyWithValue("admin-status", "down"))
+		Expect(batch.Operations[2].Values).To(HaveKeyWithValue("admin-status", "up"))
+		Expect(batch.Desired).To(HaveLen(3))
+		Expect(batch.Desired[1].Values).To(HaveKeyWithValue("admin-status", "up"))
+		Expect(batch.Queries[1]).To(Equal(dmsQuery("/nvidia/link/physical", "admin-status")))
+	})
 
-		It("resolves bonded RDMA operations to each plane-zero target", func() {
-			semantic := parseFixture("configure-plan.json", PlanStageConfigure)
-			for _, endpoint := range semantic.RuntimeContext.ExpectedRDMA {
-				Expect(endpoint.ControlBDF).To(BeEmpty())
-				Expect(endpoint.ControlTarget).To(BeEmpty())
-			}
-			plan, err := semantic.BuildDMSOperationPlan(context.Background())
-			Expect(err).NotTo(HaveOccurred())
+	It("resolves bonded RDMA operations to each plane-zero target", func() {
+		plan := compileFixture("configure-plan.json", PlanStageConfigure)
 
-			cc := plan.Groups[1]
-			Expect(cc.Name).To(Equal("cc"))
-			Expect(cc.Targets).To(HaveLen(2))
-			Expect([]string{cc.Targets[0].Target, cc.Targets[1].Target}).To(Equal([]string{
-				"pci/0000:64:00.0", "pci/0001:15:00.0",
-			}))
-			Expect(cc.Targets[0].Operations).To(HaveLen(24))
-		})
+		cc := plan.Groups[1]
+		Expect(cc.Name).To(Equal("cc"))
+		Expect(cc.Targets).To(HaveLen(2))
+		Expect([]string{cc.Targets[0].Target, cc.Targets[1].Target}).To(Equal([]string{
+			"pci/0000:64:00.0", "pci/0001:15:00.0",
+		}))
+		Expect(cc.Targets[0].Operations).To(HaveLen(24))
+	})
 
-		It("combines per-device and RDMA-scoped operations without widening bonded targets", func() {
-			semantic := parseFixture("configure-plan.json", PlanStageConfigure)
-			plan, err := semantic.BuildDMSOperationPlan(context.Background())
-			Expect(err).NotTo(HaveOccurred())
+	It("combines per-device and RDMA-scoped operations without widening bonded targets", func() {
+		plan := compileFixture("configure-plan.json", PlanStageConfigure)
 
-			linkEvent := plan.Groups[2]
-			Expect(linkEvent.Name).To(Equal("link-event"))
-			Expect(linkEvent.Targets).To(HaveLen(4))
-			Expect(linkEvent.Targets[0].Operations).To(HaveLen(21))
-			Expect(linkEvent.Targets[1].Operations).To(HaveLen(2))
-			Expect(linkEvent.Targets[2].Operations).To(HaveLen(21))
-			Expect(linkEvent.Targets[3].Operations).To(HaveLen(2))
-		})
+		linkEvent := plan.Groups[2]
+		Expect(linkEvent.Name).To(Equal("link-event"))
+		Expect(linkEvent.Targets).To(HaveLen(4))
+		Expect(linkEvent.Targets[0].Operations).To(HaveLen(21))
+		Expect(linkEvent.Targets[1].Operations).To(HaveLen(2))
+		Expect(linkEvent.Targets[2].Operations).To(HaveLen(21))
+		Expect(linkEvent.Targets[3].Operations).To(HaveLen(2))
+	})
 
-		It("fails closed for an unknown semantic group", func() {
-			semantic := parseFixture("configure-plan.json", PlanStageConfigure)
-			semantic.Groups[0].Name = "new-runtime-phase"
+	It("sorts semantic groups by declared order", func() {
+		document := decodeFixture("prepare-plan.json")
+		groups := document.Plan.Semantic.Groups
+		document.Plan.Semantic.Groups = []semanticGroupRecord{groups[1], groups[0]}
 
-			plan, err := semantic.BuildDMSOperationPlan(context.Background())
+		plan, err := buildDMSPlan(context.Background(), document, PlanStagePrepare)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(groupOperationNames(plan.Groups)).To(Equal([]string{"breakout", "post-breakout"}))
+	})
+
+	It("uses documented defaults for omitted kind and target class", func() {
+		document := decodeFixture("prepare-plan.json")
+		operationID := findGroupRecord(document, "breakout").OperationRefs[0]
+		operation := document.Plan.Operations[operationID]
+		operation.Kind = ""
+		operation.TargetClass = ""
+		document.Plan.Operations[operationID] = operation
+
+		plan, err := buildDMSPlan(context.Background(), document, PlanStagePrepare)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(plan.Groups[0].Targets).To(HaveLen(2))
+	})
+
+	It("validates references in intentionally skipped groups", func() {
+		document := decodeFixture("configure-plan.json")
+		findGroupRecord(document, "eswitch").OperationRefs = []string{"missing-operation"}
+
+		plan, err := buildDMSPlan(context.Background(), document, PlanStageConfigure)
+
+		Expect(plan).To(BeNil())
+		Expect(err).To(MatchError(ContainSubstring("references missing operation")))
+	})
+
+	DescribeTable("rejects malformed plan contracts",
+		func(mutate func(*planDocument), stage PlanStage, expected string) {
+			document := decodeFixture("prepare-plan.json")
+			mutate(document)
+			plan, err := buildDMSPlan(context.Background(), document, stage)
+			Expect(plan).To(BeNil())
+			Expect(err).To(MatchError(ContainSubstring(expected)))
+		},
+		Entry("missing semantic groups", func(document *planDocument) {
+			document.Plan.Semantic = nil
+		}, PlanStagePrepare, "semantic groups"),
+		Entry("wrong path dialect", func(document *planDocument) {
+			document.Plan.PathDialect = "legacy"
+		}, PlanStagePrepare, "path dialect"),
+		Entry("missing operation reference", func(document *planDocument) {
+			document.Plan.Semantic.Groups[0].OperationRefs = []string{"missing-operation"}
+		}, PlanStagePrepare, "references missing operation"),
+		Entry("unsupported operation kind", func(document *planDocument) {
+			operationID := document.Plan.Semantic.Groups[0].OperationRefs[0]
+			operation := document.Plan.Operations[operationID]
+			operation.Kind = "delete"
+			document.Plan.Operations[operationID] = operation
+		}, PlanStagePrepare, "unsupported kind"),
+		Entry("unsupported target class", func(document *planDocument) {
+			operationID := document.Plan.Semantic.Groups[0].OperationRefs[0]
+			operation := document.Plan.Operations[operationID]
+			operation.TargetClass = "host_global"
+			document.Plan.Operations[operationID] = operation
+		}, PlanStagePrepare, "unsupported target class"),
+		Entry("empty leaf list", func(document *planDocument) {
+			operationID := document.Plan.Semantic.Groups[0].OperationRefs[0]
+			operation := document.Plan.Operations[operationID]
+			operation.Values = map[string]any{"invalid": []string{}}
+			document.Plan.Operations[operationID] = operation
+		}, PlanStagePrepare, "unsupported value"),
+		Entry("nested leaf list", func(document *planDocument) {
+			operationID := document.Plan.Semantic.Groups[0].OperationRefs[0]
+			operation := document.Plan.Operations[operationID]
+			operation.Values = map[string]any{"invalid": [][]int{{1}}}
+			document.Plan.Operations[operationID] = operation
+		}, PlanStagePrepare, "unsupported value"),
+		Entry("duplicated group", func(document *planDocument) {
+			document.Plan.Semantic.Groups = append(document.Plan.Semantic.Groups, document.Plan.Semantic.Groups[0])
+		}, PlanStagePrepare, `group "breakout" is duplicated`),
+		Entry("invalid device target", func(document *planDocument) {
+			document.Plan.Devices[0].DMSTarget = "pci/0000:ff:00.0"
+		}, PlanStagePrepare, "invalid DMS target"),
+		Entry("stage mismatch", func(_ *planDocument) {}, PlanStageConfigure, `stage is "prepare", expected "configure"`),
+		Entry("unknown group", func(document *planDocument) {
+			document.Plan.Semantic.Groups[0].Name = "new-runtime-phase"
+		}, PlanStagePrepare, "unsupported doSPCX semantic group"),
+	)
+
+	DescribeTable("does not allow excluded operation classes in executable groups",
+		func(mutate func(*semanticOperationRecord)) {
+			document := decodeFixture("configure-plan.json")
+			group := findGroupRecord(document, "link-runtime")
+			operationID := group.OperationRefs[0]
+			operation := document.Plan.Operations[operationID]
+			mutate(&operation)
+			document.Plan.Operations[operationID] = operation
+
+			plan, err := buildDMSPlan(context.Background(), document, PlanStageConfigure)
 
 			Expect(plan).To(BeNil())
-			Expect(err).To(MatchError(ContainSubstring(`unsupported doSPCX semantic group "new-runtime-phase"`)))
-		})
+			Expect(err).To(MatchError(ContainSubstring("outside the current NCO execution scope")))
+		},
+		Entry("eSwitch path", func(operation *semanticOperationRecord) {
+			operation.Path = "/nvidia/eswitch"
+		}),
+		Entry("eSwitch target class", func(operation *semanticOperationRecord) {
+			operation.TargetClass = targetClassPerESwitch
+		}),
+		Entry("VF target class", func(operation *semanticOperationRecord) {
+			operation.TargetClass = targetClassVFRepresentor
+		}),
+		Entry("per-VF scope", func(operation *semanticOperationRecord) {
+			operation.Scope = "per_vf"
+		}),
+	)
 
-		DescribeTable("does not allow excluded operation classes in executable groups",
-			func(mutate func(*SemanticOperation)) {
-				semantic := parseFixture("configure-plan.json", PlanStageConfigure)
-				mutate(&semantic.Groups[0].Operations[0])
+	It("resolves per-PF RDMA operations only to devices with an RDMA endpoint", func() {
+		document := decodeFixture("configure-plan.json")
+		document.Plan.RuntimeContext.RDMATopology = rdmaTopologyPerPF
+		document.Plan.Devices[1].RDMADevice = ""
+		document.Plan.Devices[3].RDMADevice = ""
 
-				plan, err := semantic.BuildDMSOperationPlan(context.Background())
+		plan, err := buildDMSPlan(context.Background(), document, PlanStageConfigure)
 
-				Expect(plan).To(BeNil())
-				Expect(err).To(MatchError(ContainSubstring("outside the current NCO execution scope")))
-			},
-			Entry("eSwitch path", func(operation *SemanticOperation) {
-				operation.Path = "/nvidia/eswitch"
-			}),
-			Entry("eSwitch target class", func(operation *SemanticOperation) {
-				operation.TargetClass = targetClassPerESwitch
-			}),
-			Entry("VF target class", func(operation *SemanticOperation) {
-				operation.TargetClass = targetClassVFRepresentor
-			}),
-			Entry("per-VF scope", func(operation *SemanticOperation) {
-				operation.Scope = "per_vf"
-			}),
-		)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(plan.Groups[1].Name).To(Equal("cc"))
+		Expect(plan.Groups[1].Targets).To(HaveLen(2))
+		Expect([]string{plan.Groups[1].Targets[0].Target, plan.Groups[1].Targets[1].Target}).To(Equal([]string{
+			"pci/0000:64:00.0", "pci/0001:15:00.0",
+		}))
+	})
 
-		It("resolves per-PF RDMA operations only to devices with an RDMA endpoint", func() {
-			semantic := parseFixture("configure-plan.json", PlanStageConfigure)
-			semantic.RuntimeContext.RDMATopology = rdmaTopologyPerPF
-			semantic.Devices[1].RDMADevice = ""
-			semantic.Devices[3].RDMADevice = ""
+	It("rejects empty and nil plans without panicking", func() {
+		document, err := decodePlanDocument(nil)
+		Expect(document).To(BeNil())
+		Expect(err).To(MatchError("doSPCX plan must not be empty"))
 
-			plan, err := semantic.BuildDMSOperationPlan(context.Background())
-
-			Expect(err).NotTo(HaveOccurred())
-			Expect(plan.Groups[1].Name).To(Equal("cc"))
-			Expect(plan.Groups[1].Targets).To(HaveLen(2))
-			Expect([]string{plan.Groups[1].Targets[0].Target, plan.Groups[1].Targets[1].Target}).To(Equal([]string{
-				"pci/0000:64:00.0", "pci/0001:15:00.0",
-			}))
-		})
-
-		It("rejects a nil semantic plan", func() {
-			var semantic *SemanticPlan
-
-			plan, err := semantic.BuildDMSOperationPlan(context.Background())
-
-			Expect(plan).To(BeNil())
-			Expect(err).To(MatchError("semantic plan must not be nil"))
-		})
+		plan, err := buildDMSPlan(context.Background(), nil, PlanStagePrepare)
+		Expect(plan).To(BeNil())
+		Expect(err).To(MatchError("doSPCX plan must not be nil"))
 	})
 })
 
-func groupNames(groups []SemanticGroup) []string {
-	result := make([]string, 0, len(groups))
-	for _, group := range groups {
-		result = append(result, group.Name)
+func findGroupRecord(document *planDocument, name string) *semanticGroupRecord {
+	for index := range document.Plan.Semantic.Groups {
+		if document.Plan.Semantic.Groups[index].Name == name {
+			return &document.Plan.Semantic.Groups[index]
+		}
 	}
-	return result
+	return nil
 }
 
 func groupOperationNames(groups []DMSOperationGroup) []string {

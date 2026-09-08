@@ -400,9 +400,12 @@ dms-cli --json -t pci/<BDF> /nvidia/link/physical admin-status=down \
 
 SET value keys are sorted for deterministic command lines. Scalar leaf-list
 values use repeated assignments (`lanes=0 lanes=1 ...`), avoiding the current
-DMS compact-list parsing limitation. GET normalizes flat, backend-wrapped, and
-container-keyed JSON responses and surfaces partial and `not-supported` results
-as errors while preserving their structured result.
+DMS compact-list parsing limitation. GET decodes the public `dms-cli --json`
+contract: one container returns a flat values object and a batch returns objects
+keyed by container path. SET success returns `{ "status": "ok" }`. For partial
+GETs, successful leaves are merged into `Values`; SET results retain both the
+`successes` and `failures` maps. Both operations retain `status`, `error_msg`,
+and `error_code` while also returning the command error.
 
 Blueprint planning uses this command shape:
 
@@ -414,10 +417,10 @@ dms-cli --json /nvidia/blueprints/plan profile=<profile> name=<name> \
 
 For Blueprints planning, the wrapper sets `BLUEPRINTS_ROOT` and the DMS
 `BP_STATE_DIR` variable only on the `dms-cli` child process.
-Planner stdout and stderr are captured separately because stdout is the JSON
-protocol while DMS diagnostics are written to stderr. Successful calls log the
+All JSON-based `dms-cli` wrappers capture stdout and stderr separately because
+stdout is the protocol while DMS diagnostics are written to stderr. Successful calls log the
 exact command, result status, and plan size without repeating the embedded plan;
-failure output is bounded before logging.
+failure output is bounded before logging or adding it to a returned error.
 `SpectrumXConfigManager` supplies the fixed `/opt/nvidia/blueprints` path and
 creates its command executor internally. The executable DMS Blueprints action
 tree remains part of the daemon image. Authored doSPCX data is supplied
@@ -471,10 +474,10 @@ const (
 )
 
 type Plan struct {
-    Name     string
-    Stage    PlanStage
-    JSON     json.RawMessage
-    Semantic *SemanticPlan
+    Name          string
+    Stage         PlanStage
+    Groups        []DMSOperationGroup
+    SkippedGroups []SkippedSemanticGroup
 }
 
 type PlanManager interface {
@@ -506,18 +509,17 @@ image is not removed when no ConfigMap bundle was installed.
 
 `PreparePlan` generates or reuses the stage-specific plan for the supplied
 Spectrum-X device group. It is a no-op when none of the supplied devices enable
-Spectrum-X. `GetPreparedPlan` retrieves the persisted plan without invoking
-`dms-cli`, and rejects it unless its cached inputs, exact generated device
-topology, and target map still match the supplied device. It also parses the
-host-k8s `plan.semantic.groups` surface and resolves every `operation_ref`
-through `plan.operations`. A generated or cached plan is accepted only when
-`BuildDMSOperationPlan` can compile its execution policy and targets. The parser
-preserves group and operation ordering, including repeated writes, and does not
-inspect bare-metal steps, services, or artifacts.
+Spectrum-X. It parses the host-k8s `plan.semantic.groups` surface, resolves every
+`operation_ref` through `plan.operations`, and caches the resulting `Plan` in
+memory. A persisted plan is validated and compiled once after process startup;
+later `PreparePlan` calls reuse memory while the inputs match. `GetPreparedPlan`
+does not access the filesystem or invoke `dms-cli`; it rejects the request unless
+the cached inputs and target-map membership match the supplied device.
 
-`SemanticPlan.BuildDMSOperationPlan(ctx)` resolves `pf_netdev_all` and
-`pf_rdma_scope` to target-specific query and SET batches without executing
-them. Queries represent the final desired state; prepare-stage queries include
+Compilation resolves `pf_netdev_all` and `pf_rdma_scope` to target-specific
+query and SET batches without executing them. It preserves group and operation
+ordering, including repeated writes, and does not inspect bare-metal steps,
+services, or artifacts. Queries represent the final desired state; prepare-stage queries include
 both the current and `-pending` leaves used by the doSPCX NVConfig gate. SET
 operations preserve the complete transition sequence. Public operations may
 omit `kind` (`set` is the DMS default), `execution_group`, and `target_role`;
@@ -967,9 +969,9 @@ Methods support two modes via option structs:
 ### Command Execution Logging
 
 External commands normally use `cmd.CombinedOutput()` and log at `log.Log.V(2)`.
-JSON protocol commands that can emit DMS diagnostics on stderr, such as
-Blueprint plan generation, capture the streams separately and parse stdout
-only. Output is not duplicated in error-level logs.
+JSON protocol commands that can emit DMS diagnostics on stderr capture the
+streams separately and parse stdout only. Diagnostic content is bounded in both
+logs and returned errors. Output is not duplicated in error-level logs.
 
 ### Batch Operations
 
