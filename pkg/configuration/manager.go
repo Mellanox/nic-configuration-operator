@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"k8s.io/client-go/tools/record"
@@ -223,6 +224,9 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 		log.Log.Error(err, "failed to calculate desired nvconfig parameters", "device", device.Name)
 		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}
+	if options.Force {
+		extrapolatePortParamsFromNumOfPF(desiredParams)
+	}
 	log.Log.V(2).Info("combined desired nv config built", "device", device.Name, "params", desiredParams, "force", options.Force)
 
 	// 5. set_system_conf baseline: if the combined params do not cover all mismatched profile params
@@ -272,7 +276,9 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 					hasUnsupportedParams = true
 					continue
 				}
-				if !slices.Contains(nextValues, value) {
+				// WithDefault still requires the param to exist in the query, but applies it even
+				// when next-boot already contains the desired value.
+				if options.WithDefault || !slices.Contains(nextValues, value) {
 					batch[param] = value
 				}
 			}
@@ -281,11 +287,14 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 			continue
 		}
 		log.Log.V(2).Info("applying nv config to device", "device", device.Name, "pci", port.PCI, "fwctlDevice", port.FwctlDevice, "config", batch, "force", options.Force)
-		if err := h.nvConfigUtils.SetNvConfigParametersBatch(port, batch, options.WithDefault, options.Force); err != nil {
+		applyStatus, err := h.nvConfigUtils.SetNvConfigParametersBatch(port, batch, options.WithDefault, options.Force)
+		if err != nil {
 			log.Log.Error(err, "Failed to apply nv config parameters", "device", device.Name, "params", batch)
 			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 		}
-		anyParamsApplied = true
+		if applyStatus == types.ApplyStatusSuccess {
+			anyParamsApplied = true
+		}
 	}
 
 	if !anyParamsApplied && !hasUnsupportedParams && !systemConfApplied {
@@ -301,6 +310,35 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 	log.Log.Info("nv config applied", "device", device.Name, "status", status, "rebootRequired", rebootRequired)
 
 	return &types.ConfigurationApplyResult{Status: status, RebootRequired: rebootRequired}, nil
+}
+
+func extrapolatePortParamsFromNumOfPF(params map[string]string) {
+	value, ok := params[consts.NumOfPfParam]
+	if !ok {
+		return
+	}
+	portCount, err := strconv.Atoi(value)
+	if err != nil || portCount < 2 {
+		return
+	}
+
+	baseValues := map[string]string{}
+	for param, value := range params {
+		portNum, ok := consts.PortSuffixNum(param)
+		if !ok || portNum != 1 {
+			continue
+		}
+		base := param[:len(param)-len(strconv.Itoa(portNum))-2]
+		baseValues[base] = value
+	}
+	for base, baseValue := range baseValues {
+		for portNum := 1; portNum <= portCount; portNum++ {
+			param := consts.PortParam(base, portNum)
+			if _, exists := params[param]; !exists {
+				params[param] = baseValue
+			}
+		}
+	}
 }
 
 // setSystemConf stages the requested Network Bay set_system_conf for the device's ASIC (the

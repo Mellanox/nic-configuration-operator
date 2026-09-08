@@ -51,6 +51,26 @@ func mismatchSystemConf(mismatchedParams ...string) []interface{} {
 }
 
 var _ = Describe("ConfigurationManager", func() {
+	Describe("extrapolatePortParamsFromNumOfPF", func() {
+		It("copies P1 values to missing ports while preserving explicit overrides", func() {
+			params := map[string]string{"NUM_OF_PF": "3", "LINK_TYPE_P1": "2", "LINK_TYPE_P3": "1"}
+
+			extrapolatePortParamsFromNumOfPF(params)
+
+			Expect(params).To(Equal(map[string]string{
+				"NUM_OF_PF": "3", "LINK_TYPE_P1": "2", "LINK_TYPE_P2": "2", "LINK_TYPE_P3": "1",
+			}))
+		})
+
+		It("does not extrapolate from a higher port when P1 is absent", func() {
+			params := map[string]string{"NUM_OF_PF": "3", "LINK_TYPE_P2": "2"}
+
+			extrapolatePortParamsFromNumOfPF(params)
+
+			Expect(params).To(Equal(map[string]string{"NUM_OF_PF": "3", "LINK_TYPE_P2": "2"}))
+		})
+	})
+
 	Describe("configurationManager.ValidateDeviceNvSpec", func() {
 		var (
 			mockHostUtils        mocks.ConfigurationUtils
@@ -654,7 +674,7 @@ var _ = Describe("ConfigurationManager", func() {
 						mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
 							Return(desiredConfig, nil)
 						mockNV.On("SetNvConfigParametersBatch", portSpec(pciAddress), map[string]string{"param1": "value2"}, false, false).
-							Return(nil)
+							Return(types.ApplyStatusSuccess, nil)
 
 						result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
 						Expect(result.RebootRequired).To(BeTrue())
@@ -721,7 +741,7 @@ var _ = Describe("ConfigurationManager", func() {
 							Return(desiredConfig, nil)
 						setParamErr := errors.New("failed to set param1")
 						mockNV.On("SetNvConfigParametersBatch", portSpec(pciAddress), map[string]string{"param1": "value3"}, false, false).
-							Return(setParamErr)
+							Return(types.ApplyStatusFailed, setParamErr)
 
 						result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
 						Expect(result.RebootRequired).To(BeFalse())
@@ -752,7 +772,8 @@ var _ = Describe("ConfigurationManager", func() {
 						mockNV.On("QueryNvConfig", ctx, portSpec(pciAddress2), []string(nil)).Return(nvConfig1, nil)
 						mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig0).Return(map[string]string{"TRACER_ENABLED": "1"}, nil)
 						// Only port2 should be updated
-						mockNV.On("SetNvConfigParametersBatch", portSpec(pciAddress2), map[string]string{"TRACER_ENABLED": "1"}, false, false).Return(nil)
+						mockNV.On("SetNvConfigParametersBatch", portSpec(pciAddress2), map[string]string{"TRACER_ENABLED": "1"}, false, false).
+							Return(types.ApplyStatusSuccess, nil)
 
 						result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
 						Expect(err).To(BeNil())
@@ -805,7 +826,7 @@ var _ = Describe("ConfigurationManager", func() {
 					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
 						Return(desiredConfig, nil)
 					mockNV.On("SetNvConfigParametersBatch", portSpec(pciAddress), map[string]string{"param1": "newValue3", "param2": "newValue3"}, false, false).
-						Return(nil)
+						Return(types.ApplyStatusSuccess, nil)
 
 					result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
 					Expect(result.RebootRequired).To(BeTrue())
@@ -1371,7 +1392,8 @@ var _ = Describe("ConfigurationManager", func() {
 				mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, mock.Anything).
 					Return(map[string]string{"NUM_OF_PF": "2", "LINK_TYPE_P1": "2"}, nil)
 				// NUM_OF_PF differs (1 != 2) and is applied; LINK_TYPE_P1 already matches and is skipped.
-				mockNVConfigUtils.On("SetNvConfigParametersBatch", portSpec(pciAddress), map[string]string{"NUM_OF_PF": "2"}, false, false).Return(nil)
+				mockNVConfigUtils.On("SetNvConfigParametersBatch", portSpec(pciAddress), map[string]string{"NUM_OF_PF": "2"}, false, false).
+					Return(types.ApplyStatusSuccess, nil)
 
 				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
 				Expect(err).NotTo(HaveOccurred())
@@ -1383,7 +1405,7 @@ var _ = Describe("ConfigurationManager", func() {
 				mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, mock.Anything).
 					Return(map[string]string{"NUM_OF_PF": "2", "LINK_TYPE_P1": "2"}, nil)
 				mockNVConfigUtils.On("SetNvConfigParametersBatch", portSpec(pciAddress),
-					map[string]string{"NUM_OF_PF": "2", "LINK_TYPE_P1": "2"}, false, true).Return(nil)
+					map[string]string{"NUM_OF_PF": "2", "LINK_TYPE_P1": "2", "LINK_TYPE_P2": "2"}, false, true).Return(types.ApplyStatusSuccess, nil)
 
 				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{Force: true})
 				Expect(err).NotTo(HaveOccurred())
@@ -1396,8 +1418,10 @@ var _ = Describe("ConfigurationManager", func() {
 				mockNVConfigUtils.On("QueryNvConfig", ctx, portSpec(pciAddress2), []string(nil)).Return(types.NvConfigQuery{}, nil)
 				mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, mock.Anything).
 					Return(map[string]string{"NUM_OF_PF": "2"}, nil)
-				mockNVConfigUtils.On("SetNvConfigParametersBatch", portSpec(pciAddress), map[string]string{"NUM_OF_PF": "2"}, false, true).Return(nil)
-				mockNVConfigUtils.On("SetNvConfigParametersBatch", portSpec(pciAddress2), map[string]string{"NUM_OF_PF": "2"}, false, true).Return(nil)
+				mockNVConfigUtils.On("SetNvConfigParametersBatch", portSpec(pciAddress), map[string]string{"NUM_OF_PF": "2"}, false, true).
+					Return(types.ApplyStatusSuccess, nil)
+				mockNVConfigUtils.On("SetNvConfigParametersBatch", portSpec(pciAddress2), map[string]string{"NUM_OF_PF": "2"}, false, true).
+					Return(types.ApplyStatusSuccess, nil)
 
 				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{Force: true})
 				Expect(err).NotTo(HaveOccurred())
@@ -1410,11 +1434,39 @@ var _ = Describe("ConfigurationManager", func() {
 					types.NvConfigQuery{NextBootConfig: map[string][]string{"NUM_OF_PF": {"1"}}}, nil)
 				mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, mock.Anything).
 					Return(map[string]string{"NUM_OF_PF": "2"}, nil)
-				mockNVConfigUtils.On("SetNvConfigParametersBatch", portSpec(pciAddress), map[string]string{"NUM_OF_PF": "2"}, true, false).Return(nil)
+				mockNVConfigUtils.On("SetNvConfigParametersBatch", portSpec(pciAddress), map[string]string{"NUM_OF_PF": "2"}, true, false).
+					Return(types.ApplyStatusSuccess, nil)
 
 				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{WithDefault: true})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(result.RebootRequired).To(BeTrue())
+			})
+
+			It("returns NothingToDo when WithDefault=true but mlxconfig reports no changed params", func() {
+				mockNVConfigUtils.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(
+					types.NvConfigQuery{NextBootConfig: map[string][]string{"NUM_OF_PF": {"2"}}}, nil)
+				mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, mock.Anything).
+					Return(map[string]string{"NUM_OF_PF": "2"}, nil)
+				mockNVConfigUtils.On("SetNvConfigParametersBatch", portSpec(pciAddress), map[string]string{"NUM_OF_PF": "2"}, true, false).
+					Return(types.ApplyStatusNothingToDo, nil)
+
+				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{WithDefault: true})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.Status).To(Equal(types.ApplyStatusNothingToDo))
+				Expect(result.RebootRequired).To(BeFalse())
+			})
+
+			It("returns NothingToDo when Force and WithDefault are true but mlxconfig reports no changed params", func() {
+				mockNVConfigUtils.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(types.NvConfigQuery{}, nil)
+				mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, mock.Anything).
+					Return(map[string]string{"NUM_OF_PF": "2"}, nil)
+				mockNVConfigUtils.On("SetNvConfigParametersBatch", portSpec(pciAddress), map[string]string{"NUM_OF_PF": "2"}, true, true).
+					Return(types.ApplyStatusNothingToDo, nil)
+
+				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{Force: true, WithDefault: true})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.Status).To(Equal(types.ApplyStatusNothingToDo))
+				Expect(result.RebootRequired).To(BeFalse())
 			})
 
 			It("returns NothingToDo when the combined params already match", func() {
@@ -1452,7 +1504,8 @@ var _ = Describe("ConfigurationManager", func() {
 					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, mock.Anything).
 						Return(map[string]string{"NUM_OF_PF": "2"}, nil)
 					mockNVConfigUtils.On("SetSystemConf", ctx, portSpec(pciAddress), "conf3", 0, true).Return(nil)
-					mockNVConfigUtils.On("SetNvConfigParametersBatch", portSpec(pciAddress), map[string]string{"NUM_OF_PF": "2"}, false, true).Return(nil)
+					mockNVConfigUtils.On("SetNvConfigParametersBatch", portSpec(pciAddress), map[string]string{"NUM_OF_PF": "2"}, false, true).
+						Return(types.ApplyStatusSuccess, nil)
 
 					result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{Force: true})
 					Expect(err).NotTo(HaveOccurred())
@@ -1465,7 +1518,8 @@ var _ = Describe("ConfigurationManager", func() {
 						Return(mismatchSystemConf("NUM_OF_PF")...)
 					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, mock.Anything).
 						Return(map[string]string{"NUM_OF_PF": "2"}, nil)
-					mockNVConfigUtils.On("SetNvConfigParametersBatch", portSpec(pciAddress), map[string]string{"NUM_OF_PF": "2"}, false, true).Return(nil)
+					mockNVConfigUtils.On("SetNvConfigParametersBatch", portSpec(pciAddress), map[string]string{"NUM_OF_PF": "2"}, false, true).
+						Return(types.ApplyStatusSuccess, nil)
 					mockNVConfigUtils.AssertNotCalled(GinkgoT(), "SetSystemConf", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 
 					result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{Force: true})
@@ -1639,7 +1693,7 @@ var _ = Describe("ConfigurationManager", func() {
 				setSystemConfCall := mockNV.On("SetSystemConf", ctx, portSpec(pciAddress), "conf3", 0, false).Return(nil)
 				// set_system_conf is the baseline and must be staged before the override batch.
 				mockNV.On("SetNvConfigParametersBatch", portSpec(pciAddress), map[string]string{"param1": "value2"}, false, false).
-					Return(nil).NotBefore(setSystemConfCall)
+					Return(types.ApplyStatusSuccess, nil).NotBefore(setSystemConfCall)
 
 				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
 				Expect(err).NotTo(HaveOccurred())
@@ -1782,7 +1836,8 @@ var _ = Describe("ConfigurationManager", func() {
 					types.NvConfigQuery{NextBootConfig: staged, CurrentConfig: staged}, nil)
 				fullFlowNV.On("ValidateSystemConf", fullFlowCtx, portSpec(pciAddress), "conf3", 0).
 					Return(mismatchSystemConf("NUM_OF_PF")...)
-				fullFlowNV.On("SetNvConfigParametersBatch", portSpec(pciAddress), map[string]string{"NUM_OF_PF": "8"}, false, false).Return(nil)
+				fullFlowNV.On("SetNvConfigParametersBatch", portSpec(pciAddress), map[string]string{"NUM_OF_PF": "8"}, false, false).
+					Return(types.ApplyStatusSuccess, nil)
 
 				updateNeeded, rebootNeeded, _, err := fullFlowManager.ValidateDeviceNvSpec(fullFlowCtx, fullFlowDevice)
 				Expect(err).NotTo(HaveOccurred())
@@ -1836,7 +1891,8 @@ var _ = Describe("ConfigurationManager", func() {
 				fullFlowNV.On("ValidateSystemConf", fullFlowCtx, portSpec(pciAddress), "conf3", 0).
 					Return(mismatchSystemConf("NUM_OF_PF", "LINK_TYPE_P1")...)
 				// Only LINK_TYPE_P1 differs from next boot; the raw value 2 wins over the Spectrum-X value 1.
-				fullFlowNV.On("SetNvConfigParametersBatch", portSpec(pciAddress), map[string]string{"LINK_TYPE_P1": "2"}, false, false).Return(nil)
+				fullFlowNV.On("SetNvConfigParametersBatch", portSpec(pciAddress), map[string]string{"LINK_TYPE_P1": "2"}, false, false).
+					Return(types.ApplyStatusSuccess, nil)
 
 				updateNeeded, rebootNeeded, _, err := fullFlowManager.ValidateDeviceNvSpec(fullFlowCtx, fullFlowDevice)
 				Expect(err).NotTo(HaveOccurred())
@@ -1874,7 +1930,7 @@ var _ = Describe("ConfigurationManager", func() {
 					Return(mismatchSystemConf("NUM_OF_PF", "LINK_TYPE_P1")...)
 				// Raw wins on both: LINK_TYPE_P1 over Spectrum-X (1→2) and NUM_OF_VFS over template (4→16).
 				fullFlowNV.On("SetNvConfigParametersBatch", portSpec(pciAddress),
-					map[string]string{"LINK_TYPE_P1": "2", consts.SriovNumOfVfsParam: "16"}, false, false).Return(nil)
+					map[string]string{"LINK_TYPE_P1": "2", consts.SriovNumOfVfsParam: "16"}, false, false).Return(types.ApplyStatusSuccess, nil)
 
 				updateNeeded, rebootNeeded, _, err := fullFlowManager.ValidateDeviceNvSpec(fullFlowCtx, fullFlowDevice)
 				Expect(err).NotTo(HaveOccurred())
