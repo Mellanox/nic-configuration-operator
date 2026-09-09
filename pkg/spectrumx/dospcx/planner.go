@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package spectrumx
+package dospcx
 
 import (
 	"bytes"
@@ -29,7 +29,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
+	execUtils "k8s.io/utils/exec"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
@@ -59,19 +61,37 @@ const (
 	PlanStageConfigure PlanStage = "configure"
 )
 
-// Plan is a compiled, execution-ready view of a generated doSPCX plan.
+// Plan is the homogeneous configuration intent compiled from doSPCX plans.
 type Plan struct {
-	Name          string
-	Stage         PlanStage
-	Groups        []DMSOperationGroup
-	SkippedGroups []SkippedSemanticGroup
+	Breakout      []dmscli.XPathOperation
+	PostBreakout  []dmscli.XPathOperation
+	RuntimeConfig []OperationGroup
 }
 
-// PlanManager owns doSPCX target-map construction, plan generation, caching,
-// persistence, and retrieval.
-type PlanManager interface {
-	PreparePlan(ctx context.Context, devices []*v1alpha1.NicDevice, stage PlanStage) error
-	GetPreparedPlan(device *v1alpha1.NicDevice, stage PlanStage) (*Plan, error)
+// OperationGroup is an ordered group of runtime configuration operations.
+type OperationGroup struct {
+	Name       string
+	Operations []dmscli.XPathOperation
+}
+
+// Manager owns doSPCX data installation, target-map construction, plan
+// generation, parsing, caching, persistence, and retrieval.
+type Manager struct {
+	planMutex          sync.RWMutex
+	preparedPlans      map[string]*preparedPlan
+	execInterface      execUtils.Interface
+	blueprintsStateDir string
+	dospcxDataRoot     string
+	dospcxDataDigest   string
+}
+
+// NewManager creates a doSPCX planner manager.
+func NewManager(execInterface execUtils.Interface) *Manager {
+	return &Manager{
+		preparedPlans:  make(map[string]*preparedPlan),
+		execInterface:  execInterface,
+		dospcxDataRoot: defaultDospcxDataRoot,
+	}
 }
 
 var canonicalFunctionZeroBDF = regexp.MustCompile(`^[0-9a-f]{4}:[0-9a-f]{2}:([0-9a-f]{2})\.0$`)
@@ -132,7 +152,7 @@ type preparedPlan struct {
 
 // PreparePlan ensures that a matching node-scoped plan is cached for the
 // requested phase. It is a no-op when none of the devices enable Spectrum-X.
-func (m *spectrumXConfigManager) PreparePlan(
+func (m *Manager) PreparePlan(
 	ctx context.Context,
 	devices []*v1alpha1.NicDevice,
 	stage PlanStage,
@@ -244,7 +264,7 @@ func (m *spectrumXConfigManager) PreparePlan(
 
 // GetPreparedPlan retrieves a cached plan only when it still matches the
 // supplied Spectrum-X device and includes that device in its target map.
-func (m *spectrumXConfigManager) GetPreparedPlan(device *v1alpha1.NicDevice, stage PlanStage) (*Plan, error) {
+func (m *Manager) GetPreparedPlan(device *v1alpha1.NicDevice, stage PlanStage) (*Plan, error) {
 	if m == nil {
 		return nil, fmt.Errorf("plan manager must not be nil")
 	}
@@ -288,55 +308,8 @@ func (m *spectrumXConfigManager) GetPreparedPlan(device *v1alpha1.NicDevice, sta
 	return clonePlan(cached.plan), nil
 }
 
-func clonePlan(source *Plan) *Plan {
-	if source == nil {
-		return nil
-	}
-	result := &Plan{
-		Name:          source.Name,
-		Stage:         source.Stage,
-		Groups:        make([]DMSOperationGroup, len(source.Groups)),
-		SkippedGroups: append([]SkippedSemanticGroup(nil), source.SkippedGroups...),
-	}
-	for groupIndex, group := range source.Groups {
-		result.Groups[groupIndex] = group
-		result.Groups[groupIndex].Targets = make([]DMSTargetOperations, len(group.Targets))
-		for targetIndex, target := range group.Targets {
-			result.Groups[groupIndex].Targets[targetIndex] = DMSTargetOperations{
-				Target:     target.Target,
-				Queries:    cloneXPathQueries(target.Queries),
-				Desired:    cloneXPathOperations(target.Desired),
-				Operations: cloneXPathOperations(target.Operations),
-			}
-		}
-	}
-	return result
-}
-
-func cloneXPathQueries(source []dmscli.XPathQuery) []dmscli.XPathQuery {
-	result := make([]dmscli.XPathQuery, len(source))
-	for index, query := range source {
-		result[index] = dmscli.XPathQuery{
-			Path:   query.Path,
-			Leaves: append([]string(nil), query.Leaves...),
-		}
-	}
-	return result
-}
-
-func cloneXPathOperations(source []dmscli.XPathOperation) []dmscli.XPathOperation {
-	result := make([]dmscli.XPathOperation, len(source))
-	for index, operation := range source {
-		result[index] = dmscli.XPathOperation{
-			Path:   operation.Path,
-			Values: cloneValueMap(operation.Values),
-		}
-	}
-	return result
-}
-
 func newPlanMetadata(
-	m *spectrumXConfigManager,
+	m *Manager,
 	config *planConfig,
 	stage PlanStage,
 	stateDir string,
@@ -401,7 +374,7 @@ func validateDeviceInTargetMap(config *planConfig, saved targetMap) error {
 	return fmt.Errorf("BDF %q is absent from the target map", expectedTarget.BDF)
 }
 
-func (m *spectrumXConfigManager) resolvedStateDir() string {
+func (m *Manager) resolvedStateDir() string {
 	if strings.TrimSpace(m.blueprintsStateDir) != "" {
 		return m.blueprintsStateDir
 	}
@@ -657,7 +630,7 @@ func validateGeneratedPlan(
 	if err != nil {
 		return nil, fmt.Errorf("decode generated doSPCX %s plan: %w", expectedStage, err)
 	}
-	plan, err := buildDMSPlan(context.Background(), document, expectedStage)
+	plan, err := buildPlan(document, expectedStage)
 	if err != nil {
 		return nil, fmt.Errorf("compile generated doSPCX %s semantic plan: %w", expectedStage, err)
 	}
@@ -679,86 +652,7 @@ func validateGeneratedPlan(
 	if len(document.Artifacts.Manifest) > 0 {
 		return nil, fmt.Errorf("generated doSPCX %s plan unexpectedly contains rendered artifacts", expectedStage)
 	}
-	if err := validateGeneratedPlanDevices(document.Plan.Devices, config, expectedStage); err != nil {
-		return nil, err
-	}
-	if len(document.Plan.PostBreakoutDevices) > 0 {
-		if err := validateGeneratedPostBreakoutDevices(document.Plan.PostBreakoutDevices, config); err != nil {
-			return nil, err
-		}
-	}
 	return plan, nil
-}
-
-func validateGeneratedPlanDevices(actual []planDevice, config *planConfig, stage PlanStage) error {
-	planes := 1
-	if stage == PlanStageConfigure {
-		planes = config.planes
-	}
-	return validateGeneratedDeviceView(actual, config, planes, string(stage), false)
-}
-
-func validateGeneratedPostBreakoutDevices(actual []planDevice, config *planConfig) error {
-	if err := validateGeneratedDeviceView(actual, config, config.planes, "post-breakout", true); err != nil {
-		return err
-	}
-	for _, device := range actual {
-		if !device.PlaneExplicit {
-			return fmt.Errorf("generated doSPCX post-breakout device %q does not identify an explicit plane", device.BDF)
-		}
-	}
-	return nil
-}
-
-func validateGeneratedDeviceView(
-	actual []planDevice,
-	config *planConfig,
-	planes int,
-	view string,
-	allowMissingDeviceID bool,
-) error {
-	expected := make(map[string]planDevice, len(config.targetMap.PreBreakout.Targets)*config.planes)
-	for _, target := range config.targetMap.PreBreakout.Targets {
-		for plane := 0; plane < planes; plane++ {
-			bdf, err := bdfForPlane(target.BDF, plane)
-			if err != nil {
-				return err
-			}
-			expected[bdf] = planDevice{
-				BDF:       bdf,
-				DeviceID:  target.DeviceID,
-				DMSTarget: "pci/" + bdf,
-				Rail:      target.Rail,
-				Plane:     plane,
-				Network:   target.Role,
-			}
-		}
-	}
-	if len(actual) != len(expected) {
-		return fmt.Errorf("generated doSPCX %s device view has %d devices, expected %d", view, len(actual), len(expected))
-	}
-	for _, device := range actual {
-		want, found := expected[device.BDF]
-		if !found {
-			return fmt.Errorf("generated doSPCX %s device view contains unexpected device BDF %q", view, device.BDF)
-		}
-		deviceIDMatches := device.DeviceID == want.DeviceID || (allowMissingDeviceID && device.DeviceID == "")
-		if device.DMSTarget != want.DMSTarget || !deviceIDMatches ||
-			device.Rail != want.Rail || device.Plane != want.Plane || device.Network != want.Network {
-			return fmt.Errorf("generated doSPCX %s device %q topology does not match the target map", view, device.BDF)
-		}
-	}
-	return nil
-}
-
-func bdfForPlane(baseBDF string, plane int) (string, error) {
-	if !isCanonicalFunctionZeroBDF(baseBDF) {
-		return "", fmt.Errorf("cannot derive plane %d from non-canonical function-zero BDF %q", plane, baseBDF)
-	}
-	if plane < 0 || plane > 7 {
-		return "", fmt.Errorf("cannot derive PCI function for plane %d", plane)
-	}
-	return strings.TrimSuffix(baseBDF, ".0") + "." + strconv.Itoa(plane), nil
 }
 
 func writeJSONFileAtomic(path string, value any) error {

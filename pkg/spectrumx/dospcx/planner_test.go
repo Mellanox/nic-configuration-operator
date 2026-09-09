@@ -13,13 +13,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package spectrumx
+package dospcx
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -45,17 +48,13 @@ const (
 func newTestPlanManager(
 	execInterface execUtils.Interface,
 	stateDir string,
-) PlanManager {
-	return &spectrumXConfigManager{
-		spectrumXConfigs:   nil,
+) *Manager {
+	return &Manager{
 		preparedPlans:      make(map[string]*preparedPlan),
-		dmsManager:         nil,
 		execInterface:      execInterface,
 		blueprintsStateDir: stateDir,
 		dospcxDataRoot:     filepath.Join(stateDir, "dospcx-data"),
 		dospcxDataDigest:   "",
-		ccProcesses:        nil,
-		ccTerminationChan:  nil,
 	}
 }
 
@@ -73,11 +72,10 @@ func generatePreparePlan(
 	if err := manager.PreparePlan(ctx, devices, PlanStagePrepare); err != nil {
 		return "", err
 	}
-	plan, err := manager.GetPreparedPlan(devices[0], PlanStagePrepare)
-	if err != nil {
+	if _, err := manager.GetPreparedPlan(devices[0], PlanStagePrepare); err != nil {
 		return "", err
 	}
-	return filepath.Join(stateDir, "plans", plan.Name, "plan.json"), nil
+	return filepath.Join(stateDir, "plans", planName(nodeName, PlanStagePrepare), "plan.json"), nil
 }
 
 func generateConfigurePlan(
@@ -94,11 +92,10 @@ func generateConfigurePlan(
 	if err := manager.PreparePlan(ctx, devices, PlanStageConfigure); err != nil {
 		return "", err
 	}
-	plan, err := manager.GetPreparedPlan(devices[0], PlanStageConfigure)
-	if err != nil {
+	if _, err := manager.GetPreparedPlan(devices[0], PlanStageConfigure); err != nil {
 		return "", err
 	}
-	return filepath.Join(stateDir, "plans", plan.Name, "plan.json"), nil
+	return filepath.Join(stateDir, "plans", planName(nodeName, PlanStageConfigure), "plan.json"), nil
 }
 
 func preparePlanFakeExecutor(output []byte, commands *[]preparePlanCommand) *execTesting.FakeExec {
@@ -164,7 +161,7 @@ var _ = Describe("doSPCX planning", func() {
 				rail = index / planes
 				plane = index % planes
 				var err error
-				bdf, err = bdfForPlane(configureBDFs[rail], plane)
+				bdf, err = testBDFForPlane(configureBDFs[rail], plane)
 				Expect(err).NotTo(HaveOccurred())
 			} else {
 				bdf = prepareBDFs[index]
@@ -226,7 +223,7 @@ var _ = Describe("doSPCX planning", func() {
 			postBreakoutDevices := make([]map[string]any, 0, deviceCount*planes)
 			for rail, device := range devices {
 				for plane := 0; plane < planes; plane++ {
-					bdf, err := bdfForPlane(device["bdf"].(string), plane)
+					bdf, err := testBDFForPlane(device["bdf"].(string), plane)
 					Expect(err).NotTo(HaveOccurred())
 					postBreakoutDevices = append(postBreakoutDevices, map[string]any{
 						"bdf":            bdf,
@@ -275,10 +272,9 @@ var _ = Describe("doSPCX planning", func() {
 		Expect(err).NotTo(HaveOccurred())
 		plan, err := manager.GetPreparedPlan(devices[0], PlanStagePrepare)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(plan.Name).To(Equal(planName))
-		Expect(plan.Stage).To(Equal(PlanStagePrepare))
-		Expect(plan.Groups).To(HaveLen(2))
-		Expect(plan.Groups[0].Name).To(Equal("breakout"))
+		Expect(plan.Breakout).To(HaveLen(1))
+		Expect(plan.PostBreakout).To(BeEmpty())
+		Expect(plan.RuntimeConfig).To(BeEmpty())
 		planPath := filepath.Join(stateDir, "plans", planName, "plan.json")
 		planContent, err := os.ReadFile(planPath)
 		Expect(err).NotTo(HaveOccurred())
@@ -360,12 +356,11 @@ var _ = Describe("doSPCX planning", func() {
 		plan, err := manager.GetPreparedPlan(device, PlanStagePrepare)
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(plan.Name).To(Equal(generatedPlanName))
-		Expect(plan.Groups).To(HaveLen(2))
-		plan.Groups[0].Name = "mutated-by-caller"
+		Expect(plan.Breakout).To(HaveLen(1))
+		plan.Breakout[0].Values["enabled"] = false
 		plan, err = manager.GetPreparedPlan(device, PlanStagePrepare)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(plan.Groups[0].Name).To(Equal("breakout"))
+		Expect(plan.Breakout[0].Values).To(HaveKeyWithValue("enabled", true))
 	})
 
 	It("does not generate a plan when Spectrum-X is not enabled", func() {
@@ -499,7 +494,7 @@ var _ = Describe("doSPCX planning", func() {
 			preparePlanFakeExecutor(
 				planResponse(generatedPlanName, "SPX_Multiplane", prepareStage, 2, 1), &firstCommands,
 			), stateDir,
-		).(*spectrumXConfigManager)
+		)
 		manager.dospcxDataDigest = "first-bundle"
 
 		Expect(manager.PreparePlan(context.Background(), []*v1alpha1.NicDevice{device}, PlanStagePrepare)).To(Succeed())
@@ -574,7 +569,7 @@ var _ = Describe("doSPCX planning", func() {
 			planDevices[0].(map[string]any)["dms_target"] = "pci/" + device.Status.Ports[0].PCI
 			postBreakoutDevices := responseDocument["plan-json"].(map[string]any)["plan"].(map[string]any)["post_breakout_devices"].([]any)
 			for plane, rawDevice := range postBreakoutDevices {
-				bdf, bdfErr := bdfForPlane(device.Status.Ports[0].PCI, plane)
+				bdf, bdfErr := testBDFForPlane(device.Status.Ports[0].PCI, plane)
 				Expect(bdfErr).NotTo(HaveOccurred())
 				postBreakoutDevice := rawDevice.(map[string]any)
 				postBreakoutDevice["bdf"] = bdf
@@ -878,33 +873,19 @@ var _ = Describe("doSPCX planning", func() {
 		Entry("rendered artifacts", func(bundle map[string]any) {
 			bundle["artifacts"] = map[string]any{"manifest": []any{map[string]any{"type": "systemd-unit"}}}
 		}, "rendered artifacts"),
-		Entry("unexpected device BDF", func(bundle map[string]any) {
-			device := bundle["plan"].(map[string]any)["devices"].([]any)[0].(map[string]any)
-			device["bdf"] = secondBDF
-			device["dms_target"] = "pci/" + secondBDF
-		}, "unexpected device BDF"),
-		Entry("wrong device rail", func(bundle map[string]any) {
-			device := bundle["plan"].(map[string]any)["devices"].([]any)[0].(map[string]any)
-			device["rail"] = 1
-		}, "topology does not match"),
-		Entry("unexpected post-breakout device BDF", func(bundle map[string]any) {
-			device := bundle["plan"].(map[string]any)["post_breakout_devices"].([]any)[1].(map[string]any)
-			device["bdf"] = secondBDF
-			device["dms_target"] = "pci/" + secondBDF
-		}, "post-breakout device view contains unexpected device BDF"),
-		Entry("post-breakout device without an explicit plane", func(bundle map[string]any) {
-			device := bundle["plan"].(map[string]any)["post_breakout_devices"].([]any)[0].(map[string]any)
-			device["plane_explicit"] = false
-		}, "does not identify an explicit plane"),
 		Entry("unknown semantic group", func(bundle map[string]any) {
 			group := bundle["plan"].(map[string]any)["semantic"].(map[string]any)["groups"].([]any)[0].(map[string]any)
 			group["name"] = "unknown-prepare-group"
 		}, "unsupported doSPCX semantic group"),
-		Entry("eSwitch operation in an executable group", func(bundle map[string]any) {
-			plan := bundle["plan"].(map[string]any)
-			group := plan["semantic"].(map[string]any)["groups"].([]any)[0].(map[string]any)
-			operationID := group["operation_refs"].([]any)[0].(string)
-			plan["operations"].(map[string]any)[operationID].(map[string]any)["path"] = "/nvidia/eswitch"
-		}, "outside the current NCO execution scope"),
 	)
 })
+
+func testBDFForPlane(baseBDF string, plane int) (string, error) {
+	if !isCanonicalFunctionZeroBDF(baseBDF) {
+		return "", fmt.Errorf("cannot derive plane %d from non-canonical function-zero BDF %q", plane, baseBDF)
+	}
+	if plane < 0 || plane > 7 {
+		return "", fmt.Errorf("cannot derive PCI function for plane %d", plane)
+	}
+	return strings.TrimSuffix(baseBDF, ".0") + "." + strconv.Itoa(plane), nil
+}

@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package spectrumx
+package dospcx
 
 import (
 	"archive/tar"
@@ -83,17 +83,13 @@ func validBlueprintsArchive(extra ...blueprintsArchiveEntry) []byte {
 	return blueprintsArchive(append(entries, extra...)...)
 }
 
-func newBlueprintsDataManager(dataRoot string) *spectrumXConfigManager {
-	return &spectrumXConfigManager{
-		spectrumXConfigs:   nil,
+func newBlueprintsDataManager(dataRoot string) *Manager {
+	return &Manager{
 		preparedPlans:      make(map[string]*preparedPlan),
-		dmsManager:         nil,
 		execInterface:      nil,
 		blueprintsStateDir: "",
 		dospcxDataRoot:     dataRoot,
 		dospcxDataDigest:   "",
-		ccProcesses:        nil,
-		ccTerminationChan:  nil,
 	}
 }
 
@@ -104,7 +100,7 @@ var _ = Describe("doSPCX data archive installation", func() {
 		Expect(os.WriteFile(filepath.Join(dataRoot, "obsolete"), []byte("old"), 0o644)).To(Succeed())
 		archive := validBlueprintsArchive()
 		manager := newBlueprintsDataManager(dataRoot)
-		manager.preparedPlans["old-plan"] = &preparedPlan{plan: &Plan{Name: "old-plan"}}
+		manager.preparedPlans["old-plan"] = &preparedPlan{plan: &Plan{}}
 
 		Expect(manager.InstallBlueprintsData(archive)).To(Succeed())
 
@@ -230,7 +226,7 @@ var _ = Describe("doSPCX data archive installation", func() {
 		dataRoot := filepath.Join(GinkgoT().TempDir(), "doSpcx", "data")
 		manager := newBlueprintsDataManager(dataRoot)
 		Expect(manager.InstallBlueprintsData(validBlueprintsArchive())).To(Succeed())
-		manager.preparedPlans["old-plan"] = &preparedPlan{plan: &Plan{Name: "old-plan"}}
+		manager.preparedPlans["old-plan"] = &preparedPlan{plan: &Plan{}}
 		updatedArchive := validBlueprintsArchive(blueprintsArchiveEntry{
 			name: "data/new-profile-marker", typeFlag: tar.TypeReg, mode: 0o644, content: "new",
 		})
@@ -254,7 +250,7 @@ var _ = Describe("doSPCX data archive installation", func() {
 		dataRoot := filepath.Join(GinkgoT().TempDir(), "doSpcx", "data")
 		manager := newBlueprintsDataManager(dataRoot)
 		Expect(manager.InstallBlueprintsData(validBlueprintsArchive())).To(Succeed())
-		manager.preparedPlans["old-plan"] = &preparedPlan{plan: &Plan{Name: "old-plan"}}
+		manager.preparedPlans["old-plan"] = &preparedPlan{plan: &Plan{}}
 
 		Expect(manager.RemoveBlueprintsData()).To(Succeed())
 		Expect(dataRoot).NotTo(BeADirectory())
@@ -267,7 +263,7 @@ var _ = Describe("doSPCX data archive installation", func() {
 		manager := newBlueprintsDataManager(dataRoot)
 		archive := validBlueprintsArchive()
 		Expect(manager.InstallBlueprintsData(archive)).To(Succeed())
-		manager.preparedPlans["active-plan"] = &preparedPlan{plan: &Plan{Name: "active-plan"}}
+		manager.preparedPlans["active-plan"] = &preparedPlan{plan: &Plan{}}
 
 		originalRemove := removeBlueprintsDataDirectory
 		DeferCleanup(func() { removeBlueprintsDataDirectory = originalRemove })

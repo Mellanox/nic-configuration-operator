@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package spectrumx
+package dospcx
 
 import (
 	"archive/tar"
@@ -58,9 +58,9 @@ var requiredBlueprintsDataFiles = []string{
 
 // InstallBlueprintsData restores a doSPCX data archive under the DMS installation directory.
 // The previous valid tree remains active if validation, extraction, or activation fails.
-func (m *spectrumXConfigManager) InstallBlueprintsData(archive []byte) error {
+func (m *Manager) InstallBlueprintsData(archive []byte) error {
 	if m == nil {
-		return fmt.Errorf("spectrum-x manager must not be nil")
+		return fmt.Errorf("doSPCX manager must not be nil")
 	}
 	if strings.TrimSpace(m.dospcxDataRoot) == "" || !filepath.IsAbs(m.dospcxDataRoot) {
 		return fmt.Errorf("doSPCX data root must be a non-empty absolute path")
@@ -90,9 +90,9 @@ func (m *spectrumXConfigManager) InstallBlueprintsData(archive []byte) error {
 
 // RemoveBlueprintsData removes data previously installed from a ConfigMap. Data supplied by the
 // daemon image is left intact when this manager has not installed a bundle during its lifetime.
-func (m *spectrumXConfigManager) RemoveBlueprintsData() error {
+func (m *Manager) RemoveBlueprintsData() error {
 	if m == nil {
-		return fmt.Errorf("spectrum-x manager must not be nil")
+		return fmt.Errorf("doSPCX manager must not be nil")
 	}
 	if strings.TrimSpace(m.dospcxDataRoot) == "" || !filepath.IsAbs(m.dospcxDataRoot) {
 		return fmt.Errorf("doSPCX data root must be a non-empty absolute path")

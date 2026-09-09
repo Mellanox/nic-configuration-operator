@@ -448,9 +448,8 @@ Each plan directory also contains `metadata.json`, a flat document with only the
 inputs used for that stage, the installed doSPCX data archive digest, and the
 target-map digest. A later `PreparePlan` call reuses the saved plan when the
 metadata exactly matches the current inputs, the
-target-map file still has the recorded digest, the generated devices exactly
-match the target-map-derived topology, and the plan passes the same structural
-and execution-policy compilation as a newly generated plan. Missing, malformed, or changed
+target-map file still has the recorded digest, and the plan passes the same
+structural and execution-policy compilation as a newly generated plan. Missing, malformed, or changed
 cache artifacts cause normal regeneration through `dms-cli`. Individual
 Spectrum-X apply calls use `GetPreparedPlan` to require matching inputs and
 device membership before touching hardware.
@@ -459,8 +458,14 @@ device membership before touching hardware.
 
 ### pkg/spectrumx/ — Spectrum-X Configuration
 
-Sources: `pkg/spectrumx/spectrumx.go`, `pkg/spectrumx/blueprintsdata.go`,
-`pkg/spectrumx/prepareplan.go`, `pkg/spectrumx/semanticplan.go`
+The `pkg/spectrumx` package exposes the combined Spectrum-X manager. All doSPCX-specific
+data installation, target-map construction, planner invocation, plan parsing, persistence,
+and caching live in `pkg/spectrumx/dospcx`. The top-level manager delegates the planning API
+to that subpackage so existing consumers keep importing `pkg/spectrumx`.
+
+Sources: `pkg/spectrumx/spectrumx.go`, `pkg/spectrumx/plan.go`,
+`pkg/spectrumx/dospcx/data.go`, `pkg/spectrumx/dospcx/planner.go`,
+`pkg/spectrumx/dospcx/parser.go`
 
 #### PlanManager Interface
 
@@ -473,10 +478,14 @@ const (
 )
 
 type Plan struct {
-    Name          string
-    Stage         PlanStage
-    Groups        []DMSOperationGroup
-    SkippedGroups []SkippedSemanticGroup
+    Breakout      []dmscli.XPathOperation
+    PostBreakout  []dmscli.XPathOperation
+    RuntimeConfig []OperationGroup
+}
+
+type OperationGroup struct {
+    Name       string
+    Operations []dmscli.XPathOperation
 }
 
 type PlanManager interface {
@@ -515,21 +524,17 @@ later `PreparePlan` calls reuse memory while the inputs match. `GetPreparedPlan`
 does not access the filesystem or invoke `dms-cli`; it rejects the request unless
 the cached inputs and target-map membership match the supplied device.
 
-Compilation resolves `pf_netdev_all` and `pf_rdma_scope` to target-specific
-query and SET batches without executing them. It preserves group and operation
-ordering, including repeated writes, and does not inspect bare-metal steps,
-services, or artifacts. Queries represent the final desired state; prepare-stage queries include
-both the current and `-pending` leaves used by the doSPCX NVConfig gate. SET
-operations preserve the complete transition sequence. Public operations may
-omit `kind` (`set` is the DMS default), `execution_group`, and `target_role`;
-group membership comes from `semantic.groups[].operation_refs`, and operations
-without a role apply to all plan devices. For `pf_rdma_scope`, `per_pf` selects
-devices with an RDMA endpoint and `per_rail_bond` selects each rail's plane-zero
-PF, matching DMS lifecycle targeting. Compiled groups retain `fanout_order`, and
-eSwitch or per-VF operations are rejected if they appear under an executable
-group instead of an explicitly skipped group. `post-breakout` remains an ordered phase
-marker. Configure groups `eswitch` and `vf-lifecycle` are parsed and validated
-but explicitly reported as skipped; unknown groups fail closed. The existing
+Compilation produces homogeneous configuration intent rather than resolving
+operations onto individual devices. Prepare-stage `breakout` and `post-breakout`
+groups become ordered XPath operation slices. Configure-stage `link-runtime`,
+`cc`, and `link-event` groups become ordered `OperationGroup` values. Each group
+preserves the order of `semantic.groups[].operation_refs`, including repeated
+writes. Device targeting and construction of validation queries belong to the
+configuration manager when it consumes this plan.
+
+Public operations may omit `kind` (`set` is the DMS default). Bare-metal steps,
+services, and artifacts are outside this contract. Configure groups `eswitch`
+and `vf-lifecycle` are omitted; unknown groups fail closed. The existing
 Spectrum-X manager implementation provides both plan lifecycle methods and
 creates the command executor internally:
 
