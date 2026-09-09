@@ -61,8 +61,8 @@ ConfigurationTemplateSpec is a set of configurations for the NICs
 <tr>
 <td><code>spectrumXOptimized</code><br />
 <em><a href="#SpectrumXOptimizedSpec">SpectrumXOptimizedSpec</a></em></td>
-<td><p>Spectrum-X optimization settings. Works only with linkType==Ethernet &amp;&amp; numVfs==1. RawNvConfig parameters, if provided, are merged as overrides on top of Spectrum-X calculated
-params.</p></td>
+<td><p>Spectrum-X optimization settings. Works only with linkType==Ethernet &amp;&amp; numVfs==1.
+Temporarily cannot be combined with rawNvConfig or networkBay.</p></td>
 </tr>
 <tr>
 <td><code>networkBay</code><br />

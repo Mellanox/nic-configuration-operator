@@ -27,16 +27,14 @@ import (
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
-	"github.com/Mellanox/nic-configuration-operator/pkg/spectrumx"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 )
 
 type configValidation interface {
 	// ConstructNvParamMapFromTemplate builds the full set of desired nvconfig parameters for a device by
-	// combining, in increasing priority order, the Spectrum-X profile (breakout + postBreakout, when
-	// enabled), the spec template params, and rawNvConfig (raw wins on key collisions). For Network Bay
-	// devices these params override the set_system_conf baseline. Operates under the assumption that spec
-	// validation was already carried out.
+	// combining the spec template params and rawNvConfig (raw wins on key collisions). doSPCX plan
+	// operations are validated separately and applied together with template-derived native parameters.
+	// rawNvConfig and Network Bay are temporarily rejected when doSPCX is enabled.
 	ConstructNvParamMapFromTemplate(
 		device *v1alpha1.NicDevice, nvConfigQuery types.NvConfigQuery) (map[string]string, error)
 	// ValidateResetToDefault checks if device's nv config has been reset to default in current and next boots
@@ -51,9 +49,8 @@ type configValidation interface {
 }
 
 type configValidationImpl struct {
-	utils                  ConfigurationUtils
-	eventRecorder          record.EventRecorder
-	spectrumXConfigManager spectrumx.SpectrumXManager
+	utils         ConfigurationUtils
+	eventRecorder record.EventRecorder
 }
 
 func nvParamLinkTypeFromName(linkType string) string {
@@ -77,16 +74,13 @@ func applyDefaultNvConfigValueIfExists(
 	}
 }
 
-// ConstructNvParamMapFromTemplate builds the full set of desired nvconfig parameters for a device by
-// combining, in increasing priority order, the Spectrum-X profile (breakout + postBreakout, when
-// enabled), the spec template params, and rawNvConfig (raw wins on key collisions). Operates under the
-// assumption that spec validation was already carried out.
+// ConstructNvParamMapFromTemplate builds the desired raw nvconfig parameters from the template and
+// rawNvConfig. doSPCX operations remain typed XPaths and are handled separately.
 func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 	device *v1alpha1.NicDevice, query types.NvConfigQuery) (map[string]string, error) {
 	template := device.Spec.Configuration.Template
 	if template == nil {
-		// No template: nothing to translate. rawNvConfig / Spectrum-X live under the template, so there
-		// are no override params either.
+		// No template: nothing to translate and no rawNvConfig to merge.
 		return map[string]string{}, nil
 	}
 
@@ -206,24 +200,10 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 	return v.mergeOverrideLayers(device, desiredParameters)
 }
 
-// mergeOverrideLayers combines the template-derived params with the Spectrum-X profile (breakout +
-// postBreakout, when enabled) and rawNvConfig, in increasing priority order: Spectrum-X < template <
-// rawNvConfig (raw wins on key collisions). All keys are concrete indices (e.g. MODULE_SPLIT_M0[2]);
-// rawNvConfig range syntax is rejected by CEL validation on the CRD.
+// mergeOverrideLayers combines template-derived params with rawNvConfig. Raw values are merged last
+// and therefore win on key collisions. doSPCX plan XPaths are intentionally excluded.
 func (v *configValidationImpl) mergeOverrideLayers(device *v1alpha1.NicDevice, templateParams map[string]string) (map[string]string, error) {
 	combined := map[string]string{}
-	if spectrumXEnabled(device) {
-		breakoutParams, err := v.spectrumXConfigManager.GetBreakoutMlxConfig(device)
-		if err != nil {
-			return nil, err
-		}
-		postBreakoutParams, err := v.spectrumXConfigManager.GetPostBreakoutMlxConfig(device)
-		if err != nil {
-			return nil, err
-		}
-		mergeParams(combined, breakoutParams)
-		mergeParams(combined, postBreakoutParams)
-	}
 	mergeParams(combined, templateParams)
 	// rawNvConfig has the highest priority, so it is merged last. getRawNvConfigParams already drops
 	// _Pn params whose port is beyond the device's port count.
@@ -505,6 +485,6 @@ func (v *configValidationImpl) CalculateDesiredRuntimeConfig(device *v1alpha1.Ni
 	return result
 }
 
-func newConfigValidation(utils ConfigurationUtils, eventRecorder record.EventRecorder, spectrumXConfigManager spectrumx.SpectrumXManager) configValidation {
-	return &configValidationImpl{utils: utils, eventRecorder: eventRecorder, spectrumXConfigManager: spectrumXConfigManager}
+func newConfigValidation(utils ConfigurationUtils, eventRecorder record.EventRecorder) configValidation {
+	return &configValidationImpl{utils: utils, eventRecorder: eventRecorder}
 }

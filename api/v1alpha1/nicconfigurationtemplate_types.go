@@ -178,6 +178,9 @@ type NetworkBaySpec struct {
 // +kubebuilder:validation:XValidation:rule="has(self.networkBay) || has(self.linkType)",message="linkType is required unless networkBay is configured"
 // +kubebuilder:validation:XValidation:rule="!has(self.networkBay) || !has(self.linkType)",message="linkType must not be set when networkBay is configured (the Network Bay link type is governed by the system configuration)"
 // +kubebuilder:validation:XValidation:rule="!has(self.rawNvConfig) || self.rawNvConfig.all(p, !p.name.matches('.*[[][0-9]+[.][.][0-9]+[]].*'))",message="rawNvConfig parameter names must not use index-range syntax like NAME[0..3]; list each index explicitly (NAME[0], NAME[1], ...)"
+// TODO(dospcx-nvconfig): HIGH PRIORITY -- remove the next two temporary restrictions ASAP once DMS can report typed-plan native parameter ownership or validate combined typed/raw state.
+// +kubebuilder:validation:XValidation:rule="!(has(self.spectrumXOptimized) && self.spectrumXOptimized.enabled) || !has(self.rawNvConfig) || size(self.rawNvConfig) == 0",message="rawNvConfig cannot currently be combined with spectrumXOptimized"
+// +kubebuilder:validation:XValidation:rule="!(has(self.spectrumXOptimized) && self.spectrumXOptimized.enabled) || !has(self.networkBay)",message="networkBay cannot currently be combined with spectrumXOptimized"
 type ConfigurationTemplateSpec struct {
 	// Number of VFs to be configured
 	// +required
@@ -195,7 +198,8 @@ type ConfigurationTemplateSpec struct {
 	GpuDirectOptimized *GpuDirectOptimizedSpec `json:"gpuDirectOptimized,omitempty"`
 	// Runtime NIC performance tuning (ring buffers, channels, LRO) applied via ethtool
 	RuntimePerformanceOptimized *RuntimePerformanceOptimizedSpec `json:"runtimePerformanceOptimized,omitempty"`
-	// Spectrum-X optimization settings. Works only with linkType==Ethernet && numVfs==1. RawNvConfig parameters, if provided, are merged as overrides on top of Spectrum-X calculated params.
+	// Spectrum-X optimization settings. Works only with linkType==Ethernet && numVfs==1.
+	// Temporarily cannot be combined with rawNvConfig or networkBay.
 	SpectrumXOptimized *SpectrumXOptimizedSpec `json:"spectrumXOptimized,omitempty"`
 	// NetworkBay configures a ConnectX-9 Network Bay card (per-ASIC set_system_conf). Allowed only for ConnectX-9 (nicType 1025).
 	// +optional

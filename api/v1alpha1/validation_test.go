@@ -157,11 +157,12 @@ var _ = Describe("NicConfigurationTemplate CEL validation", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("allows SpectrumXOptimized enabled together with non-empty RawNvConfig", func() {
+	It("rejects SpectrumXOptimized enabled together with non-empty RawNvConfig", func() {
 		obj := newNicConfigurationTemplate("spcx-with-rawnv", "Ethernet", 1, &SpectrumXOptimizedSpec{Enabled: true, Version: "RA2.0"})
 		obj.Spec.Template.RawNvConfig = []NvConfigParam{{Name: "FOO", Value: "BAR"}}
 		err := k8sClient.Create(ctx, obj)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("rawNvConfig cannot currently be combined with spectrumXOptimized"))
 	})
 
 	It("allows a rawNvConfig param with an explicit index key", func() {
@@ -262,11 +263,13 @@ var _ = Describe("NicConfigurationTemplate CEL validation", func() {
 			Expect(err.Error()).To(ContainSubstring("linkType is required unless networkBay is configured"))
 		})
 
-		It("allows networkBay together with spectrumXOptimized on ConnectX-9 (linkType unset)", func() {
-			obj := newNicConfigurationTemplate("bay-allow-with-spcx", "", 1, &SpectrumXOptimizedSpec{Enabled: true, Version: "RA2.0"})
+		It("rejects networkBay together with spectrumXOptimized", func() {
+			obj := newNicConfigurationTemplate("bay-reject-with-spcx", "", 1, &SpectrumXOptimizedSpec{Enabled: true, Version: "RA2.0"})
 			obj.Spec.NicSelector.NicType = nicTypeConnectX9
 			obj.Spec.Template.NetworkBay = &NetworkBaySpec{Conf: "3"}
-			Expect(k8sClient.Create(ctx, obj)).To(Succeed())
+			err := k8sClient.Create(ctx, obj)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("networkBay cannot currently be combined with spectrumXOptimized"))
 		})
 	})
 

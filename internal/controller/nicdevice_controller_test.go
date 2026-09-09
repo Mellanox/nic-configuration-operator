@@ -287,8 +287,26 @@ var _ = Describe("NicDeviceReconciler", func() {
 		It("does nothing when no device enables Spectrum-X", func() {
 			statuses := nicDeviceConfigurationStatuses{{device: &v1alpha1.NicDevice{}}}
 
-			Expect(reconciler.prepareSpectrumXPlan(ctx, statuses, spectrumx.PlanStagePrepare)).To(Succeed())
+			devices, err := reconciler.prepareSpectrumXPlan(ctx, statuses, spectrumx.PlanStagePrepare)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(devices).To(BeEmpty())
 			spectrumXManager.AssertNotCalled(GinkgoT(), "PreparePlan", mock.Anything, mock.Anything, mock.Anything)
+		})
+
+		It("excludes devices that are resetting NVConfig to defaults", func() {
+			resetting := newSpectrumXDevice("resetting")
+			resetting.Spec.Configuration.ResetToDefault = true
+			configured := newSpectrumXDevice("configured")
+			spectrumXManager.On(
+				"PreparePlan", mock.Anything, []*v1alpha1.NicDevice{configured}, spectrumx.PlanStagePrepare,
+			).Return(nil).Once()
+
+			_, err := reconciler.prepareSpectrumXPlan(
+				ctx,
+				nicDeviceConfigurationStatuses{{device: resetting}, {device: configured}},
+				spectrumx.PlanStagePrepare,
+			)
+			Expect(err).NotTo(HaveOccurred())
 		})
 
 		DescribeTable("prepares one group before the requested configuration stage",
@@ -302,7 +320,9 @@ var _ = Describe("NicDeviceReconciler", func() {
 				}
 				spectrumXManager.On("PreparePlan", mock.Anything, []*v1alpha1.NicDevice{first, second}, stage).Return(nil).Once()
 
-				Expect(reconciler.prepareSpectrumXPlan(ctx, statuses, stage)).To(Succeed())
+				devices, err := reconciler.prepareSpectrumXPlan(ctx, statuses, stage)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(devices).To(Equal([]*v1alpha1.NicDevice{first, second}))
 			},
 			Entry("NV prepare", spectrumx.PlanStagePrepare),
 			Entry("runtime configure", spectrumx.PlanStageConfigure),
@@ -314,9 +334,11 @@ var _ = Describe("NicDeviceReconciler", func() {
 			spectrumXManager.On("PreparePlan", mock.Anything, []*v1alpha1.NicDevice{device}, spectrumx.PlanStagePrepare).
 				Return(planErr).Once()
 
-			Expect(reconciler.prepareSpectrumXPlan(
+			devices, err := reconciler.prepareSpectrumXPlan(
 				ctx, nicDeviceConfigurationStatuses{{device: device}}, spectrumx.PlanStagePrepare,
-			)).To(MatchError(planErr))
+			)
+			Expect(err).To(MatchError(planErr))
+			Expect(devices).To(Equal([]*v1alpha1.NicDevice{device}))
 		})
 	})
 
@@ -554,6 +576,12 @@ var _ = Describe("NicDeviceReconciler", func() {
 				}
 				return false
 			}, timeout).Should(BeTrue())
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.ConfigUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.SpecValidationFailed,
+				Message: "prepare doSPCX NV configuration plan: plan generation failed",
+			}))
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ScheduleMaintenance", mock.Anything)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "MaintenanceAllowed", mock.Anything)
 		})

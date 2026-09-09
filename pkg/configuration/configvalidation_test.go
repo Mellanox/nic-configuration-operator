@@ -27,7 +27,6 @@ import (
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
-	spcxmocks "github.com/Mellanox/nic-configuration-operator/pkg/spectrumx/mocks"
 )
 
 const testVal = "testVal"
@@ -708,11 +707,9 @@ var _ = Describe("ConfigValidationImpl", func() {
 		})
 	})
 
-	Describe("ConstructNvParamMapFromTemplate — override merge & priority", func() {
-		var mockSpcXMgr *spcxmocks.SpectrumXManager
-
+	Describe("ConstructNvParamMapFromTemplate — raw override merge", func() {
 		// newDevice builds a single-port device with an empty template, so ConstructNvParamMapFromTemplate
-		// contributes only its unconditional SRIOV defaults; the override layers under test are added on top.
+		// contributes only its unconditional SRIOV defaults; raw overrides are added on top.
 		newDevice := func() *v1alpha1.NicDevice {
 			return &v1alpha1.NicDevice{
 				Spec: v1alpha1.NicDeviceSpec{
@@ -725,8 +722,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 		}
 
 		BeforeEach(func() {
-			mockSpcXMgr = spcxmocks.NewSpectrumXManager(GinkgoT())
-			validator = &configValidationImpl{utils: &mockConfigurationUtils, spectrumXConfigManager: mockSpcXMgr}
+			validator = &configValidationImpl{utils: &mockConfigurationUtils}
 		})
 
 		It("returns an empty map when the template is nil", func() {
@@ -737,28 +733,16 @@ var _ = Describe("ConfigValidationImpl", func() {
 			Expect(nvParams).To(BeEmpty())
 		})
 
-		It("merges Spectrum-X breakout and postBreakout params", func() {
+		It("keeps doSPCX plan operations out of the native parameter map", func() {
 			device := newDevice()
 			device.Spec.Configuration.Template.SpectrumXOptimized = &v1alpha1.SpectrumXOptimizedSpec{Enabled: true}
-			mockSpcXMgr.On("GetBreakoutMlxConfig", device).Return(map[string]string{"NUM_OF_PF": "2"}, nil)
-			mockSpcXMgr.On("GetPostBreakoutMlxConfig", device).Return(map[string]string{"LINK_TYPE_P1": "2"}, nil)
 
 			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, types.NewNvConfigQuery())
 			Expect(err).NotTo(HaveOccurred())
-			Expect(nvParams).To(HaveKeyWithValue("NUM_OF_PF", "2"))
-			Expect(nvParams).To(HaveKeyWithValue("LINK_TYPE_P1", "2"))
-		})
-
-		It("lets rawNvConfig win over a Spectrum-X param (raw > Spectrum-X)", func() {
-			device := newDevice()
-			device.Spec.Configuration.Template.SpectrumXOptimized = &v1alpha1.SpectrumXOptimizedSpec{Enabled: true}
-			device.Spec.Configuration.Template.RawNvConfig = []v1alpha1.NvConfigParam{{Name: "NUM_OF_PF", Value: "8"}}
-			mockSpcXMgr.On("GetBreakoutMlxConfig", device).Return(map[string]string{"NUM_OF_PF": "2"}, nil)
-			mockSpcXMgr.On("GetPostBreakoutMlxConfig", device).Return(nil, nil)
-
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, types.NewNvConfigQuery())
-			Expect(err).NotTo(HaveOccurred())
-			Expect(nvParams).To(HaveKeyWithValue("NUM_OF_PF", "8"))
+			Expect(nvParams).To(Equal(map[string]string{
+				consts.SriovEnabledParam:  consts.NvParamFalse,
+				consts.SriovNumOfVfsParam: "0",
+			}))
 		})
 
 		It("lets rawNvConfig win over a template param (raw > template)", func() {
@@ -771,21 +755,6 @@ var _ = Describe("ConfigValidationImpl", func() {
 			Expect(nvParams).To(HaveKeyWithValue(consts.SriovNumOfVfsParam, "16"))
 		})
 
-		It("lets a rawNvConfig concrete index override a lower-priority Spectrum-X index", func() {
-			// rawNvConfig range syntax is rejected by CEL; both layers use concrete per-index keys, so
-			// priority is a plain key-collision (raw > Spectrum-X).
-			device := newDevice()
-			device.Spec.Configuration.Template.SpectrumXOptimized = &v1alpha1.SpectrumXOptimizedSpec{Enabled: true}
-			device.Spec.Configuration.Template.RawNvConfig = []v1alpha1.NvConfigParam{{Name: "MODULE_SPLIT_M0[2]", Value: "5"}}
-			mockSpcXMgr.On("GetBreakoutMlxConfig", device).Return(map[string]string{"MODULE_SPLIT_M0[2]": "1", "MODULE_SPLIT_M0[3]": "1"}, nil)
-			mockSpcXMgr.On("GetPostBreakoutMlxConfig", device).Return(nil, nil)
-
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, types.NewNvConfigQuery())
-			Expect(err).NotTo(HaveOccurred())
-			Expect(nvParams).To(HaveKeyWithValue("MODULE_SPLIT_M0[2]", "5"))
-			Expect(nvParams).To(HaveKeyWithValue("MODULE_SPLIT_M0[3]", "1"))
-		})
-
 		It("drops a rawNvConfig _Pn param whose port is beyond the device port count", func() {
 			device := newDevice() // single port
 			device.Spec.Configuration.Template.RawNvConfig = []v1alpha1.NvConfigParam{
@@ -796,16 +765,6 @@ var _ = Describe("ConfigValidationImpl", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(HaveKey("SOME_PARAM_P1"))
 			Expect(nvParams).ToNot(HaveKey("SOME_PARAM_P2"))
-		})
-
-		It("propagates an error from GetBreakoutMlxConfig", func() {
-			device := newDevice()
-			device.Spec.Configuration.Template.SpectrumXOptimized = &v1alpha1.SpectrumXOptimizedSpec{Enabled: true}
-			mockSpcXMgr.On("GetBreakoutMlxConfig", device).Return(nil, errors.New("config not found"))
-
-			_, err := validator.ConstructNvParamMapFromTemplate(device, types.NewNvConfigQuery())
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("config not found"))
 		})
 	})
 

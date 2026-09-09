@@ -26,6 +26,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/configuration/mocks"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	"github.com/Mellanox/nic-configuration-operator/pkg/dmscli"
 	"github.com/Mellanox/nic-configuration-operator/pkg/nvconfig"
 	nvconfigmocks "github.com/Mellanox/nic-configuration-operator/pkg/nvconfig/mocks"
 	"github.com/Mellanox/nic-configuration-operator/pkg/spectrumx"
@@ -35,11 +36,95 @@ import (
 
 const pciAddress = "0000:3b:00.0"
 const pciAddress2 = "0000:3b:00.1"
+const testPCIXPath = "/nvidia/pci"
 
 // legacyNVConfigUtils deliberately exposes only the public NVConfigUtils interface. It verifies
 // that ConfigurationManager supports implementations without the optional context-aware extension.
 type legacyNVConfigUtils struct {
 	nvconfig.NVConfigUtils
+}
+
+type xpathNVConfigUtils struct {
+	nvconfig.NVConfigUtils
+	validationResults []xpathValidationResult
+	validationCalls   []xpathValidationCall
+	applyResult       *xpathApplyResult
+	applyCalls        []xpathApplyCall
+}
+
+type xpathValidationResult struct {
+	updateNeeded bool
+	rebootNeeded bool
+	err          error
+}
+
+type xpathValidationCall struct {
+	ports      []v1alpha1.NicDevicePortSpec
+	operations []dmscli.XPathOperation
+}
+
+type xpathApplyResult struct {
+	status types.ApplyStatus
+	err    error
+}
+
+type xpathApplyCall struct {
+	port        v1alpha1.NicDevicePortSpec
+	portCount   int
+	params      map[string]string
+	operations  []dmscli.XPathOperation
+	withDefault bool
+	force       bool
+}
+
+func (u *xpathNVConfigUtils) SetNvConfigParametersBatchWithContext(
+	ctx context.Context,
+	port v1alpha1.NicDevicePortSpec,
+	params map[string]string,
+	withDefault bool,
+	force bool,
+) (types.ApplyStatus, error) {
+	return u.NVConfigUtils.(contextualNVConfigBatchSetter).
+		SetNvConfigParametersBatchWithContext(ctx, port, params, withDefault, force)
+}
+
+func (u *xpathNVConfigUtils) ValidateNvConfigXPaths(
+	ctx context.Context,
+	ports []v1alpha1.NicDevicePortSpec,
+	operations []dmscli.XPathOperation,
+) (bool, bool, error) {
+	if len(operations) == 0 {
+		return false, false, nil
+	}
+	if len(u.validationResults) == 0 {
+		return false, false, errors.New("unexpected XPath validation")
+	}
+	u.validationCalls = append(u.validationCalls, xpathValidationCall{ports, operations})
+	result := u.validationResults[0]
+	u.validationResults = u.validationResults[1:]
+	return result.updateNeeded, result.rebootNeeded, result.err
+}
+
+func (u *xpathNVConfigUtils) SetNvConfigParametersBatchWithXPaths(
+	ctx context.Context,
+	port v1alpha1.NicDevicePortSpec,
+	portCount int,
+	params map[string]string,
+	operations []dmscli.XPathOperation,
+	withDefault bool,
+	force bool,
+) (types.ApplyStatus, error) {
+	if u.applyResult == nil {
+		if len(operations) > 0 {
+			return types.ApplyStatusFailed, errors.New("unexpected XPath apply")
+		}
+		return u.NVConfigUtils.(contextualNVConfigBatchSetter).
+			SetNvConfigParametersBatchWithContext(ctx, port, params, withDefault, force)
+	}
+	u.applyCalls = append(u.applyCalls, xpathApplyCall{
+		port, portCount, params, operations, withDefault, force,
+	})
+	return u.applyResult.status, u.applyResult.err
 }
 
 func portSpec(pciAddr string) v1alpha1.NicDevicePortSpec {
@@ -97,6 +182,31 @@ var _ = Describe("ConfigurationManager", func() {
 			Expect(diff.changed).To(Equal(map[string]string{"MATCHING": "requested"}))
 			Expect(diff.unchanged).To(BeEmpty())
 			Expect(diff.unsupported).To(Equal([]string{"UNSUPPORTED"}))
+		})
+
+		It("combines changes found on any queried port", func() {
+			changed, hasUnsupported := buildCombinedNVConfigApplyDiff(map[string]types.NvConfigQuery{
+				"0000:3b:00.0": {
+					NextBootConfig: map[string][]string{"A": {"requested"}, "B": {"old"}},
+				},
+				"0000:3b:00.1": {
+					NextBootConfig: map[string][]string{"A": {"old"}, "B": {"requested"}},
+				},
+			}, map[string]string{"A": "requested", "B": "requested"}, false, false, false)
+
+			Expect(changed).To(Equal(map[string]string{"A": "requested", "B": "requested"}))
+			Expect(hasUnsupported).To(BeFalse())
+		})
+
+		It("includes matching raw values when a typed operation can overwrite them", func() {
+			changed, hasUnsupported := buildCombinedNVConfigApplyDiff(map[string]types.NvConfigQuery{
+				"0000:3b:00.0": {
+					NextBootConfig: map[string][]string{"RAW_OVERRIDE": {"requested"}},
+				},
+			}, map[string]string{"RAW_OVERRIDE": "requested"}, false, false, true)
+
+			Expect(changed).To(Equal(map[string]string{"RAW_OVERRIDE": "requested"}))
+			Expect(hasUnsupported).To(BeFalse())
 		})
 	})
 
@@ -1297,20 +1407,23 @@ var _ = Describe("ConfigurationManager", func() {
 	Describe("SpectrumX NV Configuration", func() {
 		var (
 			mockNVConfigUtils    *nvconfigmocks.NVConfigUtils
+			xpathUtils           *xpathNVConfigUtils
 			mockSpcXMgr          *spcxmocks.SpectrumXManager
 			mockConfigValidation mocks.ConfigValidation
 			manager              configurationManager
 			ctx                  context.Context
 			device               *v1alpha1.NicDevice
+			preparedPlan         *spectrumx.Plan
 		)
 
 		BeforeEach(func() {
 			mockNVConfigUtils = nvconfigmocks.NewNVConfigUtils(GinkgoT())
+			xpathUtils = &xpathNVConfigUtils{NVConfigUtils: mockNVConfigUtils}
 			mockSpcXMgr = spcxmocks.NewSpectrumXManager(GinkgoT())
 			mockConfigValidation = mocks.ConfigValidation{}
 			manager = configurationManager{
 				configValidation:       &mockConfigValidation,
-				nvConfigUtils:          mockNVConfigUtils,
+				nvConfigUtils:          xpathUtils,
 				spectrumXConfigManager: mockSpcXMgr,
 			}
 			ctx = context.TODO()
@@ -1326,14 +1439,16 @@ var _ = Describe("ConfigurationManager", func() {
 					Ports: []v1alpha1.NicDevicePortSpec{{PCI: pciAddress}},
 				},
 			}
+			preparedPlan = &spectrumx.Plan{}
+			mockSpcXMgr.On("GetPreparedPlan", device, spectrumx.PlanStagePrepare).
+				Return(func(*v1alpha1.NicDevice, spectrumx.PlanStage) *spectrumx.Plan {
+					return preparedPlan
+				}, nil).Maybe()
 		})
 
 		Describe("ValidateDeviceNvSpec", func() {
-			// The combined override map (breakout + postBreakout + template + raw) is built by
-			// ConstructNvParamMapFromTemplate; the manager validates the returned map against the device's
-			// next-boot config — the same source the apply path uses. These tests mock the combined map
-			// directly; the merge/expansion/priority itself is covered in the configValidation suite.
-			It("requires update+reboot when a combined param mismatches next boot", func() {
+			// The template-derived native parameter map is validated independently from the doSPCX XPath plan.
+			It("requires update+reboot when a native desired param mismatches next boot", func() {
 				mockNVConfigUtils.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(
 					types.NvConfigQuery{NextBootConfig: map[string][]string{"NUM_OF_PF": {"1"}}}, nil)
 				mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, mock.Anything).
@@ -1345,7 +1460,7 @@ var _ = Describe("ConfigurationManager", func() {
 				Expect(rebootNeeded).To(BeTrue())
 			})
 
-			It("requires no update when every combined param matches next boot and current", func() {
+			It("requires no update when every native desired param matches next boot and current", func() {
 				matched := map[string][]string{"NUM_OF_PF": {"2"}, "LINK_TYPE_P1": {"2"}}
 				mockNVConfigUtils.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(
 					types.NvConfigQuery{NextBootConfig: matched, CurrentConfig: matched}, nil)
@@ -1375,6 +1490,35 @@ var _ = Describe("ConfigurationManager", func() {
 				Expect(rebootNeeded).To(BeTrue())
 			})
 
+			DescribeTable("validates doSPCX phases across the breakout barrier",
+				func(results []xpathValidationResult, expectedUpdate, expectedReboot bool, expectedCalls int) {
+					preparedPlan.Breakout = []dmscli.XPathOperation{{
+						Path: testPCIXPath, Values: map[string]any{"num-pfs": 2},
+					}}
+					preparedPlan.PostBreakout = []dmscli.XPathOperation{{
+						Path: "/nvidia/link/type", Values: map[string]any{"value": "ETH"},
+					}}
+					mockNVConfigUtils.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).
+						Return(types.NvConfigQuery{}, nil)
+					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, mock.Anything).
+						Return(map[string]string{}, nil)
+					xpathUtils.validationResults = results
+
+					updateNeeded, rebootNeeded, _, err := manager.ValidateDeviceNvSpec(ctx, device)
+
+					Expect(err).NotTo(HaveOccurred())
+					Expect(updateNeeded).To(Equal(expectedUpdate))
+					Expect(rebootNeeded).To(Equal(expectedReboot))
+					Expect(xpathUtils.validationCalls).To(HaveLen(expectedCalls))
+					Expect(xpathUtils.validationCalls[0]).To(Equal(xpathValidationCall{
+						ports: []v1alpha1.NicDevicePortSpec{portSpec(pciAddress)}, operations: preparedPlan.Breakout,
+					}))
+				},
+				Entry("breakout mismatch", []xpathValidationResult{{updateNeeded: true, rebootNeeded: true}}, true, true, 1),
+				Entry("breakout pending only", []xpathValidationResult{{rebootNeeded: true}}, false, true, 1),
+				Entry("post-breakout mismatch", []xpathValidationResult{{}, {updateNeeded: true, rebootNeeded: true}}, true, true, 2),
+			)
+
 			It("returns the error when ConstructNvParamMapFromTemplate fails", func() {
 				mockNVConfigUtils.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(types.NvConfigQuery{}, nil)
 				mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, mock.Anything).
@@ -1385,95 +1529,21 @@ var _ = Describe("ConfigurationManager", func() {
 				Expect(err.Error()).To(ContainSubstring("config not found"))
 			})
 
-			Context("with Network Bay system_conf", func() {
-				BeforeEach(func() {
-					device.Spec.Configuration.Template.NetworkBay = &v1alpha1.NetworkBaySpec{Conf: "conf3"}
-					device.Status.NetworkBay = &v1alpha1.NicDeviceNetworkBayStatus{Asic: 0}
-				})
+			It("rejects Network Bay before querying device state", func() {
+				device.Spec.Configuration.Template.NetworkBay = &v1alpha1.NetworkBaySpec{Conf: "conf3"}
 
-				It("does not flag drift when every system_conf mismatch is covered by a combined override param", func() {
-					matched := map[string][]string{"NUM_OF_PF": {"2"}}
-					mockNVConfigUtils.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(
-						types.NvConfigQuery{NextBootConfig: matched, CurrentConfig: matched}, nil)
-					mockNVConfigUtils.On("ValidateSystemConf", ctx, portSpec(pciAddress), "conf3", 0).
-						Return(mismatchSystemConf("NUM_OF_PF")...)
-					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, mock.Anything).
-						Return(map[string]string{"NUM_OF_PF": "2"}, nil)
+				updateNeeded, rebootNeeded, unsupported, err := manager.ValidateDeviceNvSpec(ctx, device)
 
-					updateNeeded, rebootNeeded, _, err := manager.ValidateDeviceNvSpec(ctx, device)
-					Expect(err).NotTo(HaveOccurred())
-					Expect(updateNeeded).To(BeFalse())
-					Expect(rebootNeeded).To(BeFalse())
-				})
-
-				It("flags drift when a system_conf mismatch is covered by no combined override param", func() {
-					matched := map[string][]string{"NUM_OF_PF": {"2"}}
-					mockNVConfigUtils.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(
-						types.NvConfigQuery{NextBootConfig: matched, CurrentConfig: matched}, nil)
-					mockNVConfigUtils.On("ValidateSystemConf", ctx, portSpec(pciAddress), "conf3", 0).
-						Return(mismatchSystemConf("BOARD_CONFIGURATION_MODE")...)
-					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, mock.Anything).
-						Return(map[string]string{"NUM_OF_PF": "2"}, nil)
-
-					updateNeeded, rebootNeeded, _, err := manager.ValidateDeviceNvSpec(ctx, device)
-					Expect(err).NotTo(HaveOccurred())
-					Expect(updateNeeded).To(BeTrue())
-					Expect(rebootNeeded).To(BeTrue())
-				})
-
-				It("value-checks each expanded index (covers system_conf by name, but still drifts on a wrong index)", func() {
-					// The combined map already has the range expanded to concrete indices; [2] differs from
-					// next boot, so validation must still report an update even though all four rows are covered.
-					expanded := map[string]string{
-						"MODULE_SPLIT_M0[0]": "1", "MODULE_SPLIT_M0[1]": "1",
-						"MODULE_SPLIT_M0[2]": "1", "MODULE_SPLIT_M0[3]": "1",
-					}
-					nextBoot := map[string][]string{
-						"MODULE_SPLIT_M0[0]": {"1"}, "MODULE_SPLIT_M0[1]": {"1"},
-						"MODULE_SPLIT_M0[2]": {"0"}, "MODULE_SPLIT_M0[3]": {"1"},
-					}
-					mockNVConfigUtils.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(
-						types.NvConfigQuery{NextBootConfig: nextBoot, CurrentConfig: nextBoot}, nil)
-					mockNVConfigUtils.On("ValidateSystemConf", ctx, portSpec(pciAddress), "conf3", 0).
-						Return(mismatchSystemConf("MODULE_SPLIT_M0[0]", "MODULE_SPLIT_M0[1]", "MODULE_SPLIT_M0[2]", "MODULE_SPLIT_M0[3]")...)
-					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, mock.Anything).Return(expanded, nil)
-
-					updateNeeded, rebootNeeded, _, err := manager.ValidateDeviceNvSpec(ctx, device)
-					Expect(err).NotTo(HaveOccurred())
-					Expect(updateNeeded).To(BeTrue())
-					Expect(rebootNeeded).To(BeTrue())
-				})
-
-				It("converges when every expanded index already matches and covers the system_conf rows", func() {
-					matched := map[string][]string{
-						"MODULE_SPLIT_M0[0]": {"1"}, "MODULE_SPLIT_M0[1]": {"1"},
-						"MODULE_SPLIT_M0[2]": {"1"}, "MODULE_SPLIT_M0[3]": {"1"},
-					}
-					expanded := map[string]string{
-						"MODULE_SPLIT_M0[0]": "1", "MODULE_SPLIT_M0[1]": "1",
-						"MODULE_SPLIT_M0[2]": "1", "MODULE_SPLIT_M0[3]": "1",
-					}
-					mockNVConfigUtils.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(
-						types.NvConfigQuery{NextBootConfig: matched, CurrentConfig: matched}, nil)
-					mockNVConfigUtils.On("ValidateSystemConf", ctx, portSpec(pciAddress), "conf3", 0).
-						Return(mismatchSystemConf("MODULE_SPLIT_M0[0]", "MODULE_SPLIT_M0[1]", "MODULE_SPLIT_M0[2]", "MODULE_SPLIT_M0[3]")...)
-					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, mock.Anything).Return(expanded, nil)
-
-					updateNeeded, rebootNeeded, _, err := manager.ValidateDeviceNvSpec(ctx, device)
-					Expect(err).NotTo(HaveOccurred())
-					Expect(updateNeeded).To(BeFalse())
-					Expect(rebootNeeded).To(BeFalse())
-				})
-
+				Expect(err).To(MatchError(ContainSubstring(
+					"networkBay cannot currently be combined with spectrumXOptimized")))
+				Expect(updateNeeded).To(BeFalse())
+				Expect(rebootNeeded).To(BeFalse())
+				Expect(unsupported).To(BeNil())
+				mockNVConfigUtils.AssertNotCalled(GinkgoT(), "QueryNvConfig", mock.Anything, mock.Anything)
 			})
 		})
 
 		Describe("ApplyNVConfiguration", func() {
-			BeforeEach(func() {
-				mockSpcXMgr.On("GetPreparedPlan", device, spectrumx.PlanStagePrepare).
-					Return(&spectrumx.Plan{}, nil).Maybe()
-			})
-
 			It("requires a matching prepare plan before querying or applying NV configuration", func() {
 				missingPlanManager := spcxmocks.NewSpectrumXManager(GinkgoT())
 				missingPlanManager.On("GetPreparedPlan", device, spectrumx.PlanStagePrepare).
@@ -1487,7 +1557,163 @@ var _ = Describe("ConfigurationManager", func() {
 				mockNVConfigUtils.AssertNotCalled(GinkgoT(), "QueryNvConfig", mock.Anything, mock.Anything)
 			})
 
-			It("force=false applies the combined params present in the query that differ", func() {
+			It("rejects a Spectrum-X apply before raw changes when typed XPath support is unavailable", func() {
+				manager.nvConfigUtils = legacyNVConfigUtils{NVConfigUtils: mockNVConfigUtils}
+
+				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
+
+				Expect(result.Status).To(Equal(types.ApplyStatusFailed))
+				Expect(err).To(MatchError(ContainSubstring("doSPCX NVConfig is not supported")))
+				mockNVConfigUtils.AssertNotCalled(GinkgoT(), "QueryNvConfig", mock.Anything, mock.Anything)
+			})
+
+			It("applies native parameters and the active doSPCX phase in one batch", func() {
+				preparedPlan.Breakout = []dmscli.XPathOperation{{
+					Path: testPCIXPath, Values: map[string]any{"num-pfs": 2, "rde-disable": true},
+				}}
+				mockNVConfigUtils.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(
+					types.NvConfigQuery{NextBootConfig: map[string][]string{"RAW_PARAM": {"1"}}}, nil)
+				mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, mock.Anything).
+					Return(map[string]string{"RAW_PARAM": "2"}, nil)
+
+				xpathUtils.validationResults = []xpathValidationResult{{updateNeeded: true, rebootNeeded: true}}
+				xpathUtils.applyResult = &xpathApplyResult{status: types.ApplyStatusSuccess}
+
+				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
+
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.Status).To(Equal(types.ApplyStatusSuccess))
+				Expect(result.RebootRequired).To(BeTrue())
+				Expect(xpathUtils.applyCalls).To(Equal([]xpathApplyCall{{
+					port: portSpec(pciAddress), portCount: 1,
+					params: map[string]string{"RAW_PARAM": "2"}, operations: preparedPlan.Breakout,
+				}}))
+			})
+
+			It("fails when a successful primary-target apply leaves native drift on a secondary PCI function", func() {
+				device.Status.Ports = append(device.Status.Ports, portSpec(pciAddress2))
+				mockNVConfigUtils.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(
+					types.NvConfigQuery{NextBootConfig: map[string][]string{"NUM_OF_PF": {"2"}}}, nil)
+				mockNVConfigUtils.On("QueryNvConfig", ctx, portSpec(pciAddress2), []string(nil)).Return(
+					types.NvConfigQuery{NextBootConfig: map[string][]string{"NUM_OF_PF": {"1"}}}, nil)
+				mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, mock.Anything).
+					Return(map[string]string{"NUM_OF_PF": "2"}, nil)
+				xpathUtils.applyResult = &xpathApplyResult{status: types.ApplyStatusSuccess}
+
+				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
+
+				Expect(result.Status).To(Equal(types.ApplyStatusFailed))
+				Expect(err).To(MatchError(ContainSubstring(
+					"did not stage native NVConfig on secondary PCI function \"0000:3b:00.1\"")))
+			})
+
+			It("fails when a successful primary-target apply leaves typed drift on a secondary PCI function", func() {
+				device.Status.Ports = append(device.Status.Ports, portSpec(pciAddress2))
+				preparedPlan.Breakout = []dmscli.XPathOperation{{
+					Path: testPCIXPath, Values: map[string]any{"num-pfs": 2},
+				}}
+				for _, port := range device.Status.Ports {
+					mockNVConfigUtils.On("QueryNvConfig", ctx, port, []string(nil)).Return(types.NvConfigQuery{}, nil)
+				}
+				mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, mock.Anything).
+					Return(map[string]string{}, nil)
+				xpathUtils.validationResults = []xpathValidationResult{
+					{updateNeeded: true, rebootNeeded: true},
+					{updateNeeded: true, rebootNeeded: true},
+				}
+				xpathUtils.applyResult = &xpathApplyResult{status: types.ApplyStatusSuccess}
+
+				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
+
+				Expect(result.Status).To(Equal(types.ApplyStatusFailed))
+				Expect(err).To(MatchError(ContainSubstring(
+					"did not stage typed NVConfig on every secondary PCI function")))
+				Expect(xpathUtils.validationCalls).To(HaveLen(2))
+				Expect(xpathUtils.validationCalls[1].ports).To(Equal(
+					[]v1alpha1.NicDevicePortSpec{portSpec(pciAddress2)}))
+			})
+
+			It("rejects rawNvConfig before querying or applying device state", func() {
+				device.Spec.Configuration.Template.RawNvConfig = []v1alpha1.NvConfigParam{{
+					Name: "ROCE_ADAPTIVE_ROUTING_EN", Value: "0",
+				}}
+
+				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
+
+				Expect(result.Status).To(Equal(types.ApplyStatusFailed))
+				Expect(err).To(MatchError(ContainSubstring(
+					"rawNvConfig cannot currently be combined with spectrumXOptimized")))
+				mockNVConfigUtils.AssertNotCalled(GinkgoT(), "QueryNvConfig", mock.Anything, mock.Anything)
+			})
+
+			It("force applies the complete plan once through the primary target with every available DMS port", func() {
+				device.Status.Ports = append(device.Status.Ports, portSpec(pciAddress2))
+				preparedPlan.Breakout = []dmscli.XPathOperation{{
+					Path: testPCIXPath, Values: map[string]any{"num-pfs": 2},
+				}}
+				preparedPlan.PostBreakout = []dmscli.XPathOperation{{
+					Path: "/nvidia/link/type", Values: map[string]any{"value": "ETH"},
+				}}
+				for _, port := range device.Status.Ports {
+					mockNVConfigUtils.On("QueryNvConfig", ctx, port, []string(nil)).
+						Return(types.NvConfigQuery{}, nil)
+				}
+				mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, mock.Anything).
+					Return(map[string]string{}, nil)
+				xpathUtils.applyResult = &xpathApplyResult{status: types.ApplyStatusSuccess}
+				xpathUtils.validationResults = []xpathValidationResult{{}}
+
+				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{Force: true})
+
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.Status).To(Equal(types.ApplyStatusSuccess))
+				Expect(result.RebootRequired).To(BeTrue())
+				Expect(xpathUtils.validationCalls).To(Equal([]xpathValidationCall{{
+					ports: []v1alpha1.NicDevicePortSpec{portSpec(pciAddress2)},
+					operations: append(
+						append([]dmscli.XPathOperation{}, preparedPlan.Breakout...), preparedPlan.PostBreakout...),
+				}}))
+				Expect(xpathUtils.applyCalls).To(HaveLen(1))
+				Expect(xpathUtils.applyCalls[0].portCount).To(Equal(2))
+				Expect(xpathUtils.applyCalls[0].operations).To(Equal(
+					append(preparedPlan.Breakout, preparedPlan.PostBreakout...)))
+				Expect(xpathUtils.applyCalls[0].force).To(BeTrue())
+			})
+
+			DescribeTable("selects post-breakout operations after the barrier",
+				func(options types.ConfigurationOptions, includeBreakout bool) {
+					preparedPlan.Breakout = []dmscli.XPathOperation{{
+						Path: testPCIXPath, Values: map[string]any{"num-pfs": 2},
+					}}
+					preparedPlan.PostBreakout = []dmscli.XPathOperation{{
+						Path: "/nvidia/link/type", Values: map[string]any{"value": "ETH"},
+					}}
+					mockNVConfigUtils.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).
+						Return(types.NvConfigQuery{}, nil)
+					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, mock.Anything).
+						Return(map[string]string{}, nil)
+					xpathUtils.validationResults = []xpathValidationResult{
+						{}, {updateNeeded: true, rebootNeeded: true},
+					}
+					xpathUtils.applyResult = &xpathApplyResult{status: types.ApplyStatusSuccess}
+
+					result, err := manager.ApplyNVConfiguration(ctx, device, &options)
+
+					Expect(err).NotTo(HaveOccurred())
+					Expect(result.Status).To(Equal(types.ApplyStatusSuccess))
+					Expect(result.RebootRequired).To(BeTrue())
+					expected := preparedPlan.PostBreakout
+					if includeBreakout {
+						expected = append(preparedPlan.Breakout, preparedPlan.PostBreakout...)
+					}
+					Expect(xpathUtils.applyCalls[0].operations).To(Equal(expected))
+					Expect(xpathUtils.applyCalls[0].withDefault).To(Equal(options.WithDefault))
+				},
+				Entry("normally", types.ConfigurationOptions{}, false),
+				Entry("with defaults", types.ConfigurationOptions{WithDefault: true}, true),
+			)
+
+			It("force=false applies the native desired params present in the query that differ", func() {
 				mockNVConfigUtils.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(
 					types.NvConfigQuery{NextBootConfig: map[string][]string{"NUM_OF_PF": {"1"}, "LINK_TYPE_P1": {"2"}}}, nil)
 				mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, mock.Anything).
@@ -1502,6 +1728,7 @@ var _ = Describe("ConfigurationManager", func() {
 			})
 
 			It("falls back to the public batch method when the context-aware extension is absent", func() {
+				device.Spec.Configuration.Template.SpectrumXOptimized.Enabled = false
 				manager.nvConfigUtils = legacyNVConfigUtils{NVConfigUtils: mockNVConfigUtils}
 				mockNVConfigUtils.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(
 					types.NvConfigQuery{NextBootConfig: map[string][]string{"NUM_OF_PF": {"1"}}}, nil)
@@ -1517,7 +1744,7 @@ var _ = Describe("ConfigurationManager", func() {
 				Expect(result.RebootRequired).To(BeTrue())
 			})
 
-			It("force=true applies all combined params in a single --force batch", func() {
+			It("force=true applies all native desired params in a single --force batch", func() {
 				mockNVConfigUtils.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(types.NvConfigQuery{}, nil)
 				mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, mock.Anything).
 					Return(map[string]string{"NUM_OF_PF": "2", "LINK_TYPE_P1": "2"}, nil)
@@ -1529,7 +1756,8 @@ var _ = Describe("ConfigurationManager", func() {
 				Expect(result.RebootRequired).To(BeTrue())
 			})
 
-			It("force=true applies the batch to every PF, not just the first", func() {
+			It("preserves per-PF native apply for non-Spectrum-X devices", func() {
+				device.Spec.Configuration.Template.SpectrumXOptimized.Enabled = false
 				device.Status.Ports = []v1alpha1.NicDevicePortSpec{{PCI: pciAddress}, {PCI: pciAddress2}}
 				mockNVConfigUtils.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(types.NvConfigQuery{}, nil)
 				mockNVConfigUtils.On("QueryNvConfig", ctx, portSpec(pciAddress2), []string(nil)).Return(types.NvConfigQuery{}, nil)
@@ -1546,7 +1774,7 @@ var _ = Describe("ConfigurationManager", func() {
 				mockNVConfigUtils.AssertCalled(GinkgoT(), "SetNvConfigParametersBatchWithContext", mock.Anything, portSpec(pciAddress2), map[string]string{"NUM_OF_PF": "2"}, false, true)
 			})
 
-			It("propagates WithDefault=true to the combined batch", func() {
+			It("propagates WithDefault=true to the native batch", func() {
 				mockNVConfigUtils.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(
 					types.NvConfigQuery{NextBootConfig: map[string][]string{"NUM_OF_PF": {"1"}}}, nil)
 				mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, mock.Anything).
@@ -1586,7 +1814,7 @@ var _ = Describe("ConfigurationManager", func() {
 				Expect(result.RebootRequired).To(BeFalse())
 			})
 
-			It("returns NothingToDo when the combined params already match", func() {
+			It("returns NothingToDo when the native desired params already match", func() {
 				mockNVConfigUtils.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(
 					types.NvConfigQuery{NextBootConfig: map[string][]string{"NUM_OF_PF": {"2"}}}, nil)
 				mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, mock.Anything).
@@ -1608,42 +1836,6 @@ var _ = Describe("ConfigurationManager", func() {
 				Expect(result.Status).To(Equal(types.ApplyStatusFailed))
 			})
 
-			Context("with Network Bay system_conf", func() {
-				BeforeEach(func() {
-					device.Spec.Configuration.Template.NetworkBay = &v1alpha1.NetworkBaySpec{Conf: "conf3"}
-					device.Status.NetworkBay = &v1alpha1.NicDeviceNetworkBayStatus{Asic: 0}
-				})
-
-				It("applies set_system_conf when the combined params do not cover a mismatch", func() {
-					mockNVConfigUtils.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(types.NvConfigQuery{}, nil)
-					mockNVConfigUtils.On("ValidateSystemConf", ctx, portSpec(pciAddress), "conf3", 0).
-						Return(mismatchSystemConf("BOARD_CONFIGURATION_MODE")...)
-					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, mock.Anything).
-						Return(map[string]string{"NUM_OF_PF": "2"}, nil)
-					mockNVConfigUtils.On("SetSystemConf", ctx, portSpec(pciAddress), "conf3", 0, true).Return(nil)
-					mockNVConfigUtils.On("SetNvConfigParametersBatchWithContext", mock.Anything, portSpec(pciAddress), map[string]string{"NUM_OF_PF": "2"}, false, true).
-						Return(types.ApplyStatusSuccess, nil)
-
-					result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{Force: true})
-					Expect(err).NotTo(HaveOccurred())
-					Expect(result.RebootRequired).To(BeTrue())
-				})
-
-				It("does not apply set_system_conf when the combined params cover all mismatches", func() {
-					mockNVConfigUtils.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(types.NvConfigQuery{}, nil)
-					mockNVConfigUtils.On("ValidateSystemConf", ctx, portSpec(pciAddress), "conf3", 0).
-						Return(mismatchSystemConf("NUM_OF_PF")...)
-					mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, mock.Anything).
-						Return(map[string]string{"NUM_OF_PF": "2"}, nil)
-					mockNVConfigUtils.On("SetNvConfigParametersBatchWithContext", mock.Anything, portSpec(pciAddress), map[string]string{"NUM_OF_PF": "2"}, false, true).
-						Return(types.ApplyStatusSuccess, nil)
-					mockNVConfigUtils.AssertNotCalled(GinkgoT(), "SetSystemConf", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
-
-					result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{Force: true})
-					Expect(err).NotTo(HaveOccurred())
-					Expect(result.RebootRequired).To(BeTrue())
-				})
-			})
 		})
 	})
 
@@ -1830,8 +2022,8 @@ var _ = Describe("ConfigurationManager", func() {
 			})
 		})
 
-		// Full-flow suite: real configValidation (mocked ConfigurationUtils + SpectrumXManager + NVConfigUtils)
-		// so the whole chain — system_conf validate, the rawNvConfig > Spectrum-X > template merge inside
+		// Full-flow suite: real configValidation with mocked ConfigurationUtils and NVConfigUtils
+		// so the whole chain — system_conf validate, rawNvConfig > template merge inside
 		// ConstructNvParamMapFromTemplate, coverage check, and apply — runs end to end. Each case drives BOTH
 		// ValidateDeviceNvSpec and ApplyNVConfiguration and asserts the concrete SetSystemConf /
 		// SetNvConfigParametersBatch calls. ConstructNvParamMapFromTemplate always emits SRIOV_EN=0 /
@@ -1840,7 +2032,6 @@ var _ = Describe("ConfigurationManager", func() {
 			var (
 				fullFlowHostUtils mocks.ConfigurationUtils
 				fullFlowNV        *nvconfigmocks.NVConfigUtils
-				fullFlowSpcX      *spcxmocks.SpectrumXManager
 				fullFlowManager   configurationManager
 				fullFlowCtx       context.Context
 				fullFlowDevice    *v1alpha1.NicDevice
@@ -1849,12 +2040,10 @@ var _ = Describe("ConfigurationManager", func() {
 			BeforeEach(func() {
 				fullFlowHostUtils = mocks.ConfigurationUtils{}
 				fullFlowNV = nvconfigmocks.NewNVConfigUtils(GinkgoT())
-				fullFlowSpcX = spcxmocks.NewSpectrumXManager(GinkgoT())
 				fullFlowManager = configurationManager{
-					configurationUtils:     &fullFlowHostUtils,
-					configValidation:       newConfigValidation(&fullFlowHostUtils, nil, fullFlowSpcX),
-					nvConfigUtils:          fullFlowNV,
-					spectrumXConfigManager: fullFlowSpcX,
+					configurationUtils: &fullFlowHostUtils,
+					configValidation:   newConfigValidation(&fullFlowHostUtils, nil),
+					nvConfigUtils:      fullFlowNV,
 				}
 				fullFlowCtx = context.TODO()
 				fullFlowDevice = &v1alpha1.NicDevice{
@@ -1870,8 +2059,6 @@ var _ = Describe("ConfigurationManager", func() {
 						NetworkBay: &v1alpha1.NicDeviceNetworkBayStatus{Asic: 0},
 					},
 				}
-				fullFlowSpcX.On("GetPreparedPlan", mock.Anything, spectrumx.PlanStagePrepare).
-					Return(&spectrumx.Plan{}, nil).Maybe()
 			})
 
 			// sriovStaged returns the SRIOV defaults ConstructNvParamMapFromTemplate emits for an empty
@@ -1970,98 +2157,6 @@ var _ = Describe("ConfigurationManager", func() {
 				fullFlowNV.AssertNotCalled(GinkgoT(), "SetSystemConf", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 			})
 
-			// 5) system_conf mismatch, Spectrum-X covers it and the value is already staged, no raw → converged.
-			It("5: system_conf mismatch fully covered by an already-applied Spectrum-X override converges", func() {
-				fullFlowDevice.Spec.Configuration.Template.SpectrumXOptimized = &v1alpha1.SpectrumXOptimizedSpec{Enabled: true}
-				fullFlowSpcX.On("GetBreakoutMlxConfig", fullFlowDevice).Return(map[string]string{"NUM_OF_PF": "2"}, nil)
-				fullFlowSpcX.On("GetPostBreakoutMlxConfig", fullFlowDevice).Return(nil, nil)
-				staged := sriovStaged(map[string][]string{"NUM_OF_PF": {"2"}})
-				fullFlowNV.On("QueryNvConfig", fullFlowCtx, portSpec(pciAddress), []string(nil)).Return(
-					types.NvConfigQuery{NextBootConfig: staged, CurrentConfig: staged}, nil)
-				fullFlowNV.On("ValidateSystemConf", fullFlowCtx, portSpec(pciAddress), "conf3", 0).
-					Return(mismatchSystemConf("NUM_OF_PF")...)
-
-				updateNeeded, rebootNeeded, _, err := fullFlowManager.ValidateDeviceNvSpec(fullFlowCtx, fullFlowDevice)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(updateNeeded).To(BeFalse())
-				Expect(rebootNeeded).To(BeFalse())
-
-				result, err := fullFlowManager.ApplyNVConfiguration(fullFlowCtx, fullFlowDevice, &types.ConfigurationOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(result.Status).To(Equal(types.ApplyStatusNothingToDo))
-				fullFlowNV.AssertNotCalled(GinkgoT(), "SetSystemConf", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
-				fullFlowNV.AssertNotCalled(GinkgoT(), "SetNvConfigParametersBatchWithContext", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
-			})
-
-			// 6) Spectrum-X params for the mismatched profile params are ALSO overridden by rawNvConfig (raw wins):
-			//    one already applied (NUM_OF_PF), one differs (LINK_TYPE_P1) so the raw value — not the Spectrum-X
-			//    value — is what gets applied.
-			It("6: rawNvConfig overrides Spectrum-X for the mismatched params and the raw value wins on apply", func() {
-				fullFlowDevice.Spec.Configuration.Template.SpectrumXOptimized = &v1alpha1.SpectrumXOptimizedSpec{Enabled: true}
-				fullFlowDevice.Spec.Configuration.Template.RawNvConfig = []v1alpha1.NvConfigParam{
-					{Name: "NUM_OF_PF", Value: "8"},
-					{Name: "LINK_TYPE_P1", Value: "2"},
-				}
-				fullFlowSpcX.On("GetBreakoutMlxConfig", fullFlowDevice).Return(map[string]string{"NUM_OF_PF": "2", "LINK_TYPE_P1": "1"}, nil)
-				fullFlowSpcX.On("GetPostBreakoutMlxConfig", fullFlowDevice).Return(nil, nil)
-				staged := sriovStaged(map[string][]string{"NUM_OF_PF": {"8"}, "LINK_TYPE_P1": {"1"}})
-				fullFlowNV.On("QueryNvConfig", fullFlowCtx, portSpec(pciAddress), []string(nil)).Return(
-					types.NvConfigQuery{NextBootConfig: staged, CurrentConfig: staged}, nil)
-				fullFlowNV.On("ValidateSystemConf", fullFlowCtx, portSpec(pciAddress), "conf3", 0).
-					Return(mismatchSystemConf("NUM_OF_PF", "LINK_TYPE_P1")...)
-				// Only LINK_TYPE_P1 differs from next boot; the raw value 2 wins over the Spectrum-X value 1.
-				fullFlowNV.On("SetNvConfigParametersBatchWithContext", mock.Anything, portSpec(pciAddress), map[string]string{"LINK_TYPE_P1": "2"}, false, false).
-					Return(types.ApplyStatusSuccess, nil)
-
-				updateNeeded, rebootNeeded, _, err := fullFlowManager.ValidateDeviceNvSpec(fullFlowCtx, fullFlowDevice)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(updateNeeded).To(BeTrue())
-				Expect(rebootNeeded).To(BeTrue())
-
-				result, err := fullFlowManager.ApplyNVConfiguration(fullFlowCtx, fullFlowDevice, &types.ConfigurationOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(result.Status).To(Equal(types.ApplyStatusSuccess))
-				Expect(result.RebootRequired).To(BeTrue())
-				fullFlowNV.AssertNotCalled(GinkgoT(), "SetSystemConf", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
-			})
-
-			// 7) Same as (6) but a template-derived param (NUM_OF_VFS from NumVfs) is also partly overridden by
-			//    rawNvConfig — proving raw wins over BOTH Spectrum-X (LINK_TYPE_P1) and the template (NUM_OF_VFS).
-			It("7: rawNvConfig wins over both Spectrum-X and template params in the combined apply batch", func() {
-				fullFlowDevice.Spec.Configuration.Template.NumVfs = 4 // template: SRIOV_EN=1, NUM_OF_VFS=4
-				fullFlowDevice.Spec.Configuration.Template.SpectrumXOptimized = &v1alpha1.SpectrumXOptimizedSpec{Enabled: true}
-				fullFlowDevice.Spec.Configuration.Template.RawNvConfig = []v1alpha1.NvConfigParam{
-					{Name: "NUM_OF_PF", Value: "8"},
-					{Name: "LINK_TYPE_P1", Value: "2"},
-					{Name: consts.SriovNumOfVfsParam, Value: "16"}, // raw overrides the template's NUM_OF_VFS=4
-				}
-				fullFlowSpcX.On("GetBreakoutMlxConfig", fullFlowDevice).Return(map[string]string{"NUM_OF_PF": "2", "LINK_TYPE_P1": "1"}, nil)
-				fullFlowSpcX.On("GetPostBreakoutMlxConfig", fullFlowDevice).Return(nil, nil)
-				staged := map[string][]string{
-					consts.SriovEnabledParam:  {"1"},
-					consts.SriovNumOfVfsParam: {"4"}, // template value staged; raw wants 16
-					"NUM_OF_PF":               {"8"},
-					"LINK_TYPE_P1":            {"1"}, // Spectrum-X value staged; raw wants 2
-				}
-				fullFlowNV.On("QueryNvConfig", fullFlowCtx, portSpec(pciAddress), []string(nil)).Return(
-					types.NvConfigQuery{NextBootConfig: staged, CurrentConfig: staged}, nil)
-				fullFlowNV.On("ValidateSystemConf", fullFlowCtx, portSpec(pciAddress), "conf3", 0).
-					Return(mismatchSystemConf("NUM_OF_PF", "LINK_TYPE_P1")...)
-				// Raw wins on both: LINK_TYPE_P1 over Spectrum-X (1→2) and NUM_OF_VFS over template (4→16).
-				fullFlowNV.On("SetNvConfigParametersBatchWithContext", mock.Anything, portSpec(pciAddress),
-					map[string]string{"LINK_TYPE_P1": "2", consts.SriovNumOfVfsParam: "16"}, false, false).Return(types.ApplyStatusSuccess, nil)
-
-				updateNeeded, rebootNeeded, _, err := fullFlowManager.ValidateDeviceNvSpec(fullFlowCtx, fullFlowDevice)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(updateNeeded).To(BeTrue())
-				Expect(rebootNeeded).To(BeTrue())
-
-				result, err := fullFlowManager.ApplyNVConfiguration(fullFlowCtx, fullFlowDevice, &types.ConfigurationOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(result.Status).To(Equal(types.ApplyStatusSuccess))
-				Expect(result.RebootRequired).To(BeTrue())
-				fullFlowNV.AssertNotCalled(GinkgoT(), "SetSystemConf", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
-			})
 		})
 	})
 })
