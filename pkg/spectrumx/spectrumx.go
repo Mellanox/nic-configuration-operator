@@ -30,6 +30,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	"github.com/Mellanox/nic-configuration-operator/pkg/dms"
+	"github.com/Mellanox/nic-configuration-operator/pkg/spectrumx/dospcx"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 )
 
@@ -43,12 +44,6 @@ const cnpDscpExpectedValue = "48"
 
 // mlxregBinary is the path to the mlxreg binary. This is a var to allow substitution in tests.
 var mlxregBinary = "/usr/bin/mlxreg"
-
-// BlueprintsDataManager installs the authored data consumed by the doSPCX planner.
-type BlueprintsDataManager interface {
-	InstallBlueprintsData(archive []byte) error
-	RemoveBlueprintsData() error
-}
 
 type SpectrumXManager interface {
 	PlanManager
@@ -81,15 +76,11 @@ var _ SpectrumXManager = (*spectrumXConfigManager)(nil)
 type spectrumXConfigManager struct {
 	// configMutex guards spectrumXConfigs, which is mutated at runtime by the
 	// SpectrumXProfileReconciler while being read from reconcile goroutines.
-	configMutex        sync.RWMutex
-	spectrumXConfigs   map[string]*types.SpectrumXConfig
-	planMutex          sync.RWMutex
-	preparedPlans      map[string]*preparedPlan
-	dmsManager         dms.DMSManager
-	execInterface      execUtils.Interface
-	blueprintsStateDir string
-	dospcxDataRoot     string
-	dospcxDataDigest   string
+	configMutex      sync.RWMutex
+	spectrumXConfigs map[string]*types.SpectrumXConfig
+	dospcxManager    dospcxLifecycle
+	dmsManager       dms.DMSManager
+	execInterface    execUtils.Interface
 
 	ccProcesses       map[string]*ccProcess
 	ccTerminationChan chan string // buffered; carries RDMA iface name on unexpected exit
@@ -857,15 +848,13 @@ func NewSpectrumXConfigManager(
 	if spectrumXConfigs == nil {
 		spectrumXConfigs = map[string]*types.SpectrumXConfig{}
 	}
+	execInterface := execUtils.New()
 	return &spectrumXConfigManager{
-		dmsManager:         dmsManager,
-		spectrumXConfigs:   spectrumXConfigs,
-		preparedPlans:      make(map[string]*preparedPlan),
-		execInterface:      execUtils.New(),
-		blueprintsStateDir: "",
-		dospcxDataRoot:     defaultDospcxDataRoot,
-		dospcxDataDigest:   "",
-		ccProcesses:        make(map[string]*ccProcess),
-		ccTerminationChan:  make(chan string, 10),
+		dmsManager:        dmsManager,
+		spectrumXConfigs:  spectrumXConfigs,
+		dospcxManager:     dospcx.NewManager(execInterface),
+		execInterface:     execInterface,
+		ccProcesses:       make(map[string]*ccProcess),
+		ccTerminationChan: make(chan string, 10),
 	}
 }

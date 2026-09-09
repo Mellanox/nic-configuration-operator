@@ -1005,7 +1005,7 @@ var _ = Describe("ConfigurationManager", func() {
 
 			It("continues the existing runtime flow when the configure plan matches", func() {
 				mockSpcXMgr.On("GetPreparedPlan", device, spectrumx.PlanStageConfigure).
-					Return(&spectrumx.Plan{Stage: spectrumx.PlanStageConfigure}, nil)
+					Return(&spectrumx.Plan{}, nil)
 				mockConfigValidation.On("RuntimeConfigApplied", device).Return(true, nil)
 				mockSpcXMgr.On("RuntimeConfigApplied", device).Return(true, nil)
 
@@ -1471,7 +1471,7 @@ var _ = Describe("ConfigurationManager", func() {
 		Describe("ApplyNVConfiguration", func() {
 			BeforeEach(func() {
 				mockSpcXMgr.On("GetPreparedPlan", device, spectrumx.PlanStagePrepare).
-					Return(&spectrumx.Plan{Stage: spectrumx.PlanStagePrepare}, nil).Maybe()
+					Return(&spectrumx.Plan{}, nil).Maybe()
 			})
 
 			It("requires a matching prepare plan before querying or applying NV configuration", func() {
@@ -1871,7 +1871,7 @@ var _ = Describe("ConfigurationManager", func() {
 					},
 				}
 				fullFlowSpcX.On("GetPreparedPlan", mock.Anything, spectrumx.PlanStagePrepare).
-					Return(&spectrumx.Plan{Stage: spectrumx.PlanStagePrepare}, nil).Maybe()
+					Return(&spectrumx.Plan{}, nil).Maybe()
 			})
 
 			// sriovStaged returns the SRIOV defaults ConstructNvParamMapFromTemplate emits for an empty

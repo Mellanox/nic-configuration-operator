@@ -30,6 +30,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	dmsmocks "github.com/Mellanox/nic-configuration-operator/pkg/dms/mocks"
+	"github.com/Mellanox/nic-configuration-operator/pkg/spectrumx/dospcx"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 
 	execUtils "k8s.io/utils/exec"
@@ -169,9 +170,7 @@ var _ = Describe("SpectrumXConfigManager", func() {
 
 		Expect(ok).To(BeTrue())
 		Expect(internalManager.execInterface).NotTo(BeNil())
-		Expect(internalManager.blueprintsStateDir).To(BeEmpty())
-		Expect(internalManager.dospcxDataRoot).To(Equal(defaultDospcxDataRoot))
-		Expect(internalManager.dospcxDataDigest).To(BeEmpty())
+		Expect(internalManager.dospcxManager).NotTo(BeNil())
 	})
 
 	BeforeEach(func() {
@@ -223,15 +222,12 @@ var _ = Describe("SpectrumXConfigManager", func() {
 		}
 
 		manager = &spectrumXConfigManager{
-			dmsManager:         &dmsMgr,
-			spectrumXConfigs:   cfgs,
-			preparedPlans:      make(map[string]*preparedPlan),
-			execInterface:      execFake,
-			blueprintsStateDir: "",
-			dospcxDataRoot:     defaultDospcxDataRoot,
-			dospcxDataDigest:   "",
-			ccProcesses:        map[string]*ccProcess{},
-			ccTerminationChan:  make(chan string, 10),
+			dmsManager:        &dmsMgr,
+			spectrumXConfigs:  cfgs,
+			dospcxManager:     dospcx.NewManager(execFake),
+			execInterface:     execFake,
+			ccProcesses:       map[string]*ccProcess{},
+			ccTerminationChan: make(chan string, 10),
 		}
 
 		beforeDevice()

@@ -223,18 +223,15 @@ Spectrum-X profiles can configure NICs with multiple data planes. Available mode
 starts its existing concurrent per-device NV apply, it calls `PreparePlan` once for the node's
 Spectrum-X device group with the `prepare` stage. It does the same with the `configure` stage before
 the existing concurrent runtime apply. Plan preparation never executes generated plan operations.
-`PreparePlan` parses the host-k8s `plan.semantic.groups` contract once and caches its ordered,
-target-resolved operation groups in memory. `GetPreparedPlan` only validates the requesting
-device's inputs and membership against that cache; it does not reread or reparse files for every
-per-device apply. The compiled form includes current plus pending queries for prepare-stage
-NVConfig and retains the planner's fanout order. This translation remains execution-free. Semantic
-group references are authoritative; public doSPCX
-operations do not need to repeat group or network-role fields, and an omitted operation kind means
-`set`, matching DMS. Prepare groups use the pre-breakout or post-breakout device view implied by
-their group name when the current doSPCX schema omits that metadata. Post-breakout targets retain
-the operation's explicit DMS port, or default to port 1 for an explicitly expanded PF. Configure
-groups `eswitch` and `vf-lifecycle` are intentionally excluded from the current operation plan and
-reported as skipped; unknown groups fail closed.
+`PreparePlan` parses the host-k8s `plan.semantic.groups` contract once and caches a homogeneous
+configuration plan in memory. The compiled form contains only three execution inputs: ordered
+`breakout` and `post-breakout` XPath operation slices for the prepare stage, and ordered runtime
+operation groups for the configure stage. Device targeting remains the responsibility of the
+configuration manager when it consumes the plan. `GetPreparedPlan` validates the requesting
+device's inputs and membership against the cache; it does not reread or reparse files for every
+per-device apply. Semantic group references are authoritative, and an omitted operation kind means
+`set`, matching DMS. Configure groups `eswitch` and `vf-lifecycle` are intentionally omitted from
+the compiled plan; unknown groups fail closed. Plan compilation remains execution-free.
 
 NCO translates its CRD multiplane modes to the public profiles supplied by the doSPCX data bundle:
 `none` selects `single-plane`, `swplb` selects `SPX_NetPlugin`, and `hwplb` selects
@@ -264,12 +261,11 @@ Each stage stores a flat metadata document containing only the planner inputs, i
 platform, Spectrum-X settings, planner parameters, doSPCX data archive digest, and target-map
 digest. Repeated calls in the same process reuse the in-memory plan. After a process restart,
 `PreparePlan` loads and compiles the saved plan once when that metadata still matches, the
-target-map digest is unchanged, the generated devices exactly match the target-map-derived BDF,
-DMS-target, device-ID, rail, plane, and role set, and the semantic operations compile under NCO's
-execution policy. Any input change or invalid saved artifact regenerates
+target-map digest is unchanged, and the semantic operations compile under NCO's execution policy.
+Any input change or invalid saved artifact regenerates
 the plan through `dms-cli`. Before applying an individual Spectrum-X device, the configuration
 manager calls `GetPreparedPlan` and fails without changing the device if the stage-specific plan is
-missing, stale, or does not contain that device.
+missing, stale, or its target map does not contain that device.
 
 Set `BLUEPRINTS_STATE_DIR` to override `/var/lib/blueprints`.
 
