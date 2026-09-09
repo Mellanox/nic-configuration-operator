@@ -230,16 +230,19 @@ per-device apply. The compiled form includes current plus pending queries for pr
 NVConfig and retains the planner's fanout order. This translation remains execution-free. Semantic
 group references are authoritative; public doSPCX
 operations do not need to repeat group or network-role fields, and an omitted operation kind means
-`set`, matching DMS. Configure groups `eswitch` and `vf-lifecycle` are intentionally excluded from
-the current operation plan and reported as skipped; unknown groups fail closed.
+`set`, matching DMS. Prepare groups use the pre-breakout or post-breakout device view implied by
+their group name when the current doSPCX schema omits that metadata. Post-breakout targets retain
+the operation's explicit DMS port, or default to port 1 for an explicitly expanded PF. Configure
+groups `eswitch` and `vf-lifecycle` are intentionally excluded from the current operation plan and
+reported as skipped; unknown groups fail closed.
 
 NCO translates its CRD multiplane modes to the public profiles supplied by the doSPCX data bundle:
 `none` selects `single-plane`, `swplb` selects `SPX_NetPlugin`, and `hwplb` selects
 `SPX_Multiplane`.
 
-The manager creates its command executor internally and points the `dms-cli` child process at the
-Blueprints action tree fixed at `/opt/nvidia/blueprints`. The executable DMS planner remains part of
-the daemon base image, while the labeled doSPCX data ConfigMap restores its authored catalog under
+The manager creates its command executor internally. The executable DMS planner remains part of
+the daemon base image and resolves its authored catalog from the native DMS location where the
+labeled doSPCX data ConfigMap restores it:
 `/opt/mellanox/doca/services/dms/doSpcx/data`. When `PreparePlan` is called, files are written to:
 
 ```text

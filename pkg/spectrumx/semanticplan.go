@@ -23,6 +23,7 @@ import (
 	"io"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/go-logr/logr"
@@ -40,6 +41,12 @@ const (
 
 	rdmaTopologyPerPF       = "per_pf"
 	rdmaTopologyPerRailBond = "per_rail_bond"
+
+	deviceViewPreBreakout  = "pre_breakout"
+	deviceViewPostBreakout = "post_breakout"
+
+	semanticGroupBreakout     = "breakout"
+	semanticGroupPostBreakout = "post-breakout"
 )
 
 // DMSOperationGroup is one executable group or ordered phase marker.
@@ -84,10 +91,11 @@ type planDocument struct {
 		DetectedHW struct {
 			PlatformType string `json:"platform_type"`
 		} `json:"detected_hw"`
-		Devices        []planDevice                       `json:"devices"`
-		RuntimeContext planRuntimeContext                 `json:"runtime_ctx"`
-		Operations     map[string]semanticOperationRecord `json:"operations"`
-		Semantic       *struct {
+		Devices             []planDevice                       `json:"devices"`
+		PostBreakoutDevices []planDevice                       `json:"post_breakout_devices"`
+		RuntimeContext      planRuntimeContext                 `json:"runtime_ctx"`
+		Operations          map[string]semanticOperationRecord `json:"operations"`
+		Semantic            *struct {
 			Groups []semanticGroupRecord `json:"groups"`
 		} `json:"semantic"`
 		BareMetal *struct {
@@ -100,13 +108,14 @@ type planDocument struct {
 }
 
 type planDevice struct {
-	BDF        string `json:"bdf"`
-	DeviceID   string `json:"device_id"`
-	RDMADevice string `json:"rdma_dev"`
-	DMSTarget  string `json:"dms_target"`
-	Rail       int    `json:"rail"`
-	Plane      int    `json:"plane"`
-	Network    string `json:"network"`
+	BDF           string `json:"bdf"`
+	DeviceID      string `json:"device_id"`
+	RDMADevice    string `json:"rdma_dev"`
+	DMSTarget     string `json:"dms_target"`
+	Rail          int    `json:"rail"`
+	Plane         int    `json:"plane"`
+	PlaneExplicit bool   `json:"plane_explicit"`
+	Network       string `json:"network"`
 }
 
 type planRuntimeContext struct {
@@ -132,6 +141,7 @@ type semanticOperationRecord struct {
 	TargetClass string         `json:"target_class"`
 	TargetRole  string         `json:"target_role"`
 	Scope       string         `json:"scope"`
+	Port        *int           `json:"port"`
 }
 
 func decodePlanDocument(planJSON []byte) (*planDocument, error) {
@@ -178,7 +188,7 @@ func buildDMSPlan(ctx context.Context, document *planDocument, expectedStage Pla
 		if err != nil {
 			return nil, err
 		}
-		disposition, reason, err := semanticGroupDisposition(expectedStage, group.Name)
+		disposition, reason, err := semanticGroupDisposition(expectedStage, group.Name, len(operations))
 		if err != nil {
 			return nil, err
 		}
@@ -192,13 +202,17 @@ func buildDMSPlan(ctx context.Context, document *planDocument, expectedStage Pla
 			continue
 		}
 
+		deviceView, requiresReboot, err := semanticGroupExecutionContract(expectedStage, group)
+		if err != nil {
+			return nil, err
+		}
 		compiled := DMSOperationGroup{
 			Name:           group.Name,
 			Order:          group.Order,
 			Scope:          group.Scope,
-			DeviceView:     group.DeviceView,
+			DeviceView:     deviceView,
 			FanoutOrder:    group.FanoutOrder,
-			RequiresReboot: group.RequiresReboot,
+			RequiresReboot: requiresReboot,
 			PhaseMarker:    disposition == groupDispositionMarker,
 		}
 		if compiled.PhaseMarker {
@@ -209,9 +223,13 @@ func buildDMSPlan(ctx context.Context, document *planDocument, expectedStage Pla
 			if err := validateExecutableOperations(group.Name, operations); err != nil {
 				return nil, err
 			}
+			devices, defaultTargetPort, err := devicesForSemanticGroup(document, deviceView)
+			if err != nil {
+				return nil, fmt.Errorf("resolve doSPCX semantic group %q: %w", group.Name, err)
+			}
 			compiled.Targets, err = resolveGroupTargets(
-				document.Plan.Devices, document.Plan.RuntimeContext.RDMATopology,
-				operations, expectedStage)
+				devices, document.Plan.RuntimeContext.RDMATopology,
+				operations, expectedStage, defaultTargetPort)
 			if err != nil {
 				return nil, fmt.Errorf("resolve doSPCX semantic group %q: %w", group.Name, err)
 			}
@@ -252,7 +270,15 @@ func validateSemanticPlan(document *planDocument, expectedStage PlanStage) error
 	if document.Plan.Semantic == nil || len(document.Plan.Semantic.Groups) == 0 {
 		return fmt.Errorf("doSPCX semantic plan does not contain semantic groups")
 	}
-	return validatePlanDevices(document.Plan.Devices)
+	if err := validatePlanDevices(document.Plan.Devices); err != nil {
+		return err
+	}
+	if len(document.Plan.PostBreakoutDevices) > 0 {
+		if err := validatePlanDevices(document.Plan.PostBreakoutDevices); err != nil {
+			return fmt.Errorf("invalid doSPCX post-breakout device view: %w", err)
+		}
+	}
+	return nil
 }
 
 func validatePlanDevices(devices []planDevice) error {
@@ -355,6 +381,9 @@ func validateSemanticOperation(id string, operation semanticOperationRecord) err
 	default:
 		return fmt.Errorf("doSPCX semantic operation %q has unsupported target class %q", id, operation.TargetClass)
 	}
+	if operation.Port != nil && *operation.Port <= 0 {
+		return fmt.Errorf("doSPCX semantic operation %q has invalid port %d", id, *operation.Port)
+	}
 	return nil
 }
 
@@ -418,14 +447,17 @@ const (
 	groupDispositionSkip    groupDisposition = "skip"
 )
 
-func semanticGroupDisposition(stage PlanStage, name string) (groupDisposition, string, error) {
+func semanticGroupDisposition(stage PlanStage, name string, operationCount int) (groupDisposition, string, error) {
 	switch stage {
 	case PlanStagePrepare:
 		switch name {
-		case "breakout":
+		case semanticGroupBreakout:
 			return groupDispositionExecute, "", nil
-		case "post-breakout":
-			return groupDispositionMarker, "", nil
+		case semanticGroupPostBreakout:
+			if operationCount == 0 {
+				return groupDispositionMarker, "", nil
+			}
+			return groupDispositionExecute, "", nil
 		}
 	case PlanStageConfigure:
 		switch name {
@@ -440,16 +472,54 @@ func semanticGroupDisposition(stage PlanStage, name string) (groupDisposition, s
 	return "", "", fmt.Errorf("unsupported doSPCX semantic group %q for stage %q", name, stage)
 }
 
+func semanticGroupExecutionContract(stage PlanStage, group semanticGroupRecord) (string, bool, error) {
+	expectedDeviceView := ""
+	requiresReboot := group.RequiresReboot
+	if stage == PlanStagePrepare {
+		requiresReboot = true
+		switch group.Name {
+		case semanticGroupBreakout:
+			expectedDeviceView = deviceViewPreBreakout
+		case semanticGroupPostBreakout:
+			expectedDeviceView = deviceViewPostBreakout
+		}
+	}
+	if expectedDeviceView == "" {
+		return group.DeviceView, requiresReboot, nil
+	}
+	if group.DeviceView != "" && group.DeviceView != expectedDeviceView {
+		return "", false, fmt.Errorf(
+			"doSPCX semantic group %q uses device view %q, expected %q",
+			group.Name, group.DeviceView, expectedDeviceView)
+	}
+	return expectedDeviceView, requiresReboot, nil
+}
+
+func devicesForSemanticGroup(document *planDocument, deviceView string) ([]planDevice, bool, error) {
+	switch deviceView {
+	case "", deviceViewPreBreakout:
+		return document.Plan.Devices, false, nil
+	case deviceViewPostBreakout:
+		if len(document.Plan.PostBreakoutDevices) == 0 {
+			return nil, false, fmt.Errorf("post-breakout device view is empty")
+		}
+		return document.Plan.PostBreakoutDevices, true, nil
+	default:
+		return nil, false, fmt.Errorf("unsupported device view %q", deviceView)
+	}
+}
+
 func resolveGroupTargets(
 	devices []planDevice,
 	rdmaTopology string,
 	operations []semanticOperationRecord,
 	stage PlanStage,
+	defaultTargetPort bool,
 ) ([]DMSTargetOperations, error) {
 	targetOrder := make([]string, 0, len(devices))
 	operationsByTarget := make(map[string][]dmscli.XPathOperation, len(devices))
 	for _, operation := range operations {
-		targets, err := resolveOperationTargets(devices, rdmaTopology, operation)
+		targets, err := resolveOperationTargets(devices, rdmaTopology, operation, defaultTargetPort)
 		if err != nil {
 			return nil, fmt.Errorf("operation %q: %w", operation.ID, err)
 		}
@@ -481,6 +551,7 @@ func resolveOperationTargets(
 	devices []planDevice,
 	rdmaTopology string,
 	operation semanticOperationRecord,
+	defaultTargetPort bool,
 ) ([]string, error) {
 	result := make([]string, 0, len(devices))
 	for _, device := range devices {
@@ -489,16 +560,16 @@ func resolveOperationTargets(
 		}
 		switch operation.TargetClass {
 		case targetClassPFNetdevAll:
-			result = append(result, device.DMSTarget)
+			result = append(result, operationTarget(device, operation, defaultTargetPort))
 		case targetClassPFRDMAScope:
 			switch rdmaTopology {
 			case rdmaTopologyPerPF:
 				if strings.TrimSpace(device.RDMADevice) != "" {
-					result = append(result, device.DMSTarget)
+					result = append(result, operationTarget(device, operation, defaultTargetPort))
 				}
 			case rdmaTopologyPerRailBond:
 				if device.Plane == 0 {
-					result = append(result, device.DMSTarget)
+					result = append(result, operationTarget(device, operation, defaultTargetPort))
 				}
 			default:
 				return nil, fmt.Errorf("unsupported RDMA topology %q", rdmaTopology)
@@ -512,6 +583,28 @@ func resolveOperationTargets(
 		return nil, fmt.Errorf("doSPCX plan does not contain eligible devices")
 	}
 	return result, nil
+}
+
+func operationTarget(device planDevice, operation semanticOperationRecord, defaultTargetPort bool) string {
+	port := 0
+	if operation.Port != nil {
+		port = *operation.Port
+	} else if defaultTargetPort && (device.PlaneExplicit || isSplitPCIFunction(device.BDF)) {
+		port = 1
+	}
+	if port == 0 {
+		return device.DMSTarget
+	}
+	return fmt.Sprintf("%s?port=%d", device.DMSTarget, port)
+}
+
+func isSplitPCIFunction(bdf string) bool {
+	dot := strings.LastIndexByte(bdf, '.')
+	if dot == -1 || dot == len(bdf)-1 {
+		return false
+	}
+	function, err := strconv.ParseUint(bdf[dot+1:], 16, 8)
+	return err == nil && function > 0
 }
 
 func finalDesiredState(operations []dmscli.XPathOperation) []dmscli.XPathOperation {

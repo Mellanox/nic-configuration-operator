@@ -89,7 +89,6 @@ func newBlueprintsDataManager(dataRoot string) *spectrumXConfigManager {
 		preparedPlans:      make(map[string]*preparedPlan),
 		dmsManager:         nil,
 		execInterface:      nil,
-		blueprintsRoot:     "",
 		blueprintsStateDir: "",
 		dospcxDataRoot:     dataRoot,
 		dospcxDataDigest:   "",

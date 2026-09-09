@@ -203,8 +203,13 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	if configStatuses.nvConfigUpdateRequired() {
-		log.Log.Info("nv config update required for some devices, scheduling maintenance")
+		log.Log.Info("nv config update required for some devices")
+		err = r.prepareSpectrumXPlan(ctx, configStatuses, spectrumx.PlanStagePrepare)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("prepare doSPCX NV configuration plan: %w", err)
+		}
 
+		log.Log.Info("scheduling maintenance for nv config update")
 		result, err := r.ensureMaintenance(ctx)
 		if err != nil {
 			log.Log.V(2).Error(err, "failed to schedule maintenance")
@@ -215,11 +220,6 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 
 		log.Log.Info("maintenance allowed, applying nv config")
-
-		err = r.prepareSpectrumXPlan(ctx, configStatuses, spectrumx.PlanStagePrepare)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("prepare doSPCX NV configuration plan: %w", err)
-		}
 
 		err = runInParallel(ctx, configStatuses, r.applyNvConfig)
 		if err != nil {

@@ -17,6 +17,8 @@ package spectrumx
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -76,6 +78,64 @@ var _ = Describe("doSPCX semantic plans", func() {
 		Expect(plan.Groups[1].PhaseMarker).To(BeTrue())
 		Expect(plan.Groups[1].Targets).To(BeEmpty())
 	})
+
+	DescribeTable("compiles SPX_NetPlugin post-breakout operations against the expanded device view",
+		func(planes int) {
+			document := decodeFixture("prepare-plan.json")
+			document.Plan.Profile = dospcxProfileNetPlugin
+			document.Plan.Params.Planes = planes
+			if planes == 4 {
+				document.Plan.DetectedHW.PlatformType = "b300"
+			}
+			document.Plan.Devices = document.Plan.Devices[:1]
+			document.Plan.PostBreakoutDevices = make([]planDevice, planes)
+			postBreakout := findGroupRecord(document, "post-breakout")
+			postBreakout.DeviceView = ""
+			postBreakout.RequiresReboot = false
+			postBreakout.OperationRefs = make([]string, 0, planes)
+			for plane := 0; plane < planes; plane++ {
+				bdf, err := bdfForPlane(document.Plan.Devices[0].BDF, plane)
+				Expect(err).NotTo(HaveOccurred())
+				document.Plan.PostBreakoutDevices[plane] = planDevice{
+					BDF:           bdf,
+					DMSTarget:     "pci/" + bdf,
+					Rail:          0,
+					Plane:         plane,
+					PlaneExplicit: true,
+					Network:       targetRoleEW,
+				}
+				operationID := fmt.Sprintf("post-breakout.port-%d", plane+1)
+				operation := semanticOperationRecord{
+					Path:        "/nvidia/roce/rtt",
+					Values:      map[string]any{"dscp": json.Number("48")},
+					TargetClass: targetClassPFNetdevAll,
+				}
+				if plane > 0 {
+					port := plane + 1
+					operation.Port = &port
+				}
+				document.Plan.Operations[operationID] = operation
+				postBreakout.OperationRefs = append(postBreakout.OperationRefs, operationID)
+			}
+
+			plan, err := buildDMSPlan(context.Background(), document, PlanStagePrepare)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(plan.Groups).To(HaveLen(2))
+			compiled := plan.Groups[1]
+			Expect(compiled.Name).To(Equal("post-breakout"))
+			Expect(compiled.DeviceView).To(Equal(deviceViewPostBreakout))
+			Expect(compiled.RequiresReboot).To(BeTrue())
+			Expect(compiled.PhaseMarker).To(BeFalse())
+			Expect(compiled.Targets).To(HaveLen(planes * planes))
+			Expect(targetNames(compiled.Targets)).To(ContainElements(
+				fmt.Sprintf("pci/%s?port=1", document.Plan.PostBreakoutDevices[planes-1].BDF),
+				fmt.Sprintf("pci/%s?port=%d", document.Plan.PostBreakoutDevices[planes-1].BDF, planes),
+			))
+		},
+		Entry("two planes", 2),
+		Entry("four planes", 4),
+	)
 
 	It("skips eswitch and vf-lifecycle while compiling configure groups", func() {
 		plan := compileFixture("configure-plan.json", PlanStageConfigure)
@@ -212,6 +272,22 @@ var _ = Describe("doSPCX semantic plans", func() {
 		Entry("invalid device target", func(document *planDocument) {
 			document.Plan.Devices[0].DMSTarget = "pci/0000:ff:00.0"
 		}, PlanStagePrepare, "invalid DMS target"),
+		Entry("wrong prepare device view", func(document *planDocument) {
+			document.Plan.Semantic.Groups[0].DeviceView = deviceViewPostBreakout
+		}, PlanStagePrepare, "expected \"pre_breakout\""),
+		Entry("invalid operation port", func(document *planDocument) {
+			operationID := document.Plan.Semantic.Groups[0].OperationRefs[0]
+			operation := document.Plan.Operations[operationID]
+			port := 0
+			operation.Port = &port
+			document.Plan.Operations[operationID] = operation
+		}, PlanStagePrepare, "invalid port"),
+		Entry("missing post-breakout device view for executable operations", func(document *planDocument) {
+			document.Plan.PostBreakoutDevices = nil
+			document.Plan.Semantic.Groups[1].OperationRefs = []string{
+				document.Plan.Semantic.Groups[0].OperationRefs[0],
+			}
+		}, PlanStagePrepare, "post-breakout device view is empty"),
 		Entry("stage mismatch", func(_ *planDocument) {}, PlanStageConfigure, `stage is "prepare", expected "configure"`),
 		Entry("unknown group", func(document *planDocument) {
 			document.Plan.Semantic.Groups[0].Name = "new-runtime-phase"
@@ -286,6 +362,14 @@ func groupOperationNames(groups []DMSOperationGroup) []string {
 	result := make([]string, 0, len(groups))
 	for _, group := range groups {
 		result = append(result, group.Name)
+	}
+	return result
+}
+
+func targetNames(targets []DMSTargetOperations) []string {
+	result := make([]string, len(targets))
+	for index, target := range targets {
+		result[index] = target.Target
 	}
 	return result
 }
