@@ -162,9 +162,9 @@ type NvConfigParam struct {
 // must be configured as a pair. Allowed only when nicSelector.nicType == "1025"
 // (ConnectX-9), enforced by CEL on NicConfigurationTemplateSpec.
 type NetworkBaySpec struct {
-	// Conf is the <conf_name> argument passed to `mlxconfig set_system_conf`.
-	// The per-ASIC index is appended automatically by the daemon based on the
-	// device's detected Network Bay ASIC index, e.g. set_system_conf <conf>[0].
+	// Conf is the mlxconfig system configuration profile name. The daemon resolves
+	// the profile parameters for the device's detected Network Bay ASIC and manages
+	// them through the regular mlxconfig validation and apply flow.
 	Conf string `json:"conf"`
 }
 
@@ -193,16 +193,14 @@ type ConfigurationTemplateSpec struct {
 	RuntimePerformanceOptimized *RuntimePerformanceOptimizedSpec `json:"runtimePerformanceOptimized,omitempty"`
 	// Spectrum-X optimization settings. Works only with linkType==Ethernet && numVfs==1. RawNvConfig parameters, if provided, are merged as overrides on top of Spectrum-X calculated params.
 	SpectrumXOptimized *SpectrumXOptimizedSpec `json:"spectrumXOptimized,omitempty"`
-	// NetworkBay configures a ConnectX-9 Network Bay card (per-ASIC set_system_conf). Allowed only for ConnectX-9 (nicType 1025).
+	// NetworkBay configures a ConnectX-9 Network Bay card from a per-ASIC mlxconfig system profile. Allowed only for ConnectX-9 (nicType 1025).
 	// +optional
 	NetworkBay *NetworkBaySpec `json:"networkBay,omitempty"`
 	// List of arbitrary nv config parameters
 	// +kubebuilder:validation:MaxItems=128
 	RawNvConfig []NvConfigParam `json:"rawNvConfig,omitempty"`
-	// Force passes `--force` to mlxconfig set commands. When set, the daemon
-	// applies the nv config batch and set_system_conf with --force, letting
-	// mlxconfig accept a batch it would otherwise refuse due to implicit
-	// parameter dependencies.
+	// Force passes `--force` to mlxconfig set commands, letting mlxconfig accept
+	// a batch it would otherwise refuse due to implicit parameter dependencies.
 	// +optional
 	// +kubebuilder:default:=false
 	Force bool `json:"force,omitempty"`

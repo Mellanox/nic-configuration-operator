@@ -35,7 +35,7 @@ type configValidation interface {
 	// ConstructNvParamMapFromTemplate builds the full set of desired nvconfig parameters for a device by
 	// combining, in increasing priority order, the Spectrum-X profile (breakout + postBreakout, when
 	// enabled), the spec template params, and rawNvConfig (raw wins on key collisions). For Network Bay
-	// devices these params override the set_system_conf baseline. Operates under the assumption that spec
+	// devices these params override the named system profile layer. Operates under the assumption that spec
 	// validation was already carried out.
 	ConstructNvParamMapFromTemplate(
 		device *v1alpha1.NicDevice, nvConfigQuery types.NvConfigQuery) (map[string]string, error)
@@ -101,7 +101,7 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 	}
 
 	// Link type is only managed when the template specifies it. For Network Bay devices the
-	// template must not set linkType (enforced by CEL); the link type is owned by set_system_conf,
+	// template must not set linkType (enforced by CEL); the link type is owned by the system profile,
 	// so the operator must not emit LINK_TYPE_P* here or it would fight the system configuration.
 	if template.LinkType != "" {
 		// Link type change is not allowed on some devices
