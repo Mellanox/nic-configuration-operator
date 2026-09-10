@@ -328,7 +328,11 @@ status:
     type: ConfigUpdateInProgress
 ```
 
-## Allows to change system_conf type
+## Allows changing the system profile
+
+The daemon resolves the selected profile with `mlxconfig -d <device> show_system_conf`, selects the
+detected ASIC's parameter list, and applies any differences through its regular `mlxconfig set`
+batch. It does not invoke `set_system_conf` during reconciliation.
 
 ```
 apiVersion: configuration.net.nvidia.com/v1alpha1

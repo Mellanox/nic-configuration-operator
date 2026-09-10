@@ -68,7 +68,7 @@ params.</p></td>
 <td><code>networkBay</code><br />
 <em><a href="#NetworkBaySpec">NetworkBaySpec</a></em></td>
 <td><em>(Optional)</em>
-<p>NetworkBay configures a ConnectX-9 Network Bay card (per-ASIC set_system_conf). Allowed only for ConnectX-9 (nicType 1025).</p></td>
+<p>NetworkBay configures a ConnectX-9 Network Bay card from a per-ASIC mlxconfig system profile. Allowed only for ConnectX-9 (nicType 1025).</p></td>
 </tr>
 <tr>
 <td><code>rawNvConfig</code><br />
@@ -79,8 +79,7 @@ params.</p></td>
 <td><code>force</code><br />
 <em>bool</em></td>
 <td><em>(Optional)</em>
-<p>Force passes <code>--force</code> to mlxconfig set commands. When set, the daemon applies the nv config batch and set_system_conf with –force, letting mlxconfig accept a batch it would otherwise
-refuse due to implicit parameter dependencies.</p></td>
+<p>Force passes <code>--force</code> to mlxconfig set commands, letting mlxconfig accept a batch it would otherwise refuse due to implicit parameter dependencies.</p></td>
 </tr>
 </tbody>
 </table>
@@ -206,8 +205,8 @@ Allowed only when nicSelector.nicType == “1025” (ConnectX-9), enforced by CE
 <tr>
 <td><code>conf</code><br />
 <em>string</em></td>
-<td><p>Conf is the argument passed to <code>mlxconfig set_system_conf</code>. The per-ASIC index is appended automatically by the daemon based on the device’s detected Network Bay ASIC index, e.g.
-set_system_conf [0].</p></td>
+<td><p>Conf is the mlxconfig system configuration profile name. The daemon resolves the profile parameters for the device’s detected Network Bay ASIC and manages them through the regular mlxconfig
+validation and apply flow.</p></td>
 </tr>
 </tbody>
 </table>
@@ -1368,4 +1367,4 @@ SpectrumXOptimizedSpec enables Spectrum-X specific optimizations
 
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-*Generated with `gen-crd-api-reference-docs` on git commit `85f5e0d`.*
+*Generated with `gen-crd-api-reference-docs` on git commit `e579f52`.*

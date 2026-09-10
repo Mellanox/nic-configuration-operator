@@ -135,7 +135,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 			}
 
 			// Firmware exposes LINK_TYPE slots, but the template does not set linkType, so the
-			// operator must not emit LINK_TYPE_P* (set_system_conf owns the link type).
+			// operator must not emit LINK_TYPE_P* (the system profile owns the link type).
 			query := types.NewNvConfigQuery()
 			query.DefaultConfig = map[string][]string{
 				consts.LinkTypeP1Param: {"2"},

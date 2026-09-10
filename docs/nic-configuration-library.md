@@ -164,15 +164,15 @@ func NewConfigurationManager(
 #### NV Configuration Flow
 
 1. **Query** current NV config via `nvConfigUtils.QueryNvConfig()`
-2. **Network Bay `set_system_conf` (baseline, applied first)** — for ConnectX-9 Network Bay devices (`template.networkBay` set and `status.networkBay` detected), the per-ASIC `set_system_conf <conf>[<asic>]` is applied **before** the regular / Spectrum-X params so those layer on top of it (override priority: `rawNvConfig` > Spectrum-X > system_conf). Drift is detected per-param via `nvconfig.ValidateSystemConf()`, which returns the overall match bit plus the names of the mismatched params; the manager ignores MISMATCH rows for params owned by a higher-priority layer (matched by exact per-index key — `rawNvConfig` index-range syntax like `MODULE_SPLIT_M0[0..3]` is rejected by CRD validation, so keys are always concrete); a change requires a reboot. Skipped for devices with `ResetToDefault`
-3. **Diff** desired vs current parameters. Params not present in the device's next-boot config are unsupported on this device (e.g. hidden because `ADVANCED_PCI_SETTINGS` is off) and are skipped — the operator does **not** auto-manage `ADVANCED_PCI_SETTINGS`; drive it explicitly via `template.rawNvConfig` if needed
-4. **Batch set** via `nvConfigUtils.SetNvConfigParametersBatch()` — single `mlxconfig set` call (`--force` added when `ConfigurationOptions.Force=true`). Apply reports `ApplyStatusPartiallyApplied` when any desired param was skipped as unsupported. With `ConfigurationOptions.WithDefault=true`, the batch setter parses `mlxconfig` output and returns `ApplyStatusNothingToDo` when the command succeeds but no params are changed.
+2. **Resolve and merge the Network Bay profile** — for ConnectX-9 Network Bay devices (`template.networkBay` set and `status.networkBay` detected), run `show_system_conf`, select the named profile and detected ASIC, and expand range assignments such as `MODULE_SPLIT_M0[4..15]=FF` into concrete keys. These parameters are the lowest-priority layer in the normal desired map: system profile < Spectrum-X < template < `rawNvConfig`. Skipped for devices with `ResetToDefault`.
+3. **Diff** all desired parameters against every target's current and next-boot config. Value comparison is case-insensitive and normalizes decimal, `0x`-prefixed hexadecimal, and bare hexadecimal profile values. Params absent from a target's next-boot config are unsupported on that target (e.g. hidden because `ADVANCED_PCI_SETTINGS` is off) and are skipped — the operator does **not** auto-manage `ADVANCED_PCI_SETTINGS`; drive it explicitly via `template.rawNvConfig` if needed.
+4. **Batch set** via `nvConfigUtils.SetNvConfigParametersBatch()` — profile and explicit parameters are sent together through the existing per-target `mlxconfig set` flow (`--force` added when `ConfigurationOptions.Force=true`). Apply reports `ApplyStatusPartiallyApplied` when any desired param was skipped as unsupported. With `ConfigurationOptions.WithDefault=true`, the batch setter parses `mlxconfig` output and returns `ApplyStatusNothingToDo` when the command succeeds but no params are changed.
 5. **Optional reset** — `mlxfwreset` unless `ConfigurationOptions.SkipReset=true`
 
 **`ConfigurationOptions`:**
 - `SkipReset` — skip `mlxfwreset` after applying NV config
 - `WithDefault` — add `--with_default` to `mlxconfig set`
-- `Force` — add `--force` to `mlxconfig set` and `set_system_conf` (lets mlxconfig accept a batch it would otherwise refuse due to implicit parameter dependencies). When `NUM_OF_PF` and a `_P1` value are present, force mode copies that value to missing higher ports up to the requested PF count before applying; explicit per-port values are preserved.
+- `Force` — add `--force` to `mlxconfig set` (lets mlxconfig accept a batch it would otherwise refuse due to implicit parameter dependencies). When `NUM_OF_PF` and a `_P1` value are present, force mode copies that value to missing higher ports up to the requested PF count before applying; explicit per-port values are preserved.
 
 #### Runtime Configuration Flow
 
@@ -380,6 +380,12 @@ type NVConfigUtils interface {
     // decide which mismatches are intentional overrides rather than drift.
     ValidateSystemConf(ctx context.Context, port v1alpha1.NicDevicePortSpec, conf string, asic int) (bool, []string, error)
 }
+
+// Optional capability implemented by the built-in NVConfigUtils implementation and used by the
+// configuration manager for Network Bay templates.
+type SystemConfParamsProvider interface {
+    GetSystemConfParams(ctx context.Context, port v1alpha1.NicDevicePortSpec, conf string, asic int) (map[string]string, error)
+}
 ```
 
 **Constructor:**
@@ -395,12 +401,13 @@ mlxconfig -d <device> -e --with_default -y [--force] set PARAM1=VAL1 PARAM2=VAL2
 Parameter names are sorted for deterministic command generation.
 `<device>` is `port.FwctlDevice` when discovered, otherwise `port.PCI`.
 
-**System conf command format (ConnectX-9 Network Bay):**
+**System profile command format (ConnectX-9 Network Bay):**
 ```
+mlxconfig -d <device> show_system_conf
 mlxconfig -d <device> -y [--force] set_system_conf <conf>[<asic>]
 mlxconfig -d <device> -y validate_system_conf <conf>[<asic>]
 ```
-`ValidateSystemConf` parses the per-param `OK:` / `MISMATCH:` rows plus the `SKIPPED (failed to query:)` list and the trailing `Result:` line, returning the overall match bit and the mismatched param names. The configuration manager uses the mismatched names to treat MISMATCH rows for `rawNvConfig`- or Spectrum-X-owned params as intentional overrides (priority `rawNvConfig` > Spectrum-X > system_conf) rather than drift.
+The configuration manager uses `GetSystemConfParams` to parse `show_system_conf`, select `<conf>` and the detected ASIC, expand ranged parameter names, and merge the result into the regular desired parameter map. `SetSystemConf` and `ValidateSystemConf` remain available for compatibility, but are not used by the manager.
 
 ---
 

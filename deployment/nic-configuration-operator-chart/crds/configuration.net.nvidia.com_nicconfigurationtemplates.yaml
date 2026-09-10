@@ -95,10 +95,8 @@ spec:
                   force:
                     default: false
                     description: |-
-                      Force passes `--force` to mlxconfig set commands. When set, the daemon
-                      applies the nv config batch and set_system_conf with --force, letting
-                      mlxconfig accept a batch it would otherwise refuse due to implicit
-                      parameter dependencies.
+                      Force passes `--force` to mlxconfig set commands, letting mlxconfig accept
+                      a batch it would otherwise refuse due to implicit parameter dependencies.
                     type: boolean
                   gpuDirectOptimized:
                     description: GPU Direct optimization settings
@@ -123,14 +121,14 @@ spec:
                     type: string
                   networkBay:
                     description: NetworkBay configures a ConnectX-9 Network Bay card
-                      (per-ASIC set_system_conf). Allowed only for ConnectX-9 (nicType
-                      1025).
+                      from a per-ASIC mlxconfig system profile. Allowed only for ConnectX-9
+                      (nicType 1025).
                     properties:
                       conf:
                         description: |-
-                          Conf is the <conf_name> argument passed to `mlxconfig set_system_conf`.
-                          The per-ASIC index is appended automatically by the daemon based on the
-                          device's detected Network Bay ASIC index, e.g. set_system_conf <conf>[0].
+                          Conf is the mlxconfig system configuration profile name. The daemon resolves
+                          the profile parameters for the device's detected Network Bay ASIC and manages
+                          them through the regular mlxconfig validation and apply flow.
                         type: string
                     required:
                     - conf
