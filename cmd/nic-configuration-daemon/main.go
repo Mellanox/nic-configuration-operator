@@ -65,13 +65,13 @@ func main() {
 	utilruntime.Must(maintenanceoperator.AddToScheme(scheme))
 	utilruntime.Must(v1alpha1.AddToScheme(scheme))
 
-	// Restrict the cached ConfigMap informer to objects carrying the Spectrum-X profile label
+	// Restrict the cached ConfigMap informer to objects carrying the doSPCX data label
 	// (any value), so the daemon doesn't watch/cache every ConfigMap in the cluster. The
 	// firmware-map ConfigMap is read via a raw client (helper.InitNicFwMapFromConfigMap), not
 	// the cached client, so this narrowing is safe.
-	spectrumXProfileReq, err := labels.NewRequirement(consts.SpectrumXProfileLabel, selection.Exists, nil)
+	dospcxDataReq, err := labels.NewRequirement(consts.DospcxDataLabel, selection.Exists, nil)
 	if err != nil {
-		log.Log.Error(err, "unable to build spectrum-x profile label selector")
+		log.Log.Error(err, "unable to build doSPCX data label selector")
 		os.Exit(1)
 	}
 
@@ -83,7 +83,7 @@ func main() {
 		Cache: cache.Options{
 			ByObject: map[client.Object]cache.ByObject{
 				&corev1.ConfigMap{}: {
-					Label: labels.NewSelector().Add(*spectrumXProfileReq),
+					Label: labels.NewSelector().Add(*dospcxDataReq),
 				},
 			},
 		},
@@ -144,7 +144,7 @@ func main() {
 		}
 	}()
 
-	spectrumXConfigManager := spectrumx.NewSpectrumXConfigManager(dmsServer, nil)
+	spectrumXConfigManager := spectrumx.NewSpectrumXConfigManager()
 	configurationManager := configuration.NewConfigurationManager(
 		eventRecorder, dmsServer, nvConfigUtils, spectrumXConfigManager)
 	maintenanceManager := maintenance.New(mgr.GetClient(), hostUtils, nodeName, namespace)
@@ -195,13 +195,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	spectrumXProfileReconciler := &controller.SpectrumXProfileReconciler{
+	dospcxDataReconciler := &controller.DospcxDataReconciler{
 		Client:           mgr.GetClient(),
 		Scheme:           mgr.GetScheme(),
 		SpectrumXManager: spectrumXConfigManager,
 	}
-	if err = spectrumXProfileReconciler.SetupWithManager(mgr); err != nil {
-		log.Log.Error(err, "unable to create controller", "controller", "SpectrumXProfileReconciler")
+	if err = dospcxDataReconciler.SetupWithManager(mgr); err != nil {
+		log.Log.Error(err, "unable to create controller", "controller", "DospcxDataReconciler")
 		os.Exit(1)
 	}
 

@@ -34,6 +34,16 @@ var _ = Describe("typed XPath operations", func() {
 		commands = nil
 	})
 
+	DescribeTable("compares normalized DMS values",
+		func(actual, desired any) {
+			Expect(XPathValuesEqual(actual, desired)).To(BeTrue())
+		},
+		Entry("numbers", json.Number("25"), 25),
+		Entry("boolean enum", "DEVICE_TRUE_VALUE", true),
+		Entry("plain enum", "UP", "up"),
+		Entry("comma-separated list", "0, 1,2", []int{0, 1, 2}),
+	)
+
 	Describe("QueryXPaths", func() {
 		It("batches query paths and decodes the public keyed response", func() {
 			executor := fakeExecutor([]byte(`{
@@ -210,7 +220,7 @@ var _ = Describe("typed XPath operations", func() {
 			}))
 		})
 
-		It("logs the exact command and separate output streams", func() {
+		It("omits stderr from successful command logs", func() {
 			executor := fakeExecutorWithStderr([]byte(`{"status":"ok"}`), []byte("warning\n"), nil, &commands)
 			entries := []capturedLogEntry{}
 			ctx := logr.NewContext(context.Background(), logr.New(&capturingLogSink{entries: &entries}))
@@ -224,7 +234,23 @@ var _ = Describe("typed XPath operations", func() {
 			Expect(entries[0].fields).To(HaveKeyWithValue("command", append([]string{dmsCLIExecutable}, commands[0].args...)))
 			Expect(entries[0].fields).To(HaveKeyWithValue("target", target))
 			Expect(entries[0].fields).To(HaveKeyWithValue("stdout", `{"status":"ok"}`))
-			Expect(entries[0].fields).To(HaveKeyWithValue("stderr", "warning"))
+			Expect(entries[0].fields).NotTo(HaveKey("stderr"))
+		})
+
+		It("logs stderr when the command fails", func() {
+			commandErr := errors.New("exit status 9")
+			executor := fakeExecutorWithStderr(
+				[]byte(`{"status":"error","error_msg":"query failed"}`), []byte("DMS failure\n"), commandErr, &commands)
+			entries := []capturedLogEntry{}
+			ctx := logr.NewContext(context.Background(), logr.New(&capturingLogSink{entries: &entries}))
+
+			_, err := QueryXPaths(ctx, executor, target, []XPathQuery{
+				{Path: "/nvidia/link/ipg", Leaves: []string{"admin"}},
+			})
+
+			Expect(errors.Is(err, commandErr)).To(BeTrue())
+			Expect(entries).To(HaveLen(1))
+			Expect(entries[0].fields).To(HaveKeyWithValue("stderr", "DMS failure"))
 		})
 
 		DescribeTable("rejects invalid set input before execution",

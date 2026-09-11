@@ -21,8 +21,6 @@ metadata:
   name: spectrum-x-configuration
   namespace: nvidia-network-operator
 spec:
-  # should point to the URL of the DOCA SPC-X CC .deb package for Ubuntu 22.04
-  docaSpcXCCUrlSource: "https://example.com/doca-spcx-cc_3.1.0105-1_amd64.deb"
   # a list of firmware binaries zip archives from the Mellanox website, can point to any URL accessible from the cluster
   binUrlSources:
     - https://www.mellanox.com/downloads/firmware/fw-ConnectX8-rel-40_46_3048-900-9X85E-00NX-MC0_Ax-UEFI-14.39.14-FlexBoot-3.8.100.signed.bin.zip

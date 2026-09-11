@@ -35,8 +35,10 @@ import (
 
 // XPathOperation describes typed intent below one DMS XPath.
 type XPathOperation struct {
-	Path   string         `json:"path"`
-	Values map[string]any `json:"values"`
+	Path        string         `json:"path"`
+	Values      map[string]any `json:"values"`
+	Scope       string         `json:"scope,omitempty"`
+	TargetClass string         `json:"target_class,omitempty"`
 }
 
 // XPathQuery identifies leaves to read below one DMS XPath.
@@ -63,6 +65,42 @@ type SetXPathsResult struct {
 	ErrorCode    any
 }
 
+// XPathValuesEqual compares a typed plan value with the representation returned by DMS.
+// DMS may return enum values with DEVICE_/_VALUE decorations and lists as comma-separated strings.
+func XPathValuesEqual(actual, desired any) bool {
+	normalizedActual := normalizeXPathValue(actual)
+	normalizedDesired := normalizeXPathValue(desired)
+	if _, desiredIsList := normalizedDesired.([]any); desiredIsList {
+		if actualString, actualIsString := normalizedActual.(string); actualIsString {
+			parts := strings.Split(actualString, ",")
+			actualList := make([]any, len(parts))
+			for index, part := range parts {
+				actualList[index] = normalizeXPathValue(part)
+			}
+			normalizedActual = actualList
+		}
+	}
+	return reflect.DeepEqual(normalizedActual, normalizedDesired)
+}
+
+func normalizeXPathValue(value any) any {
+	if value == nil {
+		return nil
+	}
+	reflected := reflect.ValueOf(value)
+	if reflected.Kind() == reflect.Array || reflected.Kind() == reflect.Slice {
+		result := make([]any, reflected.Len())
+		for index := 0; index < reflected.Len(); index++ {
+			result[index] = normalizeXPathValue(reflected.Index(index).Interface())
+		}
+		return result
+	}
+
+	formatted := strings.ToLower(strings.TrimSpace(fmt.Sprint(value)))
+	formatted = strings.TrimSuffix(formatted, "_value")
+	return strings.TrimPrefix(formatted, "device_")
+}
+
 // QueryXPaths reads one or more leaf batches from a DMS target.
 func QueryXPaths(
 	ctx context.Context,
@@ -80,7 +118,7 @@ func QueryXPaths(
 	args := xpathQueryArgs(target, queries)
 	command := execInterface.CommandContext(ctx, dmsCLIExecutable, args...)
 	output, commandErr := utils.RunCommandWithStreams(command)
-	logDMSCLIOutput(ctx, append([]string{dmsCLIExecutable}, args...), target, output)
+	logDMSCLIOutput(ctx, append([]string{dmsCLIExecutable}, args...), target, output, commandErr)
 
 	if commandErr != nil {
 		result, _ := decodeXPathFailure(output.Stdout, queries)
@@ -114,7 +152,7 @@ func SetXPaths(
 
 	command := execInterface.CommandContext(ctx, dmsCLIExecutable, args...)
 	output, commandErr := utils.RunCommandWithStreams(command)
-	logDMSCLIOutput(ctx, append([]string{dmsCLIExecutable}, args...), target, output)
+	logDMSCLIOutput(ctx, append([]string{dmsCLIExecutable}, args...), target, output, commandErr)
 
 	if commandErr != nil {
 		result, _ := decodeXPathSetFailure(output.Stdout)
@@ -131,12 +169,14 @@ func SetXPaths(
 	return result, nil
 }
 
-func logDMSCLIOutput(ctx context.Context, command []string, target string, output utils.CommandOutput) {
-	logr.FromContextOrDiscard(ctx).V(2).Info("command output",
+func logDMSCLIOutput(ctx context.Context, command []string, target string, output utils.CommandOutput, commandErr error) {
+	fields := []any{
 		"command", command,
 		"target", target,
 		"stdout", boundedCommandOutput(output.Stdout),
-		"stderr", boundedCommandOutput(output.Stderr))
+	}
+	fields = appendCommandStderr(fields, output.Stderr, commandErr)
+	logr.FromContextOrDiscard(ctx).V(2).Info("command output", fields...)
 }
 
 func xpathQueryArgs(target string, queries []XPathQuery) []string {

@@ -23,6 +23,8 @@ import (
 	"sort"
 	"strings"
 
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
 	"github.com/Mellanox/nic-configuration-operator/pkg/dmscli"
 )
 
@@ -36,6 +38,11 @@ const (
 	semanticGroupLinkEvent    = "link-event"
 	semanticGroupESwitch      = "eswitch"
 	semanticGroupVFLifecycle  = "vf-lifecycle"
+
+	semanticScopePerVF             = "per_vf"
+	semanticScopePerDevice         = "per_device"
+	semanticTargetClassPerESwitch  = "per_eswitch"
+	semanticTargetClassPFNetdevAll = "pf_netdev_all"
 )
 
 type planDocument struct {
@@ -69,13 +76,16 @@ type semanticGroupRecord struct {
 	Name          string   `json:"name"`
 	Stage         string   `json:"stage"`
 	Order         int      `json:"order"`
+	Scope         string   `json:"scope"`
 	OperationRefs []string `json:"operation_refs"`
 }
 
 type semanticOperationRecord struct {
-	Path   string         `json:"path"`
-	Values map[string]any `json:"values"`
-	Kind   string         `json:"kind"`
+	Path        string         `json:"path"`
+	Values      map[string]any `json:"values"`
+	Kind        string         `json:"kind"`
+	Scope       string         `json:"scope"`
+	TargetClass string         `json:"target_class"`
 }
 
 func decodePlanDocument(planJSON []byte) (*planDocument, error) {
@@ -115,28 +125,46 @@ func buildPlan(document *planDocument, expectedStage PlanStage) (*Plan, error) {
 		if err := validateSemanticGroup(group, index, expectedStage, seenGroups); err != nil {
 			return nil, err
 		}
-		if shouldSkipGroup(expectedStage, group.Name) {
+		// eSwitch mode changes are boot operations. Filtering per_eswitch parameters
+		// alone is insufficient because the group also contains pf_netdev_all
+		// legacy/HMFS/switchdev operations.
+		if reason := skippedGroupReason(expectedStage, group.Name); reason != "" {
+			log.Log.V(2).Info("skipping doSPCX semantic group",
+				"group", group.Name, "stage", expectedStage, "reason", reason)
 			continue
-		}
-		if err := validateSupportedGroup(expectedStage, group.Name); err != nil {
-			return nil, err
 		}
 
 		operations, err := resolveGroupOperations(group, document.Plan.Operations)
 		if err != nil {
 			return nil, err
 		}
+		// Unsupported per-VF and per-eSwitch parameters are filtered individually.
+		// A group such as vf-lifecycle disappears naturally when no operations remain.
+		if len(operations) == 0 {
+			reason := "group has no operations"
+			if len(group.OperationRefs) > 0 {
+				reason = "all operations were filtered by scope or target class"
+			}
+			log.Log.V(2).Info("skipping doSPCX semantic group",
+				"group", group.Name, "stage", expectedStage,
+				"reason", reason)
+			continue
+		}
+		if err := validateSupportedGroup(expectedStage, group.Name); err != nil {
+			return nil, err
+		}
 		switch expectedStage {
 		case PlanStagePrepare:
 			switch group.Name {
 			case semanticGroupBreakout:
-				result.Breakout = operations
+				result.Breakout = stripXPathOperationMetadata(operations)
 			case semanticGroupPostBreakout:
-				result.PostBreakout = operations
+				result.PostBreakout = stripXPathOperationMetadata(operations)
 			}
 		case PlanStageConfigure:
 			result.RuntimeConfig = append(result.RuntimeConfig, OperationGroup{
 				Name:       group.Name,
+				Scope:      strings.TrimSpace(group.Scope),
 				Operations: operations,
 			})
 		}
@@ -200,9 +228,11 @@ func validateSemanticGroup(
 	return nil
 }
 
-func shouldSkipGroup(stage PlanStage, name string) bool {
-	return stage == PlanStageConfigure &&
-		(name == semanticGroupESwitch || name == semanticGroupVFLifecycle)
+func skippedGroupReason(stage PlanStage, name string) string {
+	if stage == PlanStageConfigure && name == semanticGroupESwitch {
+		return "eSwitch mode changes are boot operations"
+	}
+	return ""
 }
 
 func validateSupportedGroup(stage PlanStage, name string) error {
@@ -244,15 +274,42 @@ func resolveGroupOperations(
 				"doSPCX semantic group %q references missing operation %q",
 				group.Name, ref)
 		}
+		scope := strings.TrimSpace(record.Scope)
+		if scope == "" {
+			scope = strings.TrimSpace(group.Scope)
+		}
+		targetClass := strings.TrimSpace(record.TargetClass)
+		if reason := semanticOperationFilterReason(scope, targetClass); reason != "" {
+			log.Log.V(2).Info("skipping doSPCX semantic operation",
+				"group", group.Name, "operation", ref, "path", record.Path,
+				"scope", scope, "targetClass", targetClass, "reason", reason)
+			continue
+		}
 		if err := validateSemanticOperation(ref, record); err != nil {
 			return nil, err
 		}
+		if targetClass == "" && scope == semanticScopePerDevice {
+			targetClass = semanticTargetClassPFNetdevAll
+		}
 		result = append(result, dmscli.XPathOperation{
-			Path:   record.Path,
-			Values: cloneValueMap(record.Values),
+			Path:        record.Path,
+			Values:      cloneValueMap(record.Values),
+			Scope:       scope,
+			TargetClass: targetClass,
 		})
 	}
 	return result, nil
+}
+
+func semanticOperationFilterReason(scope, targetClass string) string {
+	reasons := make([]string, 0, 2)
+	if scope == semanticScopePerVF {
+		reasons = append(reasons, "per-VF scope is managed outside NCO runtime execution")
+	}
+	if targetClass == semanticTargetClassPerESwitch {
+		reasons = append(reasons, "per-eSwitch target class is managed by boot configuration")
+	}
+	return strings.Join(reasons, "; ")
 }
 
 func validateSemanticOperation(id string, operation semanticOperationRecord) error {
@@ -307,7 +364,19 @@ func clonePlan(source *Plan) *Plan {
 	for index, group := range source.RuntimeConfig {
 		result.RuntimeConfig[index] = OperationGroup{
 			Name:       group.Name,
+			Scope:      group.Scope,
 			Operations: cloneXPathOperations(group.Operations),
+		}
+	}
+	return result
+}
+
+func stripXPathOperationMetadata(source []dmscli.XPathOperation) []dmscli.XPathOperation {
+	result := make([]dmscli.XPathOperation, len(source))
+	for index, operation := range source {
+		result[index] = dmscli.XPathOperation{
+			Path:   operation.Path,
+			Values: cloneValueMap(operation.Values),
 		}
 	}
 	return result
@@ -317,8 +386,10 @@ func cloneXPathOperations(source []dmscli.XPathOperation) []dmscli.XPathOperatio
 	result := make([]dmscli.XPathOperation, len(source))
 	for index, operation := range source {
 		result[index] = dmscli.XPathOperation{
-			Path:   operation.Path,
-			Values: cloneValueMap(operation.Values),
+			Path:        operation.Path,
+			Values:      cloneValueMap(operation.Values),
+			Scope:       operation.Scope,
+			TargetClass: operation.TargetClass,
 		}
 	}
 	return result

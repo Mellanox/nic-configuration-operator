@@ -76,12 +76,21 @@ var _ = Describe("doSPCX semantic plan parsing", func() {
 	It("extracts supported configure groups and skips eSwitch and VF lifecycle", func() {
 		plan := compileFixture("configure-plan.json", PlanStageConfigure)
 
-		Expect(runtimeGroupNames(plan)).To(Equal([]string{"link-runtime", "cc", "link-event"}))
+		Expect(runtimeGroupNames(plan)).To(Equal([]string{"link-runtime", "link-event", "cc"}))
 		Expect(plan.RuntimeConfig[0].Operations).To(HaveLen(4))
-		Expect(plan.RuntimeConfig[1].Operations).To(HaveLen(24))
-		Expect(plan.RuntimeConfig[2].Operations).To(HaveLen(21))
+		Expect(plan.RuntimeConfig[1].Operations).To(HaveLen(21))
+		Expect(plan.RuntimeConfig[2].Operations).To(HaveLen(24))
 		Expect(plan.Breakout).To(BeEmpty())
 		Expect(plan.PostBreakout).To(BeEmpty())
+
+		Expect(plan.RuntimeConfig[1].Scope).To(Equal("per_device"))
+		Expect(plan.RuntimeConfig[1].Operations[0].Scope).To(Equal("per_device"))
+		Expect(plan.RuntimeConfig[1].Operations[0].TargetClass).To(Equal("pf_netdev_all"))
+		Expect(plan.RuntimeConfig[1].Operations[2].Scope).To(Equal("per_device"))
+		Expect(plan.RuntimeConfig[1].Operations[2].TargetClass).To(Equal("pf_rdma_scope"))
+		Expect(plan.RuntimeConfig[2].Scope).To(Equal("per_rdma_bond"))
+		Expect(plan.RuntimeConfig[2].Operations[0].Scope).To(Equal("per_rdma_bond"))
+		Expect(plan.RuntimeConfig[2].Operations[0].TargetClass).To(Equal("pf_rdma_scope"))
 	})
 
 	It("preserves operation order, including repeated paths", func() {
@@ -106,7 +115,7 @@ var _ = Describe("doSPCX semantic plan parsing", func() {
 		plan, err := buildPlan(document, PlanStageConfigure)
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(runtimeGroupNames(plan)).To(Equal([]string{"link-runtime", "cc", "link-event"}))
+		Expect(runtimeGroupNames(plan)).To(Equal([]string{"link-runtime", "link-event", "cc"}))
 	})
 
 	It("ignores operation contents belonging to skipped groups", func() {
@@ -116,15 +125,56 @@ var _ = Describe("doSPCX semantic plan parsing", func() {
 		plan, err := buildPlan(document, PlanStageConfigure)
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(runtimeGroupNames(plan)).To(Equal([]string{"link-runtime", "cc", "link-event"}))
+		Expect(runtimeGroupNames(plan)).To(Equal([]string{"link-runtime", "link-event", "cc"}))
+	})
+
+	It("filters per-VF and per-eSwitch operations from otherwise supported groups", func() {
+		document := decodeFixture("configure-plan.json")
+		linkEvent := findGroup(document, semanticGroupLinkEvent)
+		linkEvent.OperationRefs = append(linkEvent.OperationRefs,
+			"ra22-hwmp-data-direct.data-direct.enabled",
+			"spcx-eswitch.eswitch.multiport")
+
+		plan, err := buildPlan(document, PlanStageConfigure)
+
+		Expect(err).NotTo(HaveOccurred())
+		operations := plan.RuntimeConfig[1].Operations
+		Expect(operations).To(HaveLen(21))
+		for _, operation := range operations {
+			Expect(operation.Scope).NotTo(Equal("per_vf"))
+			Expect(operation.TargetClass).NotTo(Equal("per_eswitch"))
+		}
+	})
+
+	It("does not hide a non-per-VF operation in the unsupported VF lifecycle group", func() {
+		document := decodeFixture("configure-plan.json")
+		ref := findGroup(document, semanticGroupVFLifecycle).OperationRefs[0]
+		operation := document.Plan.Operations[ref]
+		operation.Scope = "per_device"
+		operation.TargetClass = "pf_netdev_all"
+		document.Plan.Operations[ref] = operation
+
+		_, err := buildPlan(document, PlanStageConfigure)
+
+		Expect(err).To(MatchError(ContainSubstring("unsupported doSPCX semantic group \"vf-lifecycle\"")))
 	})
 
 	It("deep-clones parsed operations", func() {
-		plan := compileFixture("prepare-plan.json", PlanStagePrepare)
-		clone := clonePlan(plan)
-		clone.Breakout[0].Values["adaptive-routing"] = false
+		preparePlan := compileFixture("prepare-plan.json", PlanStagePrepare)
+		prepareClone := clonePlan(preparePlan)
+		prepareClone.Breakout[0].Values["adaptive-routing"] = false
 
-		Expect(plan.Breakout[0].Values).To(HaveKeyWithValue("adaptive-routing", true))
+		Expect(preparePlan.Breakout[0].Values).To(HaveKeyWithValue("adaptive-routing", true))
+
+		configurePlan := compileFixture("configure-plan.json", PlanStageConfigure)
+		configureClone := clonePlan(configurePlan)
+		configureClone.RuntimeConfig[1].Operations[0].Values["trust-mode"] = "pcp"
+		configureClone.RuntimeConfig[1].Operations[0].Scope = "modified_scope"
+		configureClone.RuntimeConfig[1].Operations[0].TargetClass = "modified_target_class"
+
+		Expect(configurePlan.RuntimeConfig[1].Operations[0].Values).To(HaveKeyWithValue("trust-mode", "dscp"))
+		Expect(configurePlan.RuntimeConfig[1].Operations[0].Scope).To(Equal("per_device"))
+		Expect(configurePlan.RuntimeConfig[1].Operations[0].TargetClass).To(Equal("pf_netdev_all"))
 	})
 
 	DescribeTable("rejects invalid semantic plans",
