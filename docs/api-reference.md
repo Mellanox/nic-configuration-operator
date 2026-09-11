@@ -697,7 +697,7 @@ NicFirmwareSource is the Schema for the nicfirmwaresources API
 <td><code>docaSpcXCCUrlSource</code><br />
 <em>string</em></td>
 <td><em>(Optional)</em>
-<p>DocaSpcXCCUrlSource represents a url source for DOCA SPC-X CC .deb package for ubuntu 22.04 Will be removed in the future, once Doca SPC-X CC algorithm will be publicly available</p></td>
+<p>DocaSpcXCCUrlSource represents a URL source for a DOCA SPC-X CC .deb package. Deprecated: the doSPCX runtime path launches the doca_spcx_cc binary preinstalled in the NIC Configuration Daemon image. A package supplied here is not installed or selected.</p></td>
 </tr>
 </tbody>
 </table></td>
@@ -744,7 +744,7 @@ NicFirmwareSourceSpec represents a list of url sources for FW
 <td><code>docaSpcXCCUrlSource</code><br />
 <em>string</em></td>
 <td><em>(Optional)</em>
-<p>DocaSpcXCCUrlSource represents a url source for DOCA SPC-X CC .deb package for ubuntu 22.04 Will be removed in the future, once Doca SPC-X CC algorithm will be publicly available</p></td>
+<p>DocaSpcXCCUrlSource represents a URL source for a DOCA SPC-X CC .deb package. Deprecated: the doSPCX runtime path launches the doca_spcx_cc binary preinstalled in the NIC Configuration Daemon image. A package supplied here is not installed or selected.</p></td>
 </tr>
 </tbody>
 </table>
@@ -790,7 +790,7 @@ NicFirmwareSourceStatus represents the status of the FW from given sources, e.g.
 <tr>
 <td><code>docaSpcXCCVersion</code><br />
 <em>string</em></td>
-<td><p>DocaSpcXCCVersion represents the FW versions available in the provided DOCA SPC-X CC .deb package for ubuntu 22.04</p></td>
+<td><p>DocaSpcXCCVersion represents the version found in a deprecated DocaSpcXCCUrlSource package. Deprecated: this value does not select the doca_spcx_cc binary used by doSPCX runtime configuration.</p></td>
 </tr>
 </tbody>
 </table>
@@ -1343,7 +1343,7 @@ SpectrumXOptimizedSpec enables Spectrum-X specific optimizations
 <tr>
 <td><code>version</code><br />
 <em>string</em></td>
-<td><p>Version of the Spectrum-X architecture to optimize for. Should match the name of the config map with Spectrum-X profile</p></td>
+<td><p>Version of the Spectrum-X architecture passed to the doSPCX planner.</p></td>
 </tr>
 <tr>
 <td><code>platformType</code><br />
