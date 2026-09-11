@@ -127,7 +127,7 @@ type GpuDirectOptimizedSpec struct {
 type SpectrumXOptimizedSpec struct {
 	// Optimize Spectrum X
 	Enabled bool `json:"enabled"`
-	// Version of the Spectrum-X architecture to optimize for. Should match the name of the config map with Spectrum-X profile
+	// Version of the Spectrum-X architecture passed to the doSPCX planner.
 	// +required
 	Version string `json:"version"`
 	// Platform type used by the doSPCX planner to select a recipe from the supplied profile.

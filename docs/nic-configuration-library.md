@@ -37,7 +37,7 @@ rebootRequired, err := fwMgr.InstallFirmware(ctx, device, &types.FirmwareInstall
 
 // 3. Apply NV configuration
 nvUtils := nvconfig.NewNVConfigUtils()
-spectrumXMgr := spectrumx.NewSpectrumXConfigManager(dmsSrv, configs)
+spectrumXMgr := spectrumx.NewSpectrumXConfigManager()
 cfgMgr := configuration.NewConfigurationManager(nil, dmsSrv, nvUtils, spectrumXMgr)
 result, err := cfgMgr.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
 ```
@@ -74,10 +74,6 @@ type FirmwareManager interface {
     // returns bool: reboot required (when fw reset fails or SkipReset=true)
     // returns error: firmware install errors
     InstallFirmware(ctx context.Context, device *v1alpha1.NicDevice, options *types.FirmwareInstallOptions) (bool, error)
-
-    // InstallDocaSpcXCC validates and installs DOCA SPC-X CC package
-    // No-op if already installed; error if version mismatch
-    InstallDocaSpcXCC(ctx context.Context, device *v1alpha1.NicDevice, targetVersion string) error
 
     // GetFirmwareVersionsFromDevice retrieves burned and running FW versions
     // returns: burned version, running version, error
@@ -543,41 +539,14 @@ configuration manager when it consumes this plan.
 
 Public operations may omit `kind` (`set` is the DMS default). Bare-metal steps,
 services, and artifacts are outside this contract. Configure groups `eswitch`
-and `vf-lifecycle` are omitted; unknown groups fail closed. The existing
-Spectrum-X manager implementation provides both plan lifecycle methods and
-creates the command executor internally:
+and `vf-lifecycle` are omitted; unknown groups fail closed. The Spectrum-X
+manager provides plan and data lifecycle methods, owns the DOCA SPC-X CC
+processes, and creates its command executor internally:
 
 ```go
 type SpectrumXManager interface {
     PlanManager
     BlueprintsDataManager
-    // Existing Spectrum-X configuration methods...
-}
-
-func NewSpectrumXConfigManager(
-    dmsManager dms.DMSManager,
-    spectrumXConfigs map[string]*types.SpectrumXConfig,
-) SpectrumXManager
-```
-
-#### SpectrumXManager Interface
-
-```go
-type SpectrumXManager interface {
-    // Breakout configuration (phase 1 — requires reboot)
-    BreakoutConfigApplied(ctx context.Context, device *v1alpha1.NicDevice) (bool, error)
-    ApplyBreakoutConfig(ctx context.Context, device *v1alpha1.NicDevice) (*types.ConfigurationApplyResult, error)
-
-    // NV configuration (phase 2 — applied after breakout reboot)
-    NvConfigApplied(ctx context.Context, device *v1alpha1.NicDevice) (bool, error)
-    ApplyNvConfig(ctx context.Context, device *v1alpha1.NicDevice) (*types.ConfigurationApplyResult, error)
-
-    // Runtime configuration (phase 3 — no reboot)
-    RuntimeConfigApplied(device *v1alpha1.NicDevice) (bool, error)
-    ApplyRuntimeConfig(device *v1alpha1.NicDevice) (*types.RuntimeConfigurationApplyResult, error)
-
-    // DOCA Congestion Control
-    GetDocaCCTargetVersion(device *v1alpha1.NicDevice) (string, error)
     RunDocaSpcXCC(port v1alpha1.NicDevicePortSpec) error
     GetCCTerminationChannel() <-chan string
 }
@@ -585,24 +554,24 @@ type SpectrumXManager interface {
 
 **Constructor:**
 ```go
-func NewSpectrumXConfigManager(
-    dmsManager dms.DMSManager,
-    spectrumXConfigs map[string]*types.SpectrumXConfig,
-) SpectrumXManager
+func NewSpectrumXConfigManager() SpectrumXManager
 ```
-- `spectrumXConfigs`: keyed by version string (e.g., `"RA1.3"`, `"RA2.0"`, `"RA2.1"`, `"RA2.2"`), loaded from YAML via `types.LoadSpectrumXConfig()`
 
-#### Two-Phase Configuration Flow
-
-1. **Breakout** → select params by multiplane mode and plane count → apply via mlxconfig batch → reboot
-2. **NV config** → filter by `DeviceId`, `Breakout`, `Multiplane` → split into MLXConfig params (`SetNvConfigParametersBatch`) and DMS params (`SetParameters`) → apply in batch → reboot
-3. **Runtime** → RoCE, Adaptive Routing, Congestion Control, InterPacketGap settings applied via DMS and sysfs — no reboot
-
-**Parameter filtering:** each `ConfigurationParameter` can be filtered by `DeviceId` (e.g., `"1021"` for CX7, `"1023"` for CX8, `"1025"` for CX9, `"a2dc"` for BF3), `Breakout` (plane count), and `Multiplane` mode.
+The configuration manager consumes the prepared plan. It validates each runtime
+group through `dms-cli`, applies generic runtime settings first, then applies
+doSPCX groups in authored order and verifies convergence. The `cc` group starts
+DOCA SPC-X CC before its XPath operations. The legacy Spectrum-X YAML profile
+loader and its alternate reconciliation path are not supported.
 
 #### CC Process Lifecycle
 
-`RunDocaSpcXCC()` launches a `doca_spcx_cc` background process per RDMA interface. A 3-second startup check distinguishes startup failures (returned as errors) from runtime crashes (notified via `GetCCTerminationChannel()`).
+`RunDocaSpcXCC()` launches the preinstalled
+`/opt/mellanox/doca/tools/doca_spcx_cc` executable as a background process per
+RDMA interface. A 3-second startup check distinguishes startup failures
+(returned as errors) from runtime crashes (notified via
+`GetCCTerminationChannel()`). The deprecated
+`NicFirmwareSource.spec.docaSpcXCCUrlSource` field does not install or select
+this executable; custom daemon images must provide it themselves.
 
 ---
 
@@ -740,7 +709,7 @@ type VPD struct {
 
 #### ConfigurationParameter
 
-Used by DMS client and Spectrum-X profile ConfigMaps.
+Used by the legacy DMS client API.
 
 ```go
 type ConfigurationParameter struct {
@@ -770,40 +739,7 @@ type MlxRegField struct {
 }
 ```
 
-A parameter with `MlxConfig` set is applied via `nvconfig.SetNvConfigParametersBatch()`. Runtime profile parameters with `DMSPath` set are applied via `dms.DMSClient.SetParameters()`. Runtime profile parameters with `MlxReg` set are applied with `mlxreg`; they preserve profile order and split surrounding DMS parameters into separate batches.
-
-#### Spectrum-X Config Types
-
-```go
-type SpectrumXConfig struct {
-    BreakoutConfig         SpectrumXBreakoutConfig
-    NVConfig               []ConfigurationParameter
-    RuntimeConfig          SpectrumXRuntimeConfig
-    UseSoftwareCCAlgorithm bool   // Use software congestion control
-    DocaCCVersion          string // Required DOCA CC version
-}
-
-type SpectrumXBreakoutConfig struct {
-    Swplb    map[int][]ConfigurationParameter // keyed by plane count
-    Hwplb    map[int][]ConfigurationParameter
-    Uniplane map[int][]ConfigurationParameter
-    None     map[int][]ConfigurationParameter
-}
-
-type SpectrumXRuntimeConfig struct {
-    Roce              []ConfigurationParameter
-    AdaptiveRouting   []ConfigurationParameter
-    CongestionControl []ConfigurationParameter
-    InterPacketGap    InterPacketGapConfig
-}
-
-type InterPacketGapConfig struct {
-    PureL3 []ConfigurationParameter // Pure L3 overlay mode
-    L3EVPN []ConfigurationParameter // L3 EVPN overlay mode
-}
-```
-
-**Loading:** `func LoadSpectrumXConfig(configPath string) (*SpectrumXConfig, error)` — reads YAML file.
+A parameter with `MlxConfig` set is applied via `nvconfig.SetNvConfigParametersBatch()`.
 
 #### Error Helpers
 

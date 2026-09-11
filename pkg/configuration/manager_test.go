@@ -1113,11 +1113,10 @@ var _ = Describe("ConfigurationManager", func() {
 				mockConfigValidation.AssertNotCalled(GinkgoT(), "RuntimeConfigApplied", mock.Anything)
 			})
 
-			It("continues the existing runtime flow when the configure plan matches", func() {
+			It("uses the prepared doSPCX plan when it matches", func() {
 				mockSpcXMgr.On("GetPreparedPlan", device, spectrumx.PlanStageConfigure).
 					Return(&spectrumx.Plan{}, nil)
 				mockConfigValidation.On("RuntimeConfigApplied", device).Return(true, nil)
-				mockSpcXMgr.On("RuntimeConfigApplied", device).Return(true, nil)
 
 				result, err := manager.ApplyRuntimeConfiguration(ctx, device)
 

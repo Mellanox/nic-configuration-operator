@@ -34,6 +34,16 @@ var _ = Describe("typed XPath operations", func() {
 		commands = nil
 	})
 
+	DescribeTable("compares normalized DMS values",
+		func(actual, desired any) {
+			Expect(XPathValuesEqual(actual, desired)).To(BeTrue())
+		},
+		Entry("numbers", json.Number("25"), 25),
+		Entry("boolean enum", "DEVICE_TRUE_VALUE", true),
+		Entry("plain enum", "UP", "up"),
+		Entry("comma-separated list", "0, 1,2", []int{0, 1, 2}),
+	)
+
 	Describe("QueryXPaths", func() {
 		It("batches query paths and decodes the public keyed response", func() {
 			executor := fakeExecutor([]byte(`{

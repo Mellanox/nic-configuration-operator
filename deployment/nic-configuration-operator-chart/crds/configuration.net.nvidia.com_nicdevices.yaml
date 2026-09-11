@@ -280,9 +280,8 @@ spec:
                               to select a recipe from the supplied profile.
                             type: string
                           version:
-                            description: Version of the Spectrum-X architecture to
-                              optimize for. Should match the name of the config map
-                              with Spectrum-X profile
+                            description: Version of the Spectrum-X architecture passed
+                              to the doSPCX planner.
                             type: string
                         required:
                         - enabled

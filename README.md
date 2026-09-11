@@ -105,7 +105,7 @@ spec:
   * Cannot be combined with `roceOptimized` (RoCE settings are included automatically)
   * Temporarily cannot be combined with `rawNvConfig` or `networkBay`. NCO cannot yet determine which native mlxconfig parameters are owned by typed doSPCX operations, so allowing either combination could create a non-convergent reconcile loop
   * Only supported on ConnectX-7 (`nicType: 1021`), ConnectX-8 (`nicType: 1023`), ConnectX-9 (`nicType: 1025`) and BlueField-3 SuperNIC (`nicType: a2dc`)
-  * `version`: Required. Must match the name of a Spectrum-X profile ConfigMap
+  * `version`: Required. Spectrum-X architecture version passed to the doSPCX planner
   * `platformType`: Required. doSPCX platform identifier defined by the supplied Blueprints profile
   * `overlay`: Optional, default `none`. Set to `l3` for L3 EVPN overlay
   * `multiplaneMode`: Optional, default `none`. Options: `none`, `swplb`, `hwplb`
@@ -114,60 +114,9 @@ spec:
 
 #### Spectrum-X Configuration
 
-The NIC Configuration Operator supports Spectrum-X-specific NIC configuration through Spectrum-X profile ConfigMaps. A profile ConfigMap contains the Spectrum-X YAML profile consumed by the daemon at runtime.
-
-To create a Spectrum-X profile ConfigMap:
-
-1. Create one ConfigMap per profile.
-2. Set the ConfigMap name to the value that will be used in `template.spectrumXOptimized.version`.
-3. Add the label `network.nvidia.com/operator.nic-configuration.spectrum-x-profile`. The label value is ignored; only the label key must be present.
-4. Put the complete Spectrum-X profile YAML under `data.profile`.
-
-The profile ConfigMap can be created in any namespace watched by the operator.
-
-> **Warning:** If two labeled ConfigMaps in different namespaces share the same name, they define the same Spectrum-X version key and the latest-reconciled ConfigMap silently wins with no error. To avoid unpredictable behavior, use unique ConfigMap names across all watched namespaces.
-
-##### [Example Spectrum-X profile ConfigMap](docs/examples/spectrum-x/example-spectrum-x-profile-configmap.yaml):
-
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: example-spectrum-x-profile
-  namespace: nvidia-network-operator
-  labels:
-    network.nvidia.com/operator.nic-configuration.spectrum-x-profile: ""
-data:
-  profile: |
-    useSoftwareCCAlgorithm: true
-    docaCCVersion: "example-version"
-    mlxConfig:
-      none:
-        "1023":
-          postBreakout:
-            EXAMPLE_NVCONFIG_PARAMETER: "example-value"
-    runtimeConfig:
-      roce:
-        - name: Example RoCE runtime parameter
-          value: "example-value"
-          valueType: string
-          dmsPath: "<dms-path-for-runtime-parameter>"
-      adaptiveRouting:
-        - name: Example mlxreg runtime parameter
-          value: "0x00000001"
-          mlxreg:
-            register: ROCE_ACCL
-            field: "<mlxreg-field-to-check>"
-            setFields:
-              - name: "<mlxreg-field-to-set>"
-                value: "0x1"
-              - name: "<mlxreg-field-select-to-set>"
-                value: "0x1"
-```
-
-The same label also selects the doSPCX data bundle published by the
-`dospcx-data` repository. This ConfigMap uses a versioned format marker and a
-gzip-compressed tar archive instead of `data.profile`:
+Spectrum-X configuration is compiled from the doSPCX data bundle published by
+the `dospcx-data` repository. The labeled ConfigMap contains a versioned format
+marker and a gzip-compressed archive of the complete doSPCX data tree:
 
 ```yaml
 apiVersion: v1
@@ -193,12 +142,12 @@ of selecting one based on reconciliation order, and manager-installed data is
 deactivated while the conflict exists. Removing the active bundle removes the
 data installed from it and invalidates plans cached with its digest.
 
-Reference the profile from a `NicConfigurationTemplate` by using the ConfigMap name as the Spectrum-X version:
+Select the architecture and platform inputs in a `NicConfigurationTemplate`:
 
 ```yaml
 spectrumXOptimized:
   enabled: true
-  version: "example-spectrum-x-profile"
+  version: "ra2.2"
   platformType: "gb300"
   overlay: "none"
   multiplaneMode: "none"
@@ -211,7 +160,7 @@ Supported NIC types for Spectrum-X:
 * ConnectX-9 (device ID `1025`) -- supports `none`, `swplb`, and `hwplb`
 * BlueField-3 SuperNIC (device ID `a2dc`) -- supports `none` and `swplb`
 
-Spectrum-X profiles can configure NICs with multiple data planes. Available modes:
+doSPCX profiles can configure NICs with multiple data planes. Available modes:
 
 | Mode | Description | Supported NICs | Planes |
 |------|-------------|----------------|--------|
@@ -239,6 +188,23 @@ barrier, `with-default` also resends both phases so default filling cannot undo 
 group references are authoritative, and an omitted operation kind means
 `set`, matching DMS. Configure groups `eswitch` and `vf-lifecycle` are intentionally omitted from
 the compiled plan; unknown groups fail closed. Plan compilation remains execution-free.
+
+At runtime, the configuration manager validates the final desired value of every
+operation group on each applicable PCI function. Repeated writes remain ordered
+during apply, while validation compares the last write for each path and leaf.
+Generic runtime configuration is applied first and doSPCX groups are applied last
+in semantic order. The `cc` group starts `doca_spcx_cc` before its XPath operations;
+in HWPLB mode it uses the first function of each NIC because the functions share
+one RDMA device. Other groups are applied to every discovered function. Indexed
+XPath queries are issued individually until DMS preserves indexed keys in batched
+JSON responses.
+
+The NIC Configuration Daemon image must contain the executable at
+`/opt/mellanox/doca/tools/doca_spcx_cc`; the STIG daemon images install the
+`doca-spcx-cc` package during their build. The deprecated
+`NicFirmwareSource.spec.docaSpcXCCUrlSource` field does not install or select the
+runtime executable. When migrating to doSPCX plans, remove that field from
+firmware sources and ensure any custom daemon image provides the binary.
 
 NCO translates its CRD multiplane modes to the public profiles supplied by the doSPCX data bundle:
 `none` selects `single-plane`, `swplb` selects `SPX_NetPlugin`, and `hwplb` selects
@@ -296,7 +262,7 @@ spec:
       linkType: Ethernet
       spectrumXOptimized:
           enabled: true
-          version: "example-spectrum-x-profile"
+          version: "ra2.2"
           overlay: "none"
           multiplaneMode: "hwplb" # Hardware Plane Load Balancing, ConnectX-8, ConnectX-9 only
           numberOfPlanes: 4

@@ -19,7 +19,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -428,47 +427,13 @@ func matchXPathValues(result *dmscli.QueryXPathsResult, operations []dmscli.XPat
 			if !found {
 				return false, false, fmt.Errorf("DMS response does not contain XPath leaf %q/%s", operation.Path, pendingLeaf)
 			}
-			currentMatches := xpathValuesEqual(current, desired)
-			pendingMatches := xpathValuesEqual(pending, desired)
+			currentMatches := dmscli.XPathValuesEqual(current, desired)
+			pendingMatches := dmscli.XPathValuesEqual(pending, desired)
 			updateNeeded = updateNeeded || !pendingMatches
 			rebootNeeded = rebootNeeded || !currentMatches || !pendingMatches
 		}
 	}
 	return updateNeeded, rebootNeeded, nil
-}
-
-func xpathValuesEqual(actual, desired any) bool {
-	normalizedActual := normalizeXPathValue(actual)
-	normalizedDesired := normalizeXPathValue(desired)
-	if _, desiredIsList := normalizedDesired.([]any); desiredIsList {
-		if actualString, actualIsString := normalizedActual.(string); actualIsString {
-			parts := strings.Split(actualString, ",")
-			actualList := make([]any, len(parts))
-			for index, part := range parts {
-				actualList[index] = normalizeXPathValue(part)
-			}
-			normalizedActual = actualList
-		}
-	}
-	return reflect.DeepEqual(normalizedActual, normalizedDesired)
-}
-
-func normalizeXPathValue(value any) any {
-	if value == nil {
-		return nil
-	}
-	reflected := reflect.ValueOf(value)
-	if reflected.Kind() == reflect.Array || reflected.Kind() == reflect.Slice {
-		result := make([]any, reflected.Len())
-		for index := 0; index < reflected.Len(); index++ {
-			result[index] = normalizeXPathValue(reflected.Index(index).Interface())
-		}
-		return result
-	}
-
-	formatted := strings.ToLower(strings.TrimSpace(fmt.Sprint(value)))
-	formatted = strings.TrimSuffix(formatted, "_value")
-	return strings.TrimPrefix(formatted, "device_")
 }
 
 // SetNvConfigParametersBatchWithXPaths applies native parameters and typed

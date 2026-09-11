@@ -592,19 +592,7 @@ func (r *NicDeviceReconciler) applyRuntimeConfig(ctx context.Context, status *ni
 		}
 	}
 
-	targetVersion, err := r.SpectrumXManager.GetDocaCCTargetVersion(status.device)
-	if err != nil {
-		return err
-	}
-
-	if targetVersion != "" {
-		err = r.FirmwareManager.InstallDocaSpcXCC(ctx, status.device, targetVersion)
-		if err != nil {
-			return err
-		}
-	}
-
-	_, err = r.ConfigurationManager.ApplyRuntimeConfiguration(ctx, status.device)
+	_, err := r.ConfigurationManager.ApplyRuntimeConfiguration(ctx, status.device)
 	if err != nil {
 		updateErr := r.updateConfigInProgressStatusCondition(ctx, status.device, consts.RuntimeConfigUpdateFailedReason, metav1.ConditionFalse, err.Error())
 		if updateErr != nil {
