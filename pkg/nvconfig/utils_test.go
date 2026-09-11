@@ -726,4 +726,170 @@ Result: Device configuration does NOT match the system configuration.
 			Expect(err).To(MatchError("command executor must not be nil"))
 		})
 	})
+
+	Describe("typed NVConfig XPaths", func() {
+		const pciAddress = "0000:3b:00.0"
+		operations := []dmscli.XPathOperation{{
+			Path: "/nvidia/pci", Values: map[string]any{"num-pfs": 2},
+		}}
+
+		DescribeTable("normalizes equivalent values",
+			func(actual, desired any) { Expect(xpathValuesEqual(actual, desired)).To(BeTrue()) },
+			Entry("enum case", "ETH", "eth"),
+			Entry("enum suffix", "ENABLED_VALUE", "enabled"),
+			Entry("device prefix", "DEVICE_DEFAULT", "default"),
+			Entry("number", json.Number("48"), 48),
+			Entry("negative number", json.Number("-1"), -1),
+			Entry("list", []any{json.Number("0"), json.Number("1")}, []int{0, 1}),
+			Entry("comma-separated leaf list", "0,1,2,3", []int{0, 1, 2, 3}),
+		)
+
+		It("deduplicates repeated paths and leaves for one query", func() {
+			queries := xpathQueries(append(operations, dmscli.XPathOperation{
+				Path: "/nvidia/pci", Values: map[string]any{"num-pfs": 2, "rde-disable": true},
+			}))
+
+			Expect(queries).To(Equal([]dmscli.XPathQuery{{
+				Path: "/nvidia/pci",
+				Leaves: []string{
+					"num-pfs", "num-pfs-pending", "rde-disable", "rde-disable-pending",
+				},
+			}}))
+		})
+
+		It("distinguishes pending drift from current-only drift", func() {
+			result := &dmscli.QueryXPathsResult{Values: map[string]map[string]any{
+				"/nvidia/pci": {"num-pfs": 1, "num-pfs-pending": 2},
+			}}
+
+			updateNeeded, rebootNeeded, err := matchXPathValues(result, operations)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updateNeeded).To(BeFalse())
+			Expect(rebootNeeded).To(BeTrue())
+		})
+
+		It("rejects a response missing a requested pending value", func() {
+			result := &dmscli.QueryXPathsResult{Values: map[string]map[string]any{
+				"/nvidia/pci": {"num-pfs": 2},
+			}}
+
+			_, _, err := matchXPathValues(result, operations)
+
+			Expect(err).To(MatchError(ContainSubstring("num-pfs-pending")))
+		})
+
+		It("validates every available PCI function as port 1", func() {
+			var commandArgs [][]string
+			command := func(_ string, args ...string) exec.Cmd {
+				commandArgs = append(commandArgs, append([]string(nil), args...))
+				cmd := &execTesting.FakeCmd{}
+				cmd.RunScript = append(cmd.RunScript, func() ([]byte, []byte, error) {
+					return []byte(`{"num-pfs":2,"num-pfs-pending":2}`), nil, nil
+				})
+				return cmd
+			}
+			h := &nvConfigUtils{execInterface: &execTesting.FakeExec{
+				CommandScript: []execTesting.FakeCommandAction{command, command},
+			}}
+
+			updateNeeded, rebootNeeded, err := h.ValidateNvConfigXPaths(
+				context.Background(),
+				[]v1alpha1.NicDevicePortSpec{nvconfigPort(pciAddress), nvconfigPort("0000:3b:00.1")},
+				operations)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updateNeeded).To(BeFalse())
+			Expect(rebootNeeded).To(BeFalse())
+			Expect(commandArgs[0][0:4]).To(Equal([]string{"--json", "-t", "pci/" + pciAddress + "?port=1", "/nvidia/pci"}))
+			Expect(commandArgs[1][0:4]).To(Equal([]string{"--json", "-t", "pci/0000:3b:00.1?port=1", "/nvidia/pci"}))
+		})
+
+		It("queries indexed breakout lanes separately from the remaining XPaths", func() {
+			var commandArgs [][]string
+			outputs := [][]byte{
+				[]byte(`{"num-pfs":2,"num-pfs-pending":2}`),
+				[]byte(`{"lanes":"0,1,2,3,4,5,6,7","lanes-pending":"0,1,2,3,4,5,6,7"}`),
+				[]byte(`{"lanes":"8,9,10,11,12,13,14,15","lanes-pending":"8,9,10,11,12,13,14,15"}`),
+			}
+			commands := make([]execTesting.FakeCommandAction, len(outputs))
+			for index := range outputs {
+				output := outputs[index]
+				commands[index] = func(_ string, args ...string) exec.Cmd {
+					commandArgs = append(commandArgs, append([]string(nil), args...))
+					cmd := &execTesting.FakeCmd{}
+					cmd.RunScript = append(cmd.RunScript, func() ([]byte, []byte, error) {
+						return output, nil, nil
+					})
+					return cmd
+				}
+			}
+			h := &nvConfigUtils{execInterface: &execTesting.FakeExec{CommandScript: commands}}
+			lane1 := "/nvidia/link/breakout/module/[0]/port/[1]"
+			lane255 := "/nvidia/link/breakout/module/[0]/port/[255]"
+			planOperations := []dmscli.XPathOperation{
+				{Path: "/nvidia/pci", Values: map[string]any{"num-pfs": 2}},
+				{Path: lane1, Values: map[string]any{"lanes": []int{0, 1, 2, 3, 4, 5, 6, 7}}},
+				{Path: lane255, Values: map[string]any{"lanes": []int{8, 9, 10, 11, 12, 13, 14, 15}}},
+			}
+
+			updateNeeded, rebootNeeded, err := h.ValidateNvConfigXPaths(
+				context.Background(), []v1alpha1.NicDevicePortSpec{nvconfigPort(pciAddress)}, planOperations)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updateNeeded).To(BeFalse())
+			Expect(rebootNeeded).To(BeFalse())
+			Expect(commandArgs).To(HaveLen(3))
+			Expect(commandArgs[0]).To(Equal([]string{
+				"--json", "-t", "pci/" + pciAddress + "?port=1",
+				"/nvidia/pci", "num-pfs", "num-pfs-pending",
+			}))
+			Expect(commandArgs[1]).To(Equal([]string{
+				"--json", "-t", "pci/" + pciAddress + "?port=1",
+				lane1, "lanes", "lanes-pending",
+			}))
+			Expect(commandArgs[2]).To(Equal([]string{
+				"--json", "-t", "pci/" + pciAddress + "?port=1",
+				lane255, "lanes", "lanes-pending",
+			}))
+		})
+
+		It("applies raw and typed NVConfig together with all-port fanout and flags", func() {
+			var commandArgs []string
+			cmd := &execTesting.FakeCmd{}
+			cmd.RunScript = append(cmd.RunScript, func() ([]byte, []byte, error) {
+				return []byte(`{"status":"ok","requires-reset":true}`), nil, nil
+			})
+			h := &nvConfigUtils{execInterface: &execTesting.FakeExec{
+				CommandScript: []execTesting.FakeCommandAction{func(_ string, args ...string) exec.Cmd {
+					commandArgs = append([]string(nil), args...)
+					return cmd
+				}},
+			}}
+
+			status, err := h.SetNvConfigParametersBatchWithXPaths(
+				context.Background(),
+				nvconfigPort(pciAddress),
+				2,
+				map[string]string{"RAW_PARAM": "raw-value"},
+				operations,
+				true,
+				true)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(status).To(Equal(types.ApplyStatusSuccess))
+			Expect(commandArgs[0:4]).To(Equal([]string{"--json", "-t", "pci/" + pciAddress, "--input"}))
+			Expect(commandArgs[5]).To(Equal("/nvidia/nvconfig/apply"))
+
+			var payload dmscli.ApplyNVConfigRequest
+			Expect(json.Unmarshal([]byte(commandArgs[4]), &payload)).To(Succeed())
+			Expect(payload.Ports).To(Equal([]int{1, 2}))
+			Expect(payload.Typed).To(Equal([]dmscli.XPathOperation{{
+				Path: "/nvidia/pci", Values: map[string]any{"num-pfs": float64(2)},
+			}}))
+			Expect(payload.Raw).To(Equal([]dmscli.NVConfigParam{{Param: "RAW_PARAM", Value: "raw-value"}}))
+			Expect(payload.WithDefault).To(BeTrue())
+			Expect(payload.Force).To(BeTrue())
+		})
+	})
 })

@@ -19,6 +19,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -34,7 +35,8 @@ import (
 )
 
 const (
-	arrayPrefix = "Array"
+	arrayPrefix        = "Array"
+	xPathPendingSuffix = "-pending"
 )
 
 func parseMLXConfigValue(value string, valueInBracketsRegex *regexp.Regexp) []string {
@@ -67,7 +69,7 @@ type NVConfigUtils interface {
 	// ValidateSystemConf reports whether the device's applied configuration matches the named system
 	// configuration for the given ASIC via `mlxconfig -d <device> -y validate_system_conf <conf>[<asic>]`.
 	// It returns the overall match bit plus the names of the mismatched params (the MISMATCH rows), so
-	// callers that allow explicit overrides (e.g. rawNvConfig / Spectrum-X) on top of a named system conf
+	// callers that allow explicit rawNvConfig overrides on top of a named system conf
 	// can decide whether a reported mismatch is an intentional override or real drift requiring re-apply.
 	ValidateSystemConf(ctx context.Context, port v1alpha1.NicDevicePortSpec, conf string, asic int) (bool, []string, error)
 }
@@ -230,17 +232,10 @@ func (h *nvConfigUtils) SetNvConfigParametersBatchWithContext(
 	withDefault bool,
 	force bool,
 ) (types.ApplyStatus, error) {
-	if len(params) == 0 {
-		return types.ApplyStatusNothingToDo, nil
-	}
-	if h.execInterface == nil {
-		return types.ApplyStatusFailed, fmt.Errorf("command executor must not be nil")
-	}
+	return h.setNvConfigParametersBatchWithXPaths(ctx, port, nil, params, nil, withDefault, force)
+}
 
-	target := "pci/" + port.PCI
-	log.Log.Info("ConfigurationUtils.SetNvConfigParametersBatch()", "pciAddr", port.PCI, "target", target, "params", params, "withDefault", withDefault, "force", force)
-
-	// Build a sorted raw list to preserve deterministic batch construction.
+func sortedRawNVConfigParams(params map[string]string) []dmscli.NVConfigParam {
 	paramNames := make([]string, 0, len(params))
 	for name := range params {
 		paramNames = append(paramNames, name)
@@ -251,18 +246,53 @@ func (h *nvConfigUtils) SetNvConfigParametersBatchWithContext(
 	for _, name := range paramNames {
 		raw = append(raw, dmscli.NVConfigParam{Param: name, Value: params[name]})
 	}
+	return raw
+}
+
+func (h *nvConfigUtils) setNvConfigParametersBatchWithXPaths(
+	ctx context.Context,
+	primaryPort v1alpha1.NicDevicePortSpec,
+	ports []int,
+	params map[string]string,
+	operations []dmscli.XPathOperation,
+	withDefault bool,
+	force bool,
+) (types.ApplyStatus, error) {
+	if len(params) == 0 && len(operations) == 0 {
+		return types.ApplyStatusNothingToDo, nil
+	}
+	if h.execInterface == nil {
+		return types.ApplyStatusFailed, fmt.Errorf("command executor must not be nil")
+	}
+
+	target := "pci/" + primaryPort.PCI
+	logger := logr.FromContextOrDiscard(ctx)
+	logger.Info("applying NVConfig through DMS",
+		"pciAddr", primaryPort.PCI,
+		"target", target,
+		"ports", ports,
+		"nativeParameterCount", len(params),
+		"typedOperationCount", len(operations),
+		"withDefault", withDefault,
+		"force", force)
+	logger.V(2).Info("DMS NVConfig apply payload",
+		"target", target,
+		"nativeParameters", params,
+		"typedOperations", operations)
 
 	result, err := dmscli.ApplyNVConfig(ctx, h.execInterface, dmscli.ApplyNVConfigRequest{
 		Target:      target,
-		Raw:         raw,
+		Ports:       ports,
+		Typed:       operations,
+		Raw:         sortedRawNVConfigParams(params),
 		WithDefault: withDefault,
 		Force:       force,
 	})
 	if err != nil {
-		log.Log.Error(err, "SetNvConfigParametersBatch(): DMS NVConfig apply failed", "target", target)
+		logger.Error(err, "DMS NVConfig apply failed", "target", target)
 		return types.ApplyStatusFailed, err
 	}
-	log.Log.V(2).Info("DMS NVConfig apply succeeded",
+	logger.V(2).Info("DMS NVConfig apply succeeded",
 		"target", target,
 		"primaryTarget", result.PrimaryTarget,
 		"compiledCount", result.CompiledCount,
@@ -274,6 +304,196 @@ func (h *nvConfigUtils) SetNvConfigParametersBatchWithContext(
 		return types.ApplyStatusSuccess, nil
 	}
 	return types.ApplyStatusNothingToDo, nil
+}
+
+// ValidateNvConfigXPaths checks current and pending typed NVConfig values on
+// every PCI function. Split functions expose their NVConfig as port 1.
+func (h *nvConfigUtils) ValidateNvConfigXPaths(
+	ctx context.Context,
+	ports []v1alpha1.NicDevicePortSpec,
+	operations []dmscli.XPathOperation,
+) (updateNeeded, rebootNeeded bool, err error) {
+	if len(operations) == 0 {
+		return false, false, nil
+	}
+	logger := logr.FromContextOrDiscard(ctx)
+	queries := xpathQueries(operations)
+	queryBatches := xpathQueryBatches(queries)
+	logger.V(2).Info("validating doSPCX NVConfig on all device ports",
+		"ports", len(ports),
+		"operations", len(operations),
+		"queryPaths", len(queries),
+		"batchesPerPort", len(queryBatches))
+	for _, port := range ports {
+		target := "pci/" + port.PCI + "?port=1"
+		logger.V(2).Info("querying doSPCX NVConfig state for device port",
+			"pciAddr", port.PCI,
+			"target", target,
+			"batches", len(queryBatches))
+		result := &dmscli.QueryXPathsResult{Status: "ok", Values: map[string]map[string]any{}}
+		for batchIndex, queryBatch := range queryBatches {
+			logger.V(2).Info("querying doSPCX NVConfig batch",
+				"target", target,
+				"batch", batchIndex+1,
+				"totalBatches", len(queryBatches),
+				"paths", len(queryBatch))
+			batchResult, queryErr := dmscli.QueryXPaths(ctx, h.execInterface, target, queryBatch)
+			if queryErr != nil {
+				return false, false, fmt.Errorf("query NVConfig XPaths on target %q: %w", target, queryErr)
+			}
+			for path, values := range batchResult.Values {
+				result.Values[path] = values
+			}
+		}
+		portUpdateNeeded, portRebootNeeded, matchErr := matchXPathValues(result, operations)
+		if matchErr != nil {
+			return false, false, fmt.Errorf("validate NVConfig XPaths on target %q: %w", target, matchErr)
+		}
+		updateNeeded = updateNeeded || portUpdateNeeded
+		rebootNeeded = rebootNeeded || portRebootNeeded
+		logger.V(2).Info("doSPCX NVConfig validation complete for device port",
+			"pciAddr", port.PCI,
+			"target", target,
+			"configUpdateNeeded", portUpdateNeeded,
+			"rebootNeeded", portRebootNeeded)
+	}
+	logger.V(2).Info("doSPCX NVConfig validation complete for all device ports",
+		"ports", len(ports),
+		"configUpdateNeeded", updateNeeded,
+		"rebootNeeded", rebootNeeded)
+	return updateNeeded, rebootNeeded, nil
+}
+
+func xpathQueries(operations []dmscli.XPathOperation) []dmscli.XPathQuery {
+	queries := make([]dmscli.XPathQuery, 0, len(operations))
+	indices := map[string]int{}
+	leaves := map[string]map[string]struct{}{}
+	for _, operation := range operations {
+		if _, found := leaves[operation.Path]; !found {
+			indices[operation.Path] = len(queries)
+			leaves[operation.Path] = map[string]struct{}{}
+			queries = append(queries, dmscli.XPathQuery{Path: operation.Path})
+		}
+		for leaf := range operation.Values {
+			leaves[operation.Path][leaf] = struct{}{}
+			leaves[operation.Path][leaf+xPathPendingSuffix] = struct{}{}
+		}
+	}
+	for path, pathLeaves := range leaves {
+		query := &queries[indices[path]]
+		for leaf := range pathLeaves {
+			query.Leaves = append(query.Leaves, leaf)
+		}
+		sort.Strings(query.Leaves)
+	}
+	return queries
+}
+
+// TODO(dospcx-nvconfig): Remove the individual breakout-lane queries once
+// dms-cli preserves indexed XPath keys in batched JSON GET responses. Today
+// paths ending in port/[1] and port/[255] both return as .../module/port and
+// overwrite each other in the response object.
+func xpathQueryBatches(queries []dmscli.XPathQuery) [][]dmscli.XPathQuery {
+	batched := make([]dmscli.XPathQuery, 0, len(queries))
+	individual := make([][]dmscli.XPathQuery, 0)
+	for _, query := range queries {
+		if strings.HasPrefix(query.Path, "/nvidia/link/breakout/") {
+			individual = append(individual, []dmscli.XPathQuery{query})
+			continue
+		}
+		batched = append(batched, query)
+	}
+	if len(batched) == 0 {
+		return individual
+	}
+	return append([][]dmscli.XPathQuery{batched}, individual...)
+}
+
+func matchXPathValues(result *dmscli.QueryXPathsResult, operations []dmscli.XPathOperation) (updateNeeded, rebootNeeded bool, err error) {
+	if result == nil {
+		return false, false, fmt.Errorf("DMS returned a nil XPath query result")
+	}
+	for _, operation := range operations {
+		values, found := result.Values[operation.Path]
+		if !found {
+			return false, false, fmt.Errorf("DMS response does not contain XPath %q", operation.Path)
+		}
+		for leaf, desired := range operation.Values {
+			current, found := values[leaf]
+			if !found {
+				return false, false, fmt.Errorf("DMS response does not contain XPath leaf %q/%s", operation.Path, leaf)
+			}
+			pendingLeaf := leaf + xPathPendingSuffix
+			pending, found := values[pendingLeaf]
+			if !found {
+				return false, false, fmt.Errorf("DMS response does not contain XPath leaf %q/%s", operation.Path, pendingLeaf)
+			}
+			currentMatches := xpathValuesEqual(current, desired)
+			pendingMatches := xpathValuesEqual(pending, desired)
+			updateNeeded = updateNeeded || !pendingMatches
+			rebootNeeded = rebootNeeded || !currentMatches || !pendingMatches
+		}
+	}
+	return updateNeeded, rebootNeeded, nil
+}
+
+func xpathValuesEqual(actual, desired any) bool {
+	normalizedActual := normalizeXPathValue(actual)
+	normalizedDesired := normalizeXPathValue(desired)
+	if _, desiredIsList := normalizedDesired.([]any); desiredIsList {
+		if actualString, actualIsString := normalizedActual.(string); actualIsString {
+			parts := strings.Split(actualString, ",")
+			actualList := make([]any, len(parts))
+			for index, part := range parts {
+				actualList[index] = normalizeXPathValue(part)
+			}
+			normalizedActual = actualList
+		}
+	}
+	return reflect.DeepEqual(normalizedActual, normalizedDesired)
+}
+
+func normalizeXPathValue(value any) any {
+	if value == nil {
+		return nil
+	}
+	reflected := reflect.ValueOf(value)
+	if reflected.Kind() == reflect.Array || reflected.Kind() == reflect.Slice {
+		result := make([]any, reflected.Len())
+		for index := 0; index < reflected.Len(); index++ {
+			result[index] = normalizeXPathValue(reflected.Index(index).Interface())
+		}
+		return result
+	}
+
+	formatted := strings.ToLower(strings.TrimSpace(fmt.Sprint(value)))
+	formatted = strings.TrimSuffix(formatted, "_value")
+	return strings.TrimPrefix(formatted, "device_")
+}
+
+// SetNvConfigParametersBatchWithXPaths applies native parameters and typed
+// XPath operations through one primary-target dms-cli invocation.
+//
+// TODO(dospcx-nvconfig): HIGH PRIORITY -- pass the discovered BDF set once
+// /nvidia/nvconfig/apply supports multi-target execution. The current DMS API
+// uses ports only to expand {port} in native parameter names and runs one
+// mlxconfig command on the primary BDF, so it cannot fan out to split PCI
+// functions represented as separate NicDevice ports.
+func (h *nvConfigUtils) SetNvConfigParametersBatchWithXPaths(
+	ctx context.Context,
+	primaryPort v1alpha1.NicDevicePortSpec,
+	portCount int,
+	params map[string]string,
+	operations []dmscli.XPathOperation,
+	withDefault bool,
+	force bool,
+) (types.ApplyStatus, error) {
+	ports := make([]int, portCount)
+	for index := range ports {
+		ports[index] = index + 1
+	}
+	return h.setNvConfigParametersBatchWithXPaths(
+		ctx, primaryPort, ports, params, operations, withDefault, force)
 }
 
 // systemConfToken builds the `<conf>[<asic>]` argument for set/validate_system_conf, e.g. conf3[0].

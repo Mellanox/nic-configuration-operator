@@ -103,7 +103,7 @@ spec:
 * `spectrumXOptimized`: enables Spectrum-X specific NIC optimizations. When enabled:
   * Requires `linkType=Ethernet` and `numVfs=1`
   * Cannot be combined with `roceOptimized` (RoCE settings are included automatically)
-  * Can be combined with `rawNvConfig` — raw params are merged as overrides on top of Spectrum-X calculated params
+  * Temporarily cannot be combined with `rawNvConfig` or `networkBay`. NCO cannot yet determine which native mlxconfig parameters are owned by typed doSPCX operations, so allowing either combination could create a non-convergent reconcile loop
   * Only supported on ConnectX-7 (`nicType: 1021`), ConnectX-8 (`nicType: 1023`), ConnectX-9 (`nicType: 1025`) and BlueField-3 SuperNIC (`nicType: a2dc`)
   * `version`: Required. Must match the name of a Spectrum-X profile ConfigMap
   * `platformType`: Required. doSPCX platform identifier defined by the supplied Blueprints profile
@@ -222,14 +222,21 @@ Spectrum-X profiles can configure NICs with multiple data planes. Available mode
 `spectrumx.SpectrumXManager` includes the `spectrumx.PlanManager` interface. Before the controller
 starts its existing concurrent per-device NV apply, it calls `PreparePlan` once for the node's
 Spectrum-X device group with the `prepare` stage. It does the same with the `configure` stage before
-the existing concurrent runtime apply. Plan preparation never executes generated plan operations.
+the existing concurrent runtime apply. Plan preparation itself never executes generated plan operations.
 `PreparePlan` parses the host-k8s `plan.semantic.groups` contract once and caches a homogeneous
 configuration plan in memory. The compiled form contains only three execution inputs: ordered
 `breakout` and `post-breakout` XPath operation slices for the prepare stage, and ordered runtime
 operation groups for the configure stage. Device targeting remains the responsibility of the
 configuration manager when it consumes the plan. `GetPreparedPlan` validates the requesting
 device's inputs and membership against the cache; it does not reread or reparse files for every
-per-device apply. Semantic group references are authoritative, and an omitted operation kind means
+per-device apply. During NV validation, the configuration manager separately queries the existing
+template-derived native parameter map and the active doSPCX XPath phase. During NV apply, it sends both inputs
+in one DMS action through the primary PF and passes every available logical port number so DMS can expand
+port-scoped typed mappings.
+Breakout must match current and pending state on all device ports before post-breakout is considered.
+`force` applies the complete breakout plus post-breakout intent immediately; after the breakout
+barrier, `with-default` also resends both phases so default filling cannot undo breakout. Semantic
+group references are authoritative, and an omitted operation kind means
 `set`, matching DMS. Configure groups `eswitch` and `vf-lifecycle` are intentionally omitted from
 the compiled plan; unknown groups fail closed. Plan compilation remains execution-free.
 

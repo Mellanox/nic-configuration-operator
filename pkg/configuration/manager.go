@@ -29,6 +29,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	"github.com/Mellanox/nic-configuration-operator/pkg/dms"
+	"github.com/Mellanox/nic-configuration-operator/pkg/dmscli"
 	"github.com/Mellanox/nic-configuration-operator/pkg/nvconfig"
 	"github.com/Mellanox/nic-configuration-operator/pkg/spectrumx"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
@@ -87,12 +88,16 @@ type contextualNVConfigBatchSetter interface {
 // if fully matched next but not current, returns false, true
 // if not fully matched next boot, returns true, true
 func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *v1alpha1.NicDevice) (bool, bool, []string, error) {
-	log.Log.Info("configurationManager.ValidateDeviceNvSpec", "device", device.Name)
+	logger := log.FromContext(ctx)
+	logger.Info("configurationManager.ValidateDeviceNvSpec", "device", device.Name)
+	if err := validateSpectrumXNVConfigCompatibility(device); err != nil {
+		return false, false, nil, err
+	}
 
 	// 1. Query current nv config for every port.
 	nvConfigsForPorts, err := h.queryNvConfigs(ctx, device)
 	if err != nil {
-		log.Log.Error(err, "failed to query nv configs", "device", device.Name)
+		logger.Error(err, "failed to query nv configs", "device", device.Name)
 		return false, false, nil, err
 	}
 	firstPort := device.Status.Ports[0]
@@ -105,7 +110,7 @@ func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *
 		for _, nvConfig := range nvConfigsForPorts {
 			resetNeededForPort, rebootNeededForPort, err := h.configValidation.ValidateResetToDefault(nvConfig)
 			if err != nil {
-				log.Log.Error(err, "failed to validate reset to default", "device", device.Name)
+				logger.Error(err, "failed to validate reset to default", "device", device.Name)
 				return false, false, nil, err
 			}
 			resetNeeded = resetNeeded || resetNeededForPort
@@ -121,37 +126,63 @@ func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *
 		return false, false, nil, err
 	}
 	if len(systemConfMismatched) > 0 {
-		log.Log.V(2).Info("system_conf params mismatched against the profile", "device", device.Name, "params", systemConfMismatched)
+		logger.V(2).Info("system_conf params mismatched against the profile", "device", device.Name, "params", systemConfMismatched)
 	}
 
-	// 4. Combined override config (Spectrum-X breakout + postBreakout + template + rawNvConfig, raw wins).
+	// 4. Existing native NVConfig validation remains independent from the doSPCX plan.
 	//    Validated against the device's next boot, exactly like the apply path — so a value already staged
 	//    for next boot but not yet rebooted reports reboot-required instead of looping.
 	overrides, err := h.configValidation.ConstructNvParamMapFromTemplate(device, firstPortConfig)
 	if err != nil {
-		log.Log.Error(err, "failed to calculate desired nvconfig parameters", "device", device.Name)
+		logger.Error(err, "failed to calculate desired nvconfig parameters", "device", device.Name)
 		return false, false, nil, err
 	}
-	log.Log.V(2).Info("validating combined nv config", "device", device.Name, "params", overrides)
+	logger.V(2).Info("validating native NVConfig parameters", "device", device.Name, "params", overrides)
 
 	configUpdateNeeded, rebootNeeded, unsupportedParams := validateTemplateParamsApplied(nvConfigsForPorts, overrides)
+	logger.V(2).Info("native NVConfig validation complete",
+		"device", device.Name,
+		"configUpdateNeeded", configUpdateNeeded,
+		"rebootNeeded", rebootNeeded,
+		"unsupportedParams", unsupportedParams)
 	if configUpdateNeeded {
-		log.Log.Info("nv config not yet applied to next boot", "device", device.Name)
+		logger.Info("native NVConfig is not yet applied to next boot", "device", device.Name)
 	}
 	if len(unsupportedParams) > 0 {
-		log.Log.Info("some nv config params are unsupported on this device and will be skipped", "device", device.Name, "params", unsupportedParams)
+		logger.Info("some native NVConfig parameters are unsupported on this device and will be skipped", "device", device.Name, "params", unsupportedParams)
 	}
 
 	// 5. system_conf coverage: a mismatched profile param not covered (range-aware) by the override config
 	//    means the baseline itself drifted and set_system_conf must be re-applied (reboot-required).
 	if systemConfDrifted(overrides, systemConfMismatched) {
-		log.Log.Info("Network Bay system_conf drifted, set_system_conf re-apply required",
+		logger.Info("Network Bay system_conf drifted, set_system_conf re-apply required",
 			"device", device.Name, "mismatched", systemConfMismatched)
 		configUpdateNeeded = true
 		rebootNeeded = true
 	}
 
-	log.Log.V(2).Info("nv spec validation result", "device", device.Name,
+	// 6. Validate the prepared doSPCX NVConfig plan separately. Breakout is a
+	// reboot barrier: post-breakout is considered only after breakout matches
+	// both the current and pending device state.
+	plan, err := h.preparedSpectrumXPlan(device, spectrumx.PlanStagePrepare)
+	if err != nil {
+		return false, false, unsupportedParams, err
+	}
+	if plan != nil {
+		phase, planUpdateNeeded, planRebootNeeded, err := h.spectrumXNVConfigPhase(ctx, device, plan)
+		if err != nil {
+			return false, false, unsupportedParams, err
+		}
+		configUpdateNeeded = configUpdateNeeded || planUpdateNeeded
+		rebootNeeded = rebootNeeded || planRebootNeeded
+		logger.V(2).Info("doSPCX NVConfig phase validation complete",
+			"device", device.Name,
+			"phase", phase,
+			"configUpdateNeeded", planUpdateNeeded,
+			"rebootNeeded", planRebootNeeded)
+	}
+
+	logger.V(2).Info("nv spec validation result", "device", device.Name,
 		"configUpdateNeeded", configUpdateNeeded, "rebootNeeded", rebootNeeded, "unsupportedParams", unsupportedParams)
 	return configUpdateNeeded, rebootNeeded, unsupportedParams, nil
 }
@@ -233,23 +264,156 @@ func buildNVConfigApplyDiff(nvConfig types.NvConfigQuery, desiredConfig map[stri
 	return diff
 }
 
+func buildCombinedNVConfigApplyDiff(
+	nvConfigsForPorts map[string]types.NvConfigQuery,
+	desiredConfig map[string]string,
+	withDefault bool,
+	force bool,
+	includeUnchanged bool,
+) (map[string]string, bool) {
+	changed := make(map[string]string, len(desiredConfig))
+	hasUnsupported := false
+	for _, nvConfig := range nvConfigsForPorts {
+		diff := buildNVConfigApplyDiff(nvConfig, desiredConfig, withDefault || includeUnchanged, force)
+		for name, value := range diff.changed {
+			changed[name] = value
+		}
+		hasUnsupported = hasUnsupported || len(diff.unsupported) > 0
+	}
+	return changed, hasUnsupported
+}
+
+func (h configurationManager) applySpectrumXNVConfig(
+	ctx context.Context,
+	device *v1alpha1.NicDevice,
+	plan *spectrumx.Plan,
+	utils spectrumXNVConfigUtils,
+	nvConfigsForPorts map[string]types.NvConfigQuery,
+	desiredParams map[string]string,
+	options *types.ConfigurationOptions,
+) (*types.ConfigurationApplyResult, error) {
+	phase := spectrumXNVConfigPhaseBreakout
+	updateNeeded := false
+	rebootNeeded := false
+	typedOperations := make([]dmscli.XPathOperation, 0, len(plan.Breakout)+len(plan.PostBreakout))
+	if options.Force {
+		typedOperations = append(typedOperations, plan.Breakout...)
+		typedOperations = append(typedOperations, plan.PostBreakout...)
+	} else {
+		var err error
+		phase, updateNeeded, rebootNeeded, err = h.spectrumXNVConfigPhase(ctx, device, plan)
+		if err != nil {
+			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+		}
+		if options.WithDefault && phase == spectrumXNVConfigPhasePostBreakout {
+			typedOperations = append(typedOperations, plan.Breakout...)
+			typedOperations = append(typedOperations, plan.PostBreakout...)
+		} else if updateNeeded || options.WithDefault {
+			if phase == spectrumXNVConfigPhaseBreakout {
+				typedOperations = append(typedOperations, plan.Breakout...)
+			} else {
+				typedOperations = append(typedOperations, plan.PostBreakout...)
+			}
+		}
+	}
+
+	// DMS expands port-scoped typed mappings for every supplied port number in
+	// one primary-PF command. Include the complete native desired state whenever
+	// typed operations are staged so the combined operation is atomic.
+	nativeUpdateNeeded, _, _ := validateTemplateParamsApplied(nvConfigsForPorts, desiredParams)
+	batch, hasUnsupported := buildCombinedNVConfigApplyDiff(
+		nvConfigsForPorts,
+		desiredParams,
+		options.WithDefault,
+		options.Force,
+		len(typedOperations) > 0)
+	primaryPort := device.Status.Ports[0]
+	log.FromContext(ctx).V(2).Info("combined doSPCX NVConfig apply diff",
+		"device", device.Name,
+		"phase", phase,
+		"portCount", len(device.Status.Ports),
+		"withDefault", options.WithDefault,
+		"force", options.Force,
+		"nativeUpdateNeeded", nativeUpdateNeeded,
+		"nativeApplyCount", len(batch),
+		"typedOperationCount", len(typedOperations),
+		"hasUnsupported", hasUnsupported)
+	status := types.ApplyStatusNothingToDo
+	if hasUnsupported {
+		status = types.ApplyStatusPartiallyApplied
+	}
+	if len(batch) == 0 && len(typedOperations) == 0 {
+		return &types.ConfigurationApplyResult{Status: status, RebootRequired: rebootNeeded}, nil
+	}
+
+	applyStatus, err := utils.SetNvConfigParametersBatchWithXPaths(
+		ctx,
+		primaryPort,
+		len(device.Status.Ports),
+		batch,
+		typedOperations,
+		options.WithDefault,
+		options.Force)
+	if err != nil {
+		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, fmt.Errorf(
+			"apply combined doSPCX %s NVConfig for device %q: %w",
+			phase, device.Name, err)
+	}
+	if applyStatus == types.ApplyStatusNothingToDo && !updateNeeded && !nativeUpdateNeeded {
+		return &types.ConfigurationApplyResult{Status: status, RebootRequired: rebootNeeded}, nil
+	}
+	if applyStatus == types.ApplyStatusNothingToDo {
+		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, fmt.Errorf(
+			"apply combined doSPCX %s NVConfig for device %q did not stage the mismatched configuration",
+			phase, device.Name)
+	}
+	if applyStatus != types.ApplyStatusSuccess {
+		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, fmt.Errorf(
+			"apply combined doSPCX %s NVConfig for device %q returned status %d",
+			phase, device.Name, applyStatus)
+	}
+	if err := h.verifySpectrumXSecondaryNVConfigStaged(
+		ctx, device, utils, desiredParams, typedOperations); err != nil {
+		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, fmt.Errorf(
+			"verify combined doSPCX %s NVConfig for device %q: %w",
+			phase, device.Name, err)
+	}
+	if status != types.ApplyStatusPartiallyApplied {
+		status = types.ApplyStatusSuccess
+	}
+	return &types.ConfigurationApplyResult{Status: status, RebootRequired: true}, nil
+}
+
 // ApplyNVConfiguration calculates device's missing nv spec configuration and applies it to the device on the host
 // returns *ConfigurationApplyResult - result of the apply operation
 // returns error - there were errors while applying nv configuration
 func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *v1alpha1.NicDevice, options *types.ConfigurationOptions) (*types.ConfigurationApplyResult, error) {
-	log.Log.Info("configurationManager.ApplyNVConfiguration", "device", device.Name)
+	logger := log.FromContext(ctx)
+	logger.Info("configurationManager.ApplyNVConfiguration", "device", device.Name)
 
 	if device.Spec.Configuration == nil {
 		return &types.ConfigurationApplyResult{Status: types.ApplyStatusNothingToDo}, nil
 	}
-	if err := h.requirePreparedSpectrumXPlan(device, spectrumx.PlanStagePrepare); err != nil {
+	if options == nil {
+		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, fmt.Errorf("configuration options must not be nil")
+	}
+	if err := validateSpectrumXNVConfigCompatibility(device); err != nil {
 		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+	}
+	var plan *spectrumx.Plan
+	var spectrumXUtils spectrumXNVConfigUtils
+	if !device.Spec.Configuration.ResetToDefault {
+		var err error
+		plan, spectrumXUtils, err = h.preparedSpectrumXNVConfig(device)
+		if err != nil {
+			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+		}
 	}
 
 	// 1. Query current nv config for every port.
 	nvConfigsForPorts, err := h.queryNvConfigs(ctx, device)
 	if err != nil {
-		log.Log.Error(err, "failed to query nv configs", "device", device.Name)
+		logger.Error(err, "failed to query nv configs", "device", device.Name)
 		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}
 	firstPort := device.Status.Ports[0]
@@ -266,23 +430,24 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}
 
-	// 4. Combined desired params: Spectrum-X breakout + postBreakout + template + rawNvConfig (raw wins).
+	// 4. Build the existing template-derived native NVConfig layer independently
+	// from the doSPCX typed plan.
 	desiredParams, err := h.configValidation.ConstructNvParamMapFromTemplate(device, firstPortConfig)
 	if err != nil {
-		log.Log.Error(err, "failed to calculate desired nvconfig parameters", "device", device.Name)
+		logger.Error(err, "failed to calculate desired nvconfig parameters", "device", device.Name)
 		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}
 	if options.Force {
 		extrapolatePortParamsFromNumOfPF(desiredParams)
 	}
-	log.Log.V(2).Info("combined desired nv config built", "device", device.Name, "params", desiredParams, "force", options.Force)
+	logger.V(2).Info("native NVConfig desired parameters built", "device", device.Name, "params", desiredParams, "force", options.Force)
 
-	// 5. set_system_conf baseline: if the combined params do not cover all mismatched profile params
+	// 5. set_system_conf baseline: if the native params do not cover all mismatched profile params
 	//    (range-aware), the baseline itself drifted on an uncovered param — re-stage set_system_conf
 	//    before the override batch so the overrides still win in the same next-boot config.
 	systemConfApplied := false
 	if systemConfDrifted(desiredParams, systemConfMismatched) {
-		log.Log.Info("Network Bay system_conf not covered by overrides, applying set_system_conf",
+		logger.Info("Network Bay system_conf not covered by overrides, applying set_system_conf",
 			"device", device.Name, "mismatched", systemConfMismatched)
 		if err := h.setSystemConf(ctx, device, options); err != nil {
 			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
@@ -294,29 +459,38 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 		// the baseline just overwrote.
 		nvConfigsForPorts, err = h.queryNvConfigs(ctx, device)
 		if err != nil {
-			log.Log.Error(err, "failed to re-query nv configs after set_system_conf", "device", device.Name)
+			logger.Error(err, "failed to re-query nv configs after set_system_conf", "device", device.Name)
 			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 		}
 	}
 
+	// Spectrum-X combines template-derived native and typed NVConfig into one
+	// primary-PF DMS action.
+	if plan != nil {
+		result, err := h.applySpectrumXNVConfig(
+			ctx, device, plan, spectrumXUtils, nvConfigsForPorts, desiredParams, options)
+		if err != nil {
+			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+		}
+		if systemConfApplied {
+			result.RebootRequired = true
+			if result.Status == types.ApplyStatusNothingToDo {
+				result.Status = types.ApplyStatusSuccess
+			}
+		}
+		return result, nil
+	}
+
+	// Non-Spectrum-X devices keep the existing per-PF raw apply behavior.
 	anyParamsApplied := false
 	hasUnsupportedParams := false
-
-	// 6 & 7. Apply the combined override params on every PF the device exposes.
-	//   - force=true: apply every param (mlxconfig --force accepts params not currently visible, e.g.
-	//     per-port params staged before a breakout reboot exposes their ports).
-	//   - withDefault=true: apply every param visible on this PF so DMS can reset unspecified params
-	//     to their defaults and report whether the operation requires a reset.
-	//   - otherwise: apply only the params visible on this PF whose value differs; params not yet
-	//     visible are skipped this round and picked up after a reboot exposes them (which sequences
-	//     breakout before postBreakout without --force).
 	for _, port := range device.Status.Ports {
 		nvConfig := nvConfigsForPorts[port.PCI]
 		diff := buildNVConfigApplyDiff(nvConfig, desiredParams, options.WithDefault, options.Force)
 		batch := diff.changed
 		hasUnsupportedParams = hasUnsupportedParams || len(diff.unsupported) > 0
 		target := "pci/" + port.PCI
-		log.Log.V(2).Info("nv config apply diff",
+		logger.V(2).Info("nv config apply diff",
 			"device", device.Name,
 			"target", target,
 			"withDefault", options.WithDefault,
@@ -332,10 +506,10 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 		if len(batch) == 0 {
 			continue
 		}
-		log.Log.V(2).Info("applying nv config batch", "device", device.Name, "target", target, "params", batch, "force", options.Force)
+		logger.V(2).Info("applying nv config batch", "device", device.Name, "target", target, "params", batch, "force", options.Force)
 		applyStatus, err := h.setNvConfigParametersBatch(ctx, port, batch, options.WithDefault, options.Force)
 		if err != nil {
-			log.Log.Error(err, "Failed to apply nv config parameters", "device", device.Name, "params", batch)
+			logger.Error(err, "Failed to apply nv config parameters", "device", device.Name, "params", batch)
 			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 		}
 		if applyStatus == types.ApplyStatusSuccess {
@@ -344,7 +518,7 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 	}
 
 	if !anyParamsApplied && !hasUnsupportedParams && !systemConfApplied {
-		log.Log.V(2).Info("nv config already up to date, nothing to apply", "device", device.Name)
+		logger.V(2).Info("nv config already up to date, nothing to apply", "device", device.Name)
 		return &types.ConfigurationApplyResult{Status: types.ApplyStatusNothingToDo}, nil
 	}
 
@@ -353,7 +527,7 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 		status = types.ApplyStatusPartiallyApplied
 	}
 	rebootRequired := anyParamsApplied || systemConfApplied
-	log.Log.Info("nv config applied", "device", device.Name, "status", status, "rebootRequired", rebootRequired)
+	logger.Info("nv config applied", "device", device.Name, "status", status, "rebootRequired", rebootRequired)
 
 	return &types.ConfigurationApplyResult{Status: status, RebootRequired: rebootRequired}, nil
 }
@@ -456,7 +630,7 @@ func (h configurationManager) ApplyRuntimeConfiguration(ctx context.Context, dev
 	if device.Spec.Configuration == nil || device.Spec.Configuration.Template == nil {
 		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusNothingToDo}, nil
 	}
-	if err := h.requirePreparedSpectrumXPlan(device, spectrumx.PlanStageConfigure); err != nil {
+	if _, err := h.preparedSpectrumXPlan(device, spectrumx.PlanStageConfigure); err != nil {
 		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}
 
@@ -647,19 +821,6 @@ func spectrumXEnabled(device *v1alpha1.NicDevice) bool {
 		device.Spec.Configuration.Template.SpectrumXOptimized.Enabled
 }
 
-func (h configurationManager) requirePreparedSpectrumXPlan(device *v1alpha1.NicDevice, stage spectrumx.PlanStage) error {
-	if !spectrumXEnabled(device) {
-		return nil
-	}
-	if h.spectrumXConfigManager == nil {
-		return fmt.Errorf("matching doSPCX %s plan is required for device %q: Spectrum-X manager is not configured", stage, device.Name)
-	}
-	if _, err := h.spectrumXConfigManager.GetPreparedPlan(device, stage); err != nil {
-		return fmt.Errorf("matching doSPCX %s plan is required for device %q: %w", stage, device.Name, err)
-	}
-	return nil
-}
-
 // hasNetworkBaySpec reports whether the device has a Network Bay template configured AND was
 // detected as part of a Network Bay card. Both are required to apply / validate set_system_conf.
 // ResetToDefault takes precedence: a reset wipes nv config, so we must not also manage set_system_conf
@@ -748,5 +909,5 @@ func systemConfDrifted(overrides map[string]string, mismatched []string) bool {
 
 func NewConfigurationManager(eventRecorder record.EventRecorder, dmsManager dms.DMSManager, nvConfigUtils nvconfig.NVConfigUtils, spectrumXConfigManager spectrumx.SpectrumXManager) ConfigurationManager {
 	utils := newConfigurationUtils(dmsManager)
-	return configurationManager{configurationUtils: utils, configValidation: newConfigValidation(utils, eventRecorder, spectrumXConfigManager), nvConfigUtils: nvConfigUtils, spectrumXConfigManager: spectrumXConfigManager}
+	return configurationManager{configurationUtils: utils, configValidation: newConfigValidation(utils, eventRecorder), nvConfigUtils: nvConfigUtils, spectrumXConfigManager: spectrumXConfigManager}
 }
