@@ -26,6 +26,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	"github.com/Mellanox/nic-configuration-operator/pkg/nvconfig"
+	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
 
@@ -104,13 +105,17 @@ func (d *deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, e
 
 		vpd, err := d.utils.GetVPD(device.Address)
 		if err != nil {
-			log.Log.Error(err, "Failed to get device's part and serial numbers, skipping", "address", device.Address)
-			// A VPD failure makes the whole physical device incomplete for this pass.
-			d.dropIncompleteDevice(statuses, pciKey, err)
-			if skipDeviceOnDiscoveryError {
-				d.skippedDevices[pciKey] = err
+			// Temporary: unprogrammed/dev NICs have no VPD (mlxvpd exit 8 / mstvpd parse
+			// failure). Continue with a placeholder so a NicDevice CR is still created and
+			// the card can be configured. Serial/part selectors and SuperNIC detection
+			// from VPD will not work for this device. Revert once those cards are flashed.
+			log.Log.Info("Failed to get device's part and serial numbers, continuing with placeholder VPD",
+				"address", device.Address, "error", err)
+			vpd = &types.VPD{
+				SerialNumber: "unknown-" + pciKey,
+				PartNumber:   "unknown",
+				ModelName:    device.Product.Name,
 			}
-			continue
 		}
 
 		isBlueField := utils.IsBlueFieldDevice(device.Product.ID)
