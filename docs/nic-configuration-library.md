@@ -161,8 +161,8 @@ func NewConfigurationManager(
 
 1. **Spectrum-X plan precondition** — before per-device validation, the controller generates or reuses one node-scoped `prepare` plan. Spectrum-X devices require a matching cached plan; validation and apply fail closed when it is missing
 2. **Native query and validation** — query current NV config via `nvConfigUtils.QueryNvConfig()` and independently validate the template-derived native parameter map. `rawNvConfig` is temporarily rejected when Spectrum-X is enabled
-3. **Network Bay restriction** — `networkBay` is temporarily rejected when Spectrum-X is enabled because NCO cannot yet resolve native parameter ownership between `set_system_conf` and typed doSPCX operations
-4. **Native diff** — skip hidden/unsupported params as before and preserve the existing `with-default` and `force` behavior
+3. **Network Bay profile resolution** — for non-Spectrum-X Network Bay devices, run `show_system_conf`, select the named profile and detected ASIC, and expand range assignments such as `MODULE_SPLIT_M0[4..15]=FF` into concrete keys. The profile is the lowest-priority native layer; template and `rawNvConfig` values override it. `networkBay` remains temporarily rejected with Spectrum-X until DMS can represent and validate profile parameters below typed doSPCX operations
+4. **Native diff** — compare the complete native map against every target, normalizing symbolic, decimal, `0x` hexadecimal, and bare hexadecimal values; skip hidden/unsupported params and preserve the existing `with-default` and `force` behavior
 5. **doSPCX query and barrier** — query each plan leaf and its `-pending` leaf separately through DMS on every discovered PCI function, using `pci/<BDF>?port=1` because split functions expose their NVConfig as port 1. Validate breakout first; post-breakout becomes active only after breakout matches both current and pending state on every function
 6. **Combined NVConfig batch** — send template-derived native parameters and doSPCX typed operations in one `/nvidia/nvconfig/apply` action through the primary PF, with `ports: [1..N]` for every available logical port. Normal apply sends the active phase; `Force` sends breakout plus post-breakout immediately, and post-breakout `WithDefault` resends both phases
 7. **Optional reset** — `mlxfwreset` unless `ConfigurationOptions.SkipReset=true`
@@ -170,7 +170,7 @@ func NewConfigurationManager(
 **`ConfigurationOptions`:**
 - `SkipReset` — skip `mlxfwreset` after applying NV config
 - `WithDefault` — request `--with_default` through the combined DMS NVConfig action
-- `Force` — request `--force` through the combined DMS NVConfig action and add it to `set_system_conf` (lets mlxconfig accept a batch it would otherwise refuse due to implicit parameter dependencies). When `NUM_OF_PF` and a `_P1` value are present, force mode copies that value to missing higher ports up to the requested PF count before applying; explicit per-port values are preserved
+- `Force` — request `--force` through the DMS NVConfig action (lets mlxconfig accept a batch it would otherwise refuse due to implicit parameter dependencies). When `NUM_OF_PF` and a `_P1` value are present, force mode copies that value to missing higher ports up to the requested PF count before applying; explicit per-port values are preserved
 
 #### Runtime Configuration Flow
 
@@ -627,6 +627,18 @@ type NVConfigUtils interface {
 }
 ```
 
+The built-in implementation also exposes an optional profile-resolution capability:
+
+```go
+type SystemConfParamsProvider interface {
+    GetSystemConfParams(ctx context.Context, port v1alpha1.NicDevicePortSpec, conf string, asic int) (map[string]string, error)
+}
+```
+
+`ConfigurationManager` requires this capability only for a device with a selected Network Bay
+profile. Keeping it separate preserves compatibility for custom `NVConfigUtils` implementations
+that do not manage Network Bay devices.
+
 **Constructor:**
 ```go
 func NewNVConfigUtils() NVConfigUtils
@@ -651,15 +663,18 @@ dms-cli --json -t pci/<BDF> --input <payload-json> /nvidia/nvconfig/apply
 Parameter names are sorted before they are encoded as raw DMS entries. The
 apply target is always `pci/<port.PCI>`; the discovered `FwctlDevice` value is
 not passed to the NVConfig apply action. Raw query, single-parameter set, reset,
-and Network Bay system-conf operations continue to invoke `mlxconfig`
-directly; doSPCX XPath validation queries through `dms-cli`.
+and Network Bay profile resolution continue to invoke `mlxconfig` directly;
+profile application uses the ordinary DMS raw-parameter batch, while doSPCX
+XPath validation queries through `dms-cli`.
 
-**System conf command format (ConnectX-9 Network Bay):**
+**System profile command format (ConnectX-9 Network Bay):**
 ```
-mlxconfig -d <device> -y [--force] set_system_conf <conf>[<asic>]
-mlxconfig -d <device> -y validate_system_conf <conf>[<asic>]
+mlxconfig -d <device> show_system_conf
 ```
-`ValidateSystemConf` parses the per-param `OK:` / `MISMATCH:` rows plus the `SKIPPED (failed to query:)` list and the trailing `Result:` line, returning the overall match bit and the mismatched param names. The configuration manager uses the mismatched names to treat MISMATCH rows covered by `rawNvConfig` as intentional overrides rather than drift.
+`GetSystemConfParams` parses the textual output, selects `<conf>` and the detected ASIC, expands
+ranged parameter names, and merges the result into the ordinary native desired map. The older
+`SetSystemConf` and `ValidateSystemConf` methods remain on `NVConfigUtils` for library compatibility,
+but the configuration manager no longer uses them during reconciliation.
 
 ---
 

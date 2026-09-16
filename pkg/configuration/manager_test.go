@@ -131,19 +131,31 @@ func portSpec(pciAddr string) v1alpha1.NicDevicePortSpec {
 	return v1alpha1.NicDevicePortSpec{PCI: pciAddr}
 }
 
-// okSystemConf stubs a matching validate_system_conf result (no mismatched params). Spread into a
-// mock .Return(...) call: mockNV.On("ValidateSystemConf", ...).Return(okSystemConf()...).
-func okSystemConf() []interface{} {
-	return []interface{}{true, []string(nil), nil}
+type systemConfParamsProviderMock struct {
+	mock.Mock
 }
 
-// mismatchSystemConf stubs a non-matching validate_system_conf result with the given MISMATCH params.
-// Spread into a mock .Return(...) call: .Return(mismatchSystemConf("NUM_OF_PF")...).
-func mismatchSystemConf(mismatchedParams ...string) []interface{} {
-	return []interface{}{false, mismatchedParams, nil}
+var _ nvconfig.SystemConfParamsProvider = (*systemConfParamsProviderMock)(nil)
+
+func (m *systemConfParamsProviderMock) GetSystemConfParams(
+	ctx context.Context, port v1alpha1.NicDevicePortSpec, conf string, asic int) (map[string]string, error) {
+	args := m.Called(ctx, port, conf, asic)
+	params, _ := args.Get(0).(map[string]string)
+	return params, args.Error(1)
 }
 
 var _ = Describe("ConfigurationManager", func() {
+	DescribeTable("compares normalized mlxconfig values",
+		func(actual, desired string, expected bool) {
+			Expect(mlxConfigValuesEqual(actual, desired)).To(Equal(expected))
+		},
+		Entry("case-insensitive symbolic values", "ETH", "eth", true),
+		Entry("prefixed and bare hexadecimal values", "0xFF", "FF", true),
+		Entry("hexadecimal and decimal values", "0x02", "2", true),
+		Entry("decimal values with leading zeroes", "004", "4", true),
+		Entry("different values", "1", "2", false),
+	)
+
 	Describe("buildNVConfigApplyDiff", func() {
 		It("separates changed, unchanged, and unsupported parameters", func() {
 			diff := buildNVConfigApplyDiff(types.NvConfigQuery{
@@ -1838,11 +1850,12 @@ var _ = Describe("ConfigurationManager", func() {
 		})
 	})
 
-	Describe("Network Bay system_conf", func() {
+	Describe("Network Bay system profile", func() {
 		var (
 			mockHostUtils        mocks.ConfigurationUtils
 			mockConfigValidation mocks.ConfigValidation
 			mockNV               *nvconfigmocks.NVConfigUtils
+			mockSystemConf       *systemConfParamsProviderMock
 			manager              configurationManager
 			ctx                  context.Context
 			device               *v1alpha1.NicDevice
@@ -1853,13 +1866,14 @@ var _ = Describe("ConfigurationManager", func() {
 			mockHostUtils = mocks.ConfigurationUtils{}
 			mockConfigValidation = mocks.ConfigValidation{}
 			mockNV = nvconfigmocks.NewNVConfigUtils(GinkgoT())
+			mockSystemConf = &systemConfParamsProviderMock{}
 			manager = configurationManager{
 				configurationUtils: &mockHostUtils,
 				configValidation:   &mockConfigValidation,
 				nvConfigUtils:      mockNV,
+				systemConfParams:   mockSystemConf,
 			}
 			ctx = context.TODO()
-
 			device = &v1alpha1.NicDevice{
 				Spec: v1alpha1.NicDeviceSpec{
 					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
@@ -1873,289 +1887,122 @@ var _ = Describe("ConfigurationManager", func() {
 					NetworkBay: &v1alpha1.NicDeviceNetworkBayStatus{Asic: 0},
 				},
 			}
-
 			nvConfig = types.NvConfigQuery{
-				CurrentConfig:  map[string][]string{"param1": {"value1"}},
-				NextBootConfig: map[string][]string{"param1": {"value1"}},
-				DefaultConfig:  map[string][]string{"param1": {"default1"}},
+				CurrentConfig:  map[string][]string{"BOARD_CONFIGURATION_MODE": {"1"}},
+				NextBootConfig: map[string][]string{"BOARD_CONFIGURATION_MODE": {"1"}},
+				DefaultConfig:  map[string][]string{},
 			}
 		})
 
-		Describe("ValidateDeviceNvSpec", func() {
-			It("requires update+reboot when system_conf has an unexplained mismatch", func() {
-				// system_conf mismatched params are gathered first, then checked against the desired
-				// (template + rawNvConfig) config — empty here, so BOARD_CONFIGURATION_MODE is uncovered drift.
-				mockNV.On("ValidateSystemConf", ctx, portSpec(pciAddress), "conf3", 0).
-					Return(mismatchSystemConf("BOARD_CONFIGURATION_MODE")...)
-				mockNV.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(nvConfig, nil)
-				mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
-					Return(map[string]string{}, nil)
+		It("validates profile parameters as regular NVConfig values", func() {
+			mockNV.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(nvConfig, nil)
+			mockSystemConf.On("GetSystemConfParams", ctx, portSpec(pciAddress), "conf3", 0).
+				Return(map[string]string{"BOARD_CONFIGURATION_MODE": "0"}, nil)
+			mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
+				Return(map[string]string{}, nil)
 
-				configUpdate, reboot, _, err := manager.ValidateDeviceNvSpec(ctx, device)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(configUpdate).To(BeTrue())
-				Expect(reboot).To(BeTrue())
-			})
+			updateNeeded, rebootNeeded, unsupported, err := manager.ValidateDeviceNvSpec(ctx, device)
 
-			It("fails closed when validate_system_conf reports a mismatch but no MISMATCH rows are parsed", func() {
-				mockNV.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(nvConfig, nil)
-				// Result says NOT match, but no recognized MISMATCH rows — must not look like a match.
-				mockNV.On("ValidateSystemConf", ctx, portSpec(pciAddress), "conf3", 0).
-					Return(false, []string(nil), nil)
-
-				_, _, _, err := manager.ValidateDeviceNvSpec(ctx, device)
-				Expect(err).To(HaveOccurred())
-			})
-
-			It("requires nothing when both regular config and system_conf match", func() {
-				mockNV.On("ValidateSystemConf", ctx, portSpec(pciAddress), "conf3", 0).
-					Return(okSystemConf()...)
-				mockNV.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(nvConfig, nil)
-				mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
-					Return(map[string]string{}, nil)
-
-				configUpdate, reboot, _, err := manager.ValidateDeviceNvSpec(ctx, device)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(configUpdate).To(BeFalse())
-				Expect(reboot).To(BeFalse())
-			})
-
-			It("ignores a system_conf mismatch that rawNvConfig deliberately overrides", func() {
-				// NUM_OF_PF is part of conf3 but the template overrides it, so the reported MISMATCH
-				// is intentional. system_conf must not flag drift; the regular validation handles the value.
-				device.Spec.Configuration.Template.RawNvConfig = []v1alpha1.NvConfigParam{{Name: "NUM_OF_PF", Value: "8"}}
-				portConfig := types.NvConfigQuery{
-					CurrentConfig:  map[string][]string{"NUM_OF_PF": {"8"}},
-					NextBootConfig: map[string][]string{"NUM_OF_PF": {"8"}},
-					DefaultConfig:  map[string][]string{"NUM_OF_PF": {"1"}},
-				}
-				mockNV.On("ValidateSystemConf", ctx, portSpec(pciAddress), "conf3", 0).
-					Return(mismatchSystemConf("NUM_OF_PF")...)
-				mockNV.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(portConfig, nil)
-				mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, portConfig).
-					Return(map[string]string{"NUM_OF_PF": "8"}, nil)
-
-				configUpdate, reboot, _, err := manager.ValidateDeviceNvSpec(ctx, device)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(configUpdate).To(BeFalse())
-				Expect(reboot).To(BeFalse())
-			})
-
-			It("does not manage system_conf when ResetToDefault is set (avoids a reboot loop)", func() {
-				// ResetToDefault wipes nv config, so set_system_conf must not be validated/applied for the
-				// same device — otherwise it would re-stage and get wiped every reconcile. validate_system_conf
-				// must not be called; the reset validation path runs instead.
-				device.Spec.Configuration.ResetToDefault = true
-				mockNV.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(nvConfig, nil)
-				mockConfigValidation.On("ValidateResetToDefault", nvConfig).Return(false, false, nil)
-				mockNV.AssertNotCalled(GinkgoT(), "ValidateSystemConf", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
-
-				configUpdate, reboot, _, err := manager.ValidateDeviceNvSpec(ctx, device)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(configUpdate).To(BeFalse())
-				Expect(reboot).To(BeFalse())
-			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updateNeeded).To(BeTrue())
+			Expect(rebootNeeded).To(BeTrue())
+			Expect(unsupported).To(BeEmpty())
 		})
 
-		Describe("ApplyNVConfiguration", func() {
-			// Apply checks system_conf coverage: it stages set_system_conf only when the combined override
-			// params do not cover every mismatched profile param.
-			It("stages set_system_conf when the combined params do not cover a mismatch", func() {
-				mockNV.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(nvConfig, nil)
-				mockNV.On("ValidateSystemConf", ctx, portSpec(pciAddress), "conf3", 0).
-					Return(mismatchSystemConf("BOARD_CONFIGURATION_MODE")...)
-				mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
-					Return(map[string]string{}, nil)
-				mockNV.On("SetSystemConf", ctx, portSpec(pciAddress), "conf3", 0, false).Return(nil)
+		It("normalizes hexadecimal profile values during validation", func() {
+			nvConfig.CurrentConfig = map[string][]string{"MODULE_SPLIT_M0[4]": {"0xFF"}}
+			nvConfig.NextBootConfig = map[string][]string{"MODULE_SPLIT_M0[4]": {"0xFF"}}
+			mockNV.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(nvConfig, nil)
+			mockSystemConf.On("GetSystemConfParams", ctx, portSpec(pciAddress), "conf3", 0).
+				Return(map[string]string{"MODULE_SPLIT_M0[4]": "FF"}, nil)
+			mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
+				Return(map[string]string{}, nil)
 
-				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(result.Status).To(Equal(types.ApplyStatusSuccess))
-				Expect(result.RebootRequired).To(BeTrue())
-			})
+			updateNeeded, rebootNeeded, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 
-			It("passes --force to set_system_conf when Force is set", func() {
-				mockNV.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(nvConfig, nil)
-				mockNV.On("ValidateSystemConf", ctx, portSpec(pciAddress), "conf3", 0).
-					Return(mismatchSystemConf("BOARD_CONFIGURATION_MODE")...)
-				mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
-					Return(map[string]string{}, nil)
-				mockNV.On("SetSystemConf", ctx, portSpec(pciAddress), "conf3", 0, true).Return(nil)
-
-				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{Force: true})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(result.RebootRequired).To(BeTrue())
-			})
-
-			It("stages set_system_conf before the regular nv param batch", func() {
-				portConfig := types.NvConfigQuery{
-					CurrentConfig:  map[string][]string{"param1": {"value1"}},
-					NextBootConfig: map[string][]string{"param1": {"value1"}},
-					DefaultConfig:  map[string][]string{"param1": {"default1"}},
-				}
-				mockNV.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(portConfig, nil)
-				mockNV.On("ValidateSystemConf", ctx, portSpec(pciAddress), "conf3", 0).
-					Return(mismatchSystemConf("BOARD_CONFIGURATION_MODE")...)
-				mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, portConfig).
-					Return(map[string]string{"param1": "value2"}, nil)
-				setSystemConfCall := mockNV.On("SetSystemConf", ctx, portSpec(pciAddress), "conf3", 0, false).Return(nil)
-				// set_system_conf is the baseline and must be staged before the override batch.
-				mockNV.On("SetNvConfigParametersBatchWithContext", mock.Anything, portSpec(pciAddress), map[string]string{"param1": "value2"}, false, false).
-					Return(types.ApplyStatusSuccess, nil).NotBefore(setSystemConfCall)
-
-				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(result.RebootRequired).To(BeTrue())
-			})
-
-			It("resets and never touches system_conf when ResetToDefault is set", func() {
-				// Guards against the reset/set_system_conf reboot loop: reset runs, set_system_conf does not.
-				device.Spec.Configuration.ResetToDefault = true
-				mockNV.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(nvConfig, nil)
-				mockNV.On("ResetNvConfig", portSpec(pciAddress)).Return(nil)
-				mockNV.AssertNotCalled(GinkgoT(), "SetSystemConf", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
-
-				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(result.RebootRequired).To(BeTrue())
-			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updateNeeded).To(BeFalse())
+			Expect(rebootNeeded).To(BeFalse())
 		})
 
-		// Full-flow suite: real configValidation with mocked ConfigurationUtils and NVConfigUtils
-		// so the whole chain — system_conf validate, rawNvConfig > template merge inside
-		// ConstructNvParamMapFromTemplate, coverage check, and apply — runs end to end. Each case drives BOTH
-		// ValidateDeviceNvSpec and ApplyNVConfiguration and asserts the concrete SetSystemConf /
-		// SetNvConfigParametersBatch calls. ConstructNvParamMapFromTemplate always emits SRIOV_EN=0 /
-		// NUM_OF_VFS=0 for an empty template, so every fixture stages those to keep them out of the assertions.
-		Describe("Network Bay system_conf full flow (validate + apply)", func() {
-			var (
-				fullFlowHostUtils mocks.ConfigurationUtils
-				fullFlowNV        *nvconfigmocks.NVConfigUtils
-				fullFlowManager   configurationManager
-				fullFlowCtx       context.Context
-				fullFlowDevice    *v1alpha1.NicDevice
-			)
+		It("lets explicit native parameters override profile values", func() {
+			nvConfig.CurrentConfig = map[string][]string{"NUM_OF_PF": {"8"}}
+			nvConfig.NextBootConfig = map[string][]string{"NUM_OF_PF": {"8"}}
+			mockNV.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(nvConfig, nil)
+			mockSystemConf.On("GetSystemConfParams", ctx, portSpec(pciAddress), "conf3", 0).
+				Return(map[string]string{"NUM_OF_PF": "4"}, nil)
+			mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
+				Return(map[string]string{"NUM_OF_PF": "8"}, nil)
 
-			BeforeEach(func() {
-				fullFlowHostUtils = mocks.ConfigurationUtils{}
-				fullFlowNV = nvconfigmocks.NewNVConfigUtils(GinkgoT())
-				fullFlowManager = configurationManager{
-					configurationUtils: &fullFlowHostUtils,
-					configValidation:   newConfigValidation(&fullFlowHostUtils, nil),
-					nvConfigUtils:      fullFlowNV,
-				}
-				fullFlowCtx = context.TODO()
-				fullFlowDevice = &v1alpha1.NicDevice{
-					Spec: v1alpha1.NicDeviceSpec{
-						Configuration: &v1alpha1.NicDeviceConfigurationSpec{
-							Template: &v1alpha1.ConfigurationTemplateSpec{
-								NetworkBay: &v1alpha1.NetworkBaySpec{Conf: "conf3"},
-							},
-						},
-					},
-					Status: v1alpha1.NicDeviceStatus{
-						Ports:      []v1alpha1.NicDevicePortSpec{{PCI: pciAddress}},
-						NetworkBay: &v1alpha1.NicDeviceNetworkBayStatus{Asic: 0},
-					},
-				}
-			})
+			updateNeeded, rebootNeeded, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 
-			// sriovStaged returns the SRIOV defaults ConstructNvParamMapFromTemplate emits for an empty
-			// template, staged in both next boot and current so they never drive update/reboot/apply.
-			sriovStaged := func(extra map[string][]string) map[string][]string {
-				m := map[string][]string{consts.SriovEnabledParam: {"0"}, consts.SriovNumOfVfsParam: {"0"}}
-				for k, v := range extra {
-					m[k] = v
-				}
-				return m
-			}
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updateNeeded).To(BeFalse())
+			Expect(rebootNeeded).To(BeFalse())
+		})
 
-			// 1) system_conf valid, no overrides → nothing to do, no set_system_conf.
-			It("1: valid system_conf with no overrides converges without applying anything", func() {
-				staged := sriovStaged(nil)
-				fullFlowNV.On("QueryNvConfig", fullFlowCtx, portSpec(pciAddress), []string(nil)).Return(
-					types.NvConfigQuery{NextBootConfig: staged, CurrentConfig: staged}, nil)
-				fullFlowNV.On("ValidateSystemConf", fullFlowCtx, portSpec(pciAddress), "conf3", 0).Return(okSystemConf()...)
+		It("applies profile and explicit parameters in one regular DMS batch", func() {
+			nvConfig.CurrentConfig["PARAM"] = []string{"old"}
+			nvConfig.NextBootConfig["PARAM"] = []string{"old"}
+			mockNV.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(nvConfig, nil)
+			mockSystemConf.On("GetSystemConfParams", ctx, portSpec(pciAddress), "conf3", 0).
+				Return(map[string]string{"BOARD_CONFIGURATION_MODE": "0"}, nil)
+			mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
+				Return(map[string]string{"PARAM": "new"}, nil)
+			mockNV.On("SetNvConfigParametersBatchWithContext", ctx, portSpec(pciAddress),
+				map[string]string{"BOARD_CONFIGURATION_MODE": "0", "PARAM": "new"}, false, false).
+				Return(types.ApplyStatusSuccess, nil)
 
-				updateNeeded, rebootNeeded, _, err := fullFlowManager.ValidateDeviceNvSpec(fullFlowCtx, fullFlowDevice)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(updateNeeded).To(BeFalse())
-				Expect(rebootNeeded).To(BeFalse())
+			result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
 
-				result, err := fullFlowManager.ApplyNVConfiguration(fullFlowCtx, fullFlowDevice, &types.ConfigurationOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(result.Status).To(Equal(types.ApplyStatusNothingToDo))
-				Expect(result.RebootRequired).To(BeFalse())
-				fullFlowNV.AssertNotCalled(GinkgoT(), "SetSystemConf", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
-				fullFlowNV.AssertNotCalled(GinkgoT(), "SetNvConfigParametersBatchWithContext", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
-			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Status).To(Equal(types.ApplyStatusSuccess))
+			Expect(result.RebootRequired).To(BeTrue())
+			mockNV.AssertNotCalled(GinkgoT(), "SetSystemConf", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+		})
 
-			// 2) system_conf mismatch, no overrides → set_system_conf re-applied.
-			It("2: system_conf mismatch with no overrides re-applies set_system_conf", func() {
-				staged := sriovStaged(nil)
-				fullFlowNV.On("QueryNvConfig", fullFlowCtx, portSpec(pciAddress), []string(nil)).Return(
-					types.NvConfigQuery{NextBootConfig: staged, CurrentConfig: staged}, nil)
-				fullFlowNV.On("ValidateSystemConf", fullFlowCtx, portSpec(pciAddress), "conf3", 0).
-					Return(mismatchSystemConf("BOARD_CONFIGURATION_MODE")...)
-				fullFlowNV.On("SetSystemConf", fullFlowCtx, portSpec(pciAddress), "conf3", 0, false).Return(nil)
+		It("applies profile parameters to every discovered PCI target", func() {
+			device.Status.Ports = []v1alpha1.NicDevicePortSpec{{PCI: pciAddress}, {PCI: pciAddress2}}
+			mockNV.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(nvConfig, nil)
+			mockNV.On("QueryNvConfig", ctx, portSpec(pciAddress2), []string(nil)).Return(nvConfig, nil)
+			mockSystemConf.On("GetSystemConfParams", ctx, portSpec(pciAddress), "conf3", 0).
+				Return(map[string]string{"BOARD_CONFIGURATION_MODE": "0"}, nil)
+			mockConfigValidation.On("ConstructNvParamMapFromTemplate", device, nvConfig).
+				Return(map[string]string{}, nil)
+			mockNV.On("SetNvConfigParametersBatchWithContext", ctx, portSpec(pciAddress),
+				map[string]string{"BOARD_CONFIGURATION_MODE": "0"}, false, false).
+				Return(types.ApplyStatusSuccess, nil)
+			mockNV.On("SetNvConfigParametersBatchWithContext", ctx, portSpec(pciAddress2),
+				map[string]string{"BOARD_CONFIGURATION_MODE": "0"}, false, false).
+				Return(types.ApplyStatusSuccess, nil)
 
-				updateNeeded, rebootNeeded, _, err := fullFlowManager.ValidateDeviceNvSpec(fullFlowCtx, fullFlowDevice)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(updateNeeded).To(BeTrue())
-				Expect(rebootNeeded).To(BeTrue())
+			result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
 
-				result, err := fullFlowManager.ApplyNVConfiguration(fullFlowCtx, fullFlowDevice, &types.ConfigurationOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(result.Status).To(Equal(types.ApplyStatusSuccess))
-				Expect(result.RebootRequired).To(BeTrue())
-				fullFlowNV.AssertNotCalled(GinkgoT(), "SetNvConfigParametersBatchWithContext", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
-			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Status).To(Equal(types.ApplyStatusSuccess))
+			Expect(result.RebootRequired).To(BeTrue())
+		})
 
-			// 3) system_conf mismatch, rawNvConfig covers it and the value is already staged → converged.
-			It("3: system_conf mismatch fully covered by an already-applied rawNvConfig override converges", func() {
-				fullFlowDevice.Spec.Configuration.Template.RawNvConfig = []v1alpha1.NvConfigParam{{Name: "NUM_OF_PF", Value: "8"}}
-				staged := sriovStaged(map[string][]string{"NUM_OF_PF": {"8"}})
-				fullFlowNV.On("QueryNvConfig", fullFlowCtx, portSpec(pciAddress), []string(nil)).Return(
-					types.NvConfigQuery{NextBootConfig: staged, CurrentConfig: staged}, nil)
-				fullFlowNV.On("ValidateSystemConf", fullFlowCtx, portSpec(pciAddress), "conf3", 0).
-					Return(mismatchSystemConf("NUM_OF_PF")...)
+		It("fails when the configured utility cannot resolve system profiles", func() {
+			manager.systemConfParams = nil
+			mockNV.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(nvConfig, nil)
 
-				updateNeeded, rebootNeeded, _, err := fullFlowManager.ValidateDeviceNvSpec(fullFlowCtx, fullFlowDevice)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(updateNeeded).To(BeFalse())
-				Expect(rebootNeeded).To(BeFalse())
+			_, _, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 
-				result, err := fullFlowManager.ApplyNVConfiguration(fullFlowCtx, fullFlowDevice, &types.ConfigurationOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(result.Status).To(Equal(types.ApplyStatusNothingToDo))
-				fullFlowNV.AssertNotCalled(GinkgoT(), "SetSystemConf", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
-				fullFlowNV.AssertNotCalled(GinkgoT(), "SetNvConfigParametersBatchWithContext", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
-			})
+			Expect(err).To(MatchError(ContainSubstring("does not support system configuration profile resolution")))
+		})
 
-			// 4) system_conf mismatch covered by rawNvConfig by name, but the override value is not yet staged →
-			//    no set_system_conf, but the rawNvConfig param is applied.
-			It("4: rawNvConfig covers the mismatch by name but differs in value — applies the raw param, not set_system_conf", func() {
-				fullFlowDevice.Spec.Configuration.Template.RawNvConfig = []v1alpha1.NvConfigParam{{Name: "NUM_OF_PF", Value: "8"}}
-				staged := sriovStaged(map[string][]string{"NUM_OF_PF": {"1"}})
-				fullFlowNV.On("QueryNvConfig", fullFlowCtx, portSpec(pciAddress), []string(nil)).Return(
-					types.NvConfigQuery{NextBootConfig: staged, CurrentConfig: staged}, nil)
-				fullFlowNV.On("ValidateSystemConf", fullFlowCtx, portSpec(pciAddress), "conf3", 0).
-					Return(mismatchSystemConf("NUM_OF_PF")...)
-				fullFlowNV.On("SetNvConfigParametersBatchWithContext", mock.Anything, portSpec(pciAddress), map[string]string{"NUM_OF_PF": "8"}, false, false).
-					Return(types.ApplyStatusSuccess, nil)
+		It("skips profile resolution when resetting to defaults", func() {
+			device.Spec.Configuration.ResetToDefault = true
+			mockNV.On("QueryNvConfig", ctx, portSpec(pciAddress), []string(nil)).Return(nvConfig, nil)
+			mockConfigValidation.On("ValidateResetToDefault", nvConfig).Return(false, false, nil)
 
-				updateNeeded, rebootNeeded, _, err := fullFlowManager.ValidateDeviceNvSpec(fullFlowCtx, fullFlowDevice)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(updateNeeded).To(BeTrue())
-				Expect(rebootNeeded).To(BeTrue())
+			updateNeeded, rebootNeeded, _, err := manager.ValidateDeviceNvSpec(ctx, device)
 
-				result, err := fullFlowManager.ApplyNVConfiguration(fullFlowCtx, fullFlowDevice, &types.ConfigurationOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(result.Status).To(Equal(types.ApplyStatusSuccess))
-				Expect(result.RebootRequired).To(BeTrue())
-				fullFlowNV.AssertNotCalled(GinkgoT(), "SetSystemConf", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
-			})
-
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updateNeeded).To(BeFalse())
+			Expect(rebootNeeded).To(BeFalse())
+			mockSystemConf.AssertNotCalled(GinkgoT(), "GetSystemConfParams", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 		})
 	})
 })
