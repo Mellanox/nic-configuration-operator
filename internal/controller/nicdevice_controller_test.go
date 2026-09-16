@@ -1154,23 +1154,23 @@ var _ = Describe("NicDeviceReconciler", func() {
 			})
 		)
 
-		mockFirstDeviceFirmwareUpdate := func() {
-			firstDeviceFirmwareVersion := oldFwVersion
-			var firstDeviceFirmwareVersionMutex sync.RWMutex
+		mockDeviceFirmwareUpdate := func(deviceMatcher any) {
+			deviceFirmwareVersion := oldFwVersion
+			var deviceFirmwareVersionMutex sync.RWMutex
 
-			firmwareManager.On("GetFirmwareVersionsFromDevice", matchFirstDevice).Return(
+			firmwareManager.On("GetFirmwareVersionsFromDevice", deviceMatcher).Return(
 				func(*v1alpha1.NicDevice) (string, string, error) {
-					firstDeviceFirmwareVersionMutex.RLock()
-					defer firstDeviceFirmwareVersionMutex.RUnlock()
-					return firstDeviceFirmwareVersion, firstDeviceFirmwareVersion, nil
+					deviceFirmwareVersionMutex.RLock()
+					defer deviceFirmwareVersionMutex.RUnlock()
+					return deviceFirmwareVersion, deviceFirmwareVersion, nil
 				},
 			)
-			firmwareManager.On("InstallFirmware", mock.Anything, matchFirstDevice, mock.Anything).Return(false, nil).Once()
-			configurationManager.On("ResetNicFirmware", mock.Anything, matchFirstDevice).
+			firmwareManager.On("InstallFirmware", mock.Anything, deviceMatcher, mock.Anything).Return(false, nil).Once()
+			configurationManager.On("ResetNicFirmware", mock.Anything, deviceMatcher).
 				Run(func(mock.Arguments) {
-					firstDeviceFirmwareVersionMutex.Lock()
-					defer firstDeviceFirmwareVersionMutex.Unlock()
-					firstDeviceFirmwareVersion = newFwVersion
+					deviceFirmwareVersionMutex.Lock()
+					defer deviceFirmwareVersionMutex.Unlock()
+					deviceFirmwareVersion = newFwVersion
 				}).
 				Return(nil).
 				Once()
@@ -1234,7 +1234,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 
 		It("Should not stop firmware update on one device if firmware version doesn't match on the second device and policy is to Validate", func() {
 			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return(newFwVersion, nil)
-			mockFirstDeviceFirmwareUpdate()
+			mockDeviceFirmwareUpdate(matchFirstDevice)
 			firmwareManager.On("GetFirmwareVersionsFromDevice", matchSecondDevice).Return(oldFwVersion, oldFwVersion, nil)
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
@@ -1302,7 +1302,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 		It("Should stop configuration update on one device if firmware update failed for another one", func() {
 			err := errors.New("fw update failed")
 			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return(newFwVersion, nil)
-			mockFirstDeviceFirmwareUpdate()
+			mockDeviceFirmwareUpdate(matchFirstDevice)
 			firmwareManager.On("GetFirmwareVersionsFromDevice", matchSecondDevice).Return(oldFwVersion, oldFwVersion, nil)
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
@@ -1368,13 +1368,11 @@ var _ = Describe("NicDeviceReconciler", func() {
 
 		It("Should not stop configuration update if all devices have up-to-date firmware", func() {
 			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return(newFwVersion, nil)
-			firmwareManager.On("GetFirmwareVersionsFromDevice", mock.Anything).Return(oldFwVersion, oldFwVersion, nil).Times(2)
-			firmwareManager.On("GetFirmwareVersionsFromDevice", mock.Anything).Return(newFwVersion, newFwVersion, nil)
+			mockDeviceFirmwareUpdate(matchFirstDevice)
+			mockDeviceFirmwareUpdate(matchSecondDevice)
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
 			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
-			firmwareManager.On("InstallFirmware", mock.Anything, mock.Anything, mock.Anything).Return(false, nil)
-			configurationManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(nil)
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil, nil)
 			configurationManager.On("ApplyRuntimeConfiguration", mock.Anything, mock.Anything).Return(&types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusSuccess}, nil)
 
@@ -1405,16 +1403,20 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Message: "",
 			}))
 
-			Consistently(func() []metav1.Condition {
+			Eventually(func() []metav1.Condition {
 				device := &v1alpha1.NicDevice{}
 				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: secondDeviceName, Namespace: namespaceName}, device)).To(Succeed())
 				return device.Status.Conditions
-			}, time.Second).Should(testutils.MatchCondition(metav1.Condition{
+			}, time.Second*10).Should(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.ConfigUpdateInProgressCondition,
 				Status:  metav1.ConditionFalse,
 				Reason:  consts.UpdateSuccessfulReason,
 				Message: "",
 			}))
+
+			firmwareManager.AssertExpectations(GinkgoT())
+			configurationManager.AssertExpectations(GinkgoT())
+			maintenanceManager.AssertExpectations(GinkgoT())
 		})
 	})
 
