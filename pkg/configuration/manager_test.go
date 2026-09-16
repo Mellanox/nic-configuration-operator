@@ -1113,20 +1113,20 @@ var _ = Describe("ConfigurationManager", func() {
 				device.Spec.Configuration.Template.SpectrumXOptimized = &v1alpha1.SpectrumXOptimizedSpec{Enabled: true}
 			})
 
-			It("requires a matching configure plan before checking or applying runtime configuration", func() {
-				planErr := errors.New("configure plan is stale")
-				mockSpcXMgr.On("GetPreparedPlan", device, spectrumx.PlanStageConfigure).Return(nil, planErr)
+			It("requires a matching plan before checking or applying runtime configuration", func() {
+				planErr := errors.New("plan is stale")
+				mockSpcXMgr.On("GetPreparedPlan", device).Return(nil, planErr)
 
 				result, err := manager.ApplyRuntimeConfiguration(ctx, device)
 
 				Expect(result.Status).To(Equal(types.ApplyStatusFailed))
-				Expect(err).To(MatchError(ContainSubstring("matching doSPCX configure plan")))
+				Expect(err).To(MatchError(ContainSubstring("matching doSPCX plan")))
 				Expect(err).To(MatchError(ContainSubstring(planErr.Error())))
 				mockConfigValidation.AssertNotCalled(GinkgoT(), "RuntimeConfigApplied", mock.Anything)
 			})
 
 			It("uses the prepared doSPCX plan when it matches", func() {
-				mockSpcXMgr.On("GetPreparedPlan", device, spectrumx.PlanStageConfigure).
+				mockSpcXMgr.On("GetPreparedPlan", device).
 					Return(&spectrumx.Plan{}, nil)
 				mockConfigValidation.On("RuntimeConfigApplied", device).Return(true, nil)
 
@@ -1451,8 +1451,8 @@ var _ = Describe("ConfigurationManager", func() {
 				},
 			}
 			preparedPlan = &spectrumx.Plan{}
-			mockSpcXMgr.On("GetPreparedPlan", device, spectrumx.PlanStagePrepare).
-				Return(func(*v1alpha1.NicDevice, spectrumx.PlanStage) *spectrumx.Plan {
+			mockSpcXMgr.On("GetPreparedPlan", device).
+				Return(func(*v1alpha1.NicDevice) *spectrumx.Plan {
 					return preparedPlan
 				}, nil).Maybe()
 		})
@@ -1555,16 +1555,16 @@ var _ = Describe("ConfigurationManager", func() {
 		})
 
 		Describe("ApplyNVConfiguration", func() {
-			It("requires a matching prepare plan before querying or applying NV configuration", func() {
+			It("requires a matching plan before querying or applying NV configuration", func() {
 				missingPlanManager := spcxmocks.NewSpectrumXManager(GinkgoT())
-				missingPlanManager.On("GetPreparedPlan", device, spectrumx.PlanStagePrepare).
-					Return(nil, errors.New("prepare plan is missing"))
+				missingPlanManager.On("GetPreparedPlan", device).
+					Return(nil, errors.New("plan is missing"))
 				manager.spectrumXConfigManager = missingPlanManager
 
 				result, err := manager.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
 
 				Expect(result.Status).To(Equal(types.ApplyStatusFailed))
-				Expect(err).To(MatchError(ContainSubstring("matching doSPCX prepare plan")))
+				Expect(err).To(MatchError(ContainSubstring("matching doSPCX plan")))
 				mockNVConfigUtils.AssertNotCalled(GinkgoT(), "QueryNvConfig", mock.Anything, mock.Anything)
 			})
 

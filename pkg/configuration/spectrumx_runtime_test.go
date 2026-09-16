@@ -458,7 +458,7 @@ var _ = Describe("doSPCX runtime configuration", func() {
 			},
 		}}}
 		managerMock := spectrumxmocks.NewSpectrumXManager(GinkgoT())
-		managerMock.On("GetPreparedPlan", device, spectrumx.PlanStageConfigure).Return(plan, nil).Once()
+		managerMock.On("GetPreparedPlan", device).Return(plan, nil).Once()
 		validationMock := &configurationmocks.ConfigValidation{}
 		validationMock.On("RuntimeConfigApplied", device).Return(true, nil).Once()
 
@@ -495,7 +495,7 @@ var _ = Describe("doSPCX runtime configuration", func() {
 			}},
 		}}}
 		managerMock := spectrumxmocks.NewSpectrumXManager(GinkgoT())
-		managerMock.On("GetPreparedPlan", device, spectrumx.PlanStageConfigure).Return(plan, nil).Once()
+		managerMock.On("GetPreparedPlan", device).Return(plan, nil).Once()
 		validationMock := &configurationmocks.ConfigValidation{}
 		validationMock.On("RuntimeConfigApplied", device).Return(false, nil).Once()
 		validationMock.On("CalculateDesiredRuntimeConfig", device).Return(types.DesiredRuntimeConfig{}).Once()

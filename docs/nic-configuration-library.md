@@ -439,16 +439,17 @@ plan lifecycle abstraction included by `SpectrumXManager`; it owns
 target-map construction, generation, cache validation, persistence, and
 retrieval.
 
-`PreparePlan` writes a schema-v1 target map and the returned prepare or
-configure plan below `${BLUEPRINTS_STATE_DIR:-/var/lib/blueprints}`. Neither
-stage executes any generated operation. Each pre-breakout target contains a
+`PreparePlan` writes a schema-v1 target map and both semantic planner documents
+below `${BLUEPRINTS_STATE_DIR:-/var/lib/blueprints}`. It combines their
+persistent and runtime operations into one cached `Plan`; preparation does not
+execute any generated operation. Each pre-breakout target contains a
 deterministic ID, function-zero BDF, hexadecimal device ID, `ew` role, and rail.
 Target-map rails are assigned by sorting the participating function-zero PCI
 BDFs. Both stages receive the same pre-breakout map; the configure stage resolves
 post-breakout devices from the active hardware inventory. NCO maps `none` to the
 `single-plane` profile, `swplb` to `SPX_NetPlugin`, and `hwplb` to
-`SPX_Multiplane`. The NicDevice reconciler prepares one group plan before each
-existing concurrent per-device NV or runtime apply.
+`SPX_Multiplane`. The NicDevice reconciler prepares the complete group plan once
+before the existing concurrent per-device NV and runtime apply sequence.
 `interfaceNameTemplate` is not an input to doSPCX planning.
 
 Each plan directory also contains `metadata.json`, a flat document with only the
@@ -477,13 +478,6 @@ Sources: `pkg/spectrumx/spectrumx.go`, `pkg/spectrumx/plan.go`,
 #### PlanManager Interface
 
 ```go
-type PlanStage string
-
-const (
-    PlanStagePrepare   PlanStage = "prepare"
-    PlanStageConfigure PlanStage = "configure"
-)
-
 type Plan struct {
     Breakout      []dmscli.XPathOperation
     PostBreakout  []dmscli.XPathOperation
@@ -497,8 +491,8 @@ type OperationGroup struct {
 }
 
 type PlanManager interface {
-    PreparePlan(ctx context.Context, devices []*v1alpha1.NicDevice, stage PlanStage) error
-    GetPreparedPlan(device *v1alpha1.NicDevice, stage PlanStage) (*Plan, error)
+    PreparePlan(ctx context.Context, devices []*v1alpha1.NicDevice) error
+    GetPreparedPlan(device *v1alpha1.NicDevice) (*Plan, error)
 }
 ```
 
@@ -523,14 +517,16 @@ Manager-installed data is deactivated while multiple bundles conflict and is
 removed when the active ConfigMap is deleted. Data already present in the daemon
 image is not removed when no ConfigMap bundle was installed.
 
-`PreparePlan` generates or reuses the stage-specific plan for the supplied
-Spectrum-X device group. It is a no-op when none of the supplied devices enable
-Spectrum-X. It parses the host-k8s `plan.semantic.groups` surface, resolves every
-`operation_ref` through `plan.operations`, and caches the resulting `Plan` in
-memory. A persisted plan is validated and compiled once after process startup;
-later `PreparePlan` calls reuse memory while the inputs match. `GetPreparedPlan`
-does not access the filesystem or invoke `dms-cli`; it rejects the request unless
-the cached inputs and target-map membership match the supplied device.
+`PreparePlan` generates or reuses both semantic stages for the supplied
+Spectrum-X device group and publishes one complete cached plan only after both
+are valid. It is a no-op when none of the supplied devices enable Spectrum-X. It
+parses the host-k8s `plan.semantic.groups` surface, resolves every `operation_ref`
+through `plan.operations`, and combines the persistent and runtime operations in
+memory. Persisted stage documents are validated and compiled once after process
+startup; later `PreparePlan` calls reuse memory while the inputs match.
+`GetPreparedPlan` does not access the filesystem or invoke `dms-cli`; it rejects
+the request unless both cached stages and target-map membership match the
+supplied device.
 
 Compilation produces homogeneous configuration intent rather than resolving
 operations onto individual devices. Prepare-stage `breakout` and `post-breakout`

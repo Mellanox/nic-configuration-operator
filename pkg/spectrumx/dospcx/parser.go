@@ -109,7 +109,7 @@ func decodePlanDocument(planJSON []byte) (*planDocument, error) {
 	return &document, nil
 }
 
-func buildPlan(document *planDocument, expectedStage PlanStage) (*Plan, error) {
+func buildPlan(document *planDocument, expectedStage planStage) (*Plan, error) {
 	if err := validateSemanticPlan(document, expectedStage); err != nil {
 		return nil, err
 	}
@@ -154,14 +154,14 @@ func buildPlan(document *planDocument, expectedStage PlanStage) (*Plan, error) {
 			return nil, err
 		}
 		switch expectedStage {
-		case PlanStagePrepare:
+		case planStagePrepare:
 			switch group.Name {
 			case semanticGroupBreakout:
 				result.Breakout = stripXPathOperationMetadata(operations)
 			case semanticGroupPostBreakout:
 				result.PostBreakout = stripXPathOperationMetadata(operations)
 			}
-		case PlanStageConfigure:
+		case planStageConfigure:
 			result.RuntimeConfig = append(result.RuntimeConfig, OperationGroup{
 				Name:       group.Name,
 				Scope:      strings.TrimSpace(group.Scope),
@@ -172,7 +172,7 @@ func buildPlan(document *planDocument, expectedStage PlanStage) (*Plan, error) {
 	return result, nil
 }
 
-func validateSemanticPlan(document *planDocument, expectedStage PlanStage) error {
+func validateSemanticPlan(document *planDocument, expectedStage planStage) error {
 	if document == nil {
 		return fmt.Errorf("doSPCX plan must not be nil")
 	}
@@ -210,7 +210,7 @@ func validateSemanticPlan(document *planDocument, expectedStage PlanStage) error
 func validateSemanticGroup(
 	group semanticGroupRecord,
 	index int,
-	expectedStage PlanStage,
+	expectedStage planStage,
 	seen map[string]struct{},
 ) error {
 	if strings.TrimSpace(group.Name) == "" {
@@ -228,19 +228,19 @@ func validateSemanticGroup(
 	return nil
 }
 
-func skippedGroupReason(stage PlanStage, name string) string {
-	if stage == PlanStageConfigure && name == semanticGroupESwitch {
+func skippedGroupReason(stage planStage, name string) string {
+	if stage == planStageConfigure && name == semanticGroupESwitch {
 		return "eSwitch mode changes are boot operations"
 	}
 	return ""
 }
 
-func validateSupportedGroup(stage PlanStage, name string) error {
+func validateSupportedGroup(stage planStage, name string) error {
 	supported := false
 	switch stage {
-	case PlanStagePrepare:
+	case planStagePrepare:
 		supported = name == semanticGroupBreakout || name == semanticGroupPostBreakout
-	case PlanStageConfigure:
+	case planStageConfigure:
 		supported = name == semanticGroupLinkRuntime || name == semanticGroupCC || name == semanticGroupLinkEvent
 	}
 	if !supported {
@@ -359,10 +359,15 @@ func clonePlan(source *Plan) *Plan {
 	result := &Plan{
 		Breakout:      cloneXPathOperations(source.Breakout),
 		PostBreakout:  cloneXPathOperations(source.PostBreakout),
-		RuntimeConfig: make([]OperationGroup, len(source.RuntimeConfig)),
+		RuntimeConfig: cloneOperationGroups(source.RuntimeConfig),
 	}
-	for index, group := range source.RuntimeConfig {
-		result.RuntimeConfig[index] = OperationGroup{
+	return result
+}
+
+func cloneOperationGroups(source []OperationGroup) []OperationGroup {
+	result := make([]OperationGroup, len(source))
+	for index, group := range source {
+		result[index] = OperationGroup{
 			Name:       group.Name,
 			Scope:      group.Scope,
 			Operations: cloneXPathOperations(group.Operations),
