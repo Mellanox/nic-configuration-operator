@@ -27,8 +27,9 @@ type NicFirmwareSourceSpec struct {
 	// BFBUrlSource represents a url source for BlueField Bundle
 	// +optional
 	BFBUrlSource string `json:"bfbUrlSource,omitempty"`
-	// DocaSpcXCCUrlSource represents a url source for DOCA SPC-X CC .deb package for ubuntu 22.04
-	// Will be removed in the future, once Doca SPC-X CC algorithm will be publicly available
+	// DocaSpcXCCUrlSource represents a URL source for a DOCA SPC-X CC .deb package.
+	// Deprecated: the doSPCX runtime path launches the doca_spcx_cc binary preinstalled in the
+	// NIC Configuration Daemon image. A package supplied here is not installed or selected.
 	// +optional
 	DocaSpcXCCUrlSource string `json:"docaSpcXCCUrlSource,omitempty"`
 }
@@ -46,7 +47,8 @@ type NicFirmwareSourceStatus struct {
 	BinaryVersions map[string][]string `json:"binaryVersions,omitempty"`
 	// BFBVersions represents the FW versions available in the provided BFB bundle
 	BFBVersions map[string]string `json:"bfbVersions,omitempty"`
-	// DocaSpcXCCVersion represents the FW versions available in the provided DOCA SPC-X CC .deb package for ubuntu 22.04
+	// DocaSpcXCCVersion represents the version found in a deprecated DocaSpcXCCUrlSource package.
+	// Deprecated: this value does not select the doca_spcx_cc binary used by doSPCX runtime configuration.
 	DocaSpcXCCVersion string `json:"docaSpcXCCVersion,omitempty"`
 }
 

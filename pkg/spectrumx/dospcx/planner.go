@@ -71,6 +71,7 @@ type Plan struct {
 // OperationGroup is an ordered group of runtime configuration operations.
 type OperationGroup struct {
 	Name       string
+	Scope      string
 	Operations []dmscli.XPathOperation
 }
 

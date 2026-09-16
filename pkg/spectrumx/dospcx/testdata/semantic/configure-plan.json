@@ -704,7 +704,7 @@
         {
           "name": "cc",
           "stage": "configure",
-          "order": 90,
+          "order": 110,
           "scope": "per_rdma_bond",
           "operation_refs": [
             "ra22-cc-runtime.cc-algo-slot-15.enabled",

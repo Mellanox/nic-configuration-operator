@@ -66,7 +66,8 @@ var _ = Describe("Blueprint plan", func() {
 			"name=" + planName,
 			"stage=prepare",
 			"target-map-file=file:/var/lib/blueprints/target-maps/nco-node-1.json",
-			"params=deployment_mode=host-k8s,planes=2",
+			"params=deployment_mode=host-k8s",
+			"params=planes=2",
 		}))
 		Expect(commands[0].command.RunCalls).To(Equal(1))
 		Expect(commands[0].command.CombinedOutputCalls).To(BeZero())
@@ -98,7 +99,7 @@ var _ = Describe("Blueprint plan", func() {
 		Expect(json.Valid(result.PlanJSON)).To(BeTrue())
 	})
 
-	It("logs the exact command, structured result, and stderr without the full plan JSON", func() {
+	It("logs the exact command and structured result without successful stderr or the full plan JSON", func() {
 		stdout := []byte(`{"status":"ok","plan-json":{"plan":{"name":"nco-node-1-spcx-prepare"}},"error":""}`)
 		stderr := []byte("DMS diagnostic\n")
 		executor := fakeExecutorWithStderr(stdout, stderr, nil, &commands)
@@ -116,7 +117,7 @@ var _ = Describe("Blueprint plan", func() {
 		Expect(entries[0].fields).NotTo(HaveKey("stdout"))
 		Expect(entries[0].fields).To(HaveKeyWithValue("status", "ok"))
 		Expect(entries[0].fields).To(HaveKeyWithValue("planJSONBytes", len(result.PlanJSON)))
-		Expect(entries[0].fields).To(HaveKeyWithValue("stderr", strings.TrimSpace(string(stderr))))
+		Expect(entries[0].fields).NotTo(HaveKey("stderr"))
 	})
 
 	It("bounds malformed stdout in diagnostics", func() {

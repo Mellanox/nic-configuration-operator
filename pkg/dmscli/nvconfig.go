@@ -92,11 +92,13 @@ func ApplyNVConfig(ctx context.Context, execInterface execUtils.Interface, reque
 	command := execInterface.CommandContext(ctx, dmsCLIExecutable, args...)
 	output, commandErr := utils.RunCommandWithStreams(command)
 	commandAndArgs := append([]string{dmsCLIExecutable}, args...)
-	logr.FromContextOrDiscard(ctx).V(2).Info("command output",
+	fields := []any{
 		"command", commandAndArgs,
 		"target", request.Target,
 		"stdout", boundedCommandOutput(output.Stdout),
-		"stderr", boundedCommandOutput(output.Stderr))
+	}
+	fields = appendCommandStderr(fields, output.Stderr, commandErr)
+	logr.FromContextOrDiscard(ctx).V(2).Info("command output", fields...)
 
 	result, decodeErr := decodeApplyNVConfigResult(output.Stdout)
 	if commandErr != nil {

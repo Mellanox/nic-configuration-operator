@@ -30,7 +30,7 @@ FROM ${BASE_IMAGE_DOCA_FULL_RT_HOST:-nvcr.io/nvstaging/doca/doca:full-rt-3.5.0-h
 
 ARG TARGETARCH
 
-ARG PACKAGES="dpkg-dev libusb-1.0-0 ipmitool rshim curl systemd-sysv mstflint"
+ARG PACKAGES="dpkg-dev libusb-1.0-0 ipmitool iproute2 gawk rshim curl systemd-sysv mstflint"
 
 # enable deb-src repos
 RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \

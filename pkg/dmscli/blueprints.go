@@ -72,11 +72,12 @@ func GenerateBlueprintPlan(
 		"target-map-file=file:" + request.TargetMapFile,
 	}
 	if len(request.Params) > 0 {
-		// The DMS action input transport used by the daemon image applies
-		// last-value-wins semantics to repeated leaf-list arguments. Keep the
-		// complete planner parameter list in one action argument; the compatible
-		// Blueprints action wrapper expands this comma-separated value.
-		args = append(args, "params="+strings.Join(request.Params, ","))
+		// The doSPCX planner declares params as a StringArray flag: every repeated
+		// params=key=value argument appends one element. Comma-joining parameters
+		// would pass a single malformed key/value string to the planner.
+		for _, param := range request.Params {
+			args = append(args, "params="+param)
+		}
 	}
 
 	command := execInterface.CommandContext(ctx, dmsCLIExecutable, args...)
@@ -133,9 +134,7 @@ func logBlueprintPlanResult(
 	if commandErr != nil || decodeErr != nil {
 		fields = append(fields, "stdout", boundedCommandOutput(output.Stdout))
 	}
-	if len(output.Stderr) > 0 {
-		fields = append(fields, "stderr", boundedCommandOutput(output.Stderr))
-	}
+	fields = appendCommandStderr(fields, output.Stderr, commandErr)
 	logr.FromContextOrDiscard(ctx).V(2).Info("command output", fields...)
 }
 

@@ -36,3 +36,10 @@ func commandErrorDetail(stdout, stderr []byte, structured string) string {
 	}
 	return boundedCommandOutput(stdout)
 }
+
+func appendCommandStderr(fields []any, stderr []byte, commandErr error) []any {
+	if commandErr == nil || len(stderr) == 0 {
+		return fields
+	}
+	return append(fields, "stderr", boundedCommandOutput(stderr))
+}

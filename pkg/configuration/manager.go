@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"k8s.io/client-go/tools/record"
+	execUtils "k8s.io/utils/exec"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
@@ -65,6 +66,7 @@ type configurationManager struct {
 	configValidation       configValidation
 	nvConfigUtils          nvconfig.NVConfigUtils
 	spectrumXConfigManager spectrumx.SpectrumXManager
+	execInterface          execUtils.Interface
 }
 
 // contextualNVConfigBatchSetter is an optional extension implemented by the built-in NVConfig
@@ -625,76 +627,88 @@ func (h configurationManager) applyResetToDefault(device *v1alpha1.NicDevice, po
 // returns *RuntimeConfigurationApplyResult - result of the apply operation
 // returns error - there were errors while applying runtime configuration
 func (h configurationManager) ApplyRuntimeConfiguration(ctx context.Context, device *v1alpha1.NicDevice) (*types.RuntimeConfigurationApplyResult, error) {
-	log.Log.Info("configurationManager.ApplyRuntimeConfiguration", "device", device.Name)
+	logger := log.FromContext(ctx)
+	logger.Info("configurationManager.ApplyRuntimeConfiguration", "device", device.Name)
 
 	if device.Spec.Configuration == nil || device.Spec.Configuration.Template == nil {
 		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusNothingToDo}, nil
 	}
-	if _, err := h.preparedSpectrumXPlan(device, spectrumx.PlanStageConfigure); err != nil {
-		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
-	}
-
-	alreadyApplied, err := h.configValidation.RuntimeConfigApplied(device)
+	plan, err := h.preparedSpectrumXPlan(device, spectrumx.PlanStageConfigure)
 	if err != nil {
-		log.Log.Error(err, "failed to verify runtime configuration", "device", device)
 		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}
 
-	if device.Spec.Configuration.Template.SpectrumXOptimized != nil && device.Spec.Configuration.Template.SpectrumXOptimized.Enabled {
-		spectrumXConfigApplied, err := h.spectrumXConfigManager.RuntimeConfigApplied(device)
+	genericApplied, err := h.configValidation.RuntimeConfigApplied(device)
+	if err != nil {
+		logger.Error(err, "failed to validate generic runtime configuration", "device", device.Name)
+		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+	}
+
+	spectrumXApplied := true
+	if plan != nil {
+		spectrumXApplied, err = h.validateSpectrumXRuntimeConfig(ctx, device, plan)
 		if err != nil {
-			log.Log.Error(err, "failed to verify spectrumx runtime configuration", "device", device.Name)
-			return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
-		}
-
-		if !spectrumXConfigApplied {
-			log.Log.V(2).Info("spectrumx runtime config not applied yet", "device", device.Name)
-
-			result, err := h.spectrumXConfigManager.ApplyRuntimeConfig(device)
-			if err != nil {
-				log.Log.Error(err, "failed to apply spectrumx config", "device", device.Name)
-				return result, err
-			}
-		}
-
-		spectrumXConfigApplied, err = h.spectrumXConfigManager.RuntimeConfigApplied(device)
-		if err != nil {
-			log.Log.Error(err, "failed to verify spectrumx runtime configuration", "device", device.Name)
-			return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
-		}
-
-		if !spectrumXConfigApplied {
-			err = fmt.Errorf("spectrumx runtime config failed to apply")
-			log.Log.Error(err, "", "device", device.Name)
+			logger.Error(err, "failed to validate doSPCX runtime configuration", "device", device.Name)
 			return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 		}
 	}
 
-	if alreadyApplied {
-		log.Log.V(2).Info("runtime config already applied", "device", device)
+	if genericApplied && spectrumXApplied {
+		logger.V(2).Info("runtime configuration is already applied", "device", device.Name)
 		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusNothingToDo}, nil
 	}
 
-	desired := h.configValidation.CalculateDesiredRuntimeConfig(device)
+	if !genericApplied {
+		logger.Info("applying generic runtime configuration", "device", device.Name)
+		if err := h.applyGenericRuntimeConfiguration(device); err != nil {
+			return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+		}
+		// Generic settings may overlap doSPCX paths. Reapply the authored plan afterward even
+		// when it matched before generic configuration was changed.
+		if plan != nil {
+			spectrumXApplied = false
+		}
+	}
 
+	// The doSPCX plan is applied last so its authored operation ordering and final values win over
+	// any overlapping generic runtime settings.
+	if !spectrumXApplied {
+		logger.Info("applying doSPCX runtime configuration", "device", device.Name, "groups", len(plan.RuntimeConfig))
+		if err := h.applySpectrumXRuntimeConfig(ctx, device, plan); err != nil {
+			return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+		}
+		spectrumXApplied, err = h.validateSpectrumXRuntimeConfig(ctx, device, plan)
+		if err != nil {
+			return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed},
+				fmt.Errorf("validate applied doSPCX runtime configuration for device %q: %w", device.Name, err)
+		}
+		if !spectrumXApplied {
+			return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed},
+				fmt.Errorf("doSPCX runtime configuration did not converge for device %q", device.Name)
+		}
+	}
+
+	return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusSuccess}, nil
+}
+
+func (h configurationManager) applyGenericRuntimeConfiguration(device *v1alpha1.NicDevice) error {
+	desired := h.configValidation.CalculateDesiredRuntimeConfig(device)
 	ports := device.Status.Ports
 
 	if desired.MaxReadRequestSize != 0 {
 		for _, port := range ports {
-			err = h.configurationUtils.SetMaxReadRequestSize(port.PCI, desired.MaxReadRequestSize)
-			if err != nil {
+			if err := h.configurationUtils.SetMaxReadRequestSize(port.PCI, desired.MaxReadRequestSize); err != nil {
 				log.Log.Error(err, "failed to apply maxReadRequestSize", "device", device)
-				return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+				return err
 			}
 		}
 	}
 
 	// Apply QoS settings (trust, PFC, ToS) via DMS
 	if desired.Qos != nil && (desired.Qos.Trust != "" || desired.Qos.PFC != "" || desired.Qos.ToS != 0) {
-		err = h.configurationUtils.SetQoSSettings(device, desired.Qos)
-		if err != nil {
+		if err := h.configurationUtils.SetQoSSettings(device, desired.Qos); err != nil {
 			log.Log.Error(err, "failed to apply QoS settings", "device", device)
-			return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+			return err
 		}
 	}
 
@@ -704,12 +718,11 @@ func (h configurationManager) ApplyRuntimeConfiguration(ctx context.Context, dev
 			log.Log.V(2).Info("skipping runtime config apply for port with empty NetworkInterface", "device", device.Name, "port", port.PCI)
 			continue
 		}
-		if err = h.applyPortRuntimeConfig(port.NetworkInterface, device, desired); err != nil {
-			return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+		if err := h.applyPortRuntimeConfig(port.NetworkInterface, device, desired); err != nil {
+			return err
 		}
 	}
-
-	return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusSuccess}, nil
+	return nil
 }
 
 // applyPortRuntimeConfig applies per-port runtime settings (RoCE mode, QoS extended, runtime perf)
@@ -909,5 +922,11 @@ func systemConfDrifted(overrides map[string]string, mismatched []string) bool {
 
 func NewConfigurationManager(eventRecorder record.EventRecorder, dmsManager dms.DMSManager, nvConfigUtils nvconfig.NVConfigUtils, spectrumXConfigManager spectrumx.SpectrumXManager) ConfigurationManager {
 	utils := newConfigurationUtils(dmsManager)
-	return configurationManager{configurationUtils: utils, configValidation: newConfigValidation(utils, eventRecorder), nvConfigUtils: nvConfigUtils, spectrumXConfigManager: spectrumXConfigManager}
+	return configurationManager{
+		configurationUtils:     utils,
+		configValidation:       newConfigValidation(utils, eventRecorder),
+		nvConfigUtils:          nvConfigUtils,
+		spectrumXConfigManager: spectrumXConfigManager,
+		execInterface:          execUtils.New(),
+	}
 }

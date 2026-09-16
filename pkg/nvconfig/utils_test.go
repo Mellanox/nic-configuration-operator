@@ -734,7 +734,7 @@ Result: Device configuration does NOT match the system configuration.
 		}}
 
 		DescribeTable("normalizes equivalent values",
-			func(actual, desired any) { Expect(xpathValuesEqual(actual, desired)).To(BeTrue()) },
+			func(actual, desired any) { Expect(dmscli.XPathValuesEqual(actual, desired)).To(BeTrue()) },
 			Entry("enum case", "ETH", "eth"),
 			Entry("enum suffix", "ENABLED_VALUE", "enabled"),
 			Entry("device prefix", "DEVICE_DEFAULT", "default"),

@@ -309,9 +309,10 @@ var _ = Describe("doSPCX planning", func() {
 			"name="+planName,
 			"stage=prepare",
 			"target-map-file=file:"+targetMapPath,
-			"params=deployment_mode=host-k8s,planes=2",
+			"params=deployment_mode=host-k8s",
+			"params=planes=2",
 		))
-		Expect(commands[0].args).NotTo(ContainElement("params=deployment_mode=host-k8s,planes=2,overlay=none"))
+		Expect(commands[0].args).NotTo(ContainElement("params=overlay=none"))
 		Expect(commands[0].command.Env).To(ContainElement("BP_STATE_DIR=" + stateDir))
 
 		metadataPath := filepath.Join(stateDir, "plans", planName, "metadata.json")
@@ -454,7 +455,8 @@ var _ = Describe("doSPCX planning", func() {
 			"name="+configurePlanName,
 			"stage=configure",
 			"target-map-file=file:"+targetMapPath,
-			"params=deployment_mode=host-k8s,planes=2",
+			"params=deployment_mode=host-k8s",
+			"params=planes=2",
 		))
 	})
 
@@ -659,7 +661,12 @@ var _ = Describe("doSPCX planning", func() {
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(commands).To(HaveLen(1))
-		Expect(commands[0].args).To(ContainElements("profile=SPX_NetPlugin", "params=deployment_mode=host-k8s,planes=2,overlay=none"))
+		Expect(commands[0].args).To(ContainElements(
+			"profile=SPX_NetPlugin",
+			"params=deployment_mode=host-k8s",
+			"params=planes=2",
+			"params=overlay=none",
+		))
 	})
 
 	It("maps an omitted multiplane mode to a one-plane plan", func() {
@@ -676,7 +683,12 @@ var _ = Describe("doSPCX planning", func() {
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(commands).To(HaveLen(1))
-		Expect(commands[0].args).To(ContainElements("profile=single-plane", "params=deployment_mode=host-k8s,planes=1,overlay=none"))
+		Expect(commands[0].args).To(ContainElements(
+			"profile=single-plane",
+			"params=deployment_mode=host-k8s",
+			"params=planes=1",
+			"params=overlay=none",
+		))
 	})
 
 	It("rejects an unsupported SPX_Multiplane overlay before writing the target map", func() {

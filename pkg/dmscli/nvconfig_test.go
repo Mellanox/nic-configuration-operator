@@ -165,7 +165,7 @@ var _ = Describe("NVConfig apply", func() {
 		}))
 	})
 
-	It("logs the exact command argv, target, and separate output streams", func() {
+	It("logs the exact command argv and target without successful stderr", func() {
 		entries := []capturedLogEntry{}
 		ctx := logr.NewContext(context.Background(), logr.New(&capturingLogSink{entries: &entries}))
 
@@ -184,7 +184,7 @@ var _ = Describe("NVConfig apply", func() {
 		Expect(entries[0].fields).To(HaveKeyWithValue("command", append([]string{dmsCLIExecutable}, commands[0].args...)))
 		Expect(entries[0].fields).To(HaveKeyWithValue("target", target))
 		Expect(entries[0].fields["stdout"]).To(ContainSubstring(`"compiled-count":2`))
-		Expect(entries[0].fields).To(HaveKeyWithValue("stderr", ""))
+		Expect(entries[0].fields).NotTo(HaveKey("stderr"))
 	})
 
 	It("decodes JSON stdout independently from diagnostics on stderr", func() {

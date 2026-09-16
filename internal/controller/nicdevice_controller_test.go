@@ -100,7 +100,6 @@ var _ = Describe("NicDeviceReconciler", func() {
 		spectrumXManager = &spectrumxMocks.SpectrumXManager{}
 		ccTerminationChan = make(chan string, 10)
 		spectrumXManager.On("GetCCTerminationChannel").Return((<-chan string)(ccTerminationChan))
-		spectrumXManager.On("GetDocaCCTargetVersion", mock.Anything).Return("", nil).Maybe()
 		udevManager = &udevMocks.UdevManager{}
 		udevManager.On("ApplyUdevRules", mock.Anything, mock.Anything).Return(nil, false, nil)
 		deviceDiscoveryUtils = &devicediscoveryMocks.DeviceDiscoveryUtils{}

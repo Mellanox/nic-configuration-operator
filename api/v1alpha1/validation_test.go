@@ -357,7 +357,7 @@ var _ = Describe("NicConfigurationTemplate CEL validation", func() {
 	})
 
 	Context("custom profile name validation", func() {
-		It("allows a custom Spectrum-X profile name", func() {
+		It("allows a custom Spectrum-X architecture version", func() {
 			obj := newNicConfigurationTemplate("spcx-custom-profile", "Ethernet", 1, &SpectrumXOptimizedSpec{
 				Enabled:        true,
 				Version:        "custom-profile",
