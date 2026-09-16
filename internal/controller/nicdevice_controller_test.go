@@ -1160,6 +1160,28 @@ var _ = Describe("NicDeviceReconciler", func() {
 			})
 		)
 
+		mockFirstDeviceFirmwareUpdate := func() {
+			firstDeviceFirmwareVersion := oldFwVersion
+			var firstDeviceFirmwareVersionMutex sync.RWMutex
+
+			firmwareManager.On("GetFirmwareVersionsFromDevice", matchFirstDevice).Return(
+				func(*v1alpha1.NicDevice) (string, string, error) {
+					firstDeviceFirmwareVersionMutex.RLock()
+					defer firstDeviceFirmwareVersionMutex.RUnlock()
+					return firstDeviceFirmwareVersion, firstDeviceFirmwareVersion, nil
+				},
+			)
+			firmwareManager.On("InstallFirmware", mock.Anything, matchFirstDevice, mock.Anything).Return(false, nil).Once()
+			configurationManager.On("ResetNicFirmware", mock.Anything, matchFirstDevice).
+				Run(func(mock.Arguments) {
+					firstDeviceFirmwareVersionMutex.Lock()
+					defer firstDeviceFirmwareVersionMutex.Unlock()
+					firstDeviceFirmwareVersion = newFwVersion
+				}).
+				Return(nil).
+				Once()
+		}
+
 		var createDevices = func(secondPolicy string) {
 			device := &v1alpha1.NicDevice{
 				ObjectMeta: metav1.ObjectMeta{Name: deviceName, Namespace: namespaceName},
@@ -1218,16 +1240,11 @@ var _ = Describe("NicDeviceReconciler", func() {
 
 		It("Should not stop firmware update on one device if firmware version doesn't match on the second device and policy is to Validate", func() {
 			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return(newFwVersion, nil)
-			firmwareManager.On("GetFirmwareVersionsFromDevice", matchFirstDevice).Return(oldFwVersion, oldFwVersion, nil).Times(1)
-			firmwareManager.On("GetFirmwareVersionsFromDevice", matchFirstDevice).Return(newFwVersion, newFwVersion, nil)
+			mockFirstDeviceFirmwareUpdate()
 			firmwareManager.On("GetFirmwareVersionsFromDevice", matchSecondDevice).Return(oldFwVersion, oldFwVersion, nil)
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
 			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
-			firmwareManager.On("InstallFirmware", mock.Anything, mock.Anything, mock.Anything).Return(false, nil)
-			configurationManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(nil)
-			configurationManager.AssertNotCalled(GinkgoT(), "ValidateDeviceNvSpec", mock.Anything, mock.Anything)
-			configurationManager.AssertNotCalled(GinkgoT(), "ApplyRuntimeConfiguration", mock.Anything, mock.Anything)
 
 			createDevices(consts.FirmwareUpdatePolicyValidate)
 
@@ -1260,17 +1277,13 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Message: consts.PendingOwnFirmwareUpdateMessage,
 			}))
 
-			// Fix for flaky test: Wait for Device 1 firmware status to propagate
-			// Device 1's firmware update completes, but status struct may not reflect this yet
-			// when handleConfigurationPendingFirmwareUpdate() is called
+			// Wait for the successful firmware install and reset to propagate to the device status.
 			Eventually(func() string {
 				device := &v1alpha1.NicDevice{}
 				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
 				return device.Status.FirmwareVersion
 			}, timeout).Should(Equal(newFwVersion))
 
-			// Now check Device 1 shows "pending other devices" message
-			// Use Eventually to wait for the condition, then Consistently to ensure it remains stable
 			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.ConfigUpdateInProgressCondition,
 				Status:  metav1.ConditionFalse,
@@ -1284,23 +1297,22 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Message: consts.PendingOtherFirmwareUpdateMessage,
 			}))
 
+			firmwareManager.AssertExpectations(GinkgoT())
+			firmwareManager.AssertNotCalled(GinkgoT(), "InstallFirmware", mock.Anything, matchSecondDevice, mock.Anything)
 			configurationManager.AssertExpectations(GinkgoT())
+			configurationManager.AssertNotCalled(GinkgoT(), "ValidateDeviceNvSpec", mock.Anything, mock.Anything)
+			configurationManager.AssertNotCalled(GinkgoT(), "ApplyRuntimeConfiguration", mock.Anything, mock.Anything)
+			maintenanceManager.AssertExpectations(GinkgoT())
 		})
 
 		It("Should stop configuration update on one device if firmware update failed for another one", func() {
 			err := errors.New("fw update failed")
 			firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return(newFwVersion, nil)
-			firmwareManager.On("GetFirmwareVersionsFromDevice", matchFirstDevice).Return(oldFwVersion, oldFwVersion, nil).Times(1)
-			firmwareManager.On("GetFirmwareVersionsFromDevice", matchFirstDevice).Return(newFwVersion, newFwVersion, nil)
+			mockFirstDeviceFirmwareUpdate()
 			firmwareManager.On("GetFirmwareVersionsFromDevice", matchSecondDevice).Return(oldFwVersion, oldFwVersion, nil)
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
-			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
-			firmwareManager.On("InstallFirmware", mock.Anything, matchFirstDevice, mock.Anything).Return(false, nil)
 			firmwareManager.On("InstallFirmware", mock.Anything, matchSecondDevice, mock.Anything).Return(false, err)
-			configurationManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(nil)
-			configurationManager.AssertNotCalled(GinkgoT(), "ValidateDeviceNvSpec", mock.Anything, mock.Anything)
-			configurationManager.AssertNotCalled(GinkgoT(), "ApplyRuntimeConfiguration", mock.Anything, mock.Anything)
 
 			createDevices(consts.FirmwareUpdatePolicyUpdate)
 
@@ -1322,16 +1334,13 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Message: err.Error(),
 			}))
 
-			// Fix for flaky test: Wait for Device 1 firmware status to propagate
-			// Device 1's firmware update completes, but status struct may not reflect this yet
+			// Wait for the successful firmware install and reset to propagate to the device status.
 			Eventually(func() string {
 				device := &v1alpha1.NicDevice{}
 				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
 				return device.Status.FirmwareVersion
 			}, timeout).Should(Equal(newFwVersion))
 
-			// Now check Device 1 shows "pending other devices" message
-			// Use Eventually to wait for the condition, then Consistently to ensure it remains stable
 			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.ConfigUpdateInProgressCondition,
 				Status:  metav1.ConditionFalse,
@@ -1356,7 +1365,11 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Message: consts.PendingOwnFirmwareUpdateMessage,
 			}))
 
+			firmwareManager.AssertExpectations(GinkgoT())
 			configurationManager.AssertExpectations(GinkgoT())
+			configurationManager.AssertNotCalled(GinkgoT(), "ValidateDeviceNvSpec", mock.Anything, mock.Anything)
+			configurationManager.AssertNotCalled(GinkgoT(), "ApplyRuntimeConfiguration", mock.Anything, mock.Anything)
+			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
 		})
 
 		It("Should not stop configuration update if all devices have up-to-date firmware", func() {
