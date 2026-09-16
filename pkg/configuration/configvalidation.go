@@ -95,7 +95,7 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 	}
 
 	// Link type is only managed when the template specifies it. For Network Bay devices the
-	// template must not set linkType (enforced by CEL); the link type is owned by set_system_conf,
+	// template must not set linkType (enforced by CEL); the link type is owned by the system profile,
 	// so the operator must not emit LINK_TYPE_P* here or it would fight the system configuration.
 	if template.LinkType != "" {
 		// Link type change is not allowed on some devices
