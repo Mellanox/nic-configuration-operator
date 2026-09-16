@@ -149,7 +149,7 @@ func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *
 	// 4. Validate the prepared doSPCX NVConfig plan separately. Breakout is a
 	// reboot barrier: post-breakout is considered only after breakout matches
 	// both the current and pending device state.
-	plan, err := h.preparedSpectrumXPlan(device, spectrumx.PlanStagePrepare)
+	plan, err := h.preparedSpectrumXPlan(device)
 	if err != nil {
 		return false, false, unsupportedParams, err
 	}
@@ -567,7 +567,7 @@ func (h configurationManager) ApplyRuntimeConfiguration(ctx context.Context, dev
 	if device.Spec.Configuration == nil || device.Spec.Configuration.Template == nil {
 		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusNothingToDo}, nil
 	}
-	plan, err := h.preparedSpectrumXPlan(device, spectrumx.PlanStageConfigure)
+	plan, err := h.preparedSpectrumXPlan(device)
 	if err != nil {
 		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}

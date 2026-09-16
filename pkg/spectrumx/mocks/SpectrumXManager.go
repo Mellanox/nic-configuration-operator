@@ -32,31 +32,31 @@ func (_m *SpectrumXManager) RemoveBlueprintsData() error {
 	return ret.Error(0)
 }
 
-func (_m *SpectrumXManager) PreparePlan(ctx context.Context, devices []*v1alpha1.NicDevice, stage spectrumx.PlanStage) error {
-	ret := _m.Called(ctx, devices, stage)
+func (_m *SpectrumXManager) PreparePlan(ctx context.Context, devices []*v1alpha1.NicDevice) error {
+	ret := _m.Called(ctx, devices)
 	if len(ret) == 0 {
 		panic("no return value specified for PreparePlan")
 	}
 	return ret.Error(0)
 }
 
-func (_m *SpectrumXManager) GetPreparedPlan(device *v1alpha1.NicDevice, stage spectrumx.PlanStage) (*spectrumx.Plan, error) {
-	ret := _m.Called(device, stage)
+func (_m *SpectrumXManager) GetPreparedPlan(device *v1alpha1.NicDevice) (*spectrumx.Plan, error) {
+	ret := _m.Called(device)
 	if len(ret) == 0 {
 		panic("no return value specified for GetPreparedPlan")
 	}
-	if function, ok := ret.Get(0).(func(*v1alpha1.NicDevice, spectrumx.PlanStage) (*spectrumx.Plan, error)); ok {
-		return function(device, stage)
+	if function, ok := ret.Get(0).(func(*v1alpha1.NicDevice) (*spectrumx.Plan, error)); ok {
+		return function(device)
 	}
 	var plan *spectrumx.Plan
-	if function, ok := ret.Get(0).(func(*v1alpha1.NicDevice, spectrumx.PlanStage) *spectrumx.Plan); ok {
-		plan = function(device, stage)
+	if function, ok := ret.Get(0).(func(*v1alpha1.NicDevice) *spectrumx.Plan); ok {
+		plan = function(device)
 	} else if value := ret.Get(0); value != nil {
 		plan = value.(*spectrumx.Plan)
 	}
 	var err error
-	if function, ok := ret.Get(1).(func(*v1alpha1.NicDevice, spectrumx.PlanStage) error); ok {
-		err = function(device, stage)
+	if function, ok := ret.Get(1).(func(*v1alpha1.NicDevice) error); ok {
+		err = function(device)
 	} else {
 		err = ret.Error(1)
 	}

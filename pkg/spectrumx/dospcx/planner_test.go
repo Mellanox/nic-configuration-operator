@@ -33,6 +33,13 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 )
 
+type PlanStage = planStage
+
+const (
+	PlanStagePrepare   = planStagePrepare
+	PlanStageConfigure = planStageConfigure
+)
+
 type preparePlanCommand struct {
 	executable string
 	args       []string
@@ -69,10 +76,10 @@ func generatePreparePlan(
 	for _, device := range devices {
 		device.Status.Node = nodeName
 	}
-	if err := manager.PreparePlan(ctx, devices, PlanStagePrepare); err != nil {
+	if err := manager.PreparePlan(ctx, devices); err != nil {
 		return "", err
 	}
-	if _, err := manager.GetPreparedPlan(devices[0], PlanStagePrepare); err != nil {
+	if _, err := manager.GetPreparedPlan(devices[0]); err != nil {
 		return "", err
 	}
 	return filepath.Join(stateDir, "plans", planName(nodeName, PlanStagePrepare), "plan.json"), nil
@@ -89,32 +96,99 @@ func generateConfigurePlan(
 	for _, device := range devices {
 		device.Status.Node = nodeName
 	}
-	if err := manager.PreparePlan(ctx, devices, PlanStageConfigure); err != nil {
+	if err := manager.PreparePlan(ctx, devices); err != nil {
 		return "", err
 	}
-	if _, err := manager.GetPreparedPlan(devices[0], PlanStageConfigure); err != nil {
+	if _, err := manager.GetPreparedPlan(devices[0]); err != nil {
 		return "", err
 	}
 	return filepath.Join(stateDir, "plans", planName(nodeName, PlanStageConfigure), "plan.json"), nil
 }
 
 func preparePlanFakeExecutor(output []byte, commands *[]preparePlanCommand) *execTesting.FakeExec {
-	command := &execTesting.FakeCmd{}
-	command.RunScript = append(command.RunScript, func() ([]byte, []byte, error) {
-		return output, nil, nil
-	})
 	executor := &execTesting.FakeExec{}
-	executor.CommandScript = []execTesting.FakeCommandAction{
-		func(executable string, args ...string) execUtils.Cmd {
-			*commands = append(*commands, preparePlanCommand{
-				executable: executable,
-				args:       append([]string(nil), args...),
-				command:    command,
+	commandAction := func(executable string, args ...string) execUtils.Cmd {
+		command := &execTesting.FakeCmd{}
+		command.RunScript = append(command.RunScript, func() ([]byte, []byte, error) {
+			return responseForPlanCommand(output, args), nil, nil
+		})
+		*commands = append(*commands, preparePlanCommand{
+			executable: executable,
+			args:       append([]string(nil), args...),
+			command:    command,
+		})
+		return command
+	}
+	for range 32 {
+		executor.CommandScript = append(executor.CommandScript,
+			func(executable string, args ...string) execUtils.Cmd {
+				return commandAction(executable, args...)
 			})
-			return command
-		},
 	}
 	return executor
+}
+
+func responseForPlanCommand(response []byte, args []string) []byte {
+	if len(response) == 0 {
+		return response
+	}
+	requestedStage := argumentValue(args, "stage=")
+	requestedName := argumentValue(args, "name=")
+	var document map[string]any
+	if json.Unmarshal(response, &document) != nil {
+		return response
+	}
+	if document["stage"] == requestedStage {
+		return response
+	}
+	planJSON, ok := document["plan-json"].(map[string]any)
+	if !ok {
+		return response
+	}
+	plan, ok := planJSON["plan"].(map[string]any)
+	if !ok {
+		return response
+	}
+	document["name"] = requestedName
+	document["stage"] = requestedStage
+	plan["name"] = requestedName
+	plan["stage"] = requestedStage
+	groupName := semanticGroupBreakout
+	if requestedStage == configureStage {
+		groupName = semanticGroupLinkRuntime
+	}
+	operationID := "test." + groupName
+	plan["operations"] = map[string]any{
+		operationID: map[string]any{
+			"path": "/nvidia/test", "values": map[string]any{"enabled": true},
+			"source_feature": "test", "target_class": semanticTargetClassPFNetdevAll,
+		},
+	}
+	groups := []any{map[string]any{
+		"name": groupName, "stage": requestedStage, "order": 10,
+		"scope": semanticScopePerDevice, "operation_refs": []string{operationID},
+	}}
+	if requestedStage == prepareStage {
+		groups = append(groups, map[string]any{
+			"name": semanticGroupPostBreakout, "stage": requestedStage, "order": 20,
+			"scope": "mixed", "operation_refs": []string{},
+		})
+	}
+	plan["semantic"] = map[string]any{"groups": groups}
+	result, err := json.Marshal(document)
+	if err != nil {
+		return response
+	}
+	return result
+}
+
+func argumentValue(args []string, prefix string) string {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, prefix) {
+			return strings.TrimPrefix(arg, prefix)
+		}
+	}
+	return ""
 }
 
 var _ = Describe("doSPCX planning", func() {
@@ -267,22 +341,22 @@ var _ = Describe("doSPCX planning", func() {
 		}
 
 		manager := newTestPlanManager(executor, stateDir)
-		err := manager.PreparePlan(context.Background(), devices, PlanStagePrepare)
+		err := manager.PreparePlan(context.Background(), devices)
 
 		Expect(err).NotTo(HaveOccurred())
-		plan, err := manager.GetPreparedPlan(devices[0], PlanStagePrepare)
+		plan, err := manager.GetPreparedPlan(devices[0])
 		Expect(err).NotTo(HaveOccurred())
 		Expect(plan.Breakout).To(HaveLen(1))
 		Expect(plan.PostBreakout).To(BeEmpty())
-		Expect(plan.RuntimeConfig).To(BeEmpty())
+		Expect(plan.RuntimeConfig).To(HaveLen(1))
 		planPath := filepath.Join(stateDir, "plans", planName, "plan.json")
 		planContent, err := os.ReadFile(planPath)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(string(planContent)).To(ContainSubstring(`"profile": "SPX_Multiplane"`))
-		storedPlan, err := manager.GetPreparedPlan(devices[0], PlanStagePrepare)
+		storedPlan, err := manager.GetPreparedPlan(devices[0])
 		Expect(err).NotTo(HaveOccurred())
 		Expect(storedPlan).To(Equal(plan))
-		storedPlan, err = manager.GetPreparedPlan(devices[2], PlanStagePrepare)
+		storedPlan, err = manager.GetPreparedPlan(devices[2])
 		Expect(err).NotTo(HaveOccurred())
 		Expect(storedPlan).To(Equal(plan))
 
@@ -302,7 +376,7 @@ var _ = Describe("doSPCX planning", func() {
 		Expect(string(targetMapContent)).NotTo(ContainSubstring("target_constraints"))
 		Expect(string(targetMapContent)).NotTo(ContainSubstring("nic_index_in_rail"))
 
-		Expect(commands).To(HaveLen(1))
+		Expect(commands).To(HaveLen(2))
 		Expect(commands[0].executable).To(Equal("/opt/mellanox/doca/services/dms/dms-cli"))
 		Expect(commands[0].args).To(ContainElements(
 			"profile=SPX_Multiplane",
@@ -348,18 +422,18 @@ var _ = Describe("doSPCX planning", func() {
 			), stateDir,
 		)
 		device := newDevice("rail-0", "0000:64:00.0", "hwplb")
-		Expect(manager.PreparePlan(context.Background(), []*v1alpha1.NicDevice{device}, PlanStagePrepare)).To(Succeed())
+		Expect(manager.PreparePlan(context.Background(), []*v1alpha1.NicDevice{device})).To(Succeed())
 
 		Expect(os.RemoveAll(filepath.Join(stateDir, "plans"))).To(Succeed())
 		Expect(os.RemoveAll(filepath.Join(stateDir, "target-maps"))).To(Succeed())
-		Expect(manager.PreparePlan(context.Background(), []*v1alpha1.NicDevice{device}, PlanStagePrepare)).To(Succeed())
-		Expect(commands).To(HaveLen(1))
-		plan, err := manager.GetPreparedPlan(device, PlanStagePrepare)
+		Expect(manager.PreparePlan(context.Background(), []*v1alpha1.NicDevice{device})).To(Succeed())
+		Expect(commands).To(HaveLen(2))
+		plan, err := manager.GetPreparedPlan(device)
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(plan.Breakout).To(HaveLen(1))
 		plan.Breakout[0].Values["enabled"] = false
-		plan, err = manager.GetPreparedPlan(device, PlanStagePrepare)
+		plan, err = manager.GetPreparedPlan(device)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(plan.Breakout[0].Values).To(HaveKeyWithValue("enabled", true))
 	})
@@ -368,25 +442,40 @@ var _ = Describe("doSPCX planning", func() {
 		commands := []preparePlanCommand{}
 		manager := newTestPlanManager(preparePlanFakeExecutor(nil, &commands), GinkgoT().TempDir())
 
-		err := manager.PreparePlan(context.Background(), []*v1alpha1.NicDevice{{}}, PlanStagePrepare)
+		err := manager.PreparePlan(context.Background(), []*v1alpha1.NicDevice{{}})
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(commands).To(BeEmpty())
 	})
 
-	It("rejects retrieval for an unsupported plan stage", func() {
-		manager := newTestPlanManager(nil, GinkgoT().TempDir())
+	It("does not publish a partial plan when configure-stage preparation fails", func() {
+		stateDir := GinkgoT().TempDir()
+		commands := []preparePlanCommand{}
+		device := newDevice("rail-0", "0000:64:00.0", "hwplb")
+		response := planResponse(
+			planName(nodeName, configureStage), "SPX_Multiplane", configureStage, 2, 2,
+		)
+		var document map[string]any
+		Expect(json.Unmarshal(response, &document)).To(Succeed())
+		delete(document["plan-json"].(map[string]any)["plan"].(map[string]any), "semantic")
+		response, err := json.Marshal(document)
+		Expect(err).NotTo(HaveOccurred())
+		manager := newTestPlanManager(preparePlanFakeExecutor(response, &commands), stateDir)
 
-		_, err := manager.GetPreparedPlan(newDevice("device", "0000:64:00.0", "hwplb"), PlanStage("unknown"))
+		err = manager.PreparePlan(context.Background(), []*v1alpha1.NicDevice{device})
 
-		Expect(err).To(MatchError(ContainSubstring("unsupported")))
+		Expect(err).To(MatchError(ContainSubstring("semantic groups")))
+		Expect(commands).To(HaveLen(2))
+		plan, getErr := manager.GetPreparedPlan(device)
+		Expect(plan).To(BeNil())
+		Expect(getErr).To(MatchError(ContainSubstring("is not prepared")))
 	})
 
 	It("does not load a persisted plan through the per-device retrieval path", func() {
 		manager := newTestPlanManager(nil, GinkgoT().TempDir())
 		device := newDevice("device", "0000:64:00.0", "hwplb")
 
-		plan, err := manager.GetPreparedPlan(device, PlanStagePrepare)
+		plan, err := manager.GetPreparedPlan(device)
 
 		Expect(plan).To(BeNil())
 		Expect(err).To(MatchError(ContainSubstring("is not prepared")))
@@ -450,8 +539,8 @@ var _ = Describe("doSPCX planning", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(string(targetMapContent)).To(ContainSubstring("0000:64:00.0"))
 		Expect(string(targetMapContent)).NotTo(ContainSubstring("0000:64:00.1"))
-		Expect(commands).To(HaveLen(1))
-		Expect(commands[0].args).To(ContainElements(
+		Expect(commands).To(HaveLen(2))
+		Expect(commands[1].args).To(ContainElements(
 			"name="+configurePlanName,
 			"stage=configure",
 			"target-map-file=file:"+targetMapPath,
@@ -474,7 +563,7 @@ var _ = Describe("doSPCX planning", func() {
 			[]*v1alpha1.NicDevice{device}, stateDir,
 		)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(firstCommands).To(HaveLen(1))
+		Expect(firstCommands).To(HaveLen(2))
 
 		secondCommands := []preparePlanCommand{}
 		secondPath, err := generatePreparePlan(
@@ -499,8 +588,8 @@ var _ = Describe("doSPCX planning", func() {
 		)
 		manager.dospcxDataDigest = "first-bundle"
 
-		Expect(manager.PreparePlan(context.Background(), []*v1alpha1.NicDevice{device}, PlanStagePrepare)).To(Succeed())
-		Expect(firstCommands).To(HaveLen(1))
+		Expect(manager.PreparePlan(context.Background(), []*v1alpha1.NicDevice{device})).To(Succeed())
+		Expect(firstCommands).To(HaveLen(2))
 
 		secondCommands := []preparePlanCommand{}
 		manager.execInterface = preparePlanFakeExecutor(
@@ -508,8 +597,8 @@ var _ = Describe("doSPCX planning", func() {
 		)
 		manager.dospcxDataDigest = "second-bundle"
 
-		Expect(manager.PreparePlan(context.Background(), []*v1alpha1.NicDevice{device}, PlanStagePrepare)).To(Succeed())
-		Expect(secondCommands).To(HaveLen(1))
+		Expect(manager.PreparePlan(context.Background(), []*v1alpha1.NicDevice{device})).To(Succeed())
+		Expect(secondCommands).To(HaveLen(2))
 		metadataContent, err := os.ReadFile(filepath.Join(stateDir, "plans", generatedPlanName, "metadata.json"))
 		Expect(err).NotTo(HaveOccurred())
 		var metadata planMetadata
@@ -528,10 +617,10 @@ var _ = Describe("doSPCX planning", func() {
 					planResponse(generatedPlanName, "SPX_Multiplane", prepareStage, 2, 1), &commands,
 				), stateDir,
 			)
-			Expect(manager.PreparePlan(context.Background(), []*v1alpha1.NicDevice{device}, PlanStagePrepare)).To(Succeed())
+			Expect(manager.PreparePlan(context.Background(), []*v1alpha1.NicDevice{device})).To(Succeed())
 
 			mutate(device)
-			_, err := manager.GetPreparedPlan(device, PlanStagePrepare)
+			_, err := manager.GetPreparedPlan(device)
 
 			Expect(err).To(MatchError(ContainSubstring(expected)))
 		},
@@ -586,7 +675,7 @@ var _ = Describe("doSPCX planning", func() {
 			)
 
 			Expect(err).NotTo(HaveOccurred())
-			Expect(secondCommands).To(HaveLen(1))
+			Expect(secondCommands).To(HaveLen(2))
 			metadataContent, readErr := os.ReadFile(filepath.Join(
 				stateDir, "plans", generatedPlanName, "metadata.json",
 			))
@@ -607,8 +696,8 @@ var _ = Describe("doSPCX planning", func() {
 		}, "gb300", 2),
 	)
 
-	DescribeTable("regenerates when a saved cache artifact is invalid",
-		func(corrupt func(stateDir, generatedPlanName string)) {
+	DescribeTable("handles saved cache artifacts",
+		func(corrupt func(stateDir, generatedPlanName string), expectedCommands int) {
 			stateDir := GinkgoT().TempDir()
 			device := newDevice("rail-0", "0000:64:00.0", "hwplb")
 			generatedPlanName := planName(nodeName, prepareStage)
@@ -629,23 +718,23 @@ var _ = Describe("doSPCX planning", func() {
 			)
 
 			Expect(err).NotTo(HaveOccurred())
-			Expect(secondCommands).To(HaveLen(1))
+			Expect(secondCommands).To(HaveLen(expectedCommands))
 		},
 		Entry("metadata JSON", func(stateDir, generatedPlanName string) {
 			Expect(os.WriteFile(
 				filepath.Join(stateDir, "plans", generatedPlanName, "metadata.json"), []byte("{"), 0o644,
 			)).To(Succeed())
-		}),
+		}, 1),
 		Entry("target map content", func(stateDir, _ string) {
 			Expect(os.WriteFile(
 				filepath.Join(stateDir, "target-maps", targetMapName(nodeName)+".json"), []byte("{}\n"), 0o644,
 			)).To(Succeed())
-		}),
+		}, 0),
 		Entry("plan JSON", func(stateDir, generatedPlanName string) {
 			Expect(os.WriteFile(
 				filepath.Join(stateDir, "plans", generatedPlanName, "plan.json"), []byte("{}\n"), 0o644,
 			)).To(Succeed())
-		}),
+		}, 1),
 	)
 
 	It("maps swplb to SPX_NetPlugin and passes its overlay", func() {
@@ -660,7 +749,7 @@ var _ = Describe("doSPCX planning", func() {
 		)
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(commands).To(HaveLen(1))
+		Expect(commands).To(HaveLen(2))
 		Expect(commands[0].args).To(ContainElements(
 			"profile=SPX_NetPlugin",
 			"params=deployment_mode=host-k8s",
@@ -682,7 +771,7 @@ var _ = Describe("doSPCX planning", func() {
 		)
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(commands).To(HaveLen(1))
+		Expect(commands).To(HaveLen(2))
 		Expect(commands[0].args).To(ContainElements(
 			"profile=single-plane",
 			"params=deployment_mode=host-k8s",

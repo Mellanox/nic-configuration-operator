@@ -51,19 +51,18 @@ type spectrumXNVConfigUtils interface {
 
 func (h configurationManager) preparedSpectrumXPlan(
 	device *v1alpha1.NicDevice,
-	stage spectrumx.PlanStage,
 ) (*spectrumx.Plan, error) {
 	if !spectrumXEnabled(device) {
 		return nil, nil
 	}
 	if h.spectrumXConfigManager == nil {
 		return nil, fmt.Errorf(
-			"matching doSPCX %s plan is required for device %q: Spectrum-X manager is not configured",
-			stage, device.Name)
+			"matching doSPCX plan is required for device %q: Spectrum-X manager is not configured",
+			device.Name)
 	}
-	plan, err := h.spectrumXConfigManager.GetPreparedPlan(device, stage)
+	plan, err := h.spectrumXConfigManager.GetPreparedPlan(device)
 	if err != nil {
-		return nil, fmt.Errorf("matching doSPCX %s plan is required for device %q: %w", stage, device.Name, err)
+		return nil, fmt.Errorf("matching doSPCX plan is required for device %q: %w", device.Name, err)
 	}
 	return plan, nil
 }
@@ -80,7 +79,7 @@ func (h configurationManager) spectrumXNVConfigUtils(device *v1alpha1.NicDevice)
 func (h configurationManager) preparedSpectrumXNVConfig(
 	device *v1alpha1.NicDevice,
 ) (*spectrumx.Plan, spectrumXNVConfigUtils, error) {
-	plan, err := h.preparedSpectrumXPlan(device, spectrumx.PlanStagePrepare)
+	plan, err := h.preparedSpectrumXPlan(device)
 	if err != nil || plan == nil {
 		return plan, nil, err
 	}

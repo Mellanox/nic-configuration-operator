@@ -16,30 +16,26 @@ type PlanManager struct {
 	mock.Mock
 }
 
-// PreparePlan provides a mock function with given fields: ctx, devices, stage.
-func (_m *PlanManager) PreparePlan(
-	ctx context.Context,
-	devices []*v1alpha1.NicDevice,
-	stage spectrumx.PlanStage,
-) error {
-	ret := _m.Called(ctx, devices, stage)
+// PreparePlan provides a mock function with given fields: ctx, devices.
+func (_m *PlanManager) PreparePlan(ctx context.Context, devices []*v1alpha1.NicDevice) error {
+	ret := _m.Called(ctx, devices)
 
 	if len(ret) == 0 {
 		panic("no return value specified for PreparePlan")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, []*v1alpha1.NicDevice, spectrumx.PlanStage) error); ok {
-		r0 = rf(ctx, devices, stage)
+	if rf, ok := ret.Get(0).(func(context.Context, []*v1alpha1.NicDevice) error); ok {
+		r0 = rf(ctx, devices)
 	} else {
 		r0 = ret.Error(0)
 	}
 	return r0
 }
 
-// GetPreparedPlan provides a mock function with given fields: device, stage.
-func (_m *PlanManager) GetPreparedPlan(device *v1alpha1.NicDevice, stage spectrumx.PlanStage) (*spectrumx.Plan, error) {
-	ret := _m.Called(device, stage)
+// GetPreparedPlan provides a mock function with given fields: device.
+func (_m *PlanManager) GetPreparedPlan(device *v1alpha1.NicDevice) (*spectrumx.Plan, error) {
+	ret := _m.Called(device)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetPreparedPlan")
@@ -47,16 +43,16 @@ func (_m *PlanManager) GetPreparedPlan(device *v1alpha1.NicDevice, stage spectru
 
 	var r0 *spectrumx.Plan
 	var r1 error
-	if rf, ok := ret.Get(0).(func(*v1alpha1.NicDevice, spectrumx.PlanStage) (*spectrumx.Plan, error)); ok {
-		return rf(device, stage)
+	if rf, ok := ret.Get(0).(func(*v1alpha1.NicDevice) (*spectrumx.Plan, error)); ok {
+		return rf(device)
 	}
-	if rf, ok := ret.Get(0).(func(*v1alpha1.NicDevice, spectrumx.PlanStage) *spectrumx.Plan); ok {
-		r0 = rf(device, stage)
+	if rf, ok := ret.Get(0).(func(*v1alpha1.NicDevice) *spectrumx.Plan); ok {
+		r0 = rf(device)
 	} else if ret.Get(0) != nil {
 		r0 = ret.Get(0).(*spectrumx.Plan)
 	}
-	if rf, ok := ret.Get(1).(func(*v1alpha1.NicDevice, spectrumx.PlanStage) error); ok {
-		r1 = rf(device, stage)
+	if rf, ok := ret.Get(1).(func(*v1alpha1.NicDevice) error); ok {
+		r1 = rf(device)
 	} else {
 		r1 = ret.Error(1)
 	}

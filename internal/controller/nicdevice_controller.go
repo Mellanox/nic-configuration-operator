@@ -195,11 +195,11 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	log.Log.Info("firmware is ready for all devices, proceeding with NIC configuration")
 
-	// doSPCX XPath validation requires the node-scoped prepare plan. Build or
-	// retrieve it before validating individual devices.
-	planDevices, err := r.prepareSpectrumXPlan(ctx, configStatuses, spectrumx.PlanStagePrepare)
+	// Build or retrieve the complete node-scoped doSPCX plan before validating
+	// and applying individual devices.
+	planDevices, err := r.prepareSpectrumXPlan(ctx, configStatuses)
 	if err != nil {
-		planErr := fmt.Errorf("prepare doSPCX NV configuration plan: %w", err)
+		planErr := fmt.Errorf("prepare doSPCX configuration plan: %w", err)
 		statusErr := r.updateSpectrumXPlanFailureStatus(
 			ctx, planDevices, consts.SpecValidationFailed, planErr)
 		return ctrl.Result{}, errors.Join(planErr, statusErr)
@@ -242,14 +242,6 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	log.Log.Info("applying runtime config")
-	planDevices, err = r.prepareSpectrumXPlan(ctx, configStatuses, spectrumx.PlanStageConfigure)
-	if err != nil {
-		planErr := fmt.Errorf("prepare doSPCX runtime configuration plan: %w", err)
-		statusErr := r.updateSpectrumXPlanFailureStatus(
-			ctx, planDevices, consts.RuntimeConfigUpdateFailedReason, planErr)
-		return ctrl.Result{}, errors.Join(planErr, statusErr)
-	}
-
 	err = runInParallel(ctx, configStatuses, r.applyRuntimeConfig)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -514,24 +506,19 @@ func runInParallel(ctx context.Context, statuses nicDeviceConfigurationStatuses,
 func (r *NicDeviceReconciler) prepareSpectrumXPlan(
 	ctx context.Context,
 	statuses nicDeviceConfigurationStatuses,
-	stage spectrumx.PlanStage,
 ) ([]*v1alpha1.NicDevice, error) {
-	devices := spectrumXDevicesForPlan(statuses, stage)
+	devices := spectrumXDevicesForPlan(statuses)
 	if len(devices) == 0 {
 		return nil, nil
 	}
-	return devices, r.SpectrumXManager.PreparePlan(ctx, devices, stage)
+	return devices, r.SpectrumXManager.PreparePlan(ctx, devices)
 }
 
-func spectrumXDevicesForPlan(
-	statuses nicDeviceConfigurationStatuses,
-	stage spectrumx.PlanStage,
-) []*v1alpha1.NicDevice {
+func spectrumXDevicesForPlan(statuses nicDeviceConfigurationStatuses) []*v1alpha1.NicDevice {
 	devices := make([]*v1alpha1.NicDevice, 0, len(statuses))
 	for _, status := range statuses {
 		device := status.device
 		if device != nil && device.Spec.Configuration != nil &&
-			(stage != spectrumx.PlanStagePrepare || !device.Spec.Configuration.ResetToDefault) &&
 			device.Spec.Configuration.Template != nil &&
 			device.Spec.Configuration.Template.SpectrumXOptimized != nil &&
 			device.Spec.Configuration.Template.SpectrumXOptimized.Enabled {

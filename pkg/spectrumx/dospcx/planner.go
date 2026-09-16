@@ -51,14 +51,11 @@ const (
 	defaultDospcxPlatformType = "gb300"
 )
 
-// PlanStage identifies the doSPCX configuration phase represented by a plan.
-type PlanStage string
+type planStage string
 
 const (
-	// PlanStagePrepare contains persistent configuration applied before reboot.
-	PlanStagePrepare PlanStage = "prepare"
-	// PlanStageConfigure contains runtime configuration applied after reboot.
-	PlanStageConfigure PlanStage = "configure"
+	planStagePrepare   planStage = "prepare"
+	planStageConfigure planStage = "configure"
 )
 
 // Plan is the homogeneous configuration intent compiled from doSPCX plans.
@@ -146,26 +143,29 @@ type planMetadata struct {
 }
 
 type preparedPlan struct {
+	metadata  map[planStage]planMetadata
+	targetMap targetMap
+	plan      *Plan
+}
+
+type preparedStagePlan struct {
 	metadata  planMetadata
 	targetMap targetMap
 	plan      *Plan
 }
 
-// PreparePlan ensures that a matching node-scoped plan is cached for the
-// requested phase. It is a no-op when none of the devices enable Spectrum-X.
+// PreparePlan ensures that one matching node-scoped plan containing persistent
+// and runtime configuration is cached. It is a no-op when none of the devices
+// enable Spectrum-X.
 func (m *Manager) PreparePlan(
 	ctx context.Context,
 	devices []*v1alpha1.NicDevice,
-	stage PlanStage,
 ) error {
 	if !hasSpectrumXEnabledDevice(devices) {
 		return nil
 	}
 	if m == nil || m.execInterface == nil {
 		return fmt.Errorf("command executor must not be nil")
-	}
-	if err := validatePlanStage(stage); err != nil {
-		return err
 	}
 	stateDir := m.resolvedStateDir()
 	if !filepath.IsAbs(stateDir) {
@@ -184,43 +184,65 @@ func (m *Manager) PreparePlan(
 	m.planMutex.Lock()
 	defer m.planMutex.Unlock()
 
-	generatedPlanName := planName(config.nodeName, stage)
 	targetMapPath := filepath.Join(stateDir, "target-maps", targetMapName(config.nodeName)+".json")
 	targetMapContent, err := marshalJSONFile(config.targetMap)
 	if err != nil {
 		return fmt.Errorf("marshal doSPCX target map: %w", err)
 	}
-	planPath := filepath.Join(stateDir, "plans", generatedPlanName, "plan.json")
-	metadataPath := filepath.Join(filepath.Dir(planPath), "metadata.json")
-	metadata := newPlanMetadata(
-		m, config, stage, stateDir, targetMapPath, params, sha256Digest(targetMapContent))
+	targetMapDigest := sha256Digest(targetMapContent)
+	if err := writeFileAtomic(targetMapPath, targetMapContent); err != nil {
+		return fmt.Errorf("write doSPCX target map %q: %w", targetMapPath, err)
+	}
 	if m.preparedPlans == nil {
 		m.preparedPlans = make(map[string]*preparedPlan)
 	}
-	if cached, found := m.preparedPlans[generatedPlanName]; found && cached != nil && cached.plan != nil &&
-		reflect.DeepEqual(cached.metadata, metadata) {
-		log.FromContext(ctx).V(2).Info("reusing in-memory doSPCX plan",
-			"node", config.nodeName,
-			"stage", stage)
-		return nil
-	}
-	if cached, reason := loadSavedPlan(planPath, metadataPath, targetMapPath, metadata, config); cached != nil {
-		m.preparedPlans[generatedPlanName] = cached
-		log.FromContext(ctx).V(2).Info("reusing saved doSPCX plan",
-			"node", config.nodeName,
-			"stage", stage,
-			"plan", planPath,
-			"metadata", metadataPath)
-		return nil
-	} else {
-		log.FromContext(ctx).V(2).Info("saved doSPCX plan cannot be reused",
-			"node", config.nodeName,
-			"stage", stage,
-			"reason", reason)
+
+	cacheKey := targetMapName(config.nodeName)
+	cached := m.preparedPlans[cacheKey]
+	stagePlans := make(map[planStage]*preparedStagePlan, 2)
+	for _, stage := range []planStage{planStagePrepare, planStageConfigure} {
+		stagePlan, stageErr := m.prepareStagePlan(
+			ctx, config, params, stateDir, targetMapPath, targetMapDigest, stage, cached)
+		if stageErr != nil {
+			return fmt.Errorf("prepare doSPCX %s plan: %w", stage, stageErr)
+		}
+		stagePlans[stage] = stagePlan
 	}
 
-	if err := writeFileAtomic(targetMapPath, targetMapContent); err != nil {
-		return fmt.Errorf("write doSPCX target map %q: %w", targetMapPath, err)
+	m.preparedPlans[cacheKey] = combineStagePlans(
+		stagePlans[planStagePrepare], stagePlans[planStageConfigure])
+
+	return nil
+}
+
+func (m *Manager) prepareStagePlan(
+	ctx context.Context,
+	config *planConfig,
+	params []string,
+	stateDir string,
+	targetMapPath string,
+	targetMapDigest string,
+	stage planStage,
+	cached *preparedPlan,
+) (*preparedStagePlan, error) {
+	generatedPlanName := planName(config.nodeName, stage)
+	planPath := filepath.Join(stateDir, "plans", generatedPlanName, "plan.json")
+	metadataPath := filepath.Join(filepath.Dir(planPath), "metadata.json")
+	metadata := newPlanMetadata(m, config, stage, stateDir, targetMapPath, params, targetMapDigest)
+	if cached != nil && cached.plan != nil && reflect.DeepEqual(cached.metadata[stage], metadata) {
+		log.FromContext(ctx).V(2).Info("reusing in-memory doSPCX plan",
+			"node", config.nodeName, "stage", stage)
+		return &preparedStagePlan{
+			metadata: metadata, targetMap: cached.targetMap, plan: planForStage(cached.plan, stage),
+		}, nil
+	}
+	if saved, reason := loadSavedPlan(planPath, metadataPath, targetMapPath, metadata, config); saved != nil {
+		log.FromContext(ctx).V(2).Info("reusing saved doSPCX plan",
+			"node", config.nodeName, "stage", stage, "plan", planPath, "metadata", metadataPath)
+		return saved, nil
+	} else {
+		log.FromContext(ctx).V(2).Info("saved doSPCX plan cannot be reused",
+			"node", config.nodeName, "stage", stage, "reason", reason)
 	}
 
 	result, err := dmscli.GenerateBlueprintPlan(ctx, m.execInterface, dmscli.BlueprintPlanRequest{
@@ -232,45 +254,30 @@ func (m *Manager) PreparePlan(
 		Params:             params,
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	plan, err := validateGeneratedPlan(result.PlanJSON, generatedPlanName, config, stage)
 	if err != nil {
-		return err
+		return nil, err
 	}
-
 	if err := writeRawJSONFileAtomic(planPath, result.PlanJSON); err != nil {
-		return fmt.Errorf("write doSPCX %s plan %q: %w", stage, planPath, err)
+		return nil, fmt.Errorf("write doSPCX %s plan %q: %w", stage, planPath, err)
 	}
 	if err := writeJSONFileAtomic(metadataPath, metadata); err != nil {
-		return fmt.Errorf("write doSPCX %s plan metadata %q: %w", stage, metadataPath, err)
-	}
-	m.preparedPlans[generatedPlanName] = &preparedPlan{
-		metadata:  metadata,
-		targetMap: config.targetMap,
-		plan:      plan,
+		return nil, fmt.Errorf("write doSPCX %s plan metadata %q: %w", stage, metadataPath, err)
 	}
 	log.FromContext(ctx).Info("generated doSPCX plan",
-		"node", config.nodeName,
-		"stage", stage,
-		"profile", config.profile,
-		"platformType", config.platformType,
-		"devices", len(config.targetMap.PreBreakout.Targets),
-		"targetMap", targetMapPath,
-		"plan", planPath,
-		"metadata", metadataPath)
-
-	return nil
+		"node", config.nodeName, "stage", stage, "profile", config.profile,
+		"platformType", config.platformType, "devices", len(config.targetMap.PreBreakout.Targets),
+		"targetMap", targetMapPath, "plan", planPath, "metadata", metadataPath)
+	return &preparedStagePlan{metadata: metadata, targetMap: config.targetMap, plan: plan}, nil
 }
 
 // GetPreparedPlan retrieves a cached plan only when it still matches the
 // supplied Spectrum-X device and includes that device in its target map.
-func (m *Manager) GetPreparedPlan(device *v1alpha1.NicDevice, stage PlanStage) (*Plan, error) {
+func (m *Manager) GetPreparedPlan(device *v1alpha1.NicDevice) (*Plan, error) {
 	if m == nil {
 		return nil, fmt.Errorf("plan manager must not be nil")
-	}
-	if err := validatePlanStage(stage); err != nil {
-		return nil, err
 	}
 	if !spectrumXEnabledForPlan(device) {
 		return nil, fmt.Errorf("device does not enable Spectrum-X optimization")
@@ -292,27 +299,60 @@ func (m *Manager) GetPreparedPlan(device *v1alpha1.NicDevice, stage PlanStage) (
 	if !filepath.IsAbs(stateDir) {
 		return nil, fmt.Errorf("blueprints state directory must be an absolute path")
 	}
-	generatedPlanName := planName(config.nodeName, stage)
 	targetMapPath := filepath.Join(stateDir, "target-maps", targetMapName(config.nodeName)+".json")
-	cached, found := m.preparedPlans[generatedPlanName]
+	cached, found := m.preparedPlans[targetMapName(config.nodeName)]
 	if !found || cached == nil || cached.plan == nil {
-		return nil, fmt.Errorf("doSPCX %s plan is not prepared for device %q", stage, device.Name)
+		return nil, fmt.Errorf("doSPCX plan is not prepared for device %q", device.Name)
 	}
-	expectedMetadata := newPlanMetadata(
-		m, config, stage, stateDir, targetMapPath, params, cached.metadata.TargetMapDigest)
-	if cached.metadata.TargetMapDigest == "" || !reflect.DeepEqual(cached.metadata, expectedMetadata) {
-		return nil, fmt.Errorf("cached doSPCX %s plan does not match device %q inputs", stage, device.Name)
+	for _, stage := range []planStage{planStagePrepare, planStageConfigure} {
+		metadata, metadataFound := cached.metadata[stage]
+		if !metadataFound || metadata.TargetMapDigest == "" {
+			return nil, fmt.Errorf("cached doSPCX plan is incomplete for device %q", device.Name)
+		}
+		expectedMetadata := newPlanMetadata(
+			m, config, stage, stateDir, targetMapPath, params, metadata.TargetMapDigest)
+		if !reflect.DeepEqual(metadata, expectedMetadata) {
+			return nil, fmt.Errorf("cached doSPCX plan does not match device %q inputs", device.Name)
+		}
 	}
 	if err := validateDeviceInTargetMap(config, cached.targetMap); err != nil {
-		return nil, fmt.Errorf("cached doSPCX %s plan does not match device %q: %w", stage, device.Name, err)
+		return nil, fmt.Errorf("cached doSPCX plan does not match device %q: %w", device.Name, err)
 	}
 	return clonePlan(cached.plan), nil
+}
+
+func combineStagePlans(prepare, configure *preparedStagePlan) *preparedPlan {
+	return &preparedPlan{
+		metadata: map[planStage]planMetadata{
+			planStagePrepare:   prepare.metadata,
+			planStageConfigure: configure.metadata,
+		},
+		targetMap: prepare.targetMap,
+		plan: &Plan{
+			Breakout:      cloneXPathOperations(prepare.plan.Breakout),
+			PostBreakout:  cloneXPathOperations(prepare.plan.PostBreakout),
+			RuntimeConfig: cloneOperationGroups(configure.plan.RuntimeConfig),
+		},
+	}
+}
+
+func planForStage(plan *Plan, stage planStage) *Plan {
+	if plan == nil {
+		return nil
+	}
+	if stage == planStagePrepare {
+		return &Plan{
+			Breakout:     cloneXPathOperations(plan.Breakout),
+			PostBreakout: cloneXPathOperations(plan.PostBreakout),
+		}
+	}
+	return &Plan{RuntimeConfig: cloneOperationGroups(plan.RuntimeConfig)}
 }
 
 func newPlanMetadata(
 	m *Manager,
 	config *planConfig,
-	stage PlanStage,
+	stage planStage,
 	stateDir string,
 	targetMapPath string,
 	params []string,
@@ -385,9 +425,9 @@ func (m *Manager) resolvedStateDir() string {
 	return defaultBlueprintsStateDir
 }
 
-func validatePlanStage(stage PlanStage) error {
+func validatePlanStage(stage planStage) error {
 	switch stage {
-	case PlanStagePrepare, PlanStageConfigure:
+	case planStagePrepare, planStageConfigure:
 		return nil
 	default:
 		return fmt.Errorf("unsupported doSPCX plan stage %q", stage)
@@ -409,7 +449,7 @@ func loadSavedPlan(
 	targetMapPath string,
 	expectedMetadata planMetadata,
 	config *planConfig,
-) (*preparedPlan, string) {
+) (*preparedStagePlan, string) {
 	metadataContent, err := os.ReadFile(metadataPath)
 	if err != nil {
 		return nil, fmt.Sprintf("read metadata: %v", err)
@@ -438,11 +478,11 @@ func loadSavedPlan(
 	if err != nil {
 		return nil, fmt.Sprintf("read plan: %v", err)
 	}
-	plan, err := validateGeneratedPlan(planContent, expectedMetadata.PlanName, config, PlanStage(expectedMetadata.Stage))
+	plan, err := validateGeneratedPlan(planContent, expectedMetadata.PlanName, config, planStage(expectedMetadata.Stage))
 	if err != nil {
 		return nil, fmt.Sprintf("validate plan: %v", err)
 	}
-	return &preparedPlan{metadata: savedMetadata, targetMap: savedTargetMap, plan: plan}, ""
+	return &preparedStagePlan{metadata: savedMetadata, targetMap: savedTargetMap, plan: plan}, ""
 }
 
 func buildPlanConfig(devices []*v1alpha1.NicDevice) (*planConfig, error) {
@@ -599,7 +639,7 @@ func blueprintDeviceID(deviceType string) (string, error) {
 	}
 }
 
-func planName(nodeName string, stage PlanStage) string {
+func planName(nodeName string, stage planStage) string {
 	return boundedPlanName("nco-" + strings.ToLower(nodeName) + "-spcx-" + string(stage))
 }
 
@@ -625,7 +665,7 @@ func validateGeneratedPlan(
 	planJSON []byte,
 	expectedName string,
 	config *planConfig,
-	expectedStage PlanStage,
+	expectedStage planStage,
 ) (*Plan, error) {
 	document, err := decodePlanDocument(planJSON)
 	if err != nil {

@@ -29,21 +29,11 @@ type Plan = dospcx.Plan
 // OperationGroup is an ordered group of runtime configuration operations.
 type OperationGroup = dospcx.OperationGroup
 
-// PlanStage identifies the doSPCX configuration phase used to generate a plan.
-type PlanStage = dospcx.PlanStage
-
-const (
-	// PlanStagePrepare contains persistent configuration applied before reboot.
-	PlanStagePrepare = dospcx.PlanStagePrepare
-	// PlanStageConfigure contains runtime configuration applied after reboot.
-	PlanStageConfigure = dospcx.PlanStageConfigure
-)
-
 // PlanManager owns doSPCX target-map construction, plan generation, caching,
 // persistence, and retrieval.
 type PlanManager interface {
-	PreparePlan(ctx context.Context, devices []*v1alpha1.NicDevice, stage PlanStage) error
-	GetPreparedPlan(device *v1alpha1.NicDevice, stage PlanStage) (*Plan, error)
+	PreparePlan(ctx context.Context, devices []*v1alpha1.NicDevice) error
+	GetPreparedPlan(device *v1alpha1.NicDevice) (*Plan, error)
 }
 
 // BlueprintsDataManager installs the authored data consumed by the doSPCX planner.
@@ -60,22 +50,18 @@ type dospcxLifecycle interface {
 func (m *spectrumXConfigManager) PreparePlan(
 	ctx context.Context,
 	devices []*v1alpha1.NicDevice,
-	stage PlanStage,
 ) error {
 	if m == nil || m.dospcxManager == nil {
 		return fmt.Errorf("doSPCX planner manager must not be nil")
 	}
-	return m.dospcxManager.PreparePlan(ctx, devices, stage)
+	return m.dospcxManager.PreparePlan(ctx, devices)
 }
 
-func (m *spectrumXConfigManager) GetPreparedPlan(
-	device *v1alpha1.NicDevice,
-	stage PlanStage,
-) (*Plan, error) {
+func (m *spectrumXConfigManager) GetPreparedPlan(device *v1alpha1.NicDevice) (*Plan, error) {
 	if m == nil || m.dospcxManager == nil {
 		return nil, fmt.Errorf("doSPCX planner manager must not be nil")
 	}
-	return m.dospcxManager.GetPreparedPlan(device, stage)
+	return m.dospcxManager.GetPreparedPlan(device)
 }
 
 func (m *spectrumXConfigManager) InstallBlueprintsData(archive []byte) error {
