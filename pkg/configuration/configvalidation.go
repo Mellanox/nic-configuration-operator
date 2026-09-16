@@ -412,23 +412,26 @@ func (v *configValidationImpl) RuntimeConfigApplied(device *v1alpha1.NicDevice) 
 }
 
 func (v *configValidationImpl) validatePortCarrierState(device *v1alpha1.NicDevice) error {
+	checkedPort := false
 	for _, port := range device.Status.Ports {
 		if port.NetworkInterface == "" {
 			continue
 		}
 
+		checkedPort = true
 		noCarrier, err := v.utils.HasNoCarrier(port.NetworkInterface)
 		if err != nil {
 			log.Log.Error(err, "can't check link state", "device", device.Name, "port", port.PCI)
 			return err
 		}
-		if noCarrier {
-			return fmt.Errorf(
-				"network interface %s for device port %s has NO-CARRIER",
-				port.NetworkInterface, port.PCI)
+		if !noCarrier {
+			return nil
 		}
 	}
 
+	if checkedPort {
+		return fmt.Errorf("all network interfaces have NO-CARRIER")
+	}
 	return nil
 }
 
