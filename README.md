@@ -348,7 +348,7 @@ The name of the device combines the node name, device type and its PCI device ad
 
 `FirmwareUpdateInProgress` status condition can be used for tracking the state of the FW validation/update on a specific device. If an error occurs during FW update, it will be reflected in this field.
 `ConfigUpdateInProgress` status condition can be used for tracking the state of the FW configuration update on a specific device. If an error occurs during FW configuration update, it will be reflected in this field.
-Before validating runtime configuration, the configuration daemon checks every discovered network interface for carrier. An interface reported as `NO-CARRIER` causes runtime validation to fail and is reflected in `ConfigUpdateInProgress` with reason `RuntimeConfigUpdateFailed` until carrier is restored.
+Before validating runtime configuration, the configuration daemon checks every discovered network interface for carrier. Runtime validation fails only when all interfaces on the NIC report `NO-CARRIER`, and the failure is reflected in `ConfigUpdateInProgress` with reason `RuntimeConfigUpdateFailed` until at least one interface has carrier. This allows available planes to be configured while other planes are disconnected.
 
 for more information refer to [api-reference](docs/api-reference.md).
 
