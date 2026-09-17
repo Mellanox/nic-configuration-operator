@@ -43,17 +43,16 @@ RUN --mount=type=cache,target=/go/pkg/mod/ GO_GCFLAGS=${GCFLAGS} make build-daem
 
 FROM $RHEL_STIG_BASE_IMAGE
 
-ENV MFT_VERSION=4.33.0-169
+ENV MFT_VERSION=4.36.0-147
 ARG CVE_UPDATES_RHEL
 
-ARG DOCA_VERSION=3.2.1
-ARG DOCA_FULL_VERSION=3.2.1-044000-25.10
+ARG DOCA_VERSION=3.4.0
+ARG DOCA_PKG_VERSION=3.4.0-085000_26.04
 
 RUN dnf makecache && dnf install -y libusbx systemd pciutils-libs fuse-libs hwdata procps-ng && \
     dnf clean all
 
 RUN dnf install -y wget kmod && \
-    DOCA_PKG_VERSION=$(echo ${DOCA_FULL_VERSION} | sed 's/-\([0-9][0-9]*\.[0-9][0-9]*\)$/_\1/') && \
     wget https://www.mellanox.com/downloads/DOCA/DOCA_v${DOCA_VERSION}/host/doca-host-${DOCA_PKG_VERSION}_rhel9.x86_64.rpm && \
     rpm -ivh doca-host-${DOCA_PKG_VERSION}_rhel9.x86_64.rpm && \
     dnf makecache && \
