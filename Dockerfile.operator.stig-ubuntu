@@ -43,7 +43,7 @@ RUN --mount=type=cache,target=/go/pkg/mod/ GO_GCFLAGS=${GCFLAGS} make build-mana
 
 FROM $UBUNTU_STIG_BASE_IMAGE
 
-ENV MFT_VERSION=4.33.0-169
+ENV MFT_VERSION=4.36.0-147
 
 # Install MFT (Mellanox Firmware Tools) - amd64/x86_64 only for STIG
 # Note: kmod is required by MFT
