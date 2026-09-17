@@ -43,7 +43,7 @@ RUN --mount=type=cache,target=/go/pkg/mod/ GO_GCFLAGS=${GCFLAGS} make build-mana
 
 FROM $RHEL_STIG_BASE_IMAGE
 
-ENV MFT_VERSION=4.33.0-169
+ENV MFT_VERSION=4.36.0-147
 ARG CVE_UPDATES_RHEL
 
 # Install MFT (Mellanox Firmware Tools) - amd64/x86_64 only for STIG
