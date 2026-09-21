@@ -402,14 +402,20 @@ The NicDevice CRD is created and reconciled by the configuration daemon. The rec
 
 ### NicInterfaceNameTemplate
 
-The NicInterfaceNameTemplate CRD allows you to define custom naming patterns for RDMA and network device interfaces on Spectrum-X NICs. This is useful in multiplane and multi-rail deployments where predictable interface naming is required.
+The NicInterfaceNameTemplate CRD allows you to define custom naming patterns for RDMA and network device interfaces. This is useful in multiplane and multi-rail deployments, and on nodes where different groups of NICs need stable names based on their fabric role.
 
 The operator deploys udev rules to the host to rename network and RDMA interfaces according to the specified naming template.
+
+Multiple templates can select the same node when their `railPciAddresses` select disjoint `NicDevice` objects. Each template has its own prefixes and zero-based indices, allowing names such as `ew0`, `ns0`, and `admin0` on one node. If two templates select any port of the same `NicDevice`, the controller rejects the proposed assignment and preserves the existing naming specs and udev rules. See the [fabric-role example](docs/examples/example-nicinterfacenametemplate-fabric-roles.yaml).
+
+Naming ownership is per `NicDevice`, including every PF represented by that object. Different PFs of one `NicDevice` cannot be split across templates. Generated netdev names must be unique among netdevs, and generated RDMA names must be unique among RDMA devices. The same name may be used once in each namespace to align a netdev with its RDMA device.
 
 The template uses the following placeholders for device name construction:
 * `%nic_id%`: The index of the NIC in the flattened list of NICs
 * `%plane_id%`: The index of the plane of the specific NIC
 * `%rail_id%`: The index of the rail where the given NIC belongs to
+
+List one PCI address per `NicDevice` in `railPciAddresses`. For a multi-PF device, `pfsPerNic` determines how many PF naming rules are generated. The `%nic_id%` value is shared by all PFs of that device; use `%plane_id%` when each PF needs a distinct name.
 
 #### [Example NicInterfaceNameTemplate](docs/examples/spectrum-x/example-nicinterfacenametemplate-spectrum-x.yaml):
 
@@ -429,6 +435,8 @@ spec:
 ```
 
 The `railPciAddresses` field defines the PCI address to rail mapping. The first dimension is the rail index and the second dimension is the list of PCI addresses of the NICs in that rail.
+
+Set only `netDevicePrefix` to rename netdevs without renaming RDMA devices. To rename only RDMA devices, set `netDevicePrefix: ""` explicitly and provide `rdmaDevicePrefix`; the `netDevicePrefix` field remains required by the API schema. At least one prefix must be non-empty.
 
 #### Generated udev rules
 

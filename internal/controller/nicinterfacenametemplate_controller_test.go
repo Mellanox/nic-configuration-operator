@@ -136,7 +136,7 @@ var _ = Describe("NicInterfaceNameTemplate Controller", func() {
 				NodeSelector:     map[string]string{"key": "value"},
 				PfsPerNic:        2,
 				RdmaDevicePrefix: "rdma%nic_id%",
-				NetDevicePrefix:  "net%nic_id%",
+				NetDevicePrefix:  "net%nic_id%p%plane_id%",
 				RailPciAddresses: [][]string{
 					{"0000:1a:00.0", "0000:2a:00.0"},
 					{"0000:3a:00.0", "0000:4a:00.0"},
@@ -165,6 +165,93 @@ var _ = Describe("NicInterfaceNameTemplate Controller", func() {
 
 		// Verify device3 doesn't get any spec (PCI address not in template)
 		Consistently(getDeviceInterfaceNameSpec(ctx, device3.Name, namespaceName, k8sClient), time.Second).Should(BeNil())
+	})
+
+	It("should apply disjoint templates to different devices on the same node", func() {
+		device1 := &v1alpha1.NicDevice{ObjectMeta: metav1.ObjectMeta{Name: "device1", Namespace: namespaceName}}
+		Expect(k8sClient.Create(ctx, device1)).To(Succeed())
+		device1.Status = v1alpha1.NicDeviceStatus{
+			Node:  nodeName,
+			Ports: []v1alpha1.NicDevicePortSpec{{PCI: "0000:1a:00.0"}},
+		}
+		Expect(k8sClient.Status().Update(ctx, device1)).To(Succeed())
+
+		device2 := &v1alpha1.NicDevice{ObjectMeta: metav1.ObjectMeta{Name: "device2", Namespace: namespaceName}}
+		Expect(k8sClient.Create(ctx, device2)).To(Succeed())
+		device2.Status = v1alpha1.NicDeviceStatus{
+			Node:  nodeName,
+			Ports: []v1alpha1.NicDevicePortSpec{{PCI: "0000:2a:00.0"}},
+		}
+		Expect(k8sClient.Status().Update(ctx, device2)).To(Succeed())
+
+		eastWest := &v1alpha1.NicInterfaceNameTemplate{
+			ObjectMeta: metav1.ObjectMeta{Name: "east-west", Namespace: namespaceName},
+			Spec: v1alpha1.NicInterfaceNameTemplateSpec{
+				PfsPerNic:        1,
+				RdmaDevicePrefix: "ew%nic_id%",
+				NetDevicePrefix:  "ew%nic_id%",
+				RailPciAddresses: [][]string{{"0000:1a:00.0"}},
+			},
+		}
+		storage := &v1alpha1.NicInterfaceNameTemplate{
+			ObjectMeta: metav1.ObjectMeta{Name: "storage", Namespace: namespaceName},
+			Spec: v1alpha1.NicInterfaceNameTemplateSpec{
+				PfsPerNic:        1,
+				RdmaDevicePrefix: "ns%nic_id%",
+				NetDevicePrefix:  "ns%nic_id%",
+				RailPciAddresses: [][]string{{"0000:2a:00.0"}},
+			},
+		}
+		Expect(k8sClient.Create(ctx, eastWest)).To(Succeed())
+		Expect(k8sClient.Create(ctx, storage)).To(Succeed())
+
+		Eventually(getDeviceInterfaceNameSpec(ctx, device1.Name, namespaceName, k8sClient)).WithTimeout(time.Minute).Should(Equal(&v1alpha1.NicDeviceInterfaceNameSpec{
+			NicIndex:         0,
+			RailIndex:        0,
+			PlaneIndices:     []int{0},
+			RdmaDevicePrefix: "ew%nic_id%",
+			NetDevicePrefix:  "ew%nic_id%",
+		}))
+		Eventually(getDeviceInterfaceNameSpec(ctx, device2.Name, namespaceName, k8sClient)).WithTimeout(time.Minute).Should(Equal(&v1alpha1.NicDeviceInterfaceNameSpec{
+			NicIndex:         0,
+			RailIndex:        0,
+			PlaneIndices:     []int{0},
+			RdmaDevicePrefix: "ns%nic_id%",
+			NetDevicePrefix:  "ns%nic_id%",
+		}))
+
+		Expect(k8sClient.Delete(ctx, eastWest)).To(Succeed())
+		Eventually(getDeviceInterfaceNameSpec(ctx, device1.Name, namespaceName, k8sClient)).Should(BeNil())
+		Consistently(getDeviceInterfaceNameSpec(ctx, device2.Name, namespaceName, k8sClient), time.Second).Should(Equal(&v1alpha1.NicDeviceInterfaceNameSpec{
+			NicIndex:         0,
+			RailIndex:        0,
+			PlaneIndices:     []int{0},
+			RdmaDevicePrefix: "ns%nic_id%",
+			NetDevicePrefix:  "ns%nic_id%",
+		}))
+	})
+
+	It("should apply an existing template when a matching device is discovered", func() {
+		template := &v1alpha1.NicInterfaceNameTemplate{
+			ObjectMeta: metav1.ObjectMeta{Name: "existing-template", Namespace: namespaceName},
+			Spec: v1alpha1.NicInterfaceNameTemplateSpec{
+				PfsPerNic:        1,
+				RdmaDevicePrefix: "rdma%nic_id%",
+				NetDevicePrefix:  "net%nic_id%",
+				RailPciAddresses: [][]string{{"0000:1a:00.0"}},
+			},
+		}
+		Expect(k8sClient.Create(ctx, template)).To(Succeed())
+
+		device := &v1alpha1.NicDevice{ObjectMeta: metav1.ObjectMeta{Name: "device1", Namespace: namespaceName}}
+		Expect(k8sClient.Create(ctx, device)).To(Succeed())
+		device.Status = v1alpha1.NicDeviceStatus{
+			Node:  nodeName,
+			Ports: []v1alpha1.NicDevicePortSpec{{PCI: "0000:1a:00.0"}},
+		}
+		Expect(k8sClient.Status().Update(ctx, device)).To(Succeed())
+
+		Eventually(getDeviceInterfaceNameSpec(ctx, device.Name, namespaceName, k8sClient)).WithTimeout(time.Minute).ShouldNot(BeNil())
 	})
 
 	It("should not apply template to devices on non-matching nodes", func() {
@@ -209,7 +296,7 @@ var _ = Describe("NicInterfaceNameTemplate Controller", func() {
 				NodeSelector:     map[string]string{"key": "value"},
 				PfsPerNic:        2,
 				RdmaDevicePrefix: "rdma%nic_id%",
-				NetDevicePrefix:  "net%nic_id%",
+				NetDevicePrefix:  "net%nic_id%p%plane_id%",
 				RailPciAddresses: [][]string{
 					{"0000:1a:00.0"},
 				},
@@ -225,7 +312,37 @@ var _ = Describe("NicInterfaceNameTemplate Controller", func() {
 		Consistently(getDeviceInterfaceNameSpec(ctx, device2.Name, namespaceName, k8sClient), time.Second).Should(BeNil())
 	})
 
-	It("should error out and clear specs if multiple templates match the node", func() {
+	It("should reconcile templates when the local node labels change", func() {
+		device := &v1alpha1.NicDevice{ObjectMeta: metav1.ObjectMeta{Name: "device1", Namespace: namespaceName}}
+		Expect(k8sClient.Create(ctx, device)).To(Succeed())
+		device.Status = v1alpha1.NicDeviceStatus{
+			Node:  nodeName,
+			Ports: []v1alpha1.NicDevicePortSpec{{PCI: "0000:1a:00.0"}},
+		}
+		Expect(k8sClient.Status().Update(ctx, device)).To(Succeed())
+
+		template := &v1alpha1.NicInterfaceNameTemplate{
+			ObjectMeta: metav1.ObjectMeta{Name: "label-selected", Namespace: namespaceName},
+			Spec: v1alpha1.NicInterfaceNameTemplateSpec{
+				NodeSelector:     map[string]string{"fabric": "compute"},
+				PfsPerNic:        1,
+				RdmaDevicePrefix: "ew%nic_id%",
+				NetDevicePrefix:  "ew%nic_id%",
+				RailPciAddresses: [][]string{{"0000:1a:00.0"}},
+			},
+		}
+		Expect(k8sClient.Create(ctx, template)).To(Succeed())
+		Consistently(getDeviceInterfaceNameSpec(ctx, device.Name, namespaceName, k8sClient), time.Second).Should(BeNil())
+
+		node := &v1.Node{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, node)).To(Succeed())
+		node.Labels = map[string]string{"fabric": "compute"}
+		Expect(k8sClient.Update(ctx, node)).To(Succeed())
+
+		Eventually(getDeviceInterfaceNameSpec(ctx, device.Name, namespaceName, k8sClient)).WithTimeout(time.Minute).ShouldNot(BeNil())
+	})
+
+	It("should preserve the last assignment if multiple templates select the same device", func() {
 		// Update the default node with required labels
 		node := &v1.Node{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nodeName}, node)).To(Succeed())
@@ -254,7 +371,7 @@ var _ = Describe("NicInterfaceNameTemplate Controller", func() {
 		}
 		Expect(k8sClient.Status().Update(ctx, device)).To(Succeed())
 
-		// Now create templates - reconciler will find device and clear its spec due to multiple matching templates
+		// Apply one valid template first.
 		template1 := &v1alpha1.NicInterfaceNameTemplate{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-interface-template-1",
@@ -264,14 +381,23 @@ var _ = Describe("NicInterfaceNameTemplate Controller", func() {
 				NodeSelector:     map[string]string{"key": "value"},
 				PfsPerNic:        2,
 				RdmaDevicePrefix: "rdma%nic_id%",
-				NetDevicePrefix:  "net%nic_id%",
+				NetDevicePrefix:  "net%nic_id%p%plane_id%",
 				RailPciAddresses: [][]string{
 					{"0000:1a:00.0"},
 				},
 			},
 		}
 		Expect(k8sClient.Create(ctx, template1)).To(Succeed())
+		expected := &v1alpha1.NicDeviceInterfaceNameSpec{
+			NicIndex:         0,
+			RailIndex:        0,
+			PlaneIndices:     []int{0, 1},
+			RdmaDevicePrefix: template1.Spec.RdmaDevicePrefix,
+			NetDevicePrefix:  template1.Spec.NetDevicePrefix,
+		}
+		Eventually(getDeviceInterfaceNameSpec(ctx, device.Name, namespaceName, k8sClient)).WithTimeout(time.Minute).Should(Equal(expected))
 
+		// Add an overlapping template. The valid, already-applied assignment must remain.
 		template2 := &v1alpha1.NicInterfaceNameTemplate{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-interface-template-2",
@@ -281,7 +407,7 @@ var _ = Describe("NicInterfaceNameTemplate Controller", func() {
 				NodeSelector:     map[string]string{"key": "value"},
 				PfsPerNic:        2,
 				RdmaDevicePrefix: "rdma%nic_id%",
-				NetDevicePrefix:  "net%nic_id%",
+				NetDevicePrefix:  "net%nic_id%p%plane_id%",
 				RailPciAddresses: [][]string{
 					{"0000:1a:00.0"},
 				},
@@ -289,8 +415,7 @@ var _ = Describe("NicInterfaceNameTemplate Controller", func() {
 		}
 		Expect(k8sClient.Create(ctx, template2)).To(Succeed())
 
-		// The InterfaceNameTemplate spec should be cleared due to multiple matching templates
-		Eventually(getDeviceInterfaceNameSpec(ctx, device.Name, namespaceName, k8sClient)).WithTimeout(1 * time.Minute).Should(BeNil())
+		Consistently(getDeviceInterfaceNameSpec(ctx, device.Name, namespaceName, k8sClient), 2*time.Second).Should(Equal(expected))
 	})
 
 	It("should clear specs when no templates match the node", func() {
@@ -327,7 +452,7 @@ var _ = Describe("NicInterfaceNameTemplate Controller", func() {
 				NodeSelector:     map[string]string{"key": "value"}, // Won't match default node
 				PfsPerNic:        2,
 				RdmaDevicePrefix: "rdma%nic_id%",
-				NetDevicePrefix:  "net%nic_id%",
+				NetDevicePrefix:  "net%nic_id%p%plane_id%",
 				RailPciAddresses: [][]string{
 					{"0000:1a:00.0"},
 				},
@@ -360,7 +485,7 @@ var _ = Describe("NicInterfaceNameTemplate Controller", func() {
 				NodeSelector:     map[string]string{}, // Empty selector matches all nodes
 				PfsPerNic:        2,
 				RdmaDevicePrefix: "rdma%nic_id%",
-				NetDevicePrefix:  "net%nic_id%",
+				NetDevicePrefix:  "net%nic_id%p%plane_id%",
 				RailPciAddresses: [][]string{
 					{"0000:1a:00.0"},
 				},
@@ -376,6 +501,62 @@ var _ = Describe("NicInterfaceNameTemplate Controller", func() {
 			RdmaDevicePrefix: template.Spec.RdmaDevicePrefix,
 			NetDevicePrefix:  template.Spec.NetDevicePrefix,
 		}))
+	})
+})
+
+var _ = Describe("buildInterfaceNameAssignments", func() {
+	It("should treat different ports of one NicDevice as overlapping ownership", func() {
+		devices := []v1alpha1.NicDevice{{
+			ObjectMeta: metav1.ObjectMeta{Name: "device1", Namespace: "test"},
+			Status: v1alpha1.NicDeviceStatus{
+				Ports: []v1alpha1.NicDevicePortSpec{{PCI: "0000:1a:00.0"}, {PCI: "0000:1a:00.1"}},
+			},
+		}}
+		templates := []v1alpha1.NicInterfaceNameTemplate{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "east-west", Namespace: "test"},
+				Spec: v1alpha1.NicInterfaceNameTemplateSpec{
+					PfsPerNic: 1, NetDevicePrefix: "ew%nic_id%", RailPciAddresses: [][]string{{"0000:1a:00.0"}},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "storage", Namespace: "test"},
+				Spec: v1alpha1.NicInterfaceNameTemplateSpec{
+					PfsPerNic: 1, NetDevicePrefix: "ns%nic_id%", RailPciAddresses: [][]string{{"0000:1a:00.1"}},
+				},
+			},
+		}
+
+		_, err := buildInterfaceNameAssignments("node1", devices, templates)
+		Expect(err).To(MatchError(And(
+			ContainSubstring("selected by multiple NicInterfaceNameTemplates"),
+			ContainSubstring("test/east-west"),
+			ContainSubstring("test/storage"),
+		)))
+	})
+
+	It("should reject templates with no naming prefix", func() {
+		templates := []v1alpha1.NicInterfaceNameTemplate{{
+			ObjectMeta: metav1.ObjectMeta{Name: "empty", Namespace: "test"},
+			Spec: v1alpha1.NicInterfaceNameTemplateSpec{
+				PfsPerNic: 1, RailPciAddresses: [][]string{{"0000:1a:00.0"}},
+			},
+		}}
+
+		_, err := buildInterfaceNameAssignments("node1", nil, templates)
+		Expect(err).To(MatchError(ContainSubstring("must set at least one device prefix")))
+	})
+
+	It("should reject non-positive pfsPerNic", func() {
+		templates := []v1alpha1.NicInterfaceNameTemplate{{
+			ObjectMeta: metav1.ObjectMeta{Name: "invalid-pfs", Namespace: "test"},
+			Spec: v1alpha1.NicInterfaceNameTemplateSpec{
+				PfsPerNic: 0, NetDevicePrefix: "net%nic_id%", RailPciAddresses: [][]string{{"0000:1a:00.0"}},
+			},
+		}}
+
+		_, err := buildInterfaceNameAssignments("node1", nil, templates)
+		Expect(err).To(MatchError(ContainSubstring("must set pfsPerNic greater than zero")))
 	})
 })
 
