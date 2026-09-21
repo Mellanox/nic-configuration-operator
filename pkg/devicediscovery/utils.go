@@ -24,7 +24,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/Mellanox/rdmamap"
 	"github.com/jaypipes/ghw"
@@ -42,31 +41,6 @@ const pciDevicesPath = "/sys/bus/pci/devices"
 
 const fwctlDevicesPath = "/dev/fwctl"
 
-const mlxvpdMaxAttempts = 3
-
-// mlxvpdBackoff is a var (not const) so tests can override it to keep runs fast.
-var mlxvpdBackoff = 500 * time.Millisecond
-
-// runCommandWithRetry runs `name args...` up to maxAttempts times, sleeping backoff
-// between failed attempts. Returns combined stdout+stderr from the last attempt and
-// its error. A fresh Cmd is built each iteration (execUtils.Cmd is single-use).
-func runCommandWithRetry(execInterface execUtils.Interface, name string, args []string, maxAttempts int, backoff time.Duration) ([]byte, error) {
-	var output []byte
-	var err error
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		output, err = execInterface.Command(name, args...).CombinedOutput()
-		log.Log.V(2).Info("command output", "command", name, "attempt", attempt, "output", string(output))
-		if err == nil {
-			return output, nil
-		}
-		if attempt < maxAttempts {
-			log.Log.V(1).Info("command failed, retrying", "command", name, "attempt", attempt, "error", err)
-			time.Sleep(backoff)
-		}
-	}
-	return output, err
-}
-
 // physPortNameRegex matches physical port names like "p0", "p1" — the PF uplink interfaces.
 // VF/SF representors have names like "pf0vf0", "pf0sf0" which do NOT match this pattern.
 var physPortNameRegex = regexp.MustCompile(`^p\d+$`)
@@ -75,7 +49,7 @@ type DeviceDiscoveryUtils interface {
 	// GetPCIDevices returns a list of PCI devices on the host
 	GetPCIDevices() ([]*pci.Device, error)
 
-	// GetVPD uses mlxvpd util to retrieve Part Number, Serial Number, Model Name of the PCI device
+	// GetVPD reads the kernel-exposed PCI VPD and retrieves Part Number, Serial Number, and Model Name.
 	GetVPD(pciAddr string) (*types.VPD, error)
 
 	// GetFirmwareVersionAndPSID retrieves the FW version and PSID of the device
@@ -119,95 +93,6 @@ func (d *deviceDiscoveryUtils) GetPCIDevices() ([]*pci.Device, error) {
 	}
 
 	return pciRegistry.Devices, nil
-}
-
-// vpdOutputPatterns is the set of line-regexes used to extract fields from one
-// VPD tool's output. Each pattern must have a single capture group for the value.
-type vpdOutputPatterns struct {
-	partNumber   *regexp.Regexp
-	serialNumber *regexp.Regexp
-	modelName    *regexp.Regexp
-}
-
-// mlxvpd output is a 3-column table: "  PN             Part Number             <value>"
-var mlxvpdPatterns = vpdOutputPatterns{
-	partNumber:   regexp.MustCompile(`^\s*` + consts.PartNumberPrefix + `\s+` + consts.PartNumberDescription + `\s+(.+)$`),
-	serialNumber: regexp.MustCompile(`^\s*` + consts.SerialNumberPrefix + `\s+` + consts.SerialNumberDescription + `\s+(.+)$`),
-	modelName:    regexp.MustCompile(`^\s*` + consts.ModelNamePrefix + `\s+` + consts.ModelNameDescription + `\s+(.+)$`),
-}
-
-// mstvpd output is "KEY: <value>" with model name under "ID:" (no Board Id / IDTAG column).
-var mstvpdPatterns = vpdOutputPatterns{
-	partNumber:   regexp.MustCompile(`^\s*PN:\s+(.+)$`),
-	serialNumber: regexp.MustCompile(`^\s*SN:\s+(.+)$`),
-	modelName:    regexp.MustCompile(`^\s*ID:\s+(.+)$`),
-}
-
-// GetVPD retrieves Part Number, Serial Number, and Model Name for a PCI device.
-// Primary: mlxvpd (MFT). Fallback: mstvpd (mstflint) — used when mlxvpd fails all
-// retries or its output is unparseable. MFT 4.36 segfaults on BlueField-4 PF0;
-// mstvpd reads /sys/bus/pci/devices/<pci>/vpd directly and is hardware-agnostic.
-func (d *deviceDiscoveryUtils) GetVPD(pciAddr string) (*types.VPD, error) {
-	log.Log.Info("HostUtils.GetVPD()", "pciAddr", pciAddr)
-
-	vpd, mlxvpdErr := d.getVPDViaMlxvpd(pciAddr)
-	if mlxvpdErr == nil {
-		return vpd, nil
-	}
-	log.Log.Info("GetVPD(): mlxvpd failed, falling back to mstvpd", "pciAddr", pciAddr, "error", mlxvpdErr.Error())
-
-	vpd, mstvpdErr := d.getVPDViaMstvpd(pciAddr)
-	if mstvpdErr != nil {
-		return nil, fmt.Errorf("both mlxvpd and mstvpd failed: mlxvpd: %w; mstvpd: %w", mlxvpdErr, mstvpdErr)
-	}
-	return vpd, nil
-}
-
-func (d *deviceDiscoveryUtils) getVPDViaMlxvpd(pciAddr string) (*types.VPD, error) {
-	output, err := runCommandWithRetry(d.execInterface, "mlxvpd", []string{"-d", pciAddr}, mlxvpdMaxAttempts, mlxvpdBackoff)
-	if err != nil {
-		return nil, fmt.Errorf("mlxvpd failed after %d attempts: %w", mlxvpdMaxAttempts, err)
-	}
-	return parseVPDOutput(output, mlxvpdPatterns)
-}
-
-func (d *deviceDiscoveryUtils) getVPDViaMstvpd(pciAddr string) (*types.VPD, error) {
-	output, err := d.execInterface.Command("mstvpd", pciAddr).CombinedOutput()
-	log.Log.V(2).Info("command output", "command", "mstvpd", "output", string(output))
-	if err != nil {
-		return nil, fmt.Errorf("mstvpd failed: %w", err)
-	}
-	return parseVPDOutput(output, mstvpdPatterns)
-}
-
-// parseVPDOutput scans VPD tool output line-by-line, extracting the first
-// capture group of each matching regex. Returns an error if PN or SN is missing.
-func parseVPDOutput(output []byte, p vpdOutputPatterns) (*types.VPD, error) {
-	var partNumber, serialNumber, modelName string
-
-	scanner := bufio.NewScanner(strings.NewReader(string(output)))
-	for scanner.Scan() {
-		line := scanner.Text()
-		if m := p.partNumber.FindStringSubmatch(line); len(m) > 1 {
-			partNumber = strings.TrimSpace(m[1])
-		} else if m := p.serialNumber.FindStringSubmatch(line); len(m) > 1 {
-			serialNumber = strings.TrimSpace(m[1])
-		} else if m := p.modelName.FindStringSubmatch(line); len(m) > 1 {
-			modelName = strings.TrimSpace(m[1])
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("reading VPD output: %w", err)
-	}
-	if partNumber == "" || serialNumber == "" {
-		return nil, fmt.Errorf("VPD output missing part number (%q) or serial number (%q)", partNumber, serialNumber)
-	}
-
-	return &types.VPD{
-		PartNumber:   partNumber,
-		SerialNumber: serialNumber,
-		ModelName:    modelName,
-	}, nil
 }
 
 // GetFirmwareVersionAndPSID uses flint to retrieve the FW version and PSID of the device.

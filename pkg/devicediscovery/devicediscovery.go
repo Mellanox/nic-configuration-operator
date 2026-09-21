@@ -140,7 +140,7 @@ func (d *deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, e
 				return nil, err
 			}
 
-			// mlxvpd's IDTAG "Board Id" is a long marketing string like
+			// The PCI VPD Identifier String is a long marketing string like
 			//   "NVIDIA ConnectX-9 C9180 HHHL SuperNIC, 800Gbs XDR IB / 800GbE (default), ..."
 			// The portion before the first comma is the product name; everything after is
 			// feature/packaging detail we don't want in the CR.
