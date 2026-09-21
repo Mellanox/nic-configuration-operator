@@ -1123,17 +1123,36 @@ var _ = Describe("ConfigValidationImpl", func() {
 			}
 		})
 
-		Context("when a port has NO-CARRIER", func() {
+		Context("when all ports have NO-CARRIER", func() {
 			BeforeEach(func() {
+				linkStateResults["interface0"] = linkStateResult{noCarrier: true}
 				linkStateResults["interface1"] = linkStateResult{noCarrier: true}
 			})
 
 			It("should return an error before checking the runtime settings", func() {
 				applied, err = validator.RuntimeConfigApplied(device)
-				Expect(err).To(MatchError("network interface interface1 for device port 0000:03:00.1 has NO-CARRIER"))
+				Expect(err).To(MatchError("all network interfaces have NO-CARRIER"))
 				Expect(applied).To(BeFalse())
 				mockConfigurationUtils.AssertNotCalled(GinkgoT(), "GetMaxReadRequestSize", mock.Anything)
 				mockConfigurationUtils.AssertNotCalled(GinkgoT(), "GetQoSSettings", mock.Anything, mock.Anything)
+			})
+		})
+
+		Context("when only one port has NO-CARRIER", func() {
+			BeforeEach(func() {
+				linkStateResults["interface0"] = linkStateResult{noCarrier: true}
+				desired := validator.CalculateDesiredRuntimeConfig(device)
+
+				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.0").Return(desired.MaxReadRequestSize, nil)
+				mockConfigurationUtils.On("GetMaxReadRequestSize", "0000:03:00.1").Return(desired.MaxReadRequestSize, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, "interface0").Return(desired.Qos, nil)
+				mockConfigurationUtils.On("GetQoSSettings", device, "interface1").Return(desired.Qos, nil)
+			})
+
+			It("should continue checking the runtime settings", func() {
+				applied, err = validator.RuntimeConfigApplied(device)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(applied).To(BeTrue())
 			})
 		})
 
