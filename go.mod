@@ -8,7 +8,7 @@ require (
 	github.com/jaypipes/ghw v0.24.0
 	github.com/jaypipes/pcidb v1.1.1
 	github.com/onsi/ginkgo/v2 v2.28.2
-	github.com/onsi/gomega v1.42.1
+	github.com/onsi/gomega v1.43.1
 	github.com/stretchr/testify v1.11.1
 	github.com/vishvananda/netlink v1.3.1
 	go.uber.org/zap v1.28.0
@@ -63,7 +63,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/exp v0.0.0-20240823005443-9b4947da3948 // indirect
 	golang.org/x/mod v0.37.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
