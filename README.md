@@ -479,6 +479,8 @@ To use this mechanism, the next pods in the pipeline can add `nvidia.com/operato
 
 The NIC Configuration Daemon itself relies on the `network.nvidia.com/operator.mofed.wait=false` label to be present on the node as it requires the DOCA-OFED driver to be running for some of the configurations.
 
+During device discovery, the daemon queries firmware version and PSID with `flint`. If `flint` cannot query a PCI function, the daemon reads the running firmware version and PSID from the function's RDMA sysfs attributes (`fw_ver` and `board_id`). Both values are required; if neither source provides complete firmware information, discovery follows the existing error or `SKIP_DEVICE_ON_DISCOVERY_ERROR` behavior.
+
 ## Feature flags
 Feature flags can be enabled via environment variables in the helm chart or NVIDIA Network Operator's NicClusterPolicy.
 Supported flags:

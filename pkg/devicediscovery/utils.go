@@ -17,6 +17,7 @@ package devicediscovery
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,7 +29,6 @@ import (
 	"github.com/Mellanox/rdmamap"
 	"github.com/jaypipes/ghw"
 	"github.com/jaypipes/ghw/pkg/pci"
-	"github.com/vishvananda/netlink"
 	execUtils "k8s.io/utils/exec"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -80,8 +80,8 @@ type DeviceDiscoveryUtils interface {
 }
 
 type deviceDiscoveryUtils struct {
-	execInterface  execUtils.Interface
-	getDevlinkInfo func(bus, device string) (map[string]string, error)
+	execInterface execUtils.Interface
+	pciSysfsRoot  string
 }
 
 // GetPCIDevices returns a list of PCI devices on the host
@@ -96,7 +96,7 @@ func (d *deviceDiscoveryUtils) GetPCIDevices() ([]*pci.Device, error) {
 }
 
 // GetFirmwareVersionAndPSID uses flint to retrieve the FW version and PSID of the device.
-// If flint cannot query the device, it falls back to the kernel devlink interface.
+// If flint cannot query the device, it falls back to the kernel-exposed RDMA sysfs attributes.
 func (d *deviceDiscoveryUtils) GetFirmwareVersionAndPSID(pciAddr string) (string, string, error) {
 	log.Log.Info("HostUtils.GetFirmwareVersionAndPSID()", "pciAddr", pciAddr)
 	firmwareVersion, psid, flintErr := d.getFirmwareVersionAndPSIDViaFlint(pciAddr)
@@ -104,10 +104,10 @@ func (d *deviceDiscoveryUtils) GetFirmwareVersionAndPSID(pciAddr string) (string
 		return firmwareVersion, psid, nil
 	}
 
-	log.Log.Info("GetFirmwareVersionAndPSID(): flint failed, falling back to devlink", "pciAddr", pciAddr, "error", flintErr.Error())
-	firmwareVersion, psid, devlinkErr := d.getFirmwareVersionAndPSIDViaDevlink(pciAddr)
-	if devlinkErr != nil {
-		return "", "", fmt.Errorf("failed to get firmware version and PSID: flint: %w; devlink: %w", flintErr, devlinkErr)
+	log.Log.Info("GetFirmwareVersionAndPSID(): flint failed, falling back to sysfs", "pciAddr", pciAddr, "error", flintErr.Error())
+	firmwareVersion, psid, sysfsErr := d.getFirmwareVersionAndPSIDViaSysfs(pciAddr)
+	if sysfsErr != nil {
+		return "", "", fmt.Errorf("failed to get firmware version and PSID: flint: %w; sysfs: %w", flintErr, sysfsErr)
 	}
 
 	return firmwareVersion, psid, nil
@@ -145,27 +145,50 @@ func (d *deviceDiscoveryUtils) getFirmwareVersionAndPSIDViaFlint(pciAddr string)
 	return firmwareVersion, psid, nil
 }
 
-func (d *deviceDiscoveryUtils) getFirmwareVersionAndPSIDViaDevlink(pciAddr string) (string, string, error) {
-	getDevlinkInfo := d.getDevlinkInfo
-	if getDevlinkInfo == nil {
-		getDevlinkInfo = netlink.DevlinkGetDeviceInfoByNameAsMap
+func (d *deviceDiscoveryUtils) getFirmwareVersionAndPSIDViaSysfs(pciAddr string) (string, string, error) {
+	pciRoot := d.pciSysfsRoot
+	if pciRoot == "" {
+		pciRoot = pciDevicesPath
 	}
 
-	info, err := getDevlinkInfo("pci", pciAddr)
+	return getFirmwareVersionAndPSIDFromSysfs(pciRoot, pciAddr)
+}
+
+func getFirmwareVersionAndPSIDFromSysfs(pciRoot, pciAddr string) (string, string, error) {
+	rdmaDir := filepath.Join(pciRoot, pciAddr, "infiniband")
+	rdmaDevices, err := os.ReadDir(rdmaDir)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to query devlink device pci/%s: %w", pciAddr, err)
+		return "", "", fmt.Errorf("reading RDMA devices under %s: %w", rdmaDir, err)
+	}
+	if len(rdmaDevices) == 0 {
+		return "", "", fmt.Errorf("no RDMA devices found under %s", rdmaDir)
 	}
 
-	firmwareVersion := strings.TrimSpace(info["fw.version"])
-	if firmwareVersion == "" {
-		firmwareVersion = strings.TrimSpace(info["fw"])
-	}
-	psid := strings.TrimSpace(info["fw.psid"])
-	if firmwareVersion == "" || psid == "" {
-		return "", "", fmt.Errorf("devlink info has empty firmware version (%q) or PSID (%q)", firmwareVersion, psid)
+	var candidateErrs []error
+	for _, rdmaDevice := range rdmaDevices {
+		rdmaDevicePath := filepath.Join(rdmaDir, rdmaDevice.Name())
+		firmwareVersionBytes, err := os.ReadFile(filepath.Join(rdmaDevicePath, "fw_ver"))
+		if err != nil {
+			candidateErrs = append(candidateErrs, fmt.Errorf("reading firmware version for RDMA device %s: %w", rdmaDevice.Name(), err))
+			continue
+		}
+		psidBytes, err := os.ReadFile(filepath.Join(rdmaDevicePath, "board_id"))
+		if err != nil {
+			candidateErrs = append(candidateErrs, fmt.Errorf("reading PSID for RDMA device %s: %w", rdmaDevice.Name(), err))
+			continue
+		}
+
+		firmwareVersion := strings.TrimSpace(string(firmwareVersionBytes))
+		psid := strings.TrimSpace(string(psidBytes))
+		if firmwareVersion == "" || psid == "" {
+			candidateErrs = append(candidateErrs, fmt.Errorf("RDMA device %s has empty firmware version (%q) or PSID (%q)", rdmaDevice.Name(), firmwareVersion, psid))
+			continue
+		}
+
+		return strings.ToLower(firmwareVersion), strings.ToLower(psid), nil
 	}
 
-	return strings.ToLower(firmwareVersion), strings.ToLower(psid), nil
+	return "", "", fmt.Errorf("no RDMA device under %s provides complete firmware information: %w", rdmaDir, errors.Join(candidateErrs...))
 }
 
 // GetRDMADeviceName returns a RDMA device name for the given PCI address
@@ -379,7 +402,7 @@ func getFwctlDeviceFromPath(pciDevicesBasePath, pciAddr string) (string, error) 
 // NewDeviceDiscoveryUtils creates a new DeviceDiscoveryUtils instance
 func NewDeviceDiscoveryUtils() DeviceDiscoveryUtils {
 	return &deviceDiscoveryUtils{
-		execInterface:  execUtils.New(),
-		getDevlinkInfo: netlink.DevlinkGetDeviceInfoByNameAsMap,
+		execInterface: execUtils.New(),
+		pciSysfsRoot:  pciDevicesPath,
 	}
 }
