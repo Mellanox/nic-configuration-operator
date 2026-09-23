@@ -89,7 +89,10 @@ func (m *udevManager) ApplyUdevRules(ctx context.Context, devices []*v1alpha1.Ni
 	log.Log.V(2).Info("UdevManager.ApplyUdevRules", "deviceCount", len(devices))
 
 	// Generate rules content for net and RDMA devices separately, and collect expected names
-	netRulesContent, rdmaRulesContent, expectedNames := m.generateUdevRules(devices)
+	netRulesContent, rdmaRulesContent, expectedNames, err := m.generateUdevRules(devices)
+	if err != nil {
+		return nil, false, err
+	}
 
 	// Write net rules file
 	netUpdated, err := m.writeRulesFile(UdevNetRulesFile, netRulesContent)
@@ -111,6 +114,13 @@ func (m *udevManager) ApplyUdevRules(ctx context.Context, devices []*v1alpha1.Ni
 	}
 
 	return expectedNames, netUpdated || rdmaUpdated, nil
+}
+
+// ValidateInterfaceNames verifies that the interface naming specs on devices
+// produce an unambiguous set of net and RDMA device names.
+func ValidateInterfaceNames(devices []*v1alpha1.NicDevice) error {
+	_, _, _, err := generateUdevRules(devices)
+	return err
 }
 
 // reloadUdevRules reloads udev rules and triggers the net and infiniband subsystems.
@@ -196,11 +206,23 @@ func (m *udevManager) writeRulesFile(rulesFile, content string) (bool, error) {
 // Rules are sorted by PCI address to ensure deterministic output.
 // Note: The number of PFs is determined by len(PlaneIndices), which may differ from len(Status.Ports)
 // when the device is being reconfigured for a different number of PFs.
-func (m *udevManager) generateUdevRules(devices []*v1alpha1.NicDevice) (netRules, rdmaRules string, expectedNames map[string]ExpectedInterfaceNames) {
+func (m *udevManager) generateUdevRules(devices []*v1alpha1.NicDevice) (netRules, rdmaRules string, expectedNames map[string]ExpectedInterfaceNames, err error) {
+	return generateUdevRules(devices)
+}
+
+type interfaceNameOwner struct {
+	device string
+	pci    string
+}
+
+func generateUdevRules(devices []*v1alpha1.NicDevice) (netRules, rdmaRules string, expectedNames map[string]ExpectedInterfaceNames, err error) {
 	// Collect rules keyed by PCI address for sorting
 	netRulesMap := make(map[string]string)
 	rdmaRulesMap := make(map[string]string)
 	expectedNames = make(map[string]ExpectedInterfaceNames)
+	pciOwners := make(map[string]interfaceNameOwner)
+	netNameOwners := make(map[string]interfaceNameOwner)
+	rdmaNameOwners := make(map[string]interfaceNameOwner)
 
 	for _, device := range devices {
 		if device.Spec.InterfaceNameTemplate == nil {
@@ -208,6 +230,9 @@ func (m *udevManager) generateUdevRules(devices []*v1alpha1.NicDevice) (netRules
 		}
 
 		spec := device.Spec.InterfaceNameTemplate
+		if spec.NetDevicePrefix == "" && spec.RdmaDevicePrefix == "" {
+			return "", "", nil, fmt.Errorf("device %s has empty net and RDMA device prefixes", deviceObjectKey(device))
+		}
 
 		// Get the base PCI address from the first port
 		if len(device.Status.Ports) == 0 || device.Status.Ports[0].PCI == "" {
@@ -238,10 +263,15 @@ func (m *udevManager) generateUdevRules(devices []*v1alpha1.NicDevice) (netRules
 				var err error
 				pciAddr, err = CalculatePCIAddressForPF(basePCI, pfIndex)
 				if err != nil {
-					log.Log.Error(err, "Failed to calculate PCI address for PF", "device", device.Name, "basePCI", basePCI, "pfIndex", pfIndex)
-					continue
+					return "", "", nil, fmt.Errorf("calculate PCI address for device %s PF %d: %w", deviceObjectKey(device), pfIndex, err)
 				}
 			}
+
+			owner := interfaceNameOwner{device: deviceObjectKey(device), pci: pciAddr}
+			if previous, exists := pciOwners[pciAddr]; exists {
+				return "", "", nil, fmt.Errorf("PCI address %s is assigned by devices %s and %s", pciAddr, previous.device, owner.device)
+			}
+			pciOwners[pciAddr] = owner
 
 			// Get the plane index for this PF
 			planeIndex := spec.PlaneIndices[pfIndex]
@@ -254,6 +284,9 @@ func (m *udevManager) generateUdevRules(devices []*v1alpha1.NicDevice) (netRules
 				spec.RailIndex,
 			)
 			if netDeviceName != "" {
+				if err := addInterfaceNameOwner(netNameOwners, "net", netDeviceName, owner); err != nil {
+					return "", "", nil, err
+				}
 				netRulesMap[pciAddr] = generateNetDeviceRules(pciAddr, netDeviceName)
 			}
 
@@ -267,9 +300,15 @@ func (m *udevManager) generateUdevRules(devices []*v1alpha1.NicDevice) (netRules
 			if rdmaDeviceName != "" {
 				if pfIndex == 0 {
 					firstPFRdmaName = rdmaDeviceName
+					if err := addInterfaceNameOwner(rdmaNameOwners, "RDMA", rdmaDeviceName, owner); err != nil {
+						return "", "", nil, err
+					}
 					rdmaRulesMap[pciAddr] = generateRdmaDeviceRule(pciAddr, rdmaDeviceName)
 				} else if rdmaDeviceName != firstPFRdmaName {
 					// Different name per PF = standard mode, generate rule for each
+					if err := addInterfaceNameOwner(rdmaNameOwners, "RDMA", rdmaDeviceName, owner); err != nil {
+						return "", "", nil, err
+					}
 					rdmaRulesMap[pciAddr] = generateRdmaDeviceRule(pciAddr, rdmaDeviceName)
 				} else {
 					// Same name as PF0 = multiport/hwplb mode.
@@ -309,7 +348,23 @@ func (m *udevManager) generateUdevRules(devices []*v1alpha1.NicDevice) (netRules
 		}
 	}
 
-	return netBuilder.String(), rdmaBuilder.String(), expectedNames
+	return netBuilder.String(), rdmaBuilder.String(), expectedNames, nil
+}
+
+func addInterfaceNameOwner(owners map[string]interfaceNameOwner, namespace, name string, owner interfaceNameOwner) error {
+	if previous, exists := owners[name]; exists {
+		return fmt.Errorf("duplicate %s interface name %q for PCI addresses %s (%s) and %s (%s)",
+			namespace, name, previous.pci, previous.device, owner.pci, owner.device)
+	}
+	owners[name] = owner
+	return nil
+}
+
+func deviceObjectKey(device *v1alpha1.NicDevice) string {
+	if device.Namespace == "" {
+		return device.Name
+	}
+	return device.Namespace + "/" + device.Name
 }
 
 // CalculatePCIAddressForPF calculates the PCI address for a given PF index based on a base PCI address.

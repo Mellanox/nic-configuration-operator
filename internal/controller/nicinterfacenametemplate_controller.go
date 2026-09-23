@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sort"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -34,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha1 "github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
+	"github.com/Mellanox/nic-configuration-operator/pkg/udev"
 )
 
 const nicInterfaceNameTemplateSyncEventName = "nic-interface-name-template-sync-event"
@@ -93,92 +95,129 @@ func (r *NicInterfaceNameTemplateReconciler) Reconcile(ctx context.Context, req 
 	nodeDevices := deviceList.Items
 	reqLog.V(2).Info("Found devices on this node", "count", len(nodeDevices))
 
-	if len(matchingTemplates) > 1 {
-		// Error out if there are more than one matching template
-		templateNames := make([]string, len(matchingTemplates))
-		for i, t := range matchingTemplates {
-			templateNames[i] = t.Name
+	sort.Slice(matchingTemplates, func(i, j int) bool {
+		if matchingTemplates[i].Namespace == matchingTemplates[j].Namespace {
+			return matchingTemplates[i].Name < matchingTemplates[j].Name
 		}
-		err = fmt.Errorf("multiple NicInterfaceNameTemplates match node %s: %v", r.NodeName, templateNames)
-		reqLog.Error(err, "Multiple templates matching this node")
+		return matchingTemplates[i].Namespace < matchingTemplates[j].Namespace
+	})
 
-		// Clear the InterfaceNameTemplate spec from all devices on this node
-		for i := range nodeDevices {
-			device := &nodeDevices[i]
-			if device.Spec.InterfaceNameTemplate != nil {
-				r.EventRecorder.Event(device, v1.EventTypeWarning, "SpecError",
-					fmt.Sprintf("Multiple NicInterfaceNameTemplates match this node: %v", templateNames))
-				device.Spec.InterfaceNameTemplate = nil
-				if updateErr := r.Update(ctx, device); updateErr != nil {
-					reqLog.Error(updateErr, "Failed to clear device InterfaceNameTemplate spec", "device", device.Name)
-					return ctrl.Result{}, updateErr
-				}
-			}
-		}
+	assignments, err := buildInterfaceNameAssignments(r.NodeName, nodeDevices, matchingTemplates)
+	if err != nil {
+		r.recordTemplateError(matchingTemplates, err)
+		reqLog.Error(err, "Invalid interface name template assignment")
 		return ctrl.Result{}, err
 	}
 
-	if len(matchingTemplates) == 0 {
-		// No matching templates, clear the InterfaceNameTemplate spec from all devices on this node
-		reqLog.V(2).Info("No matching templates, clearing InterfaceNameTemplate spec from devices")
-		for i := range nodeDevices {
-			device := &nodeDevices[i]
-			if device.Spec.InterfaceNameTemplate != nil {
-				device.Spec.InterfaceNameTemplate = nil
-				if err := r.Update(ctx, device); err != nil {
-					reqLog.Error(err, "Failed to clear device InterfaceNameTemplate spec", "device", device.Name)
-					return ctrl.Result{}, err
-				}
-			}
-		}
-		return ctrl.Result{}, nil
+	proposedDevices := make([]*v1alpha1.NicDevice, 0, len(assignments))
+	for i := range assignments {
+		proposed := assignments[i].device.DeepCopy()
+		proposed.Spec.InterfaceNameTemplate = assignments[i].spec
+		proposedDevices = append(proposedDevices, proposed)
+	}
+	if err := udev.ValidateInterfaceNames(proposedDevices); err != nil {
+		err = fmt.Errorf("invalid interface names for node %s: %w", r.NodeName, err)
+		r.recordTemplateError(matchingTemplates, err)
+		reqLog.Error(err, "Invalid generated interface names")
+		return ctrl.Result{}, err
 	}
 
-	// Apply the matching template to devices
-	matchingTemplate := &matchingTemplates[0]
-	reqLog.V(2).Info("Applying template to devices", "template", matchingTemplate.Name)
-
-	for i := range nodeDevices {
-		device := &nodeDevices[i]
-
-		// Calculate NicIndex, RailIndex, and PlaneIndices based on the device's PCI address
-		nicIndex, railIndex, planeIndices, found := calculateNicRailAndPlaneIndices(device, matchingTemplate.Spec.RailPciAddresses, matchingTemplate.Spec.PfsPerNic)
-		if !found {
-			reqLog.V(2).Info("Device PCI address not found in template's RailPciAddresses, skipping",
-				"device", device.Name, "ports", device.Status.Ports)
-			// Clear the InterfaceNameTemplate spec if device doesn't match the template's PCI addresses
-			if device.Spec.InterfaceNameTemplate != nil {
-				device.Spec.InterfaceNameTemplate = nil
-				if err := r.Update(ctx, device); err != nil {
-					reqLog.Error(err, "Failed to clear device InterfaceNameTemplate spec", "device", device.Name)
-					return ctrl.Result{}, err
-				}
-			}
+	for i := range assignments {
+		assignment := &assignments[i]
+		if reflect.DeepEqual(assignment.device.Spec.InterfaceNameTemplate, assignment.spec) {
 			continue
 		}
 
-		// Build the new spec
-		newSpec := &v1alpha1.NicDeviceInterfaceNameSpec{
-			NicIndex:         nicIndex,
-			RailIndex:        railIndex,
-			PlaneIndices:     planeIndices,
-			RdmaDevicePrefix: matchingTemplate.Spec.RdmaDevicePrefix,
-			NetDevicePrefix:  matchingTemplate.Spec.NetDevicePrefix,
-		}
-
-		// Check if update is needed
-		if !reflect.DeepEqual(device.Spec.InterfaceNameTemplate, newSpec) {
-			reqLog.V(2).Info("Updating device InterfaceNameTemplate spec",
-				"device", device.Name, "nicIndex", nicIndex, "railIndex", railIndex)
-			device.Spec.InterfaceNameTemplate = newSpec
-			if err := r.Update(ctx, device); err != nil {
-				reqLog.Error(err, "Failed to update device InterfaceNameTemplate spec", "device", device.Name)
-				return ctrl.Result{}, err
-			}
+		updated := assignment.device.DeepCopy()
+		updated.Spec.InterfaceNameTemplate = assignment.spec
+		if err := r.Patch(ctx, updated, client.MergeFrom(assignment.device.DeepCopy())); err != nil {
+			reqLog.Error(err, "Failed to update device InterfaceNameTemplate spec", "device", assignment.device.Name)
+			return ctrl.Result{}, err
 		}
 	}
 
 	return ctrl.Result{}, nil
+}
+
+type interfaceNameAssignment struct {
+	device *v1alpha1.NicDevice
+	spec   *v1alpha1.NicDeviceInterfaceNameSpec
+}
+
+type interfaceNameTemplateMatch struct {
+	template     *v1alpha1.NicInterfaceNameTemplate
+	nicIndex     int
+	railIndex    int
+	planeIndices []int
+}
+
+func buildInterfaceNameAssignments(nodeName string, devices []v1alpha1.NicDevice, templates []v1alpha1.NicInterfaceNameTemplate) ([]interfaceNameAssignment, error) {
+	for i := range templates {
+		template := &templates[i]
+		if template.Spec.PfsPerNic <= 0 {
+			return nil, fmt.Errorf("NicInterfaceNameTemplate %s must set pfsPerNic greater than zero", templateObjectKey(template))
+		}
+		if template.Spec.NetDevicePrefix == "" && template.Spec.RdmaDevicePrefix == "" {
+			return nil, fmt.Errorf("NicInterfaceNameTemplate %s must set at least one device prefix", templateObjectKey(template))
+		}
+	}
+
+	assignments := make([]interfaceNameAssignment, 0, len(devices))
+	for i := range devices {
+		device := &devices[i]
+		matches := make([]interfaceNameTemplateMatch, 0, 1)
+		for j := range templates {
+			template := &templates[j]
+			nicIndex, railIndex, planeIndices, found := calculateNicRailAndPlaneIndices(
+				device, template.Spec.RailPciAddresses, template.Spec.PfsPerNic)
+			if found {
+				matches = append(matches, interfaceNameTemplateMatch{
+					template:     template,
+					nicIndex:     nicIndex,
+					railIndex:    railIndex,
+					planeIndices: planeIndices,
+				})
+			}
+		}
+
+		if len(matches) > 1 {
+			templateNames := make([]string, len(matches))
+			for j := range matches {
+				templateNames[j] = templateObjectKey(matches[j].template)
+			}
+			return nil, fmt.Errorf("NicDevice %s on node %s is selected by multiple NicInterfaceNameTemplates: %v",
+				deviceObjectKey(device), nodeName, templateNames)
+		}
+
+		assignment := interfaceNameAssignment{device: device}
+		if len(matches) == 1 {
+			match := matches[0]
+			assignment.spec = &v1alpha1.NicDeviceInterfaceNameSpec{
+				NicIndex:         match.nicIndex,
+				RailIndex:        match.railIndex,
+				PlaneIndices:     match.planeIndices,
+				RdmaDevicePrefix: match.template.Spec.RdmaDevicePrefix,
+				NetDevicePrefix:  match.template.Spec.NetDevicePrefix,
+			}
+		}
+		assignments = append(assignments, assignment)
+	}
+
+	return assignments, nil
+}
+
+func (r *NicInterfaceNameTemplateReconciler) recordTemplateError(templates []v1alpha1.NicInterfaceNameTemplate, err error) {
+	for i := range templates {
+		r.EventRecorder.Event(&templates[i], v1.EventTypeWarning, "SpecError", err.Error())
+	}
+}
+
+func templateObjectKey(template *v1alpha1.NicInterfaceNameTemplate) string {
+	return types.NamespacedName{Namespace: template.Namespace, Name: template.Name}.String()
+}
+
+func deviceObjectKey(device *v1alpha1.NicDevice) string {
+	return types.NamespacedName{Namespace: device.Namespace, Name: device.Name}.String()
 }
 
 // calculateNicRailAndPlaneIndices finds the NIC index (flattened position), rail index, and plane indices
@@ -242,26 +281,85 @@ func (r *NicInterfaceNameTemplateReconciler) SetupWithManager(mgr ctrl.Manager) 
 		},
 	}
 
-	// Trigger also on update of NicDevice from this node, but only if spec changed
+	// Trigger when device discovery changes which devices or PCI addresses can
+	// match a template, or when the resolved naming spec changes.
 	nicDeviceEventHandler := handler.Funcs{
+		CreateFunc: func(ctx context.Context, e event.CreateEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			device, ok := e.Object.(*v1alpha1.NicDevice)
+			if ok && device.Status.Node == r.NodeName {
+				qHandler(q)
+			}
+		},
 		UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-			oldDevice, ok1 := e.ObjectOld.(*v1alpha1.NicDevice)
-			newDevice, ok2 := e.ObjectNew.(*v1alpha1.NicDevice)
-			if !ok1 || !ok2 {
+			oldDevice, oldOK := e.ObjectOld.(*v1alpha1.NicDevice)
+			newDevice, newOK := e.ObjectNew.(*v1alpha1.NicDevice)
+			if !oldOK || !newOK || (oldDevice.Status.Node != r.NodeName && newDevice.Status.Node != r.NodeName) {
 				return
 			}
-			if reflect.DeepEqual(oldDevice.Spec, newDevice.Spec) {
+			if !deviceInterfaceNameSelectionChanged(oldDevice, newDevice) {
 				return
 			}
 			log.Log.Info("Enqueuing sync for NicDevice update event", "resource", e.ObjectNew.GetName())
-			log.Log.V(2).Info("Spec changed, enqueuing sync", "old", oldDevice.Spec, "new", newDevice.Spec)
 			qHandler(q)
+		},
+		DeleteFunc: func(ctx context.Context, e event.DeleteEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			device, ok := e.Object.(*v1alpha1.NicDevice)
+			if ok && device.Status.Node == r.NodeName {
+				qHandler(q)
+			}
+		},
+		GenericFunc: func(ctx context.Context, e event.GenericEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			device, ok := e.Object.(*v1alpha1.NicDevice)
+			if ok && device.Status.Node == r.NodeName {
+				qHandler(q)
+			}
+		},
+	}
+
+	nodeEventHandler := handler.Funcs{
+		CreateFunc: func(ctx context.Context, e event.CreateEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			if e.Object.GetName() == r.NodeName {
+				qHandler(q)
+			}
+		},
+		UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			oldNode, oldOK := e.ObjectOld.(*v1.Node)
+			newNode, newOK := e.ObjectNew.(*v1.Node)
+			if oldOK && newOK && newNode.Name == r.NodeName && !reflect.DeepEqual(oldNode.Labels, newNode.Labels) {
+				qHandler(q)
+			}
+		},
+		DeleteFunc: func(ctx context.Context, e event.DeleteEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			if e.Object.GetName() == r.NodeName {
+				qHandler(q)
+			}
+		},
+		GenericFunc: func(ctx context.Context, e event.GenericEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			if e.Object.GetName() == r.NodeName {
+				qHandler(q)
+			}
 		},
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Watches(&v1alpha1.NicInterfaceNameTemplate{}, eventHandler).
 		Watches(&v1alpha1.NicDevice{}, nicDeviceEventHandler).
+		Watches(&v1.Node{}, nodeEventHandler).
 		Named("nicInterfaceNameTemplateReconciler").
 		Complete(r)
+}
+
+func deviceInterfaceNameSelectionChanged(oldDevice, newDevice *v1alpha1.NicDevice) bool {
+	if oldDevice.Status.Node != newDevice.Status.Node ||
+		!reflect.DeepEqual(oldDevice.Spec.InterfaceNameTemplate, newDevice.Spec.InterfaceNameTemplate) ||
+		len(oldDevice.Status.Ports) != len(newDevice.Status.Ports) {
+		return true
+	}
+
+	for i := range oldDevice.Status.Ports {
+		if oldDevice.Status.Ports[i].PCI != newDevice.Status.Ports[i].PCI {
+			return true
+		}
+	}
+	return false
 }

@@ -1,0 +1,59 @@
+# Copyright 2026 NVIDIA CORPORATION & AFFILIATES
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Multiple templates can select the same nodes when their PCI address sets
+# identify different NicDevice objects. Indices start at zero in each template.
+apiVersion: configuration.net.nvidia.com/v1alpha1
+kind: NicInterfaceNameTemplate
+metadata:
+  name: east-west-interface-names
+  namespace: nvidia-network-operator
+spec:
+  nodeSelector:
+    node-role.example.com/gpu: ""
+  pfsPerNic: 1
+  rdmaDevicePrefix: "ew%rail_id%"
+  netDevicePrefix: "ew%rail_id%"
+  railPciAddresses:
+    - ["0000:0d:00.0"]
+    - ["0000:35:00.0"]
+---
+apiVersion: configuration.net.nvidia.com/v1alpha1
+kind: NicInterfaceNameTemplate
+metadata:
+  name: north-south-interface-names
+  namespace: nvidia-network-operator
+spec:
+  nodeSelector:
+    node-role.example.com/gpu: ""
+  # This NicDevice has two PFs. Use the plane index for distinct per-PF names.
+  pfsPerNic: 2
+  rdmaDevicePrefix: "ns%plane_id%"
+  netDevicePrefix: "ns%plane_id%"
+  railPciAddresses:
+    - ["0000:48:00.0"]
+---
+apiVersion: configuration.net.nvidia.com/v1alpha1
+kind: NicInterfaceNameTemplate
+metadata:
+  name: administration-interface-names
+  namespace: nvidia-network-operator
+spec:
+  nodeSelector:
+    node-role.example.com/gpu: ""
+  pfsPerNic: 1
+  # Omit rdmaDevicePrefix to leave the RDMA device name unchanged.
+  netDevicePrefix: "admin%nic_id%"
+  railPciAddresses:
+    - ["0000:c1:00.0"]

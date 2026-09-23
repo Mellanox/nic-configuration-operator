@@ -1534,6 +1534,29 @@ var _ = Describe("NicDeviceReconciler", func() {
 			}))
 		})
 
+		It("Should skip net device validation when expected net device name is empty", func() {
+			expectedNames := map[string]udev.ExpectedInterfaceNames{
+				pciAddress: {NetDevice: "", RdmaDevice: "rdma1p1"},
+			}
+
+			udevManager.ExpectedCalls = nil
+			udevManager.On("ApplyUdevRules", mock.Anything, mock.Anything).Return(expectedNames, true, nil)
+
+			deviceDiscoveryUtils.On("GetInterfaceName", pciAddress).Return("existing-net-device")
+			deviceDiscoveryUtils.On("GetRDMADeviceName", pciAddress).Return("rdma1p1")
+
+			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
+
+			createDeviceWithInterfaceNameTemplate()
+
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.InterfaceNameCondition,
+				Status:  metav1.ConditionTrue,
+				Reason:  consts.InterfaceNameAppliedReason,
+				Message: "Interface names applied successfully",
+			}))
+		})
+
 		It("Should update port status with actual interface names from sysfs", func() {
 			expectedNames := map[string]udev.ExpectedInterfaceNames{
 				pciAddress: {NetDevice: "net1p1", RdmaDevice: "rdma1p1"},
