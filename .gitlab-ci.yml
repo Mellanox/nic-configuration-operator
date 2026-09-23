@@ -148,7 +148,7 @@ variables:  # additional variables are defined at the gitlab group scope
           --branch main \
           https://$GITLAB_USERNAME:$GITLAB_TOKEN@gitlab-master.nvidia.com/pstooling/container-scan-policy-documents.git \
           $(dirname $GOV_READY_POLICY_FILE_PATH)
-        nspect_release_version=$(echo $CI_COMMIT_TAG | grep -Eo '[0-9\.]+' | head -n 1)-fedramp  # determine nspect release version
+        nspect_release_version=$(echo $CI_COMMIT_TAG | grep -Eo '[0-9\.]+' | head -n 1)-gov-ready  # determine nspect release version
         echo "NSPECT_RELEASE_VERSION=$nspect_release_version" | tee -a build.env
       else
         mkdir -p $(dirname $GOV_READY_POLICY_FILE_PATH)
