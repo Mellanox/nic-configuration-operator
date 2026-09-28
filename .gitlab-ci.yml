@@ -64,6 +64,7 @@ include:
       track_usage: "false"
 
 stages:
+  - resolve
   - build
   - pulse-scan-oss
   - pulse-scan-stig
@@ -73,8 +74,25 @@ variables:  # additional variables are defined at the gitlab group scope
   DOCKER_REGISTRY: nvcr.io/nvstaging/mellanox
   OPERATOR_IMAGE_NAME: nic-configuration-operator-stig-fips
   DAEMON_IMAGE_NAME: nic-configuration-operator-daemon-stig-fips
+  # Pin the DOCA series per release branch; the resolver selects its latest patch.
+  DOCA_SERIES: "3.5"
   GOV_READY_POLICY_FILE_PATH: pulse-scan-policies/prodsec_approved_govready_release_policy.json
   CVE_UPDATES_RHEL: "openssl openssl-libs python3 python3-libs python3-urllib3 glib2 util-linux libnghttp2 vim-minimal libarchive"
+
+resolve-doca-host:
+  stage: resolve
+  image: python:3.12-alpine
+  tags:
+    - os/linux
+    - type/docker
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^network-operator-.*$/'
+    - if: '$CI_COMMIT_BRANCH =~ /^network-operator-.*$/'
+  script:
+    - python3 scripts/resolve_doca_host.py "$DOCA_SERIES" --dotenv doca.env
+  artifacts:
+    reports:
+      dotenv: doca.env
 
 # Common job template for building STIG images
 .build-stig-image:
@@ -178,6 +196,9 @@ build-operator-stig-image-ubuntu:
 
 build-daemon-stig-image-ubuntu:
   extends: .build-stig-image
+  needs:
+    - job: resolve-doca-host
+      artifacts: true
   script:
     # build daemon image
     - |
@@ -185,6 +206,7 @@ build-daemon-stig-image-ubuntu:
         --secret    id=stig_script,src=/tmp/stig-scripts/stig-fixer.sh \
         --build-arg GOPROXY=$GOPROXY \
         --build-arg UBUNTU_STIG_BASE_IMAGE=$UBUNTU_STIG_BASE_IMAGE \
+        --build-arg DOCA_HOST_URL="$DOCA_HOST_UBUNTU_URL" \
         --file      Dockerfile.daemon.stig-ubuntu \
         --tag       $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG-ubuntu \
         .
@@ -220,12 +242,16 @@ build-operator-stig-image-rhel:
 
 build-daemon-stig-image-rhel:
   extends: .build-stig-image
+  needs:
+    - job: resolve-doca-host
+      artifacts: true
   script:
     # build daemon image
     - |
       docker build \
         --build-arg GOPROXY=$GOPROXY \
         --build-arg RHEL_STIG_BASE_IMAGE=$RHEL_STIG_BASE_IMAGE \
+        --build-arg DOCA_HOST_URL="$DOCA_HOST_RHEL_URL" \
         --build-arg CVE_UPDATES_RHEL="$CVE_UPDATES_RHEL" \
         --file      Dockerfile.daemon.stig-rhel \
         --tag       $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG-rhel \
