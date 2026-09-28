@@ -54,17 +54,18 @@ RUN apt-get update -y && \
     rm -rf /var/lib/apt/lists/*
 
 # Install DOCA packages (only doca-dms, doca-spcx-cc, and doca-pcc-counters are needed)
-ARG DOCA_VERSION=3.2.1
-ARG DOCA_FULL_VERSION=3.2.1-044000-25.10
+# Provided by GitLab resolve-doca-host or a local --build-arg.
+ARG DOCA_HOST_URL
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update -y && \
     apt-get install -y --no-install-recommends wget && \
-    wget https://www.mellanox.com/downloads/DOCA/DOCA_v${DOCA_VERSION}/host/doca-host_${DOCA_FULL_VERSION}-ubuntu2404_amd64.deb && \
-    dpkg -i doca-host_${DOCA_FULL_VERSION}-ubuntu2404_amd64.deb && \
+    : "${DOCA_HOST_URL:?DOCA_HOST_URL is required}" && \
+    wget -O /tmp/doca-host.deb "${DOCA_HOST_URL}" && \
+    dpkg -i /tmp/doca-host.deb && \
     apt-get update -y && \
     apt-get install -y doca-dms doca-spcx-cc doca-pcc-counters doca-roce-userspace && \
-    rm -f doca-host_${DOCA_FULL_VERSION}-ubuntu2404_amd64.deb && \
+    rm -f /tmp/doca-host.deb && \
     # Remove DOCA-Host unneeded collectx packages from base image
     (dpkg --purge collectx || apt-get remove --purge -y collectx || true) && \
     rm -f /usr/share/doca-host-*/repo/pool/collectx*.deb && \

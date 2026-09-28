@@ -24,3 +24,4 @@ go.work.sum
 .idea/
 bin/
 build/
+__pycache__/
