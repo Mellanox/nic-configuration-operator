@@ -6,7 +6,7 @@ require (
 	github.com/Mellanox/maintenance-operator/api v0.4.0
 	github.com/Mellanox/rdmamap v1.2.0
 	github.com/go-logr/logr v1.4.4
-	github.com/jaypipes/ghw v0.25.0
+	github.com/jaypipes/ghw v0.26.0
 	github.com/jaypipes/pcidb v1.1.1
 	github.com/onsi/ginkgo/v2 v2.33.0
 	github.com/onsi/gomega v1.43.1
