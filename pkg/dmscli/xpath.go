@@ -171,7 +171,7 @@ func SetXPaths(
 
 func logDMSCLIOutput(ctx context.Context, command []string, target string, output utils.CommandOutput, commandErr error) {
 	fields := []any{
-		"command", command,
+		commandLogKey, command,
 		"target", target,
 		"stdout", boundedCommandOutput(output.Stdout),
 	}
@@ -180,7 +180,7 @@ func logDMSCLIOutput(ctx context.Context, command []string, target string, outpu
 }
 
 func xpathQueryArgs(target string, queries []XPathQuery) []string {
-	args := []string{"--json", "-t", target}
+	args := []string{jsonOutputFlag, "-t", target}
 	for index, query := range queries {
 		if index > 0 {
 			args = append(args, ";")
@@ -232,7 +232,7 @@ func xpathSetArgs(target string, operations []XPathOperation) ([]string, error) 
 		return nil, fmt.Errorf("XPath set must contain at least one operation")
 	}
 
-	args := []string{"--json", "-t", target}
+	args := []string{jsonOutputFlag, "-t", target}
 	for operationIndex, operation := range operations {
 		if err := validateXPath(operation.Path); err != nil {
 			return nil, fmt.Errorf("XPath operation at index %d: %w", operationIndex, err)

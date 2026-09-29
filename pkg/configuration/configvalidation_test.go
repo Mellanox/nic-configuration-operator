@@ -198,7 +198,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 							LinkType: consts.Ethernet,
 							PciPerformanceOptimized: &v1alpha1.PciPerformanceOptimizedSpec{
 								Enabled:        true,
-								MaxAccOutRead:  1337,
+								MaxAccOutRead:  1337, //nolint:staticcheck // Exercise the deprecated API field for backward compatibility.
 								MaxReadRequest: 1339,
 							},
 							GpuDirectOptimized: &v1alpha1.GpuDirectOptimizedSpec{

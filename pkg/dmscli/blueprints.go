@@ -64,7 +64,7 @@ func GenerateBlueprintPlan(
 	}
 
 	args := []string{
-		"--json",
+		jsonOutputFlag,
 		blueprintsPlanPath,
 		"profile=" + request.Profile,
 		"name=" + request.Name,
@@ -122,7 +122,7 @@ func logBlueprintPlanResult(
 	decodeErr error,
 ) {
 	fields := []any{
-		"command", command,
+		commandLogKey, command,
 		"plan", request.Name,
 		"blueprintsStateDir", request.BlueprintsStateDir,
 	}
