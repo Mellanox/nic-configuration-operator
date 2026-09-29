@@ -22,6 +22,10 @@ linters:
     - unconvert
     - unparam
     - unused
+  settings:
+    goconst:
+      # Keep table-driven test fixtures readable; enforce constants in production code.
+      ignore-tests: true
   exclusions:
     generated: lax
     rules:

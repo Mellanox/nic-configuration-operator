@@ -30,6 +30,8 @@ import (
 )
 
 const (
+	jsonOutputFlag    = "--json"
+	commandLogKey     = "command"
 	dmsCLIExecutable  = "/opt/mellanox/doca/services/dms/dms-cli"
 	nvConfigApplyPath = "/nvidia/nvconfig/apply"
 )
@@ -84,7 +86,7 @@ func ApplyNVConfig(ctx context.Context, execInterface execUtils.Interface, reque
 	}
 
 	args := []string{
-		"--json",
+		jsonOutputFlag,
 		"-t", request.Target,
 		"--input", string(payload),
 		nvConfigApplyPath,
@@ -93,7 +95,7 @@ func ApplyNVConfig(ctx context.Context, execInterface execUtils.Interface, reque
 	output, commandErr := utils.RunCommandWithStreams(command)
 	commandAndArgs := append([]string{dmsCLIExecutable}, args...)
 	fields := []any{
-		"command", commandAndArgs,
+		commandLogKey, commandAndArgs,
 		"target", request.Target,
 		"stdout", boundedCommandOutput(output.Stdout),
 	}

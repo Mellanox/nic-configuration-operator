@@ -6,29 +6,12 @@ on:
     branches: ["main"]
   schedule:
     - cron: "37 4 * * 0"
+
 jobs:
   analyze:
     name: Analyze
-    runs-on: ubuntu-latest
     permissions:
       actions: read
       contents: read
       security-events: write
-    strategy:
-      fail-fast: false
-      matrix:
-        language: [go]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4.38.2
-        with:
-          languages: ${{ matrix.language }}
-          queries: +security-and-quality
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v4.38.2
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v4.38.2
-        with:
-          category: "/language:${{ matrix.language }}"
+    uses: Mellanox/cloud-orchestration-reusable-workflows/.github/workflows/codeql-reusable.yml@main

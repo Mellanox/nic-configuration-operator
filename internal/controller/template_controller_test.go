@@ -291,7 +291,7 @@ var _ = Describe("NicConfigurationTemplate Controller", func() {
 					LinkType: consts.Ethernet,
 					PciPerformanceOptimized: &v1alpha1.PciPerformanceOptimizedSpec{
 						Enabled:        true,
-						MaxAccOutRead:  4,
+						MaxAccOutRead:  4, //nolint:staticcheck // Exercise the deprecated API field for backward compatibility.
 						MaxReadRequest: 1024,
 					},
 				},
