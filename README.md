@@ -103,7 +103,10 @@ spec:
 * `spectrumXOptimized`: enables Spectrum-X specific NIC optimizations. When enabled:
   * Requires `linkType=Ethernet` and `numVfs=1`
   * Cannot be combined with `roceOptimized` (RoCE settings are included automatically)
-  * Temporarily cannot be combined with `rawNvConfig` or `networkBay`. NCO cannot yet determine which native mlxconfig parameters are owned by typed doSPCX operations, so allowing either combination could create a non-convergent reconcile loop
+  * Native NVConfig precedence is `rawNvConfig` > template-derived parameters > doSPCX. Validation uses DMS GET `_nvconfig` metadata to recognize overridden typed leaves and checks their native current/next-boot values, so intentional overrides converge after reboot
+  * Requires a DMS build containing NVConfig GET mapping metadata support (DOCA change 1508833) when native parameters accompany typed intent. Missing mappings fail validation before apply, including with `force`
+  * Raw `MODULE_SPLIT_*` assignments cannot be combined with typed breakout lane operations: DMS does not yet expose composite lane ownership
+  * Temporarily cannot be combined with `networkBay`; complete native ownership is required to place the system profile below typed doSPCX intent
   * Only supported on ConnectX-7 (`nicType: 1021`), ConnectX-8 (`nicType: 1023`), ConnectX-9 (`nicType: 1025`) and BlueField-3 SuperNIC (`nicType: a2dc`)
   * `version`: Required. Spectrum-X architecture version passed to the doSPCX planner
   * `platformType`: Required. doSPCX platform identifier defined by the supplied Blueprints profile
