@@ -8,7 +8,10 @@ env:
   OPERATOR_IMAGE_NAME: "nic-configuration-operator"
   DAEMON_IMAGE_NAME: "nic-configuration-operator-daemon"
 jobs:
+  go-builder-images:
+    uses: Mellanox/cloud-orchestration-reusable-workflows/.github/workflows/go-builder-images-reusable.yml@main
   image-build-push:
+    needs: [go-builder-images]
     name: Image build and push
     runs-on: ubuntu-latest
     steps:
@@ -47,6 +50,9 @@ jobs:
       - name: Build and push operator image
         uses: docker/build-push-action@v7
         with:
+          build-args: |
+            BASE_IMAGE_GO_BUILDER=${{ needs.go-builder-images.outputs.standard }}
+            BASE_IMAGE_GO_BUILDER_ALPINE=${{ needs.go-builder-images.outputs.alpine }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
@@ -64,6 +70,9 @@ jobs:
       - name: Build and push config daemon image
         uses: docker/build-push-action@v7
         with:
+          build-args: |
+            BASE_IMAGE_GO_BUILDER=${{ needs.go-builder-images.outputs.standard }}
+            BASE_IMAGE_GO_BUILDER_ALPINE=${{ needs.go-builder-images.outputs.alpine }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
