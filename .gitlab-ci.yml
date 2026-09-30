@@ -94,32 +94,9 @@ resolve-doca-host:
     reports:
       dotenv: doca.env
 
-resolve-go-builder-image:
-  stage: resolve
-  image: alpine:3.23
-  tags:
-    - os/linux
-    - type/docker
-  rules:
-    - if: '$CI_COMMIT_TAG =~ /^network-operator-.*$/'
-    - if: '$CI_COMMIT_BRANCH =~ /^network-operator-.*$/'
-  script:
-    - |
-      wget -q -O go-builder-images.yml \
-        https://raw.githubusercontent.com/Mellanox/cloud-orchestration-reusable-workflows/main/.github/workflows/go-builder-images-reusable.yml
-      BASE_IMAGE_GO_BUILDER=$(awk '$1 == "BASE_IMAGE_GO_BUILDER:" {print $2; exit}' go-builder-images.yml)
-      test -n "$BASE_IMAGE_GO_BUILDER"
-      printf 'BASE_IMAGE_GO_BUILDER=%s\n' "$BASE_IMAGE_GO_BUILDER" > go-builder.env
-  artifacts:
-    reports:
-      dotenv: go-builder.env
-
 # Common job template for building STIG images
 .build-stig-image:
   stage: build
-  needs:
-    - job: resolve-go-builder-image
-      artifacts: true
   tags:
     - os/linux
     - type/docker
@@ -204,7 +181,6 @@ build-operator-stig-image-ubuntu:
       docker build \
         --secret    id=stig_script,src=/tmp/stig-scripts/stig-fixer.sh \
         --build-arg GOPROXY=$GOPROXY \
-        --build-arg BASE_IMAGE_GO_BUILDER="$BASE_IMAGE_GO_BUILDER" \
         --build-arg UBUNTU_STIG_BASE_IMAGE=$UBUNTU_STIG_BASE_IMAGE \
         --file      Dockerfile.operator.stig-ubuntu \
         --tag       $DOCKER_REGISTRY/$OPERATOR_IMAGE_NAME:$DOCKER_TAG-ubuntu \
@@ -221,8 +197,6 @@ build-operator-stig-image-ubuntu:
 build-daemon-stig-image-ubuntu:
   extends: .build-stig-image
   needs:
-    - job: resolve-go-builder-image
-      artifacts: true
     - job: resolve-doca-host
       artifacts: true
   script:
@@ -231,7 +205,6 @@ build-daemon-stig-image-ubuntu:
       docker build \
         --secret    id=stig_script,src=/tmp/stig-scripts/stig-fixer.sh \
         --build-arg GOPROXY=$GOPROXY \
-        --build-arg BASE_IMAGE_GO_BUILDER="$BASE_IMAGE_GO_BUILDER" \
         --build-arg UBUNTU_STIG_BASE_IMAGE=$UBUNTU_STIG_BASE_IMAGE \
         --build-arg DOCA_HOST_URL="$DOCA_HOST_UBUNTU_URL" \
         --file      Dockerfile.daemon.stig-ubuntu \
@@ -253,7 +226,6 @@ build-operator-stig-image-rhel:
     - |
       docker build \
         --build-arg GOPROXY=$GOPROXY \
-        --build-arg BASE_IMAGE_GO_BUILDER="$BASE_IMAGE_GO_BUILDER" \
         --build-arg RHEL_STIG_BASE_IMAGE=$RHEL_STIG_BASE_IMAGE \
         --build-arg CVE_UPDATES_RHEL="$CVE_UPDATES_RHEL" \
         --file      Dockerfile.operator.stig-rhel \
@@ -271,8 +243,6 @@ build-operator-stig-image-rhel:
 build-daemon-stig-image-rhel:
   extends: .build-stig-image
   needs:
-    - job: resolve-go-builder-image
-      artifacts: true
     - job: resolve-doca-host
       artifacts: true
   script:
@@ -280,7 +250,6 @@ build-daemon-stig-image-rhel:
     - |
       docker build \
         --build-arg GOPROXY=$GOPROXY \
-        --build-arg BASE_IMAGE_GO_BUILDER="$BASE_IMAGE_GO_BUILDER" \
         --build-arg RHEL_STIG_BASE_IMAGE=$RHEL_STIG_BASE_IMAGE \
         --build-arg DOCA_HOST_URL="$DOCA_HOST_RHEL_URL" \
         --build-arg CVE_UPDATES_RHEL="$CVE_UPDATES_RHEL" \
