@@ -384,7 +384,7 @@ func planParameters(config *planConfig) ([]string, error) {
 	if config.overlay == "" {
 		return params, nil
 	}
-	if config.profile == dospcxProfileMultiplane {
+	if config.multiplane == consts.MultiplaneModeHwplb {
 		if config.overlay != consts.OverlayNone {
 			return nil, fmt.Errorf("doSPCX profile %s does not support overlay %q", config.profile, config.overlay)
 		}
@@ -501,7 +501,7 @@ func buildPlanConfig(devices []*v1alpha1.NicDevice) (*planConfig, error) {
 	if nodeName == "" {
 		return nil, fmt.Errorf("Spectrum-X device %q has no node name", selected[0].Name)
 	}
-	profile, err := blueprintProfile(firstSpec.MultiplaneMode)
+	profile, err := blueprintProfile(firstSpec.PlatformType, firstSpec.MultiplaneMode)
 	if err != nil {
 		return nil, err
 	}
@@ -538,7 +538,7 @@ func buildPlanConfig(devices []*v1alpha1.NicDevice) (*planConfig, error) {
 			return nil, fmt.Errorf("Spectrum-X devices in one plan must belong to the same node; device %q belongs to %q", device.Name, device.Status.Node)
 		}
 		spec := device.Spec.Configuration.Template.SpectrumXOptimized
-		deviceProfile, profileErr := blueprintProfile(spec.MultiplaneMode)
+		deviceProfile, profileErr := blueprintProfile(spec.PlatformType, spec.MultiplaneMode)
 		if profileErr != nil {
 			return nil, fmt.Errorf("device %q: %w", device.Name, profileErr)
 		}
@@ -616,8 +616,28 @@ func normalizedMultiplaneMode(mode string) string {
 	return mode
 }
 
-func blueprintProfile(mode string) (string, error) {
-	switch normalizedMultiplaneMode(mode) {
+func blueprintProfile(platform, mode string) (string, error) {
+	platform = strings.TrimSpace(platform)
+	mode = normalizedMultiplaneMode(mode)
+	// Platform-specific recipes are provided by the installed doSPCX data bundle.
+	// Keep the generic profiles for other platforms, including custom bundles.
+	switch platform {
+	case "rtx":
+		if mode == consts.MultiplaneModeNone {
+			return "rtx", nil
+		}
+		return "", fmt.Errorf("platform %q does not support multiplaneMode %q", platform, mode)
+	case "vr":
+		switch mode {
+		case consts.MultiplaneModeSwplb:
+			return "vr-SPX_NetPlugin", nil
+		case consts.MultiplaneModeHwplb:
+			return "vr-SPX_Multiplane", nil
+		default:
+			return "", fmt.Errorf("platform %q does not support multiplaneMode %q", platform, mode)
+		}
+	}
+	switch mode {
 	case consts.MultiplaneModeNone:
 		return dospcxProfileSinglePlane, nil
 	case consts.MultiplaneModeSwplb:

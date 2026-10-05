@@ -737,6 +737,53 @@ var _ = Describe("doSPCX planning", func() {
 		}, 1),
 	)
 
+	DescribeTable("routes platform-specific profiles through both planning stages",
+		func(platform, mode, profile string, planes int) {
+			stateDir := GinkgoT().TempDir()
+			commands := []preparePlanCommand{}
+			device := newDevice("platform-profile", "0000:64:00.0", mode)
+			device.Spec.Configuration.Template.SpectrumXOptimized.PlatformType = platform
+			device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = planes
+			response := planResponseForPlatform(
+				planName(nodeName, prepareStage), profile, prepareStage, strings.TrimSpace(platform), planes, 1)
+			_, err := generatePreparePlan(context.Background(), preparePlanFakeExecutor(response, &commands),
+				nodeName, []*v1alpha1.NicDevice{device}, stateDir)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(commands).To(HaveLen(2))
+			for _, command := range commands {
+				Expect(command.args).To(ContainElement("profile=" + profile))
+				if mode == "hwplb" {
+					Expect(command.args).NotTo(ContainElement("params=overlay=none"))
+				}
+			}
+			content, err := os.ReadFile(filepath.Join(stateDir, "target-maps", targetMapName(nodeName)+".json"))
+			Expect(err).NotTo(HaveOccurred())
+			var target targetMap
+			Expect(json.Unmarshal(content, &target)).To(Succeed())
+			Expect(target.PlatformType).To(Equal(strings.TrimSpace(platform)))
+		},
+		Entry("RTX single-plane", "rtx", "none", "rtx", 1),
+		Entry("RTX omitted mode and padded platform", " rtx ", "", "rtx", 1),
+		Entry("VR software multiplane", "vr", "swplb", "vr-SPX_NetPlugin", 2),
+		Entry("VR hardware multiplane profile routing", "vr", "hwplb", "vr-SPX_Multiplane", 4),
+	)
+
+	DescribeTable("rejects unsupported platform modes before invoking the planner",
+		func(platform, mode string) {
+			commands := []preparePlanCommand{}
+			device := newDevice("invalid-platform-mode", "0000:64:00.0", mode)
+			device.Spec.Configuration.Template.SpectrumXOptimized.PlatformType = platform
+			_, err := generatePreparePlan(context.Background(), preparePlanFakeExecutor(nil, &commands),
+				nodeName, []*v1alpha1.NicDevice{device}, GinkgoT().TempDir())
+			Expect(err).To(MatchError(ContainSubstring("does not support multiplaneMode")))
+			Expect(commands).To(BeEmpty())
+		},
+		Entry("RTX software multiplane", "rtx", "swplb"),
+		Entry("RTX hardware multiplane", "rtx", "hwplb"),
+		Entry("VR single-plane", "vr", "none"),
+		Entry("VR omitted mode", "vr", ""),
+	)
+
 	It("maps swplb to SPX_NetPlugin and passes its overlay", func() {
 		stateDir := GinkgoT().TempDir()
 		commands := []preparePlanCommand{}
@@ -780,10 +827,11 @@ var _ = Describe("doSPCX planning", func() {
 		))
 	})
 
-	It("rejects an unsupported SPX_Multiplane overlay before writing the target map", func() {
+	DescribeTable("rejects an unsupported hardware multiplane overlay before writing the target map", func(platform string) {
 		stateDir := GinkgoT().TempDir()
 		commands := []preparePlanCommand{}
 		device := newDevice("hwmp-l3", "0000:64:00.0", "hwplb")
+		device.Spec.Configuration.Template.SpectrumXOptimized.PlatformType = platform
 		device.Spec.Configuration.Template.SpectrumXOptimized.Overlay = "l3"
 
 		_, err := generatePreparePlan(
@@ -795,7 +843,10 @@ var _ = Describe("doSPCX planning", func() {
 		Expect(commands).To(BeEmpty())
 		_, statErr := os.Stat(filepath.Join(stateDir, "target-maps", targetMapName(nodeName)+".json"))
 		Expect(os.IsNotExist(statErr)).To(BeTrue())
-	})
+	},
+		Entry("generic profile", "gb300"),
+		Entry("VR profile", "vr"),
+	)
 
 	DescribeTable("rejects invalid planner paths before writing the target map",
 		func(stateDir, expected string) {
@@ -815,7 +866,7 @@ var _ = Describe("doSPCX planning", func() {
 
 	DescribeTable("maps NCO multiplane modes to public doSPCX profiles",
 		func(mode, expected string) {
-			profile, err := blueprintProfile(mode)
+			profile, err := blueprintProfile("gb300", mode)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(profile).To(Equal(expected))
 		},
@@ -826,7 +877,7 @@ var _ = Describe("doSPCX planning", func() {
 	)
 
 	It("rejects unsupported multiplane modes", func() {
-		_, err := blueprintProfile("uniplane")
+		_, err := blueprintProfile("gb300", "uniplane")
 		Expect(err).To(MatchError(ContainSubstring("unsupported")))
 	})
 

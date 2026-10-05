@@ -114,6 +114,21 @@ spec:
 
 #### Spectrum-X Configuration
 
+The planner profile is selected from `platformType` and `multiplaneMode`:
+
+| Platform | Mode | doSPCX profile |
+| --- | --- | --- |
+| `rtx` | `none` (or omitted) | `rtx` |
+| `vr` | `swplb` | `vr-SPX_NetPlugin` |
+| `vr` | `hwplb` | `vr-SPX_Multiplane` |
+| Other platforms | `none` / `swplb` / `hwplb` | `single-plane` / `SPX_NetPlugin` / `SPX_Multiplane` |
+
+RTX rejects multiplane modes; VR rejects single-plane mode. The supplied data
+bundle must contain the selected profile and support the requested hardware.
+VR profile selection alone does not provide complete VR support: target-map
+construction still lacks the two-NIC-per-rail layout and `nic_index_in_rail`,
+and the CRD does not yet allow eight planes for VR hardware multiplane.
+
 Spectrum-X configuration is compiled from the doSPCX data bundle published by
 the `dospcx-data` repository. The labeled ConfigMap contains a versioned format
 marker and a gzip-compressed archive of the complete doSPCX data tree:
