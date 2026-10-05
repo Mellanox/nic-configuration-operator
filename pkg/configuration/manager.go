@@ -18,10 +18,8 @@ package configuration
 import (
 	"context"
 	"fmt"
-	"math/big"
 	"sort"
 	"strconv"
-	"strings"
 
 	"k8s.io/client-go/tools/record"
 	execUtils "k8s.io/utils/exec"
@@ -154,7 +152,7 @@ func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *
 		return false, false, unsupportedParams, err
 	}
 	if plan != nil {
-		phase, planUpdateNeeded, planRebootNeeded, err := h.spectrumXNVConfigPhase(ctx, device, plan)
+		phase, planUpdateNeeded, planRebootNeeded, err := h.spectrumXNVConfigPhase(ctx, device, plan, desiredParams, nvConfigsForPorts)
 		if err != nil {
 			return false, false, unsupportedParams, err
 		}
@@ -192,13 +190,13 @@ func validateTemplateParamsApplied(nvConfigsForPorts map[string]types.NvConfigQu
 				unsupportedSet[parameter] = struct{}{}
 				continue
 			}
-			if !mlxConfigValueMatches(nextValues, desiredValue) {
+			if !nvconfig.ValueMatches(nextValues, desiredValue) {
 				configUpdateNeeded = true
 				rebootNeeded = true
 				continue
 			}
 			currentValues, foundInCurrent := nvConfig.CurrentConfig[parameter]
-			if !foundInCurrent || !mlxConfigValueMatches(currentValues, desiredValue) {
+			if !foundInCurrent || !nvconfig.ValueMatches(currentValues, desiredValue) {
 				rebootNeeded = true
 			}
 		}
@@ -238,7 +236,7 @@ func buildNVConfigApplyDiff(nvConfig types.NvConfigQuery, desiredConfig map[stri
 			diff.unsupported = append(diff.unsupported, param)
 			continue
 		}
-		if !withDefault && mlxConfigValueMatches(nextValues, value) {
+		if !withDefault && nvconfig.ValueMatches(nextValues, value) {
 			diff.unchanged = append(diff.unchanged, param)
 			continue
 		}
@@ -284,9 +282,15 @@ func (h configurationManager) applySpectrumXNVConfig(
 	if options.Force {
 		typedOperations = append(typedOperations, plan.Breakout...)
 		typedOperations = append(typedOperations, plan.PostBreakout...)
+		// Force bypasses drift decisions, but cannot bypass ownership checks.
+		if len(desiredParams) > 0 {
+			if _, _, err := validateSpectrumXNVConfig(ctx, utils, device.Status.Ports, typedOperations, desiredParams, nvConfigsForPorts); err != nil {
+				return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+			}
+		}
 	} else {
 		var err error
-		phase, updateNeeded, rebootNeeded, err = h.spectrumXNVConfigPhase(ctx, device, plan)
+		phase, updateNeeded, rebootNeeded, err = h.spectrumXNVConfigPhase(ctx, device, plan, desiredParams, nvConfigsForPorts)
 		if err != nil {
 			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 		}
@@ -853,47 +857,6 @@ func getRawNvConfigParams(device *v1alpha1.NicDevice) map[string]string {
 		return nil
 	}
 	return params
-}
-
-func mlxConfigValueMatches(values []string, desired string) bool {
-	for _, value := range values {
-		if mlxConfigValuesEqual(value, desired) {
-			return true
-		}
-	}
-	return false
-}
-
-func mlxConfigValuesEqual(actual, desired string) bool {
-	actual = strings.TrimSpace(actual)
-	desired = strings.TrimSpace(desired)
-	if strings.EqualFold(actual, desired) {
-		return true
-	}
-
-	actualNumber, actualIsNumber := parseMlxConfigNumber(actual)
-	desiredNumber, desiredIsNumber := parseMlxConfigNumber(desired)
-	return actualIsNumber && desiredIsNumber && actualNumber.Cmp(desiredNumber) == 0
-}
-
-func parseMlxConfigNumber(value string) (*big.Int, bool) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil, false
-	}
-
-	base := 10
-	digits := value
-	if strings.HasPrefix(strings.ToLower(digits), "0x") {
-		base = 16
-		digits = digits[2:]
-	} else if strings.ContainsAny(digits, "abcdefABCDEF") {
-		// System configuration profiles use bare hexadecimal values such as FF.
-		base = 16
-	}
-
-	number, ok := new(big.Int).SetString(digits, base)
-	return number, ok
 }
 
 func NewConfigurationManager(eventRecorder record.EventRecorder, dmsManager dms.DMSManager, nvConfigUtils nvconfig.NVConfigUtils, spectrumXConfigManager spectrumx.SpectrumXManager) ConfigurationManager {

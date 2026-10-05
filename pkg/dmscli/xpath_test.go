@@ -68,6 +68,71 @@ var _ = Describe("typed XPath operations", func() {
 			}))
 		})
 
+		It("separates concrete XPath metadata from leaf values", func() {
+			executor := fakeExecutor([]byte(`{
+				"num-planes":2,"num-planes-pending":4,
+				"_nvconfig":{
+					"/nvidia/multiplane/num-planes":"NUM_OF_PLANES_P1",
+					"/nvidia/multiplane/num-planes-pending":"NUM_OF_PLANES_P1"
+				}
+			}`), nil, &commands)
+			result, err := QueryXPaths(context.Background(), executor, target, []XPathQuery{
+				{Path: "/nvidia/multiplane", Leaves: []string{"num-planes", "num-planes-pending"}},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Values["/nvidia/multiplane"]).To(Equal(map[string]any{
+				"num-planes": json.Number("2"), "num-planes-pending": json.Number("4"),
+			}))
+			Expect(result.NVConfig).To(Equal(map[string]string{
+				"/nvidia/multiplane/num-planes":         "NUM_OF_PLANES_P1",
+				"/nvidia/multiplane/num-planes-pending": "NUM_OF_PLANES_P1",
+			}))
+		})
+
+		It("preserves distinct indexed metadata in batched responses", func() {
+			executor := fakeExecutor([]byte(`{
+				"/nvidia/first":{"value":1,"_nvconfig":{"/nvidia/first/[0]/value":"PARAM[0]"}},
+				"/nvidia/second":{"value":2,"_nvconfig":{"/nvidia/second/[1]/value":"PARAM[1]"}}
+			}`), nil, &commands)
+			result, err := QueryXPaths(context.Background(), executor, target, []XPathQuery{
+				{Path: "/nvidia/first", Leaves: []string{"value"}},
+				{Path: "/nvidia/second", Leaves: []string{"value"}},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.NVConfig).To(Equal(map[string]string{
+				"/nvidia/first/[0]/value": "PARAM[0]", "/nvidia/second/[1]/value": "PARAM[1]",
+			}))
+			Expect(result.Values["/nvidia/first"]).NotTo(HaveKey("_nvconfig"))
+			Expect(result.Values["/nvidia/second"]).NotTo(HaveKey("_nvconfig"))
+		})
+
+		It("rejects conflicting metadata for the same concrete XPath", func() {
+			executor := fakeExecutor([]byte(`{
+				"/nvidia/first":{"value":1,"_nvconfig":{"/nvidia/shared/value":"PARAM_A"}},
+				"/nvidia/second":{"value":2,"_nvconfig":{"/nvidia/shared/value":"PARAM_B"}}
+			}`), nil, &commands)
+			_, err := QueryXPaths(context.Background(), executor, target, []XPathQuery{
+				{Path: "/nvidia/first", Leaves: []string{"value"}},
+				{Path: "/nvidia/second", Leaves: []string{"value"}},
+			})
+			Expect(err).To(MatchError(ContainSubstring("conflicting DMS _nvconfig mappings")))
+		})
+
+		DescribeTable("rejects malformed mapping metadata",
+			func(metadata string) {
+				executor := fakeExecutor([]byte(`{"value":1,"_nvconfig":`+metadata+`}`), nil, &commands)
+				_, err := QueryXPaths(context.Background(), executor, target, []XPathQuery{
+					{Path: "/nvidia/first", Leaves: []string{"value"}},
+				})
+				Expect(err).To(MatchError(ContainSubstring("_nvconfig")))
+			},
+			Entry("null", `null`),
+			Entry("array", `[]`),
+			Entry("non-string parameter", `{"/nvidia/first/value":1}`),
+			Entry("empty parameter", `{"/nvidia/first/value":""}`),
+			Entry("non-XPath key", `{"value":"PARAM"}`),
+		)
+
 		It("decodes the public flat single-container response", func() {
 			executor := fakeExecutor([]byte(`{"operating-mode":"dpu","status":"ready"}`), nil, &commands)
 

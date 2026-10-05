@@ -49,6 +49,38 @@ type spectrumXNVConfigUtils interface {
 	) (types.ApplyStatus, error)
 }
 
+// Optional extension for implementations that reconcile typed and native intent.
+type spectrumXNVConfigOverrideValidator interface {
+	ValidateNvConfigXPathsWithOverrides(
+		ctx context.Context,
+		ports []v1alpha1.NicDevicePortSpec,
+		operations []dmscli.XPathOperation,
+		nativeParams map[string]string,
+		configs map[string]types.NvConfigQuery,
+	) (updateNeeded, rebootNeeded bool, err error)
+}
+
+func validateSpectrumXNVConfig(
+	ctx context.Context,
+	utils spectrumXNVConfigUtils,
+	ports []v1alpha1.NicDevicePortSpec,
+	operations []dmscli.XPathOperation,
+	nativeParams map[string]string,
+	configs map[string]types.NvConfigQuery,
+) (bool, bool, error) {
+	if len(operations) == 0 {
+		return false, false, nil
+	}
+	if len(nativeParams) == 0 {
+		return utils.ValidateNvConfigXPaths(ctx, ports, operations)
+	}
+	validator, ok := utils.(spectrumXNVConfigOverrideValidator)
+	if !ok {
+		return false, false, fmt.Errorf("configured NVConfig utility does not support doSPCX native override validation")
+	}
+	return validator.ValidateNvConfigXPathsWithOverrides(ctx, ports, operations, nativeParams, configs)
+}
+
 func (h configurationManager) preparedSpectrumXPlan(
 	device *v1alpha1.NicDevice,
 ) (*spectrumx.Plan, error) {
@@ -90,17 +122,13 @@ func (h configurationManager) preparedSpectrumXNVConfig(
 // validateSpectrumXNVConfigCompatibility rejects combinations whose native
 // NVConfig ownership cannot yet be reconciled with typed doSPCX operations.
 //
-// TODO(dospcx-nvconfig): HIGH PRIORITY -- restore rawNvConfig and Network Bay
-// support ASAP once DMS can validate their combined native/typed state.
+// TODO(dospcx-nvconfig): Restore Network Bay once DMS exposes complete typed
+// ownership, including composite lanes, to layer the system profile below it.
 func validateSpectrumXNVConfigCompatibility(device *v1alpha1.NicDevice) error {
 	if !spectrumXEnabled(device) || device.Spec.Configuration.ResetToDefault {
 		return nil
 	}
 	template := device.Spec.Configuration.Template
-	if len(template.RawNvConfig) > 0 {
-		return types.IncorrectSpecError(
-			"rawNvConfig cannot currently be combined with spectrumXOptimized")
-	}
 	if template.NetworkBay != nil {
 		return types.IncorrectSpecError(
 			"networkBay cannot currently be combined with spectrumXOptimized")
@@ -112,6 +140,8 @@ func (h configurationManager) spectrumXNVConfigPhase(
 	ctx context.Context,
 	device *v1alpha1.NicDevice,
 	plan *spectrumx.Plan,
+	nativeParams map[string]string,
+	configs map[string]types.NvConfigQuery,
 ) (phase string, updateNeeded, rebootNeeded bool, err error) {
 	utils, err := h.spectrumXNVConfigUtils(device)
 	if err != nil {
@@ -123,8 +153,8 @@ func (h configurationManager) spectrumXNVConfigPhase(
 			"phase", phase,
 			"operations", len(operations),
 			"ports", len(device.Status.Ports))
-		updateNeeded, rebootNeeded, err := utils.ValidateNvConfigXPaths(
-			ctx, device.Status.Ports, operations)
+		updateNeeded, rebootNeeded, err := validateSpectrumXNVConfig(
+			ctx, utils, device.Status.Ports, operations, nativeParams, configs)
 		if err != nil {
 			return "", false, false, fmt.Errorf(
 				"validate doSPCX %s NVConfig for device %q: %w", phase, device.Name, err)
@@ -163,8 +193,19 @@ func (h configurationManager) verifySpectrumXSecondaryNVConfigStaged(
 		"nativeParameters", len(desiredParams),
 		"typedOperations", len(typedOperations))
 
+	// Refresh native state before checking typed leaves shadowed by overrides.
+	configs := make(map[string]types.NvConfigQuery, len(secondaryPorts))
+	if len(desiredParams) > 0 {
+		for _, port := range secondaryPorts {
+			config, err := h.nvConfigUtils.QueryNvConfig(ctx, port, nil)
+			if err != nil {
+				return fmt.Errorf("verify native NVConfig on secondary PCI function %q: %w", port.PCI, err)
+			}
+			configs[port.PCI] = config
+		}
+	}
 	if len(typedOperations) > 0 {
-		updateNeeded, _, err := utils.ValidateNvConfigXPaths(ctx, secondaryPorts, typedOperations)
+		updateNeeded, _, err := validateSpectrumXNVConfig(ctx, utils, secondaryPorts, typedOperations, desiredParams, configs)
 		if err != nil {
 			return fmt.Errorf("verify typed NVConfig on secondary PCI functions: %w", err)
 		}
@@ -172,20 +213,10 @@ func (h configurationManager) verifySpectrumXSecondaryNVConfigStaged(
 			return fmt.Errorf("DMS primary-target apply did not stage typed NVConfig on every secondary PCI function")
 		}
 	}
-	if len(desiredParams) == 0 {
-		return nil
-	}
-
-	for _, port := range secondaryPorts {
-		nvConfig, err := h.nvConfigUtils.QueryNvConfig(ctx, port, nil)
-		if err != nil {
-			return fmt.Errorf("verify native NVConfig on secondary PCI function %q: %w", port.PCI, err)
-		}
-		updateNeeded, _, _ := validateTemplateParamsApplied(
-			map[string]types.NvConfigQuery{port.PCI: nvConfig}, desiredParams)
+	for pci, config := range configs {
+		updateNeeded, _, _ := validateTemplateParamsApplied(map[string]types.NvConfigQuery{pci: config}, desiredParams)
 		if updateNeeded {
-			return fmt.Errorf(
-				"DMS primary-target apply did not stage native NVConfig on secondary PCI function %q", port.PCI)
+			return fmt.Errorf("DMS primary-target apply did not stage native NVConfig on secondary PCI function %q", pci)
 		}
 	}
 	return nil
