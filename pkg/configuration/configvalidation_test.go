@@ -198,7 +198,6 @@ var _ = Describe("ConfigValidationImpl", func() {
 							LinkType: consts.Ethernet,
 							PciPerformanceOptimized: &v1alpha1.PciPerformanceOptimizedSpec{
 								Enabled:        true,
-								MaxAccOutRead:  1337, //nolint:staticcheck // Exercise the deprecated API field for backward compatibility.
 								MaxReadRequest: 1339,
 							},
 							GpuDirectOptimized: &v1alpha1.GpuDirectOptimizedSpec{
@@ -227,7 +226,6 @@ var _ = Describe("ConfigValidationImpl", func() {
 
 			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(nvParams).To(HaveKeyWithValue(consts.MaxAccOutReadParam, "1337"))
 			Expect(nvParams).To(HaveKeyWithValue(consts.AtsEnabledParam, "0"))
 			Expect(nvParams).To(HaveKeyWithValue(consts.RoceCcPrioMaskP1Param, "255"))
 			Expect(nvParams).To(HaveKeyWithValue(consts.CnpDscpP1Param, "4"))
@@ -237,100 +235,31 @@ var _ = Describe("ConfigValidationImpl", func() {
 			Expect(nvParams).To(HaveKeyWithValue(consts.Cnp802pPrioP2Param, "6"))
 		})
 
-		It("should skip the MaxAccOutRead if the default is not 0", func() {
-			mockConfigurationUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
-
+		It("should not change NVConfig when only PCI performance optimization is enabled", func() {
 			device := &v1alpha1.NicDevice{
 				Spec: v1alpha1.NicDeviceSpec{
 					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
 						Template: &v1alpha1.ConfigurationTemplateSpec{
-							NumVfs:   0,
-							LinkType: consts.Ethernet,
+							NumVfs: 0,
 							PciPerformanceOptimized: &v1alpha1.PciPerformanceOptimizedSpec{
-								Enabled: true,
+								Enabled:        true,
+								MaxReadRequest: 1024,
 							},
 						},
 					},
 				},
 				Status: v1alpha1.NicDeviceStatus{
-					Ports: []v1alpha1.NicDevicePortSpec{
-						{PCI: "0000:03:00.0"},
-					},
+					Ports: []v1alpha1.NicDevicePortSpec{{PCI: "0000:03:00.0"}},
 				},
 			}
 
-			defaultValues := map[string][]string{
-				consts.MaxAccOutReadParam: {"notZero"},
-			}
 			query := types.NewNvConfigQuery()
-			query.DefaultConfig = defaultValues
-
 			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(nvParams).NotTo(HaveKeyWithValue(consts.MaxAccOutReadParam, consts.NvParamZero))
-		})
-
-		It("should apply MaxAccOutRead if the default is 0", func() {
-			mockConfigurationUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
-
-			device := &v1alpha1.NicDevice{
-				Spec: v1alpha1.NicDeviceSpec{
-					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
-						Template: &v1alpha1.ConfigurationTemplateSpec{
-							NumVfs:   0,
-							LinkType: consts.Ethernet,
-							PciPerformanceOptimized: &v1alpha1.PciPerformanceOptimizedSpec{
-								Enabled: true,
-							},
-						},
-					},
-				},
-				Status: v1alpha1.NicDeviceStatus{
-					Ports: []v1alpha1.NicDevicePortSpec{
-						{PCI: "0000:03:00.0"},
-					},
-				},
-			}
-
-			defaultValues := map[string][]string{
-				consts.MaxAccOutReadParam: {consts.NvParamZero},
-			}
-			query := types.NewNvConfigQuery()
-			query.DefaultConfig = defaultValues
-
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(nvParams).To(HaveKeyWithValue(consts.MaxAccOutReadParam, consts.NvParamZero))
-		})
-
-		It("should not apply MaxAccOutRead if the default is unavailable", func() {
-			mockConfigurationUtils.On("GetPCILinkSpeed", mock.Anything).Return(16, nil)
-
-			device := &v1alpha1.NicDevice{
-				Spec: v1alpha1.NicDeviceSpec{
-					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
-						Template: &v1alpha1.ConfigurationTemplateSpec{
-							NumVfs:   0,
-							LinkType: consts.Ethernet,
-							PciPerformanceOptimized: &v1alpha1.PciPerformanceOptimizedSpec{
-								Enabled: true,
-							},
-						},
-					},
-				},
-				Status: v1alpha1.NicDeviceStatus{
-					Ports: []v1alpha1.NicDevicePortSpec{
-						{PCI: "0000:03:00.0"},
-					},
-				},
-			}
-
-			// MAX_ACC_OUT_READ param is unavailable if ADVANCED_PCI_SETTINGS is disabled
-			query := types.NewNvConfigQuery()
-
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, query)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(nvParams).ToNot(HaveKeyWithValue(consts.MaxAccOutReadParam, consts.NvParamZero))
+			Expect(nvParams).To(Equal(map[string]string{
+				consts.SriovEnabledParam:  consts.NvParamFalse,
+				consts.SriovNumOfVfsParam: "0",
+			}))
 		})
 
 		It("should return an error when GpuOptimized is enabled without PciPerformanceOptimized", func() {
@@ -694,7 +623,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 			}
 
 			defaultValues := map[string][]string{
-				consts.MaxAccOutReadParam: {"testMaxAccOutRead", "0"},
+				consts.AtsEnabledParam: {"testAtsEnabled", "0"},
 			}
 			query := types.NewNvConfigQuery()
 			query.DefaultConfig = defaultValues
@@ -703,7 +632,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nvParams).To(HaveKeyWithValue(consts.SriovEnabledParam, consts.NvParamFalse))
 			Expect(nvParams).To(HaveKeyWithValue(consts.SriovNumOfVfsParam, "0"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.MaxAccOutReadParam, "0"))
+			Expect(nvParams).To(HaveKeyWithValue(consts.AtsEnabledParam, "0"))
 		})
 	})
 

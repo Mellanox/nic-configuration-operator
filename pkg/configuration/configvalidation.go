@@ -16,13 +16,10 @@ limitations under the License.
 package configuration
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
 
-	v1 "k8s.io/api/core/v1"
-	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
@@ -49,8 +46,7 @@ type configValidation interface {
 }
 
 type configValidationImpl struct {
-	utils         ConfigurationUtils
-	eventRecorder record.EventRecorder
+	utils ConfigurationUtils
 }
 
 func nvParamLinkTypeFromName(linkType string) string {
@@ -125,34 +121,6 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 				}
 			}
 		}
-	}
-
-	if template.PciPerformanceOptimized != nil && template.PciPerformanceOptimized.Enabled {
-		maxAccOutRead := template.PciPerformanceOptimized.MaxAccOutRead //nolint:staticcheck // Backward compatibility: keep honoring this field until the mapping is removed.
-		if maxAccOutRead != 0 {
-			desiredParameters[consts.MaxAccOutReadParam] = strconv.Itoa(maxAccOutRead)
-		} else if values, found := query.DefaultConfig[consts.MaxAccOutReadParam]; found {
-			// MAX_ACC_OUT_READ is hidden when ADVANCED_PCI_SETTINGS is off. If the default is not
-			// in DefaultConfig the param is unsupported on this device — skip it silently and let
-			// the apply path report ApplyStatusPartiallyApplied if any other params still need work.
-			maxAccOutReadParamDefaultValue := values[len(values)-1]
-
-			// According to the PRM, setting MAX_ACC_OUT_READ to zero enables the auto mode,
-			// which applies the best suitable optimizations.
-			// However, there is a bug in certain FW versions, where the zero value is not available.
-			// In this case, until the fix is available, skipping this parameter and emitting a warning
-			if maxAccOutReadParamDefaultValue == consts.NvParamZero {
-				applyDefaultNvConfigValueIfExists(consts.MaxAccOutReadParam, desiredParameters, query)
-			} else {
-				warning := fmt.Sprintf("%s nv config parameter does not work properly on this version of FW, skipping it", consts.MaxAccOutReadParam)
-				if v.eventRecorder != nil {
-					v.eventRecorder.Event(device, v1.EventTypeWarning, "FirmwareError", warning)
-				}
-				log.Log.Error(errors.New(warning), "skipping parameter", "device", device.Name, "fw version", device.Status.FirmwareVersion)
-			}
-		}
-
-		// maxReadRequest is applied as runtime configuration
 	}
 
 	if template.RoceOptimized != nil && template.RoceOptimized.Enabled {
@@ -488,6 +456,6 @@ func (v *configValidationImpl) CalculateDesiredRuntimeConfig(device *v1alpha1.Ni
 	return result
 }
 
-func newConfigValidation(utils ConfigurationUtils, eventRecorder record.EventRecorder) configValidation {
-	return &configValidationImpl{utils: utils, eventRecorder: eventRecorder}
+func newConfigValidation(utils ConfigurationUtils) configValidation {
+	return &configValidationImpl{utils: utils}
 }

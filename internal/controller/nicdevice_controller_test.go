@@ -399,8 +399,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 							NumVfs:   4,
 							LinkType: consts.Ethernet,
 							PciPerformanceOptimized: &v1alpha1.PciPerformanceOptimizedSpec{
-								Enabled:       true,
-								MaxAccOutRead: 9999, //nolint:staticcheck // Exercise the deprecated API field for backward compatibility.
+								Enabled: true,
 							},
 						},
 					},

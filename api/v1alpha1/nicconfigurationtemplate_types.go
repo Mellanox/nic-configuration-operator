@@ -44,8 +44,6 @@ type LinkTypeEnum string
 type PciPerformanceOptimizedSpec struct {
 	// Specifies whether to enable PCI performance optimization
 	Enabled bool `json:"enabled"`
-	// Deprecated: this field is ignored and no longer maps to MAX_ACC_OUT_READ.
-	MaxAccOutRead int `json:"maxAccOutRead,omitempty"`
 	// Specifies the size of a single PCI read request in bytes
 	// +kubebuilder:validation:Enum=128;256;512;1024;2048;4096
 	MaxReadRequest int `json:"maxReadRequest,omitempty"`

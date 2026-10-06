@@ -88,7 +88,6 @@ const (
 	NumOfPfParam             = "NUM_OF_PF"
 	LinkTypeP1Param          = "LINK_TYPE_P1"
 	LinkTypeP2Param          = "LINK_TYPE_P2"
-	MaxAccOutReadParam       = "MAX_ACC_OUT_READ"
 	RoceCcPrioMaskP1Param    = "ROCE_CC_PRIO_MASK_P1"
 	RoceCcPrioMaskP2Param    = "ROCE_CC_PRIO_MASK_P2"
 	CnpDscpP1Param           = "CNP_DSCP_P1"
@@ -217,7 +216,7 @@ func PortParam(base string, portNum int) string {
 
 // PortSuffixNum parses a trailing "_P<n>" suffix (n >= 1, digits only) and
 // returns the port number. Returns (0, false) when the name does not carry
-// a port suffix (e.g. "SRIOV_EN", "MAX_ACC_OUT_READ").
+// a port suffix (e.g. "SRIOV_EN", "NUM_OF_VFS").
 func PortSuffixNum(paramName string) (int, bool) {
 	idx := strings.LastIndex(paramName, "_P")
 	if idx < 0 || idx+2 >= len(paramName) {
