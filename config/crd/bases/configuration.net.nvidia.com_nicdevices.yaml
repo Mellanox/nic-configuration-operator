@@ -109,10 +109,6 @@ spec:
                             description: Specifies whether to enable PCI performance
                               optimization
                             type: boolean
-                          maxAccOutRead:
-                            description: 'Deprecated: this field is ignored and no
-                              longer maps to MAX_ACC_OUT_READ.'
-                            type: integer
                           maxReadRequest:
                             description: Specifies the size of a single PCI read request
                               in bytes

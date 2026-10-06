@@ -864,7 +864,7 @@ func NewConfigurationManager(eventRecorder record.EventRecorder, dmsManager dms.
 	systemConfParams, _ := nvConfigUtils.(nvconfig.SystemConfParamsProvider)
 	return configurationManager{
 		configurationUtils:     utils,
-		configValidation:       newConfigValidation(utils, eventRecorder),
+		configValidation:       newConfigValidation(utils),
 		nvConfigUtils:          nvConfigUtils,
 		systemConfParams:       systemConfParams,
 		spectrumXConfigManager: spectrumXConfigManager,

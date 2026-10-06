@@ -84,7 +84,6 @@ spec:
 * `pciPerformanceOptimized`: performs PCI performance optimizations. If enabled then by default the following will happen:
   * Set PCI max read request size for each PF to `4096` (note: this is a runtime config and is not persistent)
   * Users can override the runtime value via `maxReadRequest`
-  * `maxAccOutRead` is deprecated and ignored; use `rawNvConfig` for explicit `MAX_ACC_OUT_READ` management if needed.
 * `roceOptimized`: performs RoCE related optimizations. If enabled performs the following by default:
   * Nvconfig set for both ports (can be applied from PF0)
     * Conditionally applied for second port if present

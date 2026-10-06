@@ -1171,11 +1171,6 @@ PciPerformanceOptimizedSpec specifies PCI performance optimization settings
 <td><p>Specifies whether to enable PCI performance optimization</p></td>
 </tr>
 <tr>
-<td><code>maxAccOutRead</code><br />
-<em>int</em></td>
-<td><p>Deprecated: this field is ignored and no longer maps to MAX_ACC_OUT_READ.</p></td>
-</tr>
-<tr>
 <td><code>maxReadRequest</code><br />
 <em>int</em></td>
 <td><p>Specifies the size of a single PCI read request in bytes</p></td>

@@ -53,7 +53,7 @@ func TestPortSuffixNum(t *testing.T) {
 
 		// Not port-suffixed.
 		{"SRIOV_EN", 0, false},
-		{"MAX_ACC_OUT_READ", 0, false},
+		{"NUM_OF_VFS", 0, false},
 		{"INTERNAL_CPU_MODEL", 0, false},
 		{"", 0, false},
 		{"_P", 0, false},
