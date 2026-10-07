@@ -240,6 +240,9 @@ func networkBayImbalanceReason(devices []*v1alpha1.NicDevice) string {
 		if device.Status.NetworkBay == nil {
 			return fmt.Sprintf("device %s is not part of a Network Bay card but was matched by a Network Bay template", device.Name)
 		}
+		if device.Status.SerialNumber == "" {
+			return fmt.Sprintf("device %s has no serial number; cannot identify its Network Bay pair", device.Name)
+		}
 		bySerial[device.Status.SerialNumber]++
 	}
 

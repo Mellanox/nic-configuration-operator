@@ -137,6 +137,23 @@ var _ = Describe("DMSServer", func() {
 				Expect(server.clients["0000:02:00"].targetPCI).To(Equal("0000:02:00.0"))
 			})
 
+			It("should keep distinct clients for devices with empty VPD metadata", func() {
+				for i := range testDevices {
+					testDevices[i].Status.SerialNumber = ""
+					testDevices[i].Status.PartNumber = ""
+					testDevices[i].Status.ModelName = ""
+				}
+				Expect(server.StartDMSServer(testDevices)).To(Succeed())
+				Expect(server.clients).To(HaveLen(2))
+				first, err := server.GetDMSClientByPCIAddress("0000:01:00")
+				Expect(err).NotTo(HaveOccurred())
+				second, err := server.GetDMSClientByPCIAddress("0000:02:00")
+				Expect(err).NotTo(HaveOccurred())
+				Expect(first).NotTo(BeIdenticalTo(second))
+				Expect(server.clients["0000:01:00"].targetPCI).To(Equal("0000:01:00.0"))
+				Expect(server.clients["0000:02:00"].targetPCI).To(Equal("0000:02:00.0"))
+			})
+
 			It("should not start another server if already running", func() {
 				err := server.StartDMSServer(testDevices)
 				Expect(err).NotTo(HaveOccurred())

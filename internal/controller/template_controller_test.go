@@ -445,6 +445,20 @@ var _ = Describe("NicConfigurationTemplate Controller", func() {
 			Eventually(getMatchedDevicesFromStatus(ctx, template.Name, template.Namespace, k8sClient)).Should(BeEmpty())
 		})
 
+		It("rejects Network Bay templates when both serial numbers are unavailable", func() {
+			template := newBayTemplate()
+			Expect(k8sClient.Create(ctx, template)).To(Succeed())
+
+			device1 := createBayDevice("bay-no-serial-a", "0000:0b:00.0", "", 0)
+			device2 := createBayDevice("bay-no-serial-b", "0000:0e:00.0", "", 1)
+
+			Eventually(networkBayConditionStatus(device1.Name)).WithTimeout(time.Minute).Should(Equal(metav1.ConditionFalse))
+			Eventually(networkBayConditionStatus(device2.Name)).Should(Equal(metav1.ConditionFalse))
+			Consistently(getDeviceSpecTemplate(ctx, device1.Name, namespaceName, k8sClient), time.Second).Should(BeNil())
+			Consistently(getDeviceSpecTemplate(ctx, device2.Name, namespaceName, k8sClient), time.Second).Should(BeNil())
+			Eventually(getMatchedDevicesFromStatus(ctx, template.Name, template.Namespace, k8sClient)).Should(BeEmpty())
+		})
+
 		It("rejects the whole bay when one ASIC is in a multi-template conflict", func() {
 			// A bay template that selects both ASICs by NIC type.
 			template := newBayTemplate()

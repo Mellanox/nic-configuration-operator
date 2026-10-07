@@ -18,6 +18,7 @@ package devicediscovery
 import (
 	"errors"
 	"os"
+	"strconv"
 
 	"github.com/jaypipes/ghw/pkg/pci"
 	"github.com/jaypipes/pcidb"
@@ -141,37 +142,42 @@ var _ = Describe("DeviceDiscovery", func() {
 				mockUtils.AssertExpectations(GinkgoT())
 			})
 
-			It("should not fail if GetPartAndSerialNumber fails", func() {
+			DescribeTable("should discover a device without VPD metadata",
+				func(skipErrors bool) {
+					if skipErrors {
+						Expect(os.Setenv(consts.SKIP_DEVICE_ON_DISCOVERY_ERROR, consts.LabelValueTrue)).To(Succeed())
+					}
+					mockUtils.On("IsSriovVF", "0000:00:00.0").Return(false)
+					mockUtils.On("GetVPD", "0000:00:00.0").Return(nil, errors.New("VPD unavailable"))
+					mockUtils.On("GetFirmwareVersionAndPSID", "0000:00:00.0").Return("fw-version", "psid", nil)
+					mockUtils.On("GetInterfaceName", "0000:00:00.0").Return("eth0")
+					mockUtils.On("GetRDMADeviceName", "0000:00:00.0").Return("mlx5_0")
+
+					devices, err := manager.DiscoverNicDevices()
+					Expect(err).NotTo(HaveOccurred())
+					Expect(devices).To(HaveKey("0000:00:00"))
+					status := devices["0000:00:00"].Status
+					Expect(status.SerialNumber).To(BeEmpty())
+					Expect(status.PartNumber).To(BeEmpty())
+					Expect(status.ModelName).To(BeEmpty())
+					Expect(status.SuperNIC).To(BeFalse())
+					Expect(status.FirmwareVersion).To(Equal("fw-version"))
+					Expect(status.PSID).To(Equal("psid"))
+					Expect(status.Ports).To(Equal([]v1alpha1.NicDevicePortSpec{{
+						PCI: "0000:00:00.0", FwctlDevice: "", NetworkInterface: "eth0", RdmaInterface: "mlx5_0",
+					}}))
+					Expect(manager.SkippedDevices()).To(BeEmpty())
+					Expect(manager.IncompleteDevices()).To(BeEmpty())
+					mockUtils.AssertExpectations(GinkgoT())
+				},
+				Entry("with default discovery error handling", false),
+				Entry("with SKIP_DEVICE_ON_DISCOVERY_ERROR enabled", true),
+			)
+
+			It("should fail firmware discovery even when VPD is unavailable", func() {
 				mockUtils.On("IsSriovVF", "0000:00:00.0").Return(false)
 				mockUtils.On("GetVPD", "0000:00:00.0").
-					Return(nil, errors.New("serial number error"))
-
-				devices, err := manager.DiscoverNicDevices()
-				Expect(err).NotTo(HaveOccurred())
-				Expect(devices).To(BeEmpty())
-				Expect(manager.SkippedDevices()).To(BeEmpty())
-				Expect(manager.IncompleteDevices()).To(HaveKey("0000:00:00"))
-				mockUtils.AssertExpectations(GinkgoT())
-			})
-
-			It("should report skipped device if GetPartAndSerialNumber fails and SKIP_DEVICE_ON_DISCOVERY_ERROR is true", func() {
-				Expect(os.Setenv(consts.SKIP_DEVICE_ON_DISCOVERY_ERROR, consts.LabelValueTrue)).To(Succeed())
-				mockUtils.On("IsSriovVF", "0000:00:00.0").Return(false)
-				mockUtils.On("GetVPD", "0000:00:00.0").
-					Return(nil, errors.New("serial number error"))
-
-				devices, err := manager.DiscoverNicDevices()
-				Expect(err).NotTo(HaveOccurred())
-				Expect(devices).To(BeEmpty())
-				Expect(manager.SkippedDevices()).To(HaveKey("0000:00:00"))
-				Expect(manager.IncompleteDevices()).To(HaveKey("0000:00:00"))
-				mockUtils.AssertExpectations(GinkgoT())
-			})
-
-			It("should log and skip devices if GetFirmwareVersionAndPSID fails", func() {
-				mockUtils.On("IsSriovVF", "0000:00:00.0").Return(false)
-				mockUtils.On("GetVPD", "0000:00:00.0").
-					Return(&types.VPD{PartNumber: "part-number", SerialNumber: "serial-number", ModelName: ""}, nil)
+					Return(nil, errors.New("VPD unavailable"))
 				mockUtils.On("GetFirmwareVersionAndPSID", "0000:00:00.0").
 					Return("", "", errors.New("firmware error"))
 
@@ -181,11 +187,11 @@ var _ = Describe("DeviceDiscovery", func() {
 				mockUtils.AssertExpectations(GinkgoT())
 			})
 
-			It("should skip devices if GetFirmwareVersionAndPSID fails and SKIP_DEVICE_ON_DISCOVERY_ERROR is true", func() {
+			It("should skip a device with unavailable VPD when firmware discovery fails and skip-errors is enabled", func() {
 				Expect(os.Setenv(consts.SKIP_DEVICE_ON_DISCOVERY_ERROR, consts.LabelValueTrue)).To(Succeed())
 				mockUtils.On("IsSriovVF", "0000:00:00.0").Return(false)
 				mockUtils.On("GetVPD", "0000:00:00.0").
-					Return(&types.VPD{PartNumber: "part-number", SerialNumber: "serial-number", ModelName: ""}, nil)
+					Return(nil, errors.New("VPD unavailable"))
 				mockUtils.On("GetFirmwareVersionAndPSID", "0000:00:00.0").
 					Return("", "", errors.New("firmware error"))
 
@@ -298,7 +304,7 @@ var _ = Describe("DeviceDiscovery", func() {
 			mockUtils.AssertExpectations(GinkgoT())
 		})
 
-		It("should log and skip only a faulty device if GetVPD fails", func() {
+		It("should retain both devices when one has no VPD", func() {
 			mockUtils.On("IsSriovVF", "0000:00:00.0").
 				Return(false)
 			mockUtils.On("GetVPD", "0000:00:00.0").
@@ -314,10 +320,15 @@ var _ = Describe("DeviceDiscovery", func() {
 				Return(false)
 			mockUtils.On("GetVPD", "0000:01:00.0").
 				Return(nil, errors.New("serial number error"))
+			mockUtils.On("GetFirmwareVersionAndPSID", "0000:01:00.0").Return("fw-version-2", "psid-2", nil)
+			mockUtils.On("GetInterfaceName", "0000:01:00.0").Return("eth1")
+			mockUtils.On("GetRDMADeviceName", "0000:01:00.0").Return("mlx5_1")
 
 			devices, err := manager.DiscoverNicDevices()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(devices).To(HaveLen(1))
+			Expect(devices).To(HaveLen(2))
+			Expect(devices["0000:01:00"].Status.SerialNumber).To(BeEmpty())
+			Expect(devices["0000:01:00"].Status.PartNumber).To(BeEmpty())
 			mockUtils.AssertExpectations(GinkgoT())
 		})
 
@@ -477,6 +488,21 @@ var _ = Describe("DeviceDiscovery", func() {
 			}
 		}
 
+		It("does not pair Network Bay devices with empty serial numbers", func() {
+			mockUtils.On("GetPCIDevices").Return(cx9Devices(), nil)
+			stageCX9("0000:0b:00.0", "", "eth0", "mlx5_0")
+			stageCX9("0000:0e:00.0", "", "eth1", "mlx5_1")
+			mockUtils.On("GetNetworkBayASIC", "0000:0b:00.0").Return(0, true)
+			mockUtils.On("GetNetworkBayASIC", "0000:0e:00.0").Return(1, true)
+
+			devices, err := manager.DiscoverNicDevices()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(devices).To(HaveLen(2))
+			Expect(devices["0000:0b:00"].Status.NetworkBay.PeerPCI).To(BeEmpty())
+			Expect(devices["0000:0e:00"].Status.NetworkBay.PeerPCI).To(BeEmpty())
+			mockUtils.AssertExpectations(GinkgoT())
+		})
+
 		It("sets ASIC index and pairs PeerPCI for two orchid ASICs sharing a serial", func() {
 			mockUtils.On("GetPCIDevices").Return(cx9Devices(), nil)
 			stageCX9("0000:0b:00.0", "orchid-serial", "eth0", "mlx5_0")
@@ -585,82 +611,65 @@ var _ = Describe("DeviceDiscovery", func() {
 			mockUtils.AssertExpectations(GinkgoT())
 		})
 
-		It("should drop the whole physical device when VPD discovery fails after one port was added", func() {
-			mockUtils.On("GetPCIDevices").Return([]*pci.Device{
-				{
-					Address: "0000:00:00.0",
-					Vendor:  &pcidb.Vendor{ID: consts.MellanoxVendor},
-					Product: &pcidb.Product{ID: "test-id", Name: "Mellanox Device"},
-					Class:   &pcidb.Class{ID: "02"},
-				},
-				{
-					Address: "0000:00:00.1",
-					Vendor:  &pcidb.Vendor{ID: consts.MellanoxVendor},
-					Product: &pcidb.Product{ID: "test-id", Name: "Mellanox Device"},
-					Class:   &pcidb.Class{ID: "02"},
-				},
-			}, nil)
+		DescribeTable("should retain both ports and use available VPD from either function",
+			func(firstVPD, secondVPD *types.VPD, skipErrors bool, wantPart, wantSerial, wantModel string) {
+				if skipErrors {
+					Expect(os.Setenv(consts.SKIP_DEVICE_ON_DISCOVERY_ERROR, consts.LabelValueTrue)).To(Succeed())
+				}
+				addresses := []string{"0000:00:00.0", "0000:00:00.1"}
+				pciDevices := make([]*pci.Device, 0, len(addresses))
+				for i, address := range addresses {
+					pciDevices = append(pciDevices, &pci.Device{
+						Address: address,
+						Vendor:  &pcidb.Vendor{ID: consts.MellanoxVendor},
+						Product: &pcidb.Product{ID: "1023", Name: "ConnectX-8"},
+						Class:   &pcidb.Class{ID: "02"},
+					})
+					mockUtils.On("IsSriovVF", address).Return(false)
+					vpd := []*types.VPD{firstVPD, secondVPD}[i]
+					var vpdErr error
+					if vpd == nil {
+						vpdErr = errors.New("VPD unavailable")
+					}
+					mockUtils.On("GetVPD", address).Return(vpd, vpdErr)
+					mockUtils.On("GetInterfaceName", address).Return("eth" + strconv.Itoa(i))
+					mockUtils.On("GetRDMADeviceName", address).Return("mlx5_" + strconv.Itoa(i))
+				}
+				mockUtils.On("GetPCIDevices").Return(pciDevices, nil)
+				mockUtils.On("GetFirmwareVersionAndPSID", addresses[0]).Return("fw-version", "psid", nil)
 
-			mockUtils.On("IsSriovVF", "0000:00:00.0").Return(false)
-			mockUtils.On("GetVPD", "0000:00:00.0").
-				Return(&types.VPD{PartNumber: "part-number", SerialNumber: "serial-number", ModelName: ""}, nil)
-			mockUtils.On("GetFirmwareVersionAndPSID", "0000:00:00.0").
-				Return("fw-version", "psid", nil)
-			mockUtils.On("GetInterfaceName", "0000:00:00.0").
-				Return("eth0")
-			mockUtils.On("GetRDMADeviceName", "0000:00:00.0").
-				Return("mlx5_0")
+				devices, err := manager.DiscoverNicDevices()
+				Expect(err).NotTo(HaveOccurred())
+				Expect(devices).To(HaveLen(1))
+				status := devices["0000:00:00"].Status
+				Expect(status.Ports).To(HaveLen(2))
+				Expect(status.Ports[0].PCI).To(Equal(addresses[0]))
+				Expect(status.Ports[1].PCI).To(Equal(addresses[1]))
+				Expect(status.PartNumber).To(Equal(wantPart))
+				Expect(status.SerialNumber).To(Equal(wantSerial))
+				Expect(status.ModelName).To(Equal(wantModel))
+				Expect(status.SuperNIC).To(Equal(wantModel != ""))
+				Expect(manager.SkippedDevices()).To(BeEmpty())
+				Expect(manager.IncompleteDevices()).To(BeEmpty())
+				mockUtils.AssertExpectations(GinkgoT())
+			},
+			Entry("both functions have no VPD", nil, nil, false, "", "", ""),
+			Entry("both functions have no VPD and skip-errors is enabled", nil, nil, true, "", "", ""),
+			Entry("first function has no VPD", nil,
+				&types.VPD{PartNumber: "part", SerialNumber: "serial", ModelName: "CX8 SuperNIC, details"},
+				false, "part", "serial", "CX8 SuperNIC"),
+			Entry("second function has no VPD",
+				&types.VPD{PartNumber: "part", SerialNumber: "serial", ModelName: "CX8 SuperNIC, details"},
+				nil, false, "part", "serial", "CX8 SuperNIC"),
+			Entry("second function has no VPD and skip-errors is enabled",
+				&types.VPD{PartNumber: "part", SerialNumber: "serial", ModelName: "CX8 SuperNIC, details"},
+				nil, true, "part", "serial", "CX8 SuperNIC"),
+			Entry("functions provide complementary fields",
+				&types.VPD{PartNumber: "part", SerialNumber: "", ModelName: ""},
+				&types.VPD{PartNumber: "", SerialNumber: "serial", ModelName: "CX8 SuperNIC, details"},
+				false, "part", "serial", "CX8 SuperNIC"),
+		)
 
-			mockUtils.On("IsSriovVF", "0000:00:00.1").Return(false)
-			mockUtils.On("GetVPD", "0000:00:00.1").
-				Return(nil, errors.New("vpd error"))
-
-			devices, err := manager.DiscoverNicDevices()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(devices).To(BeEmpty())
-			Expect(manager.SkippedDevices()).To(BeEmpty())
-			Expect(manager.IncompleteDevices()).To(HaveKey("0000:00:00"))
-			mockUtils.AssertExpectations(GinkgoT())
-		})
-
-		It("should report the whole physical device as skipped when VPD discovery fails after one port was added and SKIP_DEVICE_ON_DISCOVERY_ERROR is true", func() {
-			Expect(os.Setenv(consts.SKIP_DEVICE_ON_DISCOVERY_ERROR, consts.LabelValueTrue)).To(Succeed())
-			mockUtils.On("GetPCIDevices").Return([]*pci.Device{
-				{
-					Address: "0000:00:00.0",
-					Vendor:  &pcidb.Vendor{ID: consts.MellanoxVendor},
-					Product: &pcidb.Product{ID: "test-id", Name: "Mellanox Device"},
-					Class:   &pcidb.Class{ID: "02"},
-				},
-				{
-					Address: "0000:00:00.1",
-					Vendor:  &pcidb.Vendor{ID: consts.MellanoxVendor},
-					Product: &pcidb.Product{ID: "test-id", Name: "Mellanox Device"},
-					Class:   &pcidb.Class{ID: "02"},
-				},
-			}, nil)
-
-			mockUtils.On("IsSriovVF", "0000:00:00.0").Return(false)
-			mockUtils.On("GetVPD", "0000:00:00.0").
-				Return(&types.VPD{PartNumber: "part-number", SerialNumber: "serial-number", ModelName: ""}, nil)
-			mockUtils.On("GetFirmwareVersionAndPSID", "0000:00:00.0").
-				Return("fw-version", "psid", nil)
-			mockUtils.On("GetInterfaceName", "0000:00:00.0").
-				Return("eth0")
-			mockUtils.On("GetRDMADeviceName", "0000:00:00.0").
-				Return("mlx5_0")
-
-			mockUtils.On("IsSriovVF", "0000:00:00.1").Return(false)
-			mockUtils.On("GetVPD", "0000:00:00.1").
-				Return(nil, errors.New("vpd error"))
-
-			devices, err := manager.DiscoverNicDevices()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(devices).To(BeEmpty())
-			Expect(manager.SkippedDevices()).To(HaveKey("0000:00:00"))
-			Expect(manager.IncompleteDevices()).To(HaveKey("0000:00:00"))
-			mockUtils.AssertExpectations(GinkgoT())
-		})
 	})
 
 	Context("when multiple NICs share the same flashed serial number (HGX B300)", func() {
@@ -839,7 +848,7 @@ var _ = Describe("DeviceDiscovery", func() {
 			Expect(discoveredDevice.Status.DPU).To(BeTrue())
 		})
 
-		It("should skip zero-trust device", func() {
+		It("should skip a zero-trust device even when VPD is unavailable", func() {
 			mockUtils.On("GetPCIDevices").Return([]*pci.Device{
 				{
 					Address: "0000:00:00.0",
@@ -849,7 +858,7 @@ var _ = Describe("DeviceDiscovery", func() {
 				},
 			}, nil)
 			mockUtils.On("IsSriovVF", "0000:00:00.0").Return(false)
-			mockUtils.On("GetVPD", "0000:00:00.0").Return(&types.VPD{PartNumber: "part-number", SerialNumber: "serial-number", ModelName: "BlueField-3"}, nil)
+			mockUtils.On("GetVPD", "0000:00:00.0").Return(nil, errors.New("VPD unavailable"))
 			mockUtils.On("IsZeroTrust", "0000:00:00.0").Return(true, nil)
 
 			devices, err := manager.DiscoverNicDevices()

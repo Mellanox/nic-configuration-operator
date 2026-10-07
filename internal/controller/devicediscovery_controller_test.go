@@ -239,6 +239,49 @@ var _ = Describe("DeviceDiscoveryController", func() {
 				}, timeout).Should(Equal(serialNumber))
 			})
 
+			It("should publish distinct NicDevice CRs with empty VPD metadata", func() {
+				observed := map[string]v1alpha1.NicDevice{}
+				for _, pciKey := range []string{"0000:81:00", "0000:82:00"} {
+					observed[pciKey] = v1alpha1.NicDevice{Status: v1alpha1.NicDeviceStatus{
+						Node: nodeName, Type: "1023",
+						SerialNumber: "", PartNumber: "", ModelName: "", SuperNIC: false, DPU: false,
+						FirmwareVersion: "40.51.0348", PSID: "NVD0000000115",
+						Ports: []v1alpha1.NicDevicePortSpec{
+							{PCI: pciKey + ".0", FwctlDevice: "", NetworkInterface: "", RdmaInterface: ""},
+							{PCI: pciKey + ".1", FwctlDevice: "", NetworkInterface: "", RdmaInterface: ""},
+						},
+						NetworkBay: nil, Conditions: nil,
+					}}
+				}
+				deviceDiscovery.On("DiscoverNicDevices").Return(func() map[string]v1alpha1.NicDevice {
+					fresh := make(map[string]v1alpha1.NicDevice, len(observed))
+					for key, device := range observed {
+						fresh[key] = *device.DeepCopy()
+					}
+					return fresh
+				}, nil)
+				hostUtils.On("DiscoverOfedVersion").Return("00.00-0.0.0", nil)
+				startManager(mgr, ctx, &wg)
+
+				for pciKey, discovered := range observed {
+					Eventually(func(g Gomega) {
+						device := &v1alpha1.NicDevice{}
+						g.Expect(k8sClient.Get(ctx, client.ObjectKey{
+							Name:      deviceRegistry.getCRName("1023", pciKey),
+							Namespace: namespaceName,
+						}, device)).To(Succeed())
+						g.Expect(device.Status.Node).To(Equal(nodeName))
+						g.Expect(device.Status.SerialNumber).To(BeEmpty())
+						g.Expect(device.Status.PartNumber).To(BeEmpty())
+						g.Expect(device.Status.ModelName).To(BeEmpty())
+						g.Expect(device.Status.SuperNIC).To(BeFalse())
+						g.Expect(device.Status.PSID).To(Equal(discovered.Status.PSID))
+						g.Expect(device.Status.FirmwareVersion).To(Equal(discovered.Status.FirmwareVersion))
+						g.Expect(device.Status.Ports).To(Equal(discovered.Status.Ports))
+					}).WithTimeout(timeout).Should(Succeed())
+				}
+			})
+
 			It("should create new CRs for new devices", func() {
 				newPciDevKey := "0000:81:00"
 				newSerial := "new-serial-num"

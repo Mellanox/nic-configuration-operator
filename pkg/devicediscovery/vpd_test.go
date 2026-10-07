@@ -53,19 +53,30 @@ var _ = Describe("PCI VPD", func() {
 			Expect(vpd.ModelName).To(BeEmpty())
 		})
 
-		DescribeTable("rejects missing required fields",
-			func(pn, sn, missing string) {
-				parsed := &pci.VPD{ReadOnly: map[string]string{"PN": pn, "SN": sn}}
+		DescribeTable("retains available fields when read-only keywords are missing",
+			func(pn, sn string) {
+				parsed := &pci.VPD{Identifier: "ConnectX-8", ReadOnly: map[string]string{"PN": pn, "SN": sn}}
 
 				vpd, err := mapPCIVPD(parsed)
 
-				Expect(err).To(MatchError(ContainSubstring("missing required keyword(s): " + missing)))
-				Expect(vpd).To(BeNil())
+				Expect(err).NotTo(HaveOccurred())
+				Expect(vpd.PartNumber).To(Equal(pn))
+				Expect(vpd.SerialNumber).To(Equal(sn))
+				Expect(vpd.ModelName).To(Equal("ConnectX-8"))
 			},
-			Entry("missing PN", "", serialNumber, "PN"),
-			Entry("missing SN", partNumber, "", "SN"),
-			Entry("missing PN and SN", "", "", "PN, SN"),
+			Entry("missing PN", "", serialNumber),
+			Entry("missing SN", partNumber, ""),
+			Entry("missing PN and SN", "", ""),
 		)
+
+		It("accepts VPD without any metadata", func() {
+			vpd, err := mapPCIVPD(&pci.VPD{Identifier: "", ReadOnly: nil, ReadWrite: nil})
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(vpd.PartNumber).To(BeEmpty())
+			Expect(vpd.SerialNumber).To(BeEmpty())
+			Expect(vpd.ModelName).To(BeEmpty())
+		})
 
 		It("rejects invalid text in a required field", func() {
 			parsed := &pci.VPD{ReadOnly: map[string]string{

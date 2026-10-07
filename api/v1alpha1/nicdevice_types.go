@@ -83,8 +83,10 @@ type NicDeviceStatus struct {
 	// VPD image (e.g. HGX B300) multiple cards will report the same serial number. The
 	// operator identifies NICs uniquely by their PCI device address (the `pci` field on
 	// the first entry in `ports`, with the function digit stripped).
+	// Empty when the serial number is unavailable from PCI VPD.
 	SerialNumber string `json:"serialNumber"`
 	// Part number of the device, e.g. MCX713106AEHEA_QP1
+	// Empty when the part number is unavailable from PCI VPD.
 	PartNumber string `json:"partNumber"`
 	// Product Serial ID of the device, e.g. MT_0000000221
 	PSID string `json:"psid"`
@@ -93,8 +95,10 @@ type NicDeviceStatus struct {
 	// DPU indicates if the device is a BlueField in DPU mode
 	DPU bool `json:"dpu"`
 	// ModelName is the model name of the device, e.g. ConnectX-6 or BlueField-3
+	// Empty when the model name is unavailable from PCI VPD.
 	ModelName string `json:"modelName"`
 	// SuperNIC indicates if the device is a SuperNIC
+	// False when the PCI VPD model name is unavailable.
 	SuperNIC bool `json:"superNIC"`
 	// List of ports for the device
 	Ports []NicDevicePortSpec `json:"ports"`
