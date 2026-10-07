@@ -439,8 +439,9 @@ spec:
                   22.31.1014
                 type: string
               modelName:
-                description: ModelName is the model name of the device, e.g. ConnectX-6
-                  or BlueField-3
+                description: |-
+                  ModelName is the model name of the device, e.g. ConnectX-6 or BlueField-3
+                  Empty when the model name is unavailable from PCI VPD.
                 type: string
               networkBay:
                 description: |-
@@ -464,7 +465,9 @@ spec:
                 description: Node where the device is located
                 type: string
               partNumber:
-                description: Part number of the device, e.g. MCX713106AEHEA_QP1
+                description: |-
+                  Part number of the device, e.g. MCX713106AEHEA_QP1
+                  Empty when the part number is unavailable from PCI VPD.
                 type: string
               ports:
                 description: List of ports for the device
@@ -501,9 +504,12 @@ spec:
                   VPD image (e.g. HGX B300) multiple cards will report the same serial number. The
                   operator identifies NICs uniquely by their PCI device address (the `pci` field on
                   the first entry in `ports`, with the function digit stripped).
+                  Empty when the serial number is unavailable from PCI VPD.
                 type: string
               superNIC:
-                description: SuperNIC indicates if the device is a SuperNIC
+                description: |-
+                  SuperNIC indicates if the device is a SuperNIC
+                  False when the PCI VPD model name is unavailable.
                 type: boolean
               type:
                 description: Type of device, e.g. ConnectX7

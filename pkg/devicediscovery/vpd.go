@@ -44,8 +44,8 @@ func (d *deviceDiscoveryUtils) GetVPD(pciAddr string) (*types.VPD, error) {
 	return vpd, nil
 }
 
-// mapPCIVPD maps ghw's generic PCI VPD representation to the fields required
-// by NicDevice discovery, validating required fields along the way.
+// mapPCIVPD maps ghw's generic PCI VPD representation to NicDevice metadata.
+// Missing keywords remain empty; available fields must still contain valid text.
 func mapPCIVPD(parsed *pci.VPD) (*types.VPD, error) {
 	if parsed == nil {
 		return nil, fmt.Errorf("parsed VPD is nil")
@@ -62,17 +62,6 @@ func mapPCIVPD(parsed *pci.VPD) (*types.VPD, error) {
 	serialNumber, err := parseVPDText("SN", parsed.ReadOnly["SN"])
 	if err != nil {
 		return nil, err
-	}
-
-	missing := make([]string, 0, 2)
-	if partNumber == "" {
-		missing = append(missing, "PN")
-	}
-	if serialNumber == "" {
-		missing = append(missing, "SN")
-	}
-	if len(missing) > 0 {
-		return nil, fmt.Errorf("VPD read-only data is missing required keyword(s): %s", strings.Join(missing, ", "))
 	}
 
 	return &types.VPD{

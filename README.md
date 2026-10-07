@@ -506,6 +506,8 @@ The NIC Configuration Daemon itself relies on the `network.nvidia.com/operator.m
 
 During device discovery, the daemon queries firmware version and PSID with `flint`. If `flint` cannot query a PCI function, the daemon reads the running firmware version and PSID from the function's RDMA sysfs attributes (`fw_ver` and `board_id`). Both values are required; if neither source provides complete firmware information, discovery follows the existing error or `SKIP_DEVICE_ON_DISCOVERY_ERROR` behavior.
 
+PCI VPD metadata is optional during discovery. NICs with missing, unreadable, or invalid VPD still get a `NicDevice` CR with unavailable `status.serialNumber`, `status.partNumber`, and `status.modelName` fields set to empty strings. Available fields are retained, including metadata read from another PCI function of the same NIC. This applies regardless of `SKIP_DEVICE_ON_DISCOVERY_ERROR`. Without a VPD model name, `status.superNIC` is `false`. Select these NICs by node, NIC type, or PCI address rather than unavailable serial/part numbers. ConnectX-9 Network Bay pairing and Network Bay templates require a nonempty serial number.
+
 ## Feature flags
 Feature flags can be enabled via environment variables in the helm chart or NVIDIA Network Operator's NicClusterPolicy.
 Supported flags:

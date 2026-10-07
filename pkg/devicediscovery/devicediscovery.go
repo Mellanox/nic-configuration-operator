@@ -26,6 +26,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	"github.com/Mellanox/nic-configuration-operator/pkg/nvconfig"
+	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
 
@@ -104,13 +105,12 @@ func (d *deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, e
 
 		vpd, err := d.utils.GetVPD(device.Address)
 		if err != nil {
-			log.Log.Error(err, "Failed to get device's part and serial numbers, skipping", "address", device.Address)
-			// A VPD failure makes the whole physical device incomplete for this pass.
-			d.dropIncompleteDevice(statuses, pciKey, err)
-			if skipDeviceOnDiscoveryError {
-				d.skippedDevices[pciKey] = err
-			}
-			continue
+			log.Log.Info("Failed to read device VPD, continuing discovery without VPD metadata",
+				"address", device.Address, "error", err)
+			vpd = nil
+		}
+		if vpd == nil {
+			vpd = &types.VPD{}
 		}
 
 		isBlueField := utils.IsBlueFieldDevice(device.Product.ID)
@@ -140,12 +140,6 @@ func (d *deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, e
 				return nil, err
 			}
 
-			// The PCI VPD Identifier String is a long marketing string like
-			//   "NVIDIA ConnectX-9 C9180 HHHL SuperNIC, 800Gbs XDR IB / 800GbE (default), ..."
-			// The portion before the first comma is the product name; everything after is
-			// feature/packaging detail we don't want in the CR.
-			modelName := strings.TrimSpace(strings.SplitN(vpd.ModelName, ",", 2)[0])
-
 			dpu := false
 			if isBlueField {
 				port := v1alpha1.NicDevicePortSpec{PCI: device.Address, FwctlDevice: fwctlDevice}
@@ -165,16 +159,16 @@ func (d *deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, e
 			deviceStatus = v1alpha1.NicDeviceStatus{
 				Node:            d.nodeName,
 				Type:            device.Product.ID,
-				SerialNumber:    vpd.SerialNumber,
-				PartNumber:      vpd.PartNumber,
-				ModelName:       modelName,
 				PSID:            psid,
 				FirmwareVersion: firmwareVersion,
-				SuperNIC:        utils.ContainsIgnoreCase(vpd.ModelName, consts.SuperNIC),
 				DPU:             dpu,
 				Ports:           []v1alpha1.NicDevicePortSpec{},
 			}
-
+		}
+		// Any function can provide identity metadata for the physical NIC. Fill
+		// missing fields without discarding data already read from another port.
+		mergeVPDStatus(&deviceStatus, vpd)
+		if !ok {
 			log.Log.Info("Discovered NIC device", "address", device.Address, "status", deviceStatus)
 		}
 
@@ -216,6 +210,21 @@ func (d *deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, e
 	return devices, nil
 }
 
+func mergeVPDStatus(status *v1alpha1.NicDeviceStatus, vpd *types.VPD) {
+	if status.SerialNumber == "" {
+		status.SerialNumber = vpd.SerialNumber
+	}
+	if status.PartNumber == "" {
+		status.PartNumber = vpd.PartNumber
+	}
+	if status.ModelName == "" {
+		// The identifier contains the product name followed by comma-separated
+		// feature/packaging details; only expose the product name in the CR.
+		status.ModelName = strings.TrimSpace(strings.SplitN(vpd.ModelName, ",", 2)[0])
+		status.SuperNIC = utils.ContainsIgnoreCase(vpd.ModelName, consts.SuperNIC)
+	}
+}
+
 func (d *deviceDiscovery) skipPhysicalDevice(statuses map[string]v1alpha1.NicDeviceStatus, pciKey string, err error) {
 	d.skippedDevices[pciKey] = err
 	d.dropIncompleteDevice(statuses, pciKey, err)
@@ -251,7 +260,7 @@ func (d *deviceDiscovery) IncompleteDevices() map[string]error {
 func pairNetworkBayDevices(statuses map[string]v1alpha1.NicDeviceStatus) {
 	bySerial := make(map[string][]string)
 	for key, status := range statuses {
-		if status.NetworkBay != nil {
+		if status.NetworkBay != nil && status.SerialNumber != "" {
 			bySerial[status.SerialNumber] = append(bySerial[status.SerialNumber], key)
 		}
 	}
