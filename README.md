@@ -103,7 +103,7 @@ spec:
   * Requires `linkType=Ethernet` and `numVfs=1`
   * Cannot be combined with `roceOptimized` (RoCE settings are included automatically)
   * Native NVConfig precedence is `rawNvConfig` > template-derived parameters > doSPCX. Validation uses DMS GET `_nvconfig` metadata to recognize overridden typed leaves and checks their native current/next-boot values, so intentional overrides converge after reboot
-  * Requires a DMS build containing NVConfig GET mapping metadata support (DOCA change 1508833) when native parameters accompany typed intent. Missing mappings fail validation before apply, including with `force`. For `/nvidia/link/type/value` only, the operator reuses the current mapping when the pending mapping is absent to support DMS builds missing that declaration; conflicting mappings still fail validation
+  * Requires a DMS build containing NVConfig GET mapping metadata support (DOCA change 1508833) when native parameters accompany typed intent. Missing mappings fail validation before apply, including with `force`. For `/nvidia/link/type/value` and indexed breakout `planes` only, the operator reuses the current mapping when the pending mapping is absent to support DMS builds missing that declaration; conflicting mappings still fail validation
   * Raw `MODULE_SPLIT_*` assignments cannot be combined with typed breakout lane operations: DMS does not yet expose composite lane ownership
   * Temporarily cannot be combined with `networkBay`; complete native ownership is required to place the system profile below typed doSPCX intent
   * Only supported on ConnectX-7 (`nicType: 1021`), ConnectX-8 (`nicType: 1023`), ConnectX-9 (`nicType: 1025`) and BlueField-3 SuperNIC (`nicType: a2dc`)
@@ -197,8 +197,8 @@ configuration manager when it consumes the plan. `GetPreparedPlan` validates the
 device's inputs and membership against the cache; it does not reread or reparse files for every
 per-device apply. During NV validation, the configuration manager separately queries the existing
 template-derived native parameter map and the active doSPCX XPath phase. During NV apply, it sends both inputs
-in one DMS action through the primary PF and passes every available logical port number so DMS can expand
-port-scoped typed mappings.
+in one DMS action per discovered PCI function, using local port 1 consistently with validation.
+Each batch includes that function's supported native overrides.
 Breakout must match current and pending state on all device ports before post-breakout is considered.
 `force` applies the complete breakout plus post-breakout intent immediately; after the breakout
 barrier, `with-default` also resends both phases so default filling cannot undo breakout. Semantic

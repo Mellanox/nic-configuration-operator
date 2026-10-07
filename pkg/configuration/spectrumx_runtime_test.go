@@ -66,6 +66,53 @@ func spectrumXRuntimeTargetNames(targets []spectrumXRuntimeTarget) []string {
 }
 
 var _ = Describe("doSPCX runtime configuration", func() {
+	It("validates final writes across runtime groups", func() {
+		calls := [][]string{}
+		manager := configurationManager{execInterface: &execTesting.FakeExec{CommandScript: []execTesting.FakeCommandAction{
+			runtimeFakeCommand(`{"admin-status":"up"}`, &calls),
+			runtimeFakeCommand(`{"admin-status":"up"}`, &calls),
+		}}}
+		plan := &spectrumx.Plan{RuntimeConfig: []spectrumx.OperationGroup{
+			{Name: "link-runtime", Scope: spectrumXRuntimeScopePerDevice, Operations: []dmscli.XPathOperation{
+				{Path: "/nvidia/link/physical", Values: map[string]any{"admin-status": "down"}, TargetClass: spectrumXRuntimeTargetPFNetdevAll},
+			}},
+			{Name: "link-event", Scope: spectrumXRuntimeScopePerDevice, Operations: []dmscli.XPathOperation{
+				{Path: "/nvidia/link/physical", Values: map[string]any{"admin-status": "up"}, TargetClass: spectrumXRuntimeTargetPFNetdevAll},
+			}},
+		}}
+		matches, err := manager.validateSpectrumXRuntimeConfig(context.Background(), spectrumXRuntimeTestDevice(), plan)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(matches).To(BeTrue())
+		Expect(calls).To(HaveLen(2))
+	})
+	DescribeTable("keeps final runtime writes scoped to their targets across groups",
+		func(secondaryState string, expected bool) {
+			calls := [][]string{}
+			manager := configurationManager{execInterface: &execTesting.FakeExec{CommandScript: []execTesting.FakeCommandAction{
+				runtimeFakeCommand(`{"admin-status":"`+secondaryState+`"}`, &calls),
+				runtimeFakeCommand(`{"admin-status":"up"}`, &calls),
+			}}}
+			plan := &spectrumx.Plan{RuntimeConfig: []spectrumx.OperationGroup{
+				{Name: "link-runtime", Scope: spectrumXRuntimeScopePerDevice, Operations: []dmscli.XPathOperation{
+					{Path: "/nvidia/link/physical", Values: map[string]any{"admin-status": "down"}, TargetClass: spectrumXRuntimeTargetPFNetdevAll},
+				}},
+				{Name: "link-event", Scope: spectrumXRuntimeScopePerDevice, Operations: []dmscli.XPathOperation{
+					{Path: "/nvidia/link/physical", Values: map[string]any{"admin-status": "up"}, TargetClass: spectrumXRuntimeTargetPFRDMAScope},
+				}},
+			}}
+			matches, err := manager.validateSpectrumXRuntimeConfig(context.Background(), spectrumXRuntimeTestDevice(), plan)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(matches).To(Equal(expected))
+			Expect(calls[0]).To(ContainElement("pci/0000:64:00.1"))
+			if expected {
+				Expect(calls).To(HaveLen(2))
+				Expect(calls[1]).To(ContainElement("pci/0000:64:00.0"))
+			}
+		},
+		Entry("converged", "down", true),
+		Entry("drift on a target not overwritten by the later group", "up", false),
+	)
+
 	It("validates the final value of an ordered operation sequence", func() {
 		operations := []dmscli.XPathOperation{
 			{Path: "/nvidia/link/physical", Values: map[string]any{"admin-status": "down"}},

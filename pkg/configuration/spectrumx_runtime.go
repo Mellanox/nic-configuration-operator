@@ -59,17 +59,25 @@ func (h configurationManager) validateSpectrumXRuntimeConfig(
 	if plan == nil {
 		return false, fmt.Errorf("cannot validate a nil doSPCX runtime plan")
 	}
-	for _, group := range plan.RuntimeConfig {
+	groupBatches := make([][]spectrumXRuntimeOperationBatch, len(plan.RuntimeConfig))
+	var allBatches []spectrumXRuntimeOperationBatch
+	for i, group := range plan.RuntimeConfig {
 		batches, err := spectrumXRuntimeOperationBatches(ctx, device, group)
 		if err != nil {
 			return false, err
 		}
+		groupBatches[i] = batches
+		allBatches = append(allBatches, batches...)
+	}
+	lastWriteBatches := spectrumXRuntimeLastWriteBatches(allBatches)
+	batchOffset := 0
+	for i, group := range plan.RuntimeConfig {
+		batches := groupBatches[i]
 		if group.Name == spectrumXRuntimeGroupCC && len(batches) > 0 {
 			if err := h.startSpectrumXCC(spectrumXRuntimeBatchPorts(batches)); err != nil {
 				return false, fmt.Errorf("start DOCA SPC-X CC for device %q: %w", device.Name, err)
 			}
 		}
-		lastWriteBatches := spectrumXRuntimeLastWriteBatches(batches)
 
 		for batchIndex, batch := range batches {
 			log.FromContext(ctx).V(2).Info("validating doSPCX runtime configuration group",
@@ -77,7 +85,7 @@ func (h configurationManager) validateSpectrumXRuntimeConfig(
 				"targetClass", batch.targetClass, "operations", len(batch.operations), "targets", len(batch.targets))
 			for _, target := range batch.targets {
 				operations := spectrumXRuntimeFinalBatchOperations(
-					batch.operations, batchIndex, target.name, lastWriteBatches)
+					batch.operations, batchOffset+batchIndex, target.name, lastWriteBatches)
 				queries, desiredValues := spectrumXRuntimeQueries(operations)
 				if len(queries) == 0 {
 					log.FromContext(ctx).V(2).Info("skipping doSPCX runtime validation batch",
@@ -98,6 +106,7 @@ func (h configurationManager) validateSpectrumXRuntimeConfig(
 				}
 			}
 		}
+		batchOffset += len(batches)
 	}
 	return true, nil
 }

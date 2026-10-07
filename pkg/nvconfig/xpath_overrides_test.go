@@ -171,6 +171,54 @@ var _ = Describe("typed NVConfig native overrides", func() {
 		})
 	})
 
+	Context("indexed planes with missing pending metadata", func() {
+		const planesPath = "/nvidia/link/breakout/module/[0]/port/[2]"
+		const planesParam = "NUM_OF_PLANES_P2"
+
+		BeforeEach(func() {
+			operations = []dmscli.XPathOperation{{Path: planesPath, Values: map[string]any{"planes": 2}}}
+			state.Values = map[string]map[string]any{planesPath: {"planes": 2, "planes-pending": 2}}
+			state.NVConfig = map[string]string{planesPath + "/planes": planesParam}
+		})
+
+		DescribeTable("preserves typed drift checks",
+			func(current, pending int, updateExpected, rebootExpected bool) {
+				state.Values[planesPath]["planes"] = current
+				state.Values[planesPath]["planes-pending"] = pending
+				update, reboot, err := matchXPathValuesWithOverrides(state, operations,
+					map[string]string{"NUM_OF_VFS": "1"}, types.NewNvConfigQuery())
+				Expect(err).NotTo(HaveOccurred())
+				Expect(update).To(Equal(updateExpected))
+				Expect(reboot).To(Equal(rebootExpected))
+			},
+			Entry("before apply", 1, 1, true, true),
+			Entry("pending reboot", 1, 2, false, true),
+			Entry("converged", 2, 2, false, false),
+		)
+
+		It("uses the supplied indexed native mapping for overrides", func() {
+			config := types.NewNvConfigQuery()
+			config.CurrentConfig[planesParam] = []string{"4"}
+			config.NextBootConfig[planesParam] = []string{"4"}
+			update, reboot, err := matchXPathValuesWithOverrides(state, operations,
+				map[string]string{planesParam: "4"}, config)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(update).To(BeFalse())
+			Expect(reboot).To(BeFalse())
+		})
+
+		It("rejects absent current or conflicting pending ownership", func() {
+			state.NVConfig = nil
+			_, _, err := matchXPathValuesWithOverrides(state, operations,
+				map[string]string{"NUM_OF_VFS": "1"}, types.NewNvConfigQuery())
+			Expect(err).To(MatchError(ContainSubstring("mapping metadata is required")))
+			state.NVConfig = map[string]string{planesPath + "/planes": planesParam, planesPath + "/planes-pending": "NUM_OF_PLANES_P1"}
+			_, _, err = matchXPathValuesWithOverrides(state, operations,
+				map[string]string{"NUM_OF_VFS": "1"}, types.NewNvConfigQuery())
+			Expect(err).To(MatchError(ContainSubstring("inconsistent DMS NVConfig mappings")))
+		})
+	})
+
 	It("requires pending metadata for other typed leaves", func() {
 		delete(state.NVConfig, path+"/adaptive-routing-pending")
 		_, _, err := matchXPathValuesWithOverrides(state, operations,

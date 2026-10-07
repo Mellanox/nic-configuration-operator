@@ -482,6 +482,8 @@ func matchXPathValuesWithOverrides(
 	return updateNeeded, rebootNeeded, nil
 }
 
+var breakoutPlanesXPath = regexp.MustCompile(`^/nvidia/link/breakout/module/\[[0-9]+\]/port/\[[0-9]+\]/planes$`)
+
 // DMS intentionally omits composite lane mappings. They remain typed-only until
 // DMS exposes their native ownership; a raw lane assignment could otherwise loop.
 func overrideParameter(mappings map[string]string, path, leaf string, nativeParams map[string]string) (string, error) {
@@ -496,10 +498,14 @@ func overrideParameter(mappings map[string]string, path, leaf string, nativePara
 	fullPath := strings.TrimRight(path, "/") + "/" + leaf
 	param := mappings[fullPath]
 	pendingParam := mappings[fullPath+xPathPendingSuffix]
-	// Some DMS builds omit the direct param declaration for link type's pending
-	// getter. Both leaves use the same LINK_TYPE parameter; retain DMS's current
-	// mapping rather than guessing its port suffix. Remove once bundled DMS is fixed.
-	if pendingParam == "" && fullPath == "/nvidia/link/type/value" {
+	// TODO: Remove this compatibility workaround once bundled DMS fixes the
+	// missing pending-leaf param declarations in link-shell.yaml (value-pending)
+	// and breakout-shell.yaml (planes-pending). GET returns both values, but
+	// _nvconfig contains only the current XPath's LINK_TYPE_Pn or NUM_OF_PLANES_Pn
+	// ownership. Both leaves share that native parameter. Reuse DMS's current
+	// mapping only for these known paths; never guess the port or replace a
+	// conflicting pending mapping.
+	if pendingParam == "" && (fullPath == "/nvidia/link/type/value" || breakoutPlanesXPath.MatchString(fullPath)) {
 		pendingParam = param
 	}
 	if param == "" || pendingParam == "" {
@@ -514,11 +520,8 @@ func overrideParameter(mappings map[string]string, path, leaf string, nativePara
 // SetNvConfigParametersBatchWithXPaths applies native parameters and typed
 // XPath operations through one primary-target dms-cli invocation.
 //
-// TODO(dospcx-nvconfig): HIGH PRIORITY -- pass the discovered BDF set once
-// /nvidia/nvconfig/apply supports multi-target execution. The current DMS API
-// uses ports only to expand {port} in native parameter names and runs one
-// mlxconfig command on the primary BDF, so it cannot fan out to split PCI
-// functions represented as separate NicDevice ports.
+// The ports payload expands native parameter names on this BDF only. Callers
+// managing split functions invoke this method once per BDF with portCount=1.
 func (h *nvConfigUtils) SetNvConfigParametersBatchWithXPaths(
 	ctx context.Context,
 	primaryPort v1alpha1.NicDevicePortSpec,
