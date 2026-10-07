@@ -100,6 +100,84 @@ var _ = Describe("typed NVConfig native overrides", func() {
 		Expect(err).To(MatchError(ContainSubstring("inconsistent DMS NVConfig mappings")))
 	})
 
+	Context("link type with missing pending metadata", func() {
+		const linkPath = "/nvidia/link/type"
+		const linkParam = "LINK_TYPE_P1"
+
+		BeforeEach(func() {
+			operations = []dmscli.XPathOperation{{Path: linkPath, Values: map[string]any{"value": "ETH"}}}
+			state.Values = map[string]map[string]any{linkPath: {"value": "ETH", "value-pending": "ETH"}}
+			state.NVConfig = map[string]string{linkPath + "/value": linkParam}
+		})
+
+		It("validates the DMS response when an unrelated native override is present", func() {
+			data, err := json.Marshal(map[string]any{
+				"value": "ETH", "value-pending": "ETH", "_nvconfig": state.NVConfig,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			h := &nvConfigUtils{execInterface: &execTesting.FakeExec{
+				CommandScript: []execTesting.FakeCommandAction{func(_ string, _ ...string) execUtils.Cmd {
+					return &execTesting.FakeCmd{RunScript: []execTesting.FakeAction{func() ([]byte, []byte, error) {
+						return data, nil, nil
+					}}}
+				}},
+			}}
+			update, reboot, err := h.ValidateNvConfigXPathsWithOverrides(context.Background(),
+				[]v1alpha1.NicDevicePortSpec{{PCI: pci}}, operations,
+				map[string]string{"NUM_OF_VFS": "16"}, map[string]types.NvConfigQuery{pci: types.NewNvConfigQuery()})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(update).To(BeFalse())
+			Expect(reboot).To(BeFalse())
+		})
+
+		DescribeTable("preserves drift checks for a native link type override",
+			func(current, pending string, expectedUpdate, expectedReboot bool) {
+				config := types.NewNvConfigQuery()
+				config.CurrentConfig[linkParam] = []string{current}
+				config.NextBootConfig[linkParam] = []string{pending}
+				update, reboot, err := matchXPathValuesWithOverrides(state, operations,
+					map[string]string{linkParam: "IB"}, config)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(update).To(Equal(expectedUpdate))
+				Expect(reboot).To(Equal(expectedReboot))
+			},
+			Entry("before apply", "ETH", "ETH", true, true),
+			Entry("staged until reboot", "ETH", "IB", false, true),
+			Entry("converged after reboot", "IB", "IB", false, false),
+		)
+
+		It("preserves typed drift checks when the link type is not overridden", func() {
+			state.Values[linkPath]["value-pending"] = "IB"
+			update, reboot, err := matchXPathValuesWithOverrides(state, operations,
+				map[string]string{"NUM_OF_VFS": "16"}, types.NewNvConfigQuery())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(update).To(BeTrue())
+			Expect(reboot).To(BeTrue())
+		})
+
+		It("requires the current mapping", func() {
+			delete(state.NVConfig, linkPath+"/value")
+			state.NVConfig[linkPath+"/value-pending"] = linkParam
+			_, _, err := matchXPathValuesWithOverrides(state, operations,
+				map[string]string{"NUM_OF_VFS": "16"}, types.NewNvConfigQuery())
+			Expect(err).To(MatchError(ContainSubstring("mapping metadata is required")))
+		})
+
+		It("rejects conflicting pending metadata", func() {
+			state.NVConfig[linkPath+"/value-pending"] = "LINK_TYPE_P2"
+			_, _, err := matchXPathValuesWithOverrides(state, operations,
+				map[string]string{"NUM_OF_VFS": "16"}, types.NewNvConfigQuery())
+			Expect(err).To(MatchError(ContainSubstring("inconsistent DMS NVConfig mappings")))
+		})
+	})
+
+	It("requires pending metadata for other typed leaves", func() {
+		delete(state.NVConfig, path+"/adaptive-routing-pending")
+		_, _, err := matchXPathValuesWithOverrides(state, operations,
+			map[string]string{"OTHER_PARAM": "0"}, types.NewNvConfigQuery())
+		Expect(err).To(MatchError(ContainSubstring("mapping metadata is required")))
+	})
+
 	It("uses exact indexed XPath identity", func() {
 		const indexed = "/nvidia/example/[1]"
 		operations = []dmscli.XPathOperation{{Path: indexed, Values: map[string]any{"value": 1}}}

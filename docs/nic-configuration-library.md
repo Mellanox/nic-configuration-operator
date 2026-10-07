@@ -170,8 +170,12 @@ func NewConfigurationManager(
 Native override validation requires a DMS build containing DOCA change 1508833.
 `QueryXPathsResult.NVConfig` contains the concrete leaf XPath to native parameter
 mapping, separate from `Values`; current and `-pending` paths retain their own
-keys. Missing or inconsistent direct mappings produce an error before apply,
-even when `Force` is enabled. Composite breakout `lanes` have no direct mapping;
+keys. For `/nvidia/link/type/value` only, validation reuses the current mapping
+when the pending mapping is absent, as a workaround for DMS builds missing the
+pending leaf's parameter declaration. The current mapping remains required,
+and conflicting mappings remain errors. Other missing or inconsistent direct
+mappings produce an error before apply, even when `Force` is enabled.
+Composite breakout `lanes` have no direct mapping;
 they remain validated as typed values and reject accompanying `MODULE_SPLIT_*`
 native assignments. Network Bay with Spectrum-X remains unsupported.
 
