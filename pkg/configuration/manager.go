@@ -247,25 +247,6 @@ func buildNVConfigApplyDiff(nvConfig types.NvConfigQuery, desiredConfig map[stri
 	return diff
 }
 
-func buildCombinedNVConfigApplyDiff(
-	nvConfigsForPorts map[string]types.NvConfigQuery,
-	desiredConfig map[string]string,
-	withDefault bool,
-	force bool,
-	includeUnchanged bool,
-) (map[string]string, bool) {
-	changed := make(map[string]string, len(desiredConfig))
-	hasUnsupported := false
-	for _, nvConfig := range nvConfigsForPorts {
-		diff := buildNVConfigApplyDiff(nvConfig, desiredConfig, withDefault || includeUnchanged, force)
-		for name, value := range diff.changed {
-			changed[name] = value
-		}
-		hasUnsupported = hasUnsupported || len(diff.unsupported) > 0
-	}
-	return changed, hasUnsupported
-}
-
 func (h configurationManager) applySpectrumXNVConfig(
 	ctx context.Context,
 	device *v1alpha1.NicDevice,
@@ -306,62 +287,72 @@ func (h configurationManager) applySpectrumXNVConfig(
 		}
 	}
 
-	// DMS expands port-scoped typed mappings for every supplied port number in
-	// one primary-PF command. Include the complete native desired state whenever
-	// typed operations are staged so the combined operation is atomic.
-	nativeUpdateNeeded, _, _ := validateTemplateParamsApplied(nvConfigsForPorts, desiredParams)
-	batch, hasUnsupported := buildCombinedNVConfigApplyDiff(
-		nvConfigsForPorts,
-		desiredParams,
-		options.WithDefault,
-		options.Force,
-		len(typedOperations) > 0)
-	primaryPort := device.Status.Ports[0]
-	log.FromContext(ctx).V(2).Info("combined doSPCX NVConfig apply diff",
-		"device", device.Name,
-		"phase", phase,
-		"portCount", len(device.Status.Ports),
-		"withDefault", options.WithDefault,
-		"force", options.Force,
-		"nativeUpdateNeeded", nativeUpdateNeeded,
-		"nativeApplyCount", len(batch),
-		"typedOperationCount", len(typedOperations),
-		"hasUnsupported", hasUnsupported)
+	// Each discovered PCI function exposes local DMS port 1, just as in
+	// validation. Preserve native override precedence within each target's batch.
 	status := types.ApplyStatusNothingToDo
-	if hasUnsupported {
-		status = types.ApplyStatusPartiallyApplied
+	applied := false
+	for _, port := range device.Status.Ports {
+		config := nvConfigsForPorts[port.PCI]
+		diff := buildNVConfigApplyDiff(config, desiredParams,
+			options.WithDefault || len(typedOperations) > 0, options.Force)
+		if len(diff.unsupported) > 0 {
+			status = types.ApplyStatusPartiallyApplied
+		}
+		log.FromContext(ctx).V(2).Info("combined doSPCX NVConfig apply diff",
+			"device", device.Name, "pciAddr", port.PCI, "phase", phase,
+			"withDefault", options.WithDefault, "force", options.Force,
+			"nativeApplyCount", len(diff.changed), "typedOperationCount", len(typedOperations),
+			"unsupportedParams", diff.unsupported)
+		if len(diff.changed) == 0 && len(typedOperations) == 0 {
+			continue
+		}
+		applyStatus, err := utils.SetNvConfigParametersBatchWithXPaths(
+			ctx, port, 1, diff.changed, typedOperations, options.WithDefault, options.Force)
+		if err != nil {
+			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, fmt.Errorf(
+				"apply combined doSPCX %s NVConfig for device %q on PCI function %q: %w",
+				phase, device.Name, port.PCI, err)
+		}
+		if applyStatus == types.ApplyStatusNothingToDo {
+			if len(device.Status.Ports) > 1 && len(desiredParams) > 0 {
+				// Earlier writes may have staged parameters shared by functions.
+				config, err = h.nvConfigUtils.QueryNvConfig(ctx, port, nil)
+				if err != nil {
+					return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, fmt.Errorf(
+						"refresh NVConfig after no-op on PCI function %q: %w", port.PCI, err)
+				}
+			}
+			nativeUpdateNeeded, _, _ := validateTemplateParamsApplied(
+				map[string]types.NvConfigQuery{port.PCI: config}, desiredParams)
+			targetUpdateNeeded := updateNeeded
+			if targetUpdateNeeded && !nativeUpdateNeeded && len(device.Status.Ports) > 1 {
+				// Another function may be the only source of the global typed drift.
+				// Do not stop before reaching it when this function needs no write.
+				targetUpdateNeeded, _, err = validateSpectrumXNVConfig(ctx, utils,
+					[]v1alpha1.NicDevicePortSpec{port}, typedOperations, desiredParams,
+					map[string]types.NvConfigQuery{port.PCI: config})
+				if err != nil {
+					return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
+				}
+			}
+			if !targetUpdateNeeded && !nativeUpdateNeeded {
+				continue
+			}
+			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, fmt.Errorf(
+				"apply combined doSPCX %s NVConfig for device %q on PCI function %q did not stage the mismatched configuration",
+				phase, device.Name, port.PCI)
+		}
+		if applyStatus != types.ApplyStatusSuccess {
+			return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, fmt.Errorf(
+				"apply combined doSPCX %s NVConfig for device %q on PCI function %q returned status %d",
+				phase, device.Name, port.PCI, applyStatus)
+		}
+		applied = true
 	}
-	if len(batch) == 0 && len(typedOperations) == 0 {
+	if !applied {
 		return &types.ConfigurationApplyResult{Status: status, RebootRequired: rebootNeeded}, nil
 	}
-
-	applyStatus, err := utils.SetNvConfigParametersBatchWithXPaths(
-		ctx,
-		primaryPort,
-		len(device.Status.Ports),
-		batch,
-		typedOperations,
-		options.WithDefault,
-		options.Force)
-	if err != nil {
-		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, fmt.Errorf(
-			"apply combined doSPCX %s NVConfig for device %q: %w",
-			phase, device.Name, err)
-	}
-	if applyStatus == types.ApplyStatusNothingToDo && !updateNeeded && !nativeUpdateNeeded {
-		return &types.ConfigurationApplyResult{Status: status, RebootRequired: rebootNeeded}, nil
-	}
-	if applyStatus == types.ApplyStatusNothingToDo {
-		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, fmt.Errorf(
-			"apply combined doSPCX %s NVConfig for device %q did not stage the mismatched configuration",
-			phase, device.Name)
-	}
-	if applyStatus != types.ApplyStatusSuccess {
-		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, fmt.Errorf(
-			"apply combined doSPCX %s NVConfig for device %q returned status %d",
-			phase, device.Name, applyStatus)
-	}
-	if err := h.verifySpectrumXSecondaryNVConfigStaged(
+	if err := h.verifySpectrumXNVConfigStaged(
 		ctx, device, utils, desiredParams, typedOperations); err != nil {
 		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, fmt.Errorf(
 			"verify combined doSPCX %s NVConfig for device %q: %w",
@@ -426,7 +417,7 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 	logger.V(2).Info("native NVConfig desired parameters built", "device", device.Name, "params", desiredParams, "force", options.Force)
 
 	// Spectrum-X combines template-derived native and typed NVConfig into one
-	// primary-PF DMS action.
+	// DMS action per PCI function.
 	if plan != nil {
 		result, err := h.applySpectrumXNVConfig(
 			ctx, device, plan, spectrumXUtils, nvConfigsForPorts, desiredParams, options)

@@ -164,13 +164,13 @@ func NewConfigurationManager(
 3. **Network Bay profile resolution** — for non-Spectrum-X Network Bay devices, run `show_system_conf`, select the named profile and detected ASIC, and expand range assignments such as `MODULE_SPLIT_M0[4..15]=FF` into concrete keys. The profile is the lowest-priority native layer; template and `rawNvConfig` values override it. `networkBay` remains temporarily rejected with Spectrum-X until DMS can represent and validate profile parameters below typed doSPCX operations
 4. **Native diff** — compare the complete native map against every target, normalizing symbolic, decimal, `0x` hexadecimal, and bare hexadecimal values; skip hidden/unsupported params and preserve the existing `with-default` and `force` behavior
 5. **doSPCX query and barrier** — query each plan leaf and its `-pending` leaf separately through DMS on every discovered PCI function, using `pci/<BDF>?port=1` because split functions expose their NVConfig as port 1. Use the returned `_nvconfig` metadata to associate each concrete XPath with its native parameter. For an overridden leaf, compare native current/next-boot values with the effective native value; validate all other leaves against typed intent. Validate breakout first; post-breakout becomes active only after its effective configuration matches both current and pending state on every function
-6. **Combined NVConfig batch** — send template-derived native parameters and doSPCX typed operations in one `/nvidia/nvconfig/apply` action through the primary PF, with `ports: [1..N]` for every available logical port. Normal apply sends the active phase; `Force` sends breakout plus post-breakout immediately, and post-breakout `WithDefault` resends both phases
+6. **Combined NVConfig batch** — send template-derived native parameters and doSPCX typed operations in one `/nvidia/nvconfig/apply` action per discovered PCI function, with `ports: [1]` for its local port. Normal apply sends the active phase; `Force` sends breakout plus post-breakout immediately, and post-breakout `WithDefault` resends both phases
 7. **Optional reset** — `mlxfwreset` unless `ConfigurationOptions.SkipReset=true`
 
 Native override validation requires a DMS build containing DOCA change 1508833.
 `QueryXPathsResult.NVConfig` contains the concrete leaf XPath to native parameter
 mapping, separate from `Values`; current and `-pending` paths retain their own
-keys. For `/nvidia/link/type/value` only, validation reuses the current mapping
+keys. For `/nvidia/link/type/value` and indexed breakout `planes` only, validation reuses the current mapping
 when the pending mapping is absent, as a workaround for DMS builds missing the
 pending leaf's parameter declaration. The current mapping remains required,
 and conflicting mappings remain errors. Other missing or inconsistent direct
@@ -413,16 +413,15 @@ dms-cli --json -t pci/<BDF> --input <payload-json> /nvidia/nvconfig/apply
 
 The payload supports `ports`, `typed`, `raw`, `with-default`, and `force`.
 `Target` is carried by `-t` and is not serialized. For Spectrum-X, the target
-is the primary PF, `ports` contains every available logical port (`[1..N]`),
+is each discovered PCI function in turn, `ports` contains its local port (`[1]`),
 and the existing template-derived native parameters and doSPCX prepare operations are
 sent in one action. `with-default` and `force` apply to that combined action;
 both send the complete breakout plus post-breakout intent once the breakout
 barrier is complete, and `force` does so immediately.
 
-The current DMS apply action accepts one primary BDF. Its `ports` field expands
-port-scoped native parameter names but does not target additional split-function
-BDFs. Multi-target apply for those functions therefore depends on a future DMS
-API extension.
+Each DMS apply action accepts one BDF. The configuration manager invokes it
+separately for every discovered function, preserving native overrides within each
+batch. Pending state on every function is verified after all writes before permitting reboot.
 
 Typed GET and SET preserve query/group order and use `;` as a literal argument
 between DMS containers:
@@ -568,7 +567,7 @@ repeated writes. Each runtime XPath operation preserves its effective `scope` an
 excluded from the host-Kubernetes runtime plan. Device targeting and construction
 of validation queries belong to the configuration manager when it consumes this
 plan. Runtime apply preserves the authored batch order. Validation ignores values
-shadowed by later batches on the same target, while keeping different scope and
+shadowed by later batches across all runtime groups on the same target, while keeping different scope and
 target-class pairs in separate DMS commands.
 
 Public operations may omit `kind` (`set` is the DMS default). Bare-metal steps,
@@ -678,7 +677,7 @@ implementations. Implementations without the extension continue through the lega
 
 The built-in implementation also supports doSPCX XPath validation and combined
 native/typed apply. It validates each discovered PCI function through
-`pci/<BDF>?port=1` and uses `ports: [1..N]` in the combined apply payload.
+`pci/<BDF>?port=1` and uses `ports: [1]` in each function's combined apply payload.
 Spectrum-X configuration fails closed when a custom utility does not provide
 these optional methods.
 
@@ -993,7 +992,7 @@ logs and returned errors. Output is not duplicated in error-level logs.
 
 ### Batch Operations
 
-- **NVConfig apply**: the non-Spectrum-X path keeps one sorted raw batch per PCI target. The Spectrum-X path sends one combined template-native/typed batch through the primary PF with every available logical port in `ports`; DMS executes one primary-PF `mlxconfig` operation
+- **NVConfig apply**: the non-Spectrum-X path keeps one sorted raw batch per PCI target. The Spectrum-X path sends one combined template-native/typed batch per PCI function with local port 1 in `ports`; DMS executes one `mlxconfig` operation per function
 - **DMS**: `GetParameters()` batches `--path` entries per concrete interface (with a separate global batch), and `SetParameters()` sends all `--update` entries in a single `dmsc set` command with `--timeout 5m`
 - **IgnoreError**: per-parameter flag; in batch mode, errors are suppressed only if ALL params have `IgnoreError=true`
 

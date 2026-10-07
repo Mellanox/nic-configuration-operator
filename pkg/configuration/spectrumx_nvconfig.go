@@ -171,11 +171,9 @@ func (h configurationManager) spectrumXNVConfigPhase(
 	return validate(spectrumXNVConfigPhasePostBreakout, plan.PostBreakout)
 }
 
-// verifySpectrumXSecondaryNVConfigStaged prevents a successful primary-target
-// apply from hiding drift on split PCI functions. DMS currently executes one
-// mlxconfig command on the primary BDF, so its success response alone cannot
-// prove that every secondary function's pending state converged.
-func (h configurationManager) verifySpectrumXSecondaryNVConfigStaged(
+// verifySpectrumXNVConfigStaged checks pending state after all writes
+// so later writes to shared parameters cannot hide drift on an earlier function.
+func (h configurationManager) verifySpectrumXNVConfigStaged(
 	ctx context.Context,
 	device *v1alpha1.NicDevice,
 	utils spectrumXNVConfigUtils,
@@ -185,38 +183,38 @@ func (h configurationManager) verifySpectrumXSecondaryNVConfigStaged(
 	if len(device.Status.Ports) < 2 {
 		return nil
 	}
-	secondaryPorts := device.Status.Ports[1:]
+	ports := device.Status.Ports
 	logger := log.FromContext(ctx)
-	logger.V(2).Info("verifying doSPCX NVConfig pending state on secondary PCI functions",
+	logger.V(2).Info("verifying doSPCX NVConfig pending state on all PCI functions",
 		"device", device.Name,
-		"secondaryFunctions", len(secondaryPorts),
+		"functions", len(ports),
 		"nativeParameters", len(desiredParams),
 		"typedOperations", len(typedOperations))
 
 	// Refresh native state before checking typed leaves shadowed by overrides.
-	configs := make(map[string]types.NvConfigQuery, len(secondaryPorts))
+	configs := make(map[string]types.NvConfigQuery, len(ports))
 	if len(desiredParams) > 0 {
-		for _, port := range secondaryPorts {
+		for _, port := range ports {
 			config, err := h.nvConfigUtils.QueryNvConfig(ctx, port, nil)
 			if err != nil {
-				return fmt.Errorf("verify native NVConfig on secondary PCI function %q: %w", port.PCI, err)
+				return fmt.Errorf("verify native NVConfig on PCI function %q: %w", port.PCI, err)
 			}
 			configs[port.PCI] = config
 		}
 	}
 	if len(typedOperations) > 0 {
-		updateNeeded, _, err := validateSpectrumXNVConfig(ctx, utils, secondaryPorts, typedOperations, desiredParams, configs)
+		updateNeeded, _, err := validateSpectrumXNVConfig(ctx, utils, ports, typedOperations, desiredParams, configs)
 		if err != nil {
-			return fmt.Errorf("verify typed NVConfig on secondary PCI functions: %w", err)
+			return fmt.Errorf("verify typed NVConfig on all PCI functions: %w", err)
 		}
 		if updateNeeded {
-			return fmt.Errorf("DMS primary-target apply did not stage typed NVConfig on every secondary PCI function")
+			return fmt.Errorf("DMS apply did not stage typed NVConfig on every PCI function")
 		}
 	}
 	for pci, config := range configs {
 		updateNeeded, _, _ := validateTemplateParamsApplied(map[string]types.NvConfigQuery{pci: config}, desiredParams)
 		if updateNeeded {
-			return fmt.Errorf("DMS primary-target apply did not stage native NVConfig on secondary PCI function %q", pci)
+			return fmt.Errorf("DMS apply did not stage native NVConfig on PCI function %q", pci)
 		}
 	}
 	return nil
