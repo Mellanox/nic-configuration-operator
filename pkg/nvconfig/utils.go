@@ -495,10 +495,17 @@ func overrideParameter(mappings map[string]string, path, leaf string, nativePara
 	}
 	fullPath := strings.TrimRight(path, "/") + "/" + leaf
 	param := mappings[fullPath]
-	if param == "" || mappings[fullPath+xPathPendingSuffix] == "" {
+	pendingParam := mappings[fullPath+xPathPendingSuffix]
+	// Some DMS builds omit the direct param declaration for link type's pending
+	// getter. Both leaves use the same LINK_TYPE parameter; retain DMS's current
+	// mapping rather than guessing its port suffix. Remove once bundled DMS is fixed.
+	if pendingParam == "" && fullPath == "/nvidia/link/type/value" {
+		pendingParam = param
+	}
+	if param == "" || pendingParam == "" {
 		return "", fmt.Errorf("DMS NVConfig mapping metadata is required for XPath %q and its pending value when native overrides are present; use a DMS build with NVConfig GET metadata support", fullPath)
 	}
-	if mappings[fullPath+xPathPendingSuffix] != param {
+	if pendingParam != param {
 		return "", fmt.Errorf("inconsistent DMS NVConfig mappings for current and pending XPath %q", fullPath)
 	}
 	return param, nil
