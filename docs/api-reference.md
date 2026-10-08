@@ -229,7 +229,7 @@ NicConfigurationTemplate is the Schema for the nicconfigurationtemplates API
 <tbody>
 <tr>
 <td><code>metadata</code><br />
-<em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta">Kubernetes meta/v1.ObjectMeta</a></em></td>
+<em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.36/#objectmeta-v1-meta">Kubernetes meta/v1.ObjectMeta</a></em></td>
 <td>Refer to the Kubernetes API documentation for the fields of the <code>metadata</code> field.</td>
 </tr>
 <tr>
@@ -338,7 +338,7 @@ NicDevice is the Schema for the nicdevices API
 <tbody>
 <tr>
 <td><code>metadata</code><br />
-<em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta">Kubernetes meta/v1.ObjectMeta</a></em></td>
+<em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.36/#objectmeta-v1-meta">Kubernetes meta/v1.ObjectMeta</a></em></td>
 <td>Refer to the Kubernetes API documentation for the fields of the <code>metadata</code> field.</td>
 </tr>
 <tr>
@@ -642,7 +642,7 @@ function digit stripped). Empty when the serial number is unavailable from PCI V
 </tr>
 <tr>
 <td><code>conditions</code><br />
-<em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta">[]Kubernetes meta/v1.Condition</a></em></td>
+<em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.36/#condition-v1-meta">[]Kubernetes meta/v1.Condition</a></em></td>
 <td><p>List of conditions observed for the device</p></td>
 </tr>
 </tbody>
@@ -666,7 +666,7 @@ NicFirmwareSource is the Schema for the nicfirmwaresources API
 <tbody>
 <tr>
 <td><code>metadata</code><br />
-<em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta">Kubernetes meta/v1.ObjectMeta</a></em></td>
+<em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.36/#objectmeta-v1-meta">Kubernetes meta/v1.ObjectMeta</a></em></td>
 <td>Refer to the Kubernetes API documentation for the fields of the <code>metadata</code> field.</td>
 </tr>
 <tr>
@@ -812,7 +812,7 @@ NicFirmwareTemplate is the Schema for the nicfirmwaretemplates API
 <tbody>
 <tr>
 <td><code>metadata</code><br />
-<em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta">Kubernetes meta/v1.ObjectMeta</a></em></td>
+<em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.36/#objectmeta-v1-meta">Kubernetes meta/v1.ObjectMeta</a></em></td>
 <td>Refer to the Kubernetes API documentation for the fields of the <code>metadata</code> field.</td>
 </tr>
 <tr>
@@ -906,7 +906,7 @@ NicInterfaceNameTemplate is the Schema for the nicinterfacenametemplates API
 <tbody>
 <tr>
 <td><code>metadata</code><br />
-<em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta">Kubernetes meta/v1.ObjectMeta</a></em></td>
+<em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.36/#objectmeta-v1-meta">Kubernetes meta/v1.ObjectMeta</a></em></td>
 <td>Refer to the Kubernetes API documentation for the fields of the <code>metadata</code> field.</td>
 </tr>
 <tr>
@@ -1086,7 +1086,7 @@ NicTemplateStatus defines the observed state of NicConfigurationTemplate and Nic
 </tr>
 <tr>
 <td><code>conditions</code><br />
-<em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta">[]Kubernetes meta/v1.Condition</a></em></td>
+<em><a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.36/#condition-v1-meta">[]Kubernetes meta/v1.Condition</a></em></td>
 <td><p>Conditions observed for this template, e.g. a Network Bay pairing imbalance on a node</p></td>
 </tr>
 </tbody>
