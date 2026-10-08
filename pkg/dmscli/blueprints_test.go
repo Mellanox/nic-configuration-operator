@@ -111,6 +111,7 @@ var _ = Describe("Blueprint plan", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(entries).To(HaveLen(1))
 		Expect(entries[0].message).To(Equal("command output"))
+		Expect(entries[0].fields).To(HaveKeyWithValue("duration_ms", BeNumerically(">=", 0)))
 		Expect(entries[0].fields).To(HaveKeyWithValue("command", append([]string{dmsCLIExecutable}, commands[0].args...)))
 		Expect(entries[0].fields).To(HaveKeyWithValue("plan", planName))
 		Expect(entries[0].fields).To(HaveKeyWithValue("blueprintsStateDir", blueprintsStateDir))
