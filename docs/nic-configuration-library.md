@@ -167,14 +167,13 @@ func NewConfigurationManager(
 6. **Combined NVConfig batch** — send template-derived native parameters and doSPCX typed operations in one `/nvidia/nvconfig/apply` action per discovered PCI function, with `ports: [1]` for its local port. Normal apply sends the active phase; `Force` sends breakout plus post-breakout immediately, and post-breakout `WithDefault` resends both phases
 7. **Optional reset** — `mlxfwreset` unless `ConfigurationOptions.SkipReset=true`
 
-Native override validation requires a DMS build containing DOCA change 1508833.
-`QueryXPathsResult.NVConfig` contains the concrete leaf XPath to native parameter
-mapping, separate from `Values`; current and `-pending` paths retain their own
-keys. For `/nvidia/link/type/value` and indexed breakout `planes` only, validation reuses the current mapping
-when the pending mapping is absent, as a workaround for DMS builds missing the
-pending leaf's parameter declaration. The current mapping remains required,
-and conflicting mappings remain errors. Other missing or inconsistent direct
-mappings produce an error before apply, even when `Force` is enabled.
+Native override validation requires a DMS build containing DOCA changes 1508833
+and 1521729. `QueryXPathsResult.NVConfig` contains the concrete leaf XPath to
+native parameter mapping, separate from `Values`; current and `-pending` paths
+retain their own keys. Both mappings must be present and refer to the same native
+parameter, including link type and indexed breakout planes. Missing or
+inconsistent direct mappings produce an error before apply, even when `Force`
+is enabled.
 Composite breakout `lanes` have no direct mapping;
 they remain validated as typed values and reject accompanying `MODULE_SPLIT_*`
 native assignments. Network Bay with Spectrum-X remains unsupported.
