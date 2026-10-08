@@ -40,7 +40,29 @@ var Options = &zap.Options{
 	Level:           zzap.NewAtomicLevelAt(zapcore.InfoLevel),
 	// log caller (file and line number) in "caller" key
 	EncoderConfigOptions: []zap.EncoderConfigOption{func(ec *zapcore.EncoderConfig) { ec.CallerKey = "caller" }},
-	ZapOpts:              []zzap.Option{zzap.AddCaller()},
+	ZapOpts:              []zzap.Option{zzap.AddCaller(), zzap.WrapCore(withoutControllerContext)},
+}
+
+// controllerContextCore removes framework fields bound to a logger while keeping
+// fields supplied by individual operations, including interface names and errors.
+type controllerContextCore struct {
+	zapcore.Core
+}
+
+func withoutControllerContext(core zapcore.Core) zapcore.Core {
+	return controllerContextCore{Core: core}
+}
+
+func (core controllerContextCore) With(fields []zapcore.Field) zapcore.Core {
+	filtered := make([]zapcore.Field, 0, len(fields))
+	for _, field := range fields {
+		switch field.Key {
+		case "controller", "controllerGroup", "controllerKind", "NicDevice", "namespace", "name", "reconcileID":
+			continue
+		}
+		filtered = append(filtered, field)
+	}
+	return controllerContextCore{Core: core.Core.With(filtered)}
 }
 
 // BindFlags binds controller-runtime logging flags to provided flag Set
