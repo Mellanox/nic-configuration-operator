@@ -596,6 +596,7 @@ type SpectrumXManager interface {
     PlanManager
     BlueprintsDataManager
     RunDocaSpcXCC(port v1alpha1.NicDevicePortSpec) error
+    IsDocaSpcXCCRunning(rdma string) bool
     GetCCTerminationChannel() <-chan string
 }
 ```
@@ -1025,3 +1026,10 @@ K8s-free packages (`pkg/spectrumx/`, `pkg/dms/`) communicate with controllers vi
 | `a819489` — Refactor DMS to single daemon | Single `dmsd` process for all devices, `dmsClient` with `--target`, `IsRunning()` on manager | `DMSManager.StartDMSServer` replaces `StartDMSInstances`; `DMSClient.IsRunning()` removed |
 | `852ced3` — Fix CX8 reboot blocked by mlxfwreset | Treat `mlxfwreset` failure as non-fatal in controller | No library API change; behavioral fix for CX8 SuperNIC devices |
 | `3bf35c5` — Batch SetParameters | `collectSetUpdates` + single `dmsc set` with multiple `--update` flags + `--timeout 5m` | `SetParameters` now executes one command instead of N; `formatSetUpdate` shared helper |
+
+Runtime sections are validated concurrently. A mismatch or read error cancels the
+other sections and joins their workers before configuration writes begin. A required
+CC process that is absent or still starting makes validation return false immediately;
+process startup remains in the apply phase. Custom implementations of
+`SpectrumXManager` must implement `IsDocaSpcXCCRunning` without starting a process.
+DMS CLI command-output logs include elapsed command execution time as `duration_ms`.

@@ -122,6 +122,7 @@ func logBlueprintPlanResult(
 	decodeErr error,
 ) {
 	fields := []any{
+		"duration_ms", float64(output.Duration.Microseconds()) / 1000,
 		commandLogKey, command,
 		"plan", request.Name,
 		"blueprintsStateDir", request.BlueprintsStateDir,

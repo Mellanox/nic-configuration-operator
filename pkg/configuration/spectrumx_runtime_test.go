@@ -17,6 +17,9 @@ package configuration
 
 import (
 	"context"
+	"fmt"
+	"sync"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -65,7 +68,68 @@ func spectrumXRuntimeTargetNames(targets []spectrumXRuntimeTarget) []string {
 	return names
 }
 
+type runtimeContextExec struct {
+	execUtils.Interface
+	command func(context.Context, string, ...string) execUtils.Cmd
+}
+
+func (e runtimeContextExec) CommandContext(ctx context.Context, name string, args ...string) execUtils.Cmd {
+	return e.command(ctx, name, args...)
+}
+
 var _ = Describe("doSPCX runtime configuration", func() {
+	DescribeTable("cancels and joins parallel sections on mismatch or error", func(fail bool) {
+		started := make(chan struct{})
+		exited := make(chan struct{})
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		manager := configurationManager{execInterface: runtimeContextExec{command: func(ctx context.Context, _ string, args ...string) execUtils.Cmd {
+			cmd := &execTesting.FakeCmd{}
+			cmd.RunScript = []execTesting.FakeAction{func() ([]byte, []byte, error) {
+				if args[3] == "/nvidia/link/physical" {
+					close(started)
+					<-ctx.Done()
+					close(exited)
+					return nil, nil, ctx.Err()
+				}
+				select {
+				case <-started:
+				case <-ctx.Done():
+					return nil, nil, ctx.Err()
+				}
+				if fail {
+					return nil, nil, fmt.Errorf("fixture read failed")
+				}
+				return []byte(`{"status":"ok","values":{"/nvidia/link/ipg/admin":12},"failures":{}}`), nil, nil
+			}}
+			return cmd
+		}}}
+		plan := &spectrumx.Plan{RuntimeConfig: []spectrumx.OperationGroup{
+			{Name: "blocked", Scope: spectrumXRuntimeScopePerDevice, Operations: []dmscli.XPathOperation{{Path: "/nvidia/link/physical", Values: map[string]any{"admin-status": "up"}, TargetClass: spectrumXRuntimeTargetPFRDMAScope}}},
+			{Name: "mismatch", Scope: spectrumXRuntimeScopePerDevice, Operations: []dmscli.XPathOperation{{Path: "/nvidia/link/ipg", Values: map[string]any{"admin": 25}, TargetClass: spectrumXRuntimeTargetPFRDMAScope}}},
+		}}
+		matches, err := manager.validateSpectrumXRuntimeConfig(ctx, spectrumXRuntimeTestDevice(), plan)
+		Expect(matches).To(BeFalse())
+		if fail {
+			Expect(err).To(MatchError(ContainSubstring("fixture read failed")))
+		} else {
+			Expect(err).NotTo(HaveOccurred())
+		}
+		Expect(ctx.Err()).NotTo(HaveOccurred())
+		Expect(exited).To(BeClosed())
+	}, Entry("mismatch", false), Entry("error", true))
+
+	It("returns immediately when a required CC process is absent without querying or starting it", func() {
+		device := spectrumXRuntimeTestDevice()
+		managerMock := spectrumxmocks.NewSpectrumXManager(GinkgoT())
+		managerMock.On("IsDocaSpcXCCRunning", device.Status.Ports[0].RdmaInterface).Return(false).Once()
+		manager := configurationManager{spectrumXConfigManager: managerMock, execInterface: &execTesting.FakeExec{}}
+		plan := &spectrumx.Plan{RuntimeConfig: []spectrumx.OperationGroup{{Name: spectrumXRuntimeGroupCC, Scope: spectrumXRuntimeScopePerRDMABond, Operations: []dmscli.XPathOperation{{Path: "/nvidia/cc/algo/slot/[0]", Values: map[string]any{"enabled": true}, TargetClass: spectrumXRuntimeTargetPFRDMAScope}}}}}
+		matches, err := manager.validateSpectrumXRuntimeConfig(context.Background(), device, plan)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(matches).To(BeFalse())
+	})
+
 	It("validates final writes across runtime groups", func() {
 		calls := [][]string{}
 		manager := configurationManager{execInterface: &execTesting.FakeExec{CommandScript: []execTesting.FakeCommandAction{
@@ -88,10 +152,17 @@ var _ = Describe("doSPCX runtime configuration", func() {
 	DescribeTable("keeps final runtime writes scoped to their targets across groups",
 		func(secondaryState string, expected bool) {
 			calls := [][]string{}
-			manager := configurationManager{execInterface: &execTesting.FakeExec{CommandScript: []execTesting.FakeCommandAction{
-				runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"`+secondaryState+`"},"failures":{}}`, &calls),
-				runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"up"},"failures":{}}`, &calls),
+			var mu sync.Mutex
+			manager := configurationManager{execInterface: runtimeContextExec{command: func(_ context.Context, executable string, args ...string) execUtils.Cmd {
+				mu.Lock()
+				defer mu.Unlock()
+				state := "up"
+				if args[2] == "pci/0000:64:00.1" {
+					state = secondaryState
+				}
+				return runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"`+state+`"},"failures":{}}`, &calls)(executable, args...)
 			}}}
+
 			plan := &spectrumx.Plan{RuntimeConfig: []spectrumx.OperationGroup{
 				{Name: "link-runtime", Scope: spectrumXRuntimeScopePerDevice, Operations: []dmscli.XPathOperation{
 					{Path: "/nvidia/link/physical", Values: map[string]any{"admin-status": "down"}, TargetClass: spectrumXRuntimeTargetPFNetdevAll},
@@ -103,10 +174,10 @@ var _ = Describe("doSPCX runtime configuration", func() {
 			matches, err := manager.validateSpectrumXRuntimeConfig(context.Background(), spectrumXRuntimeTestDevice(), plan)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(matches).To(Equal(expected))
-			Expect(calls[0]).To(ContainElement("pci/0000:64:00.1"))
+			Expect(calls).To(ContainElement(ContainElement("pci/0000:64:00.1")))
 			if expected {
 				Expect(calls).To(HaveLen(2))
-				Expect(calls[1]).To(ContainElement("pci/0000:64:00.0"))
+				Expect(calls).To(ContainElement(ContainElement("pci/0000:64:00.0")))
 			}
 		},
 		Entry("converged", "down", true),
@@ -388,10 +459,10 @@ var _ = Describe("doSPCX runtime configuration", func() {
 		Expect(calls[0]).NotTo(ContainElement("pci/0000:64:00.1"))
 	})
 
-	It("starts CC and validates its group only on the RDMA-bond owner", func() {
+	It("checks CC and validates its group only on the RDMA-bond owner", func() {
 		device := spectrumXRuntimeTestDevice()
 		managerMock := spectrumxmocks.NewSpectrumXManager(GinkgoT())
-		managerMock.On("RunDocaSpcXCC", device.Status.Ports[0]).Return(nil).Once()
+		managerMock.On("IsDocaSpcXCCRunning", device.Status.Ports[0].RdmaInterface).Return(true).Once()
 		calls := [][]string{}
 		manager := configurationManager{
 			spectrumXConfigManager: managerMock,
@@ -421,7 +492,7 @@ var _ = Describe("doSPCX runtime configuration", func() {
 	It("uses readable slot 0 as the validation proxy for the write-only slot 15 disable", func() {
 		device := spectrumXRuntimeTestDevice()
 		managerMock := spectrumxmocks.NewSpectrumXManager(GinkgoT())
-		managerMock.On("RunDocaSpcXCC", device.Status.Ports[0]).Return(nil).Once()
+		managerMock.On("IsDocaSpcXCCRunning", device.Status.Ports[0].RdmaInterface).Return(true).Once()
 		calls := [][]string{}
 		manager := configurationManager{
 			spectrumXConfigManager: managerMock,

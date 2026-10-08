@@ -95,6 +95,7 @@ func ApplyNVConfig(ctx context.Context, execInterface execUtils.Interface, reque
 	output, commandErr := utils.RunCommandWithStreams(command)
 	commandAndArgs := append([]string{dmsCLIExecutable}, args...)
 	fields := []any{
+		"duration_ms", float64(output.Duration.Microseconds()) / 1000,
 		commandLogKey, commandAndArgs,
 		"target", request.Target,
 		"stdout", boundedCommandOutput(output.Stdout),
