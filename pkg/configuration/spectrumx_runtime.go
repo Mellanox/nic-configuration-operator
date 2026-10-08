@@ -424,47 +424,27 @@ func (h configurationManager) validateSpectrumXRuntimeTarget(
 	queries []dmscli.XPathQuery,
 	desiredValues map[string]map[string]any,
 ) (bool, error) {
-	for _, batch := range spectrumXRuntimeQueryBatches(queries) {
-		result, err := dmscli.QueryXPaths(ctx, h.execInterface, target, batch)
-		if err != nil {
-			return false, err
+	result, err := dmscli.QueryXPathsFullPaths(ctx, h.execInterface, target, queries)
+	if err != nil {
+		return false, err
+	}
+	for _, query := range queries {
+		actualValues, found := result.Values[query.Path]
+		if !found {
+			return false, fmt.Errorf("DMS response does not contain XPath %q", query.Path)
 		}
-		for _, query := range batch {
-			actualValues, found := result.Values[query.Path]
+		for _, leaf := range query.Leaves {
+			actual, found := actualValues[leaf]
 			if !found {
-				return false, fmt.Errorf("DMS response does not contain XPath %q", query.Path)
+				return false, fmt.Errorf("DMS response does not contain XPath leaf %q/%s", query.Path, leaf)
 			}
-			for _, leaf := range query.Leaves {
-				actual, found := actualValues[leaf]
-				if !found {
-					return false, fmt.Errorf("DMS response does not contain XPath leaf %q/%s", query.Path, leaf)
-				}
-				desired := desiredValues[query.Path][leaf]
-				if !dmscli.XPathValuesEqual(actual, desired) {
-					log.FromContext(ctx).V(2).Info("doSPCX runtime value differs",
-						"target", target, "path", query.Path, "leaf", leaf, "current", actual, "desired", desired)
-					return false, nil
-				}
+			desired := desiredValues[query.Path][leaf]
+			if !dmscli.XPathValuesEqual(actual, desired) {
+				log.FromContext(ctx).V(2).Info("doSPCX runtime value differs",
+					"target", target, "path", query.Path, "leaf", leaf, "current", actual, "desired", desired)
+				return false, nil
 			}
 		}
 	}
 	return true, nil
-}
-
-// TODO(dospcx-runtime): remove per-index queries once dms-cli preserves indexed XPath keys in
-// batched JSON GET responses. Today indexed paths can collapse to the same response key.
-func spectrumXRuntimeQueryBatches(queries []dmscli.XPathQuery) [][]dmscli.XPathQuery {
-	batched := make([]dmscli.XPathQuery, 0, len(queries))
-	individual := make([][]dmscli.XPathQuery, 0)
-	for _, query := range queries {
-		if strings.Contains(query.Path, "[") {
-			individual = append(individual, []dmscli.XPathQuery{query})
-			continue
-		}
-		batched = append(batched, query)
-	}
-	if len(batched) == 0 {
-		return individual
-	}
-	return append([][]dmscli.XPathQuery{batched}, individual...)
 }

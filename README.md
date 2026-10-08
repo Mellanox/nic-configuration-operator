@@ -214,9 +214,9 @@ keeps different scope and target-class pairs in separate DMS commands.
 Generic runtime configuration is applied first and doSPCX groups are applied last
 in semantic order. The `cc` group starts `doca_spcx_cc` before its XPath operations;
 in HWPLB mode it uses the first function of each NIC because the functions share
-one RDMA device. Other groups are applied to every discovered function. Indexed
-XPath queries are issued individually until DMS preserves indexed keys in batched
-JSON responses.
+one RDMA device. Other groups are applied to every discovered function. Runtime validation batches explicit leaves, including indexed XPaths, using
+`dms-cli --json-xpaths`. This requires DMS support for the full-XPath GET envelope;
+older DMS versions fail explicitly instead of returning ambiguous indexed values.
 
 The NIC Configuration Daemon image must contain the executable at
 `/opt/mellanox/doca/tools/doca_spcx_cc`; the STIG daemon images install the

@@ -69,8 +69,8 @@ var _ = Describe("doSPCX runtime configuration", func() {
 	It("validates final writes across runtime groups", func() {
 		calls := [][]string{}
 		manager := configurationManager{execInterface: &execTesting.FakeExec{CommandScript: []execTesting.FakeCommandAction{
-			runtimeFakeCommand(`{"admin-status":"up"}`, &calls),
-			runtimeFakeCommand(`{"admin-status":"up"}`, &calls),
+			runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"up"},"failures":{}}`, &calls),
+			runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"up"},"failures":{}}`, &calls),
 		}}}
 		plan := &spectrumx.Plan{RuntimeConfig: []spectrumx.OperationGroup{
 			{Name: "link-runtime", Scope: spectrumXRuntimeScopePerDevice, Operations: []dmscli.XPathOperation{
@@ -89,8 +89,8 @@ var _ = Describe("doSPCX runtime configuration", func() {
 		func(secondaryState string, expected bool) {
 			calls := [][]string{}
 			manager := configurationManager{execInterface: &execTesting.FakeExec{CommandScript: []execTesting.FakeCommandAction{
-				runtimeFakeCommand(`{"admin-status":"`+secondaryState+`"}`, &calls),
-				runtimeFakeCommand(`{"admin-status":"up"}`, &calls),
+				runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"`+secondaryState+`"},"failures":{}}`, &calls),
+				runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"up"},"failures":{}}`, &calls),
 			}}}
 			plan := &spectrumx.Plan{RuntimeConfig: []spectrumx.OperationGroup{
 				{Name: "link-runtime", Scope: spectrumXRuntimeScopePerDevice, Operations: []dmscli.XPathOperation{
@@ -234,9 +234,9 @@ var _ = Describe("doSPCX runtime configuration", func() {
 		calls := [][]string{}
 		manager := configurationManager{execInterface: &execTesting.FakeExec{
 			CommandScript: []execTesting.FakeCommandAction{
-				runtimeFakeCommand(`{"trust-mode":"dscp"}`, &calls),
-				runtimeFakeCommand(`{"trust-mode":"dscp"}`, &calls),
-				runtimeFakeCommand(`{"traffic-class":96}`, &calls),
+				runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/qos/trust-mode":"dscp"},"failures":{}}`, &calls),
+				runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/qos/trust-mode":"dscp"},"failures":{}}`, &calls),
+				runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/roce/tos/traffic-class":96},"failures":{}}`, &calls),
 			},
 		}}
 		plan := &spectrumx.Plan{RuntimeConfig: []spectrumx.OperationGroup{{
@@ -269,9 +269,9 @@ var _ = Describe("doSPCX runtime configuration", func() {
 		calls := [][]string{}
 		manager := configurationManager{execInterface: &execTesting.FakeExec{
 			CommandScript: []execTesting.FakeCommandAction{
-				runtimeFakeCommand(`{"traffic-class":96}`, &calls),
-				runtimeFakeCommand(`{"admin-status":"up"}`, &calls),
-				runtimeFakeCommand(`{"admin-status":"up"}`, &calls),
+				runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/roce/tos/traffic-class":96},"failures":{}}`, &calls),
+				runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"up"},"failures":{}}`, &calls),
+				runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"up"},"failures":{}}`, &calls),
 			},
 		}}
 		plan := &spectrumx.Plan{RuntimeConfig: []spectrumx.OperationGroup{{
@@ -396,7 +396,7 @@ var _ = Describe("doSPCX runtime configuration", func() {
 		manager := configurationManager{
 			spectrumXConfigManager: managerMock,
 			execInterface: &execTesting.FakeExec{CommandScript: []execTesting.FakeCommandAction{
-				runtimeFakeCommand(`{"enabled":true}`, &calls),
+				runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/cc/algo/slot/[0]/enabled":true},"failures":{}}`, &calls),
 			}},
 		}
 		plan := &spectrumx.Plan{RuntimeConfig: []spectrumx.OperationGroup{{
@@ -426,7 +426,7 @@ var _ = Describe("doSPCX runtime configuration", func() {
 		manager := configurationManager{
 			spectrumXConfigManager: managerMock,
 			execInterface: &execTesting.FakeExec{CommandScript: []execTesting.FakeCommandAction{
-				runtimeFakeCommand(`{"enabled":true}`, &calls),
+				runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/cc/algo/slot/[0]/enabled":true},"failures":{}}`, &calls),
 			}},
 		}
 		plan := &spectrumx.Plan{RuntimeConfig: []spectrumx.OperationGroup{{
@@ -454,7 +454,7 @@ var _ = Describe("doSPCX runtime configuration", func() {
 		Expect(calls[0]).NotTo(ContainElement(spectrumXRuntimeWriteOnlyPPCCSlot15))
 	})
 
-	It("queries indexed paths separately and detects a mismatch on a later index", func() {
+	It("batches indexed paths and detects a mismatch on a later index", func() {
 		const (
 			target     = "pci/0000:64:00.0"
 			firstIndex = "/nvidia/cc/algo/slot/[0]/param/[0]"
@@ -475,9 +475,11 @@ var _ = Describe("doSPCX runtime configuration", func() {
 		calls := [][]string{}
 		manager := configurationManager{execInterface: &execTesting.FakeExec{
 			CommandScript: []execTesting.FakeCommandAction{
-				runtimeFakeCommand(`{"/nvidia/qos":{"trust-mode":"dscp"},"/nvidia/roce":{"adaptive-routing":true}}`, &calls),
-				runtimeFakeCommand(`{"value":400}`, &calls),
-				runtimeFakeCommand(`{"value":999}`, &calls),
+				runtimeFakeCommand(`{"status":"ok","values":{
+                  "/nvidia/qos/trust-mode":"dscp", "/nvidia/roce/adaptive-routing":true,
+                  "/nvidia/cc/algo/slot/[0]/param/[0]/value":400,
+                  "/nvidia/cc/algo/slot/[0]/param/[1]/value":999
+                },"failures":{}}`, &calls),
 			},
 		}}
 
@@ -485,14 +487,8 @@ var _ = Describe("doSPCX runtime configuration", func() {
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(matches).To(BeFalse())
-		Expect(calls).To(HaveLen(3))
-		Expect(calls[0]).To(ContainElements("/nvidia/qos", "/nvidia/roce", ";"))
-		Expect(calls[0]).NotTo(ContainElement(firstIndex))
-		Expect(calls[0]).NotTo(ContainElement(lastIndex))
-		Expect(calls[1]).To(ContainElement(firstIndex))
-		Expect(calls[1]).NotTo(ContainElement(";"))
-		Expect(calls[2]).To(ContainElement(lastIndex))
-		Expect(calls[2]).NotTo(ContainElement(";"))
+		Expect(calls).To(HaveLen(1))
+		Expect(calls[0]).To(ContainElements("--json-xpaths", "/nvidia/qos", "/nvidia/roce", firstIndex, lastIndex, ";"))
 	})
 
 	It("batches link-event operations and post-validates the prepared runtime plan", func() {
@@ -512,13 +508,13 @@ var _ = Describe("doSPCX runtime configuration", func() {
 		calls := [][]string{}
 		executor := &execTesting.FakeExec{CommandScript: []execTesting.FakeCommandAction{
 			// Initial validation stops on the first mismatching target.
-			runtimeFakeCommand(`{"admin-status":"down"}`, &calls),
+			runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"down"},"failures":{}}`, &calls),
 			// Apply the full ordered group to both target functions.
 			runtimeFakeCommand(`{"status":"ok"}`, &calls),
 			runtimeFakeCommand(`{"status":"ok"}`, &calls),
 			// Post-validation checks both target functions.
-			runtimeFakeCommand(`{"admin-status":"up"}`, &calls),
-			runtimeFakeCommand(`{"admin-status":"up"}`, &calls),
+			runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"up"},"failures":{}}`, &calls),
+			runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"up"},"failures":{}}`, &calls),
 		}}
 		manager := configurationManager{
 			configValidation: validationMock, spectrumXConfigManager: managerMock, execInterface: executor,
@@ -550,13 +546,13 @@ var _ = Describe("doSPCX runtime configuration", func() {
 		calls := [][]string{}
 		executor := &execTesting.FakeExec{CommandScript: []execTesting.FakeCommandAction{
 			// The plan initially matches both functions.
-			runtimeFakeCommand(`{"admin-status":"up"}`, &calls),
-			runtimeFakeCommand(`{"admin-status":"up"}`, &calls),
+			runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"up"},"failures":{}}`, &calls),
+			runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"up"},"failures":{}}`, &calls),
 			// It is still applied after generic runtime configuration to preserve final precedence.
 			runtimeFakeCommand(`{"status":"ok"}`, &calls),
 			runtimeFakeCommand(`{"status":"ok"}`, &calls),
-			runtimeFakeCommand(`{"admin-status":"up"}`, &calls),
-			runtimeFakeCommand(`{"admin-status":"up"}`, &calls),
+			runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"up"},"failures":{}}`, &calls),
+			runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"up"},"failures":{}}`, &calls),
 		}}
 		manager := configurationManager{
 			configurationUtils: &configurationmocks.ConfigurationUtils{},

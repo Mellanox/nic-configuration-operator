@@ -137,6 +137,100 @@ func QueryXPaths(
 	return result, nil
 }
 
+// QueryXPathsFullPaths reads explicit leaves with an unambiguous full-XPath response.
+// This requires DMS --json-xpaths support; older DMS versions return an error.
+func QueryXPathsFullPaths(
+	ctx context.Context,
+	execInterface execUtils.Interface,
+	target string,
+	queries []XPathQuery,
+) (*QueryXPathsResult, error) {
+	if execInterface == nil {
+		return nil, fmt.Errorf("command executor must not be nil")
+	}
+	if err := validateXPathQueries(target, queries); err != nil {
+		return nil, err
+	}
+	args := xpathQueryArgs(target, queries)
+	args[0] = "--json-xpaths"
+	command := execInterface.CommandContext(ctx, dmsCLIExecutable, args...)
+	output, commandErr := utils.RunCommandWithStreams(command)
+	logDMSCLIOutput(ctx, append([]string{dmsCLIExecutable}, args...), target, output, commandErr)
+	result, decodeErr := decodeXPathFullPaths(output.Stdout, queries)
+	if commandErr != nil {
+		detail := ""
+		if result != nil {
+			detail = result.ErrorMessage
+		}
+		return result, xpathCommandError("query", target, commandErrorDetail(output.Stdout, output.Stderr, detail), commandErr)
+	}
+	if decodeErr != nil {
+		return result, fmt.Errorf("decode full XPath query result for target %q: %w", target, decodeErr)
+	}
+	return result, nil
+}
+
+func decodeXPathFullPaths(output []byte, queries []XPathQuery) (*QueryXPathsResult, error) {
+	var envelope struct {
+		Status   string            `json:"status"`
+		Values   map[string]any    `json:"values"`
+		Failures map[string]any    `json:"failures"`
+		NVConfig map[string]string `json:"_nvconfig"`
+	}
+	if err := decodeJSON(output, &envelope); err != nil {
+		return nil, err
+	}
+	if envelope.Status != "ok" && envelope.Status != "partial" && envelope.Status != "error" {
+		return nil, fmt.Errorf("unexpected DMS status %q", envelope.Status)
+	}
+	if envelope.Values == nil || envelope.Failures == nil {
+		return nil, fmt.Errorf("DMS response must contain values and failures objects")
+	}
+	result := &QueryXPathsResult{Status: envelope.Status, Values: make(map[string]map[string]any, len(queries)),
+		NVConfig: envelope.NVConfig, Failures: envelope.Failures}
+	for _, query := range queries {
+		result.Values[query.Path] = map[string]any{}
+	}
+	for path, value := range envelope.Values {
+		queryPath, leaf, found := matchingQuery(path, queries)
+		if !found {
+			return nil, fmt.Errorf("DMS response contains unexpected value path %q", path)
+		}
+		if value == nil {
+			return nil, fmt.Errorf("DMS response contains null value for %q", path)
+		}
+		result.Values[queryPath][leaf] = value
+	}
+	for path, value := range envelope.Failures {
+		if _, _, found := matchingQuery(path, queries); !found {
+			return nil, fmt.Errorf("DMS response contains unexpected failure path %q", path)
+		}
+		if _, found := envelope.Values[path]; found {
+			return nil, fmt.Errorf("DMS response contains both value and failure for %q", path)
+		}
+		if _, ok := value.(string); !ok {
+			return nil, fmt.Errorf("DMS failure for %q must be a string", path)
+		}
+	}
+	for path, param := range envelope.NVConfig {
+		if _, _, found := matchingQuery(path, queries); !found || strings.TrimSpace(param) == "" {
+			return nil, fmt.Errorf("invalid DMS _nvconfig mapping for XPath %q", path)
+		}
+	}
+	if envelope.Status != "ok" || len(envelope.Failures) != 0 {
+		result.ErrorMessage = failureMessage(xpathFailureEnvelope{Status: envelope.Status, Failures: envelope.Failures})
+		return result, fmt.Errorf("DMS query status %q with %d failures: %s", envelope.Status, len(envelope.Failures), result.ErrorMessage)
+	}
+	for _, query := range queries {
+		for _, leaf := range query.Leaves {
+			if _, found := result.Values[query.Path][leaf]; !found {
+				return nil, fmt.Errorf("DMS response does not contain XPath leaf %q", query.Path+"/"+leaf)
+			}
+		}
+	}
+	return result, nil
+}
+
 // SetXPaths applies an ordered sequence of typed operations to a DMS target.
 func SetXPaths(
 	ctx context.Context,

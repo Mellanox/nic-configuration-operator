@@ -393,6 +393,13 @@ func QueryXPaths(
     queries []XPathQuery,
 ) (*QueryXPathsResult, error)
 
+func QueryXPathsFullPaths(
+    ctx context.Context,
+    execInterface execUtils.Interface,
+    target string,
+    queries []XPathQuery,
+) (*QueryXPathsResult, error)
+
 func SetXPaths(
     ctx context.Context,
     execInterface execUtils.Interface,
@@ -400,6 +407,15 @@ func SetXPaths(
     operations []XPathOperation,
 ) (*SetXPathsResult, error)
 ```
+
+`QueryXPathsFullPaths` uses local `dms-cli --json-xpaths` to preserve concrete
+indices in batched GET responses. It normalizes full leaf XPath keys into
+`QueryXPathsResult.Values[path][leaf]`, retains optional `_nvconfig` ownership,
+and rejects missing values, partial failures, and malformed responses. doSPCX
+runtime validation uses this mode once per target and scope/target-class batch.
+It requires a DMS version supporting this flag and does not retry ambiguous legacy
+reads. `QueryXPaths` continues to use the legacy JSON contract for native NVConfig
+validation.
 
 The caller supplies the repository-standard `k8s.io/utils/exec.Interface`; this
 reuses the existing command abstraction and supports
