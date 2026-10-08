@@ -253,6 +253,7 @@ func calculateNicRailAndPlaneIndices(device *v1alpha1.NicDevice, railPciAddresse
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *NicInterfaceNameTemplateReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	//nolint:staticcheck // Callers use record.EventRecorder. GetEventRecorder returns the newer events API.
 	r.EventRecorder = mgr.GetEventRecorderFor("NicInterfaceNameTemplateReconciler")
 
 	qHandler := func(q workqueue.TypedRateLimitingInterface[reconcile.Request]) {

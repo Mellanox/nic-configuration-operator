@@ -158,6 +158,7 @@ func (t *nicConfigurationTemplate) getObject() client.Object {
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *NicConfigurationTemplateReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	//nolint:staticcheck // Callers use record.EventRecorder. GetEventRecorder returns the newer events API.
 	r.EventRecorder = mgr.GetEventRecorderFor("NicConfigurationTemplateReconciler")
 
 	qHandler := func(q workqueue.TypedRateLimitingInterface[reconcile.Request]) {

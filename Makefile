@@ -1,4 +1,6 @@
 # Version information
+GO_MOD_VERSION := $(shell awk '/^go / { print $$2 }' go.mod)
+
 include Makefile.version
 include make/license.mk
 
@@ -8,7 +10,7 @@ OPERATOR_SDK_VERSION ?= v1.36.0
 # Image URL to use all building/pushing image targets
 OPERATOR_IMAGE_TAG ?= nic-configuration-operator:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.31.0
+ENVTEST_K8S_VERSION = 1.36.0
 
 CONFIG_DAEMON_IMAGE_TAG ?= nic-configuration-daemon:latest
 
@@ -218,9 +220,9 @@ GOLANGCI_LINT = $(LOCALBIN)/golangci-lint-$(GOLANGCILINT_VERSION)
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.3.0
-CONTROLLER_TOOLS_VERSION ?= v0.20.0
-ENVTEST_VERSION ?= release-0.19
-GOLANGCILINT_VERSION ?= v2.11.4
+CONTROLLER_TOOLS_VERSION ?= v0.21.0
+ENVTEST_VERSION ?= release-0.24
+GOLANGCILINT_VERSION ?= v2.12.2
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
@@ -257,21 +259,30 @@ $(HELM): | $(LOCALBIN)
 
 .PHONY: golangci-lint
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
+# Build with the Go that will run the linter. golangci-lint can typecheck only
+# language features from that Go version, so pinning an older toolchain breaks
+# runners that use a newer standard library.
 $(GOLANGCI_LINT): $(LOCALBIN)
-	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,${GOLANGCILINT_VERSION})
+	@[ -f $(GOLANGCI_LINT) ] || { \
+	set -e; \
+	package=github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCILINT_VERSION); \
+	echo "Downloading $${package}"; \
+	GOBIN=$(LOCALBIN) go install $${package}; \
+	mv $(LOCALBIN)/golangci-lint $(GOLANGCI_LINT); \
+	}
 
 GEN_CRD_API_REFERENCE_DOCS = $(LOCALBIN)/gen-crd-api-reference-docs
 .PHONY: gen-crd-api-reference-docs ## Download gen-crd-api-reference-docs locally if necessary
 gen-crd-api-reference-docs: $(GEN_CRD_API_REFERENCE_DOCS)
 $(GEN_CRD_API_REFERENCE_DOCS): | $(LOCALBIN)
-	@ GOBIN=$(LOCALBIN) go install github.com/ahmetb/gen-crd-api-reference-docs@latest
+	@ GOBIN=$(LOCALBIN) GOTOOLCHAIN=go$(GO_MOD_VERSION) go install github.com/ahmetb/gen-crd-api-reference-docs@latest
 
 HELM_DOCS = $(LOCALBIN)/helm-docs
 HELM_DOCS_VERSION ?= v1.14.2
 .PHONY: helm-docs ## Download helm-docs locally if necessary
 helm-docs: $(HELM_DOCS)
 $(HELM_DOCS): | $(LOCALBIN)
-	@ GOBIN=$(LOCALBIN) go install github.com/norwoodj/helm-docs/cmd/helm-docs@$(HELM_DOCS_VERSION)
+	@ GOBIN=$(LOCALBIN) GOTOOLCHAIN=go$(GO_MOD_VERSION) go install github.com/norwoodj/helm-docs/cmd/helm-docs@$(HELM_DOCS_VERSION)
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary (ideally with version)
@@ -282,7 +293,7 @@ define go-install-tool
 set -e; \
 package=$(2)@$(3) ;\
 echo "Downloading $${package}" ;\
-GOBIN=$(LOCALBIN) go install $${package} ;\
+GOBIN=$(LOCALBIN) GOTOOLCHAIN=go$(GO_MOD_VERSION) go install $${package} ;\
 mv "$$(echo "$(1)" | sed "s/-$(3)$$//")" $(1) ;\
 }
 endef

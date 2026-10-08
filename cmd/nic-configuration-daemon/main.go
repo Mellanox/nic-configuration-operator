@@ -115,6 +115,7 @@ func main() {
 		}
 	}
 
+	//nolint:staticcheck // Callers use record.EventRecorder. GetEventRecorder returns the newer events API.
 	eventRecorder := mgr.GetEventRecorderFor("NicDeviceReconciler")
 
 	hostUtils := host.NewHostUtils()

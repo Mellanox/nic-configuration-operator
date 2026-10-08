@@ -141,7 +141,3 @@ type NicDeviceList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []NicDevice `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&NicDevice{}, &NicDeviceList{})
-}

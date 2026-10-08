@@ -74,7 +74,3 @@ type NicInterfaceNameTemplateList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []NicInterfaceNameTemplate `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&NicInterfaceNameTemplate{}, &NicInterfaceNameTemplateList{})
-}

@@ -72,7 +72,3 @@ type NicFirmwareSourceList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []NicFirmwareSource `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&NicFirmwareSource{}, &NicFirmwareSourceList{})
-}
