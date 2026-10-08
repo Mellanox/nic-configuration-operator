@@ -17,10 +17,12 @@ package configuration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
+	"golang.org/x/sync/errgroup"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
@@ -69,44 +71,85 @@ func (h configurationManager) validateSpectrumXRuntimeConfig(
 		groupBatches[i] = batches
 		allBatches = append(allBatches, batches...)
 	}
+	// Check process readiness before launching any DMS reads. Startup belongs to apply.
+	for i, group := range plan.RuntimeConfig {
+		if group.Name != spectrumXRuntimeGroupCC {
+			continue
+		}
+		for _, port := range spectrumXRuntimeBatchPorts(groupBatches[i]) {
+			if strings.TrimSpace(port.RdmaInterface) == "" {
+				return false, fmt.Errorf("PCI function %q has no RDMA interface", port.PCI)
+			}
+			if !h.spectrumXConfigManager.IsDocaSpcXCCRunning(port.RdmaInterface) {
+				log.FromContext(ctx).V(2).Info("required DOCA SPC-X CC process is not running", "rdma", port.RdmaInterface)
+				return false, nil
+			}
+		}
+	}
 	lastWriteBatches := spectrumXRuntimeLastWriteBatches(allBatches)
+	workers, workerCtx := errgroup.WithContext(ctx)
+	mismatch := errors.New("runtime configuration differs")
 	batchOffset := 0
 	for i, group := range plan.RuntimeConfig {
 		batches := groupBatches[i]
-		if group.Name == spectrumXRuntimeGroupCC && len(batches) > 0 {
-			if err := h.startSpectrumXCC(spectrumXRuntimeBatchPorts(batches)); err != nil {
-				return false, fmt.Errorf("start DOCA SPC-X CC for device %q: %w", device.Name, err)
-			}
-		}
-
-		for batchIndex, batch := range batches {
-			log.FromContext(ctx).V(2).Info("validating doSPCX runtime configuration group",
-				"device", device.Name, "group", group.Name, "scope", batch.scope,
-				"targetClass", batch.targetClass, "operations", len(batch.operations), "targets", len(batch.targets))
-			for _, target := range batch.targets {
-				operations := spectrumXRuntimeFinalBatchOperations(
-					batch.operations, batchOffset+batchIndex, target.name, lastWriteBatches)
-				queries, desiredValues := spectrumXRuntimeQueries(operations)
-				if len(queries) == 0 {
-					log.FromContext(ctx).V(2).Info("skipping doSPCX runtime validation batch",
-						"device", device.Name, "group", group.Name, "scope", batch.scope,
-						"targetClass", batch.targetClass, "target", target.name,
-						"reason", "all values are shadowed by a later batch or are write-only")
-					continue
-				}
-				matches, err := h.validateSpectrumXRuntimeTarget(
-					ctx, target.name, queries, desiredValues)
-				if err != nil {
-					return false, fmt.Errorf(
-						"validate doSPCX runtime group %q scope %q target class %q for device %q on PCI function %q: %w",
-						group.Name, batch.scope, batch.targetClass, device.Name, target.port.PCI, err)
-				}
-				if !matches {
-					return false, nil
-				}
-			}
-		}
+		offset := batchOffset
 		batchOffset += len(batches)
+		workers.Go(func() error {
+			matches, err := h.validateSpectrumXRuntimeGroup(workerCtx, device, group, batches, offset, lastWriteBatches)
+			if err != nil {
+				return err
+			}
+			if !matches {
+				return mismatch
+			}
+			return nil
+		})
+	}
+	// Wait also joins cancelled workers before the caller can start configuration writes.
+	err := workers.Wait()
+	if ctx.Err() != nil {
+		return false, ctx.Err()
+	}
+	if errors.Is(err, mismatch) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (h configurationManager) validateSpectrumXRuntimeGroup(
+	ctx context.Context, device *v1alpha1.NicDevice, group spectrumx.OperationGroup,
+	batches []spectrumXRuntimeOperationBatch, batchOffset int,
+	lastWriteBatches map[spectrumXRuntimeWriteKey]int,
+) (bool, error) {
+	for batchIndex, batch := range batches {
+		log.FromContext(ctx).V(2).Info("validating doSPCX runtime configuration group",
+			"device", device.Name, "group", group.Name, "scope", batch.scope,
+			"targetClass", batch.targetClass, "operations", len(batch.operations), "targets", len(batch.targets))
+		for _, target := range batch.targets {
+			if err := ctx.Err(); err != nil {
+				return false, err
+			}
+			operations := spectrumXRuntimeFinalBatchOperations(
+				batch.operations, batchOffset+batchIndex, target.name, lastWriteBatches)
+			queries, desiredValues := spectrumXRuntimeQueries(operations)
+			if len(queries) == 0 {
+				log.FromContext(ctx).V(2).Info("skipping doSPCX runtime validation batch",
+					"device", device.Name, "group", group.Name, "scope", batch.scope,
+					"targetClass", batch.targetClass, "target", target.name,
+					"reason", "all values are shadowed by a later batch or are write-only")
+				continue
+			}
+			matches, err := h.validateSpectrumXRuntimeTarget(
+				ctx, target.name, queries, desiredValues)
+			if err != nil {
+				return false, fmt.Errorf(
+					"validate doSPCX runtime group %q scope %q target class %q for device %q on PCI function %q: %w",
+					group.Name, batch.scope, batch.targetClass, device.Name, target.port.PCI, err)
+			}
+			if !matches {
+				return false, nil
+			}
+		}
 	}
 	return true, nil
 }
@@ -424,47 +467,27 @@ func (h configurationManager) validateSpectrumXRuntimeTarget(
 	queries []dmscli.XPathQuery,
 	desiredValues map[string]map[string]any,
 ) (bool, error) {
-	for _, batch := range spectrumXRuntimeQueryBatches(queries) {
-		result, err := dmscli.QueryXPaths(ctx, h.execInterface, target, batch)
-		if err != nil {
-			return false, err
+	result, err := dmscli.QueryXPathsFullPaths(ctx, h.execInterface, target, queries)
+	if err != nil {
+		return false, err
+	}
+	for _, query := range queries {
+		actualValues, found := result.Values[query.Path]
+		if !found {
+			return false, fmt.Errorf("DMS response does not contain XPath %q", query.Path)
 		}
-		for _, query := range batch {
-			actualValues, found := result.Values[query.Path]
+		for _, leaf := range query.Leaves {
+			actual, found := actualValues[leaf]
 			if !found {
-				return false, fmt.Errorf("DMS response does not contain XPath %q", query.Path)
+				return false, fmt.Errorf("DMS response does not contain XPath leaf %q/%s", query.Path, leaf)
 			}
-			for _, leaf := range query.Leaves {
-				actual, found := actualValues[leaf]
-				if !found {
-					return false, fmt.Errorf("DMS response does not contain XPath leaf %q/%s", query.Path, leaf)
-				}
-				desired := desiredValues[query.Path][leaf]
-				if !dmscli.XPathValuesEqual(actual, desired) {
-					log.FromContext(ctx).V(2).Info("doSPCX runtime value differs",
-						"target", target, "path", query.Path, "leaf", leaf, "current", actual, "desired", desired)
-					return false, nil
-				}
+			desired := desiredValues[query.Path][leaf]
+			if !dmscli.XPathValuesEqual(actual, desired) {
+				log.FromContext(ctx).V(2).Info("doSPCX runtime value differs",
+					"target", target, "path", query.Path, "leaf", leaf, "current", actual, "desired", desired)
+				return false, nil
 			}
 		}
 	}
 	return true, nil
-}
-
-// TODO(dospcx-runtime): remove per-index queries once dms-cli preserves indexed XPath keys in
-// batched JSON GET responses. Today indexed paths can collapse to the same response key.
-func spectrumXRuntimeQueryBatches(queries []dmscli.XPathQuery) [][]dmscli.XPathQuery {
-	batched := make([]dmscli.XPathQuery, 0, len(queries))
-	individual := make([][]dmscli.XPathQuery, 0)
-	for _, query := range queries {
-		if strings.Contains(query.Path, "[") {
-			individual = append(individual, []dmscli.XPathQuery{query})
-			continue
-		}
-		batched = append(batched, query)
-	}
-	if len(batched) == 0 {
-		return individual
-	}
-	return append([][]dmscli.XPathQuery{batched}, individual...)
 }

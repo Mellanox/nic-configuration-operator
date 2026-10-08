@@ -39,6 +39,8 @@ type SpectrumXManager interface {
 	BlueprintsDataManager
 	// RunDocaSpcXCC launches and tracks the DOCA SPC-X CC process for a port.
 	RunDocaSpcXCC(port v1alpha1.NicDevicePortSpec) error
+	// IsDocaSpcXCCRunning reports whether a tracked process completed startup and is alive.
+	IsDocaSpcXCCRunning(rdma string) bool
 	// GetCCTerminationChannel reports CC processes that terminate after startup.
 	GetCCTerminationChannel() <-chan string
 }
@@ -155,6 +157,14 @@ func (m *spectrumXConfigManager) RunDocaSpcXCC(port v1alpha1.NicDevicePortSpec) 
 	process.completeStartup(nil)
 	log.Log.Info("Started DOCA SPC-X CC process", "rdma", port.RdmaInterface)
 	return nil
+}
+
+// IsDocaSpcXCCRunning checks tracked process state without starting or waiting for a process.
+func (m *spectrumXConfigManager) IsDocaSpcXCCRunning(rdma string) bool {
+	m.ccProcessesMutex.Lock()
+	defer m.ccProcessesMutex.Unlock()
+	process := m.ccProcesses[rdma]
+	return process != nil && process.running.Load() && process.startupCheckPassed.Load()
 }
 
 // GetCCTerminationChannel returns a read-only channel for CC process termination notifications.

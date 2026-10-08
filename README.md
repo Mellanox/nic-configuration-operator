@@ -103,7 +103,7 @@ spec:
   * Requires `linkType=Ethernet` and `numVfs=1`
   * Cannot be combined with `roceOptimized` (RoCE settings are included automatically)
   * Native NVConfig precedence is `rawNvConfig` > template-derived parameters > doSPCX. Validation uses DMS GET `_nvconfig` metadata to recognize overridden typed leaves and checks their native current/next-boot values, so intentional overrides converge after reboot
-  * Requires a DMS build containing NVConfig GET mapping metadata support (DOCA change 1508833) when native parameters accompany typed intent. Missing mappings fail validation before apply, including with `force`. For `/nvidia/link/type/value` and indexed breakout `planes` only, the operator reuses the current mapping when the pending mapping is absent to support DMS builds missing that declaration; conflicting mappings still fail validation
+  * Requires a DMS build containing NVConfig GET mapping metadata support (DOCA changes 1508833 and 1521729) when native parameters accompany typed intent. Current and pending mappings must both be present and consistent; missing or conflicting mappings fail validation before apply, including with `force`
   * Raw `MODULE_SPLIT_*` assignments cannot be combined with typed breakout lane operations: DMS does not yet expose composite lane ownership
   * Temporarily cannot be combined with `networkBay`; complete native ownership is required to place the system profile below typed doSPCX intent
   * Only supported on ConnectX-7 (`nicType: 1021`), ConnectX-8 (`nicType: 1023`), ConnectX-9 (`nicType: 1025`) and BlueField-3 SuperNIC (`nicType: a2dc`)
@@ -214,9 +214,9 @@ keeps different scope and target-class pairs in separate DMS commands.
 Generic runtime configuration is applied first and doSPCX groups are applied last
 in semantic order. The `cc` group starts `doca_spcx_cc` before its XPath operations;
 in HWPLB mode it uses the first function of each NIC because the functions share
-one RDMA device. Other groups are applied to every discovered function. Indexed
-XPath queries are issued individually until DMS preserves indexed keys in batched
-JSON responses.
+one RDMA device. Other groups are applied to every discovered function. Runtime validation batches explicit leaves, including indexed XPaths, using
+`dms-cli --batch-xpaths`. This requires DMS support for the full-XPath GET envelope;
+older DMS versions fail explicitly instead of returning ambiguous indexed values.
 
 The NIC Configuration Daemon image must contain the executable at
 `/opt/mellanox/doca/tools/doca_spcx_cc`; the STIG daemon images install the

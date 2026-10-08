@@ -167,14 +167,13 @@ func NewConfigurationManager(
 6. **Combined NVConfig batch** — send template-derived native parameters and doSPCX typed operations in one `/nvidia/nvconfig/apply` action per discovered PCI function, with `ports: [1]` for its local port. Normal apply sends the active phase; `Force` sends breakout plus post-breakout immediately, and post-breakout `WithDefault` resends both phases
 7. **Optional reset** — `mlxfwreset` unless `ConfigurationOptions.SkipReset=true`
 
-Native override validation requires a DMS build containing DOCA change 1508833.
-`QueryXPathsResult.NVConfig` contains the concrete leaf XPath to native parameter
-mapping, separate from `Values`; current and `-pending` paths retain their own
-keys. For `/nvidia/link/type/value` and indexed breakout `planes` only, validation reuses the current mapping
-when the pending mapping is absent, as a workaround for DMS builds missing the
-pending leaf's parameter declaration. The current mapping remains required,
-and conflicting mappings remain errors. Other missing or inconsistent direct
-mappings produce an error before apply, even when `Force` is enabled.
+Native override validation requires a DMS build containing DOCA changes 1508833
+and 1521729. `QueryXPathsResult.NVConfig` contains the concrete leaf XPath to
+native parameter mapping, separate from `Values`; current and `-pending` paths
+retain their own keys. Both mappings must be present and refer to the same native
+parameter, including link type and indexed breakout planes. Missing or
+inconsistent direct mappings produce an error before apply, even when `Force`
+is enabled.
 Composite breakout `lanes` have no direct mapping;
 they remain validated as typed values and reject accompanying `MODULE_SPLIT_*`
 native assignments. Network Bay with Spectrum-X remains unsupported.
@@ -394,6 +393,13 @@ func QueryXPaths(
     queries []XPathQuery,
 ) (*QueryXPathsResult, error)
 
+func QueryXPathsFullPaths(
+    ctx context.Context,
+    execInterface execUtils.Interface,
+    target string,
+    queries []XPathQuery,
+) (*QueryXPathsResult, error)
+
 func SetXPaths(
     ctx context.Context,
     execInterface execUtils.Interface,
@@ -401,6 +407,15 @@ func SetXPaths(
     operations []XPathOperation,
 ) (*SetXPathsResult, error)
 ```
+
+`QueryXPathsFullPaths` uses local `dms-cli --batch-xpaths` to preserve concrete
+indices in batched GET responses. It normalizes full leaf XPath keys into
+`QueryXPathsResult.Values[path][leaf]`, retains optional `_nvconfig` ownership,
+and rejects missing values, partial failures, and malformed responses. doSPCX
+runtime validation uses this mode once per target and scope/target-class batch.
+It requires a DMS version supporting this flag and does not retry ambiguous legacy
+reads. `QueryXPaths` continues to use the legacy JSON contract for native NVConfig
+validation.
 
 The caller supplies the repository-standard `k8s.io/utils/exec.Interface`; this
 reuses the existing command abstraction and supports
@@ -581,6 +596,7 @@ type SpectrumXManager interface {
     PlanManager
     BlueprintsDataManager
     RunDocaSpcXCC(port v1alpha1.NicDevicePortSpec) error
+    IsDocaSpcXCCRunning(rdma string) bool
     GetCCTerminationChannel() <-chan string
 }
 ```
@@ -1010,3 +1026,10 @@ K8s-free packages (`pkg/spectrumx/`, `pkg/dms/`) communicate with controllers vi
 | `a819489` — Refactor DMS to single daemon | Single `dmsd` process for all devices, `dmsClient` with `--target`, `IsRunning()` on manager | `DMSManager.StartDMSServer` replaces `StartDMSInstances`; `DMSClient.IsRunning()` removed |
 | `852ced3` — Fix CX8 reboot blocked by mlxfwreset | Treat `mlxfwreset` failure as non-fatal in controller | No library API change; behavioral fix for CX8 SuperNIC devices |
 | `3bf35c5` — Batch SetParameters | `collectSetUpdates` + single `dmsc set` with multiple `--update` flags + `--timeout 5m` | `SetParameters` now executes one command instead of N; `formatSetUpdate` shared helper |
+
+Runtime sections are validated concurrently. A mismatch or read error cancels the
+other sections and joins their workers before configuration writes begin. A required
+CC process that is absent or still starting makes validation return false immediately;
+process startup remains in the apply phase. Custom implementations of
+`SpectrumXManager` must implement `IsDocaSpcXCCRunning` without starting a process.
+DMS CLI command-output logs include elapsed command execution time as `duration_ms`.

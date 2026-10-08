@@ -482,8 +482,6 @@ func matchXPathValuesWithOverrides(
 	return updateNeeded, rebootNeeded, nil
 }
 
-var breakoutPlanesXPath = regexp.MustCompile(`^/nvidia/link/breakout/module/\[[0-9]+\]/port/\[[0-9]+\]/planes$`)
-
 // DMS intentionally omits composite lane mappings. They remain typed-only until
 // DMS exposes their native ownership; a raw lane assignment could otherwise loop.
 func overrideParameter(mappings map[string]string, path, leaf string, nativeParams map[string]string) (string, error) {
@@ -498,16 +496,6 @@ func overrideParameter(mappings map[string]string, path, leaf string, nativePara
 	fullPath := strings.TrimRight(path, "/") + "/" + leaf
 	param := mappings[fullPath]
 	pendingParam := mappings[fullPath+xPathPendingSuffix]
-	// TODO: Remove this compatibility workaround once bundled DMS fixes the
-	// missing pending-leaf param declarations in link-shell.yaml (value-pending)
-	// and breakout-shell.yaml (planes-pending). GET returns both values, but
-	// _nvconfig contains only the current XPath's LINK_TYPE_Pn or NUM_OF_PLANES_Pn
-	// ownership. Both leaves share that native parameter. Reuse DMS's current
-	// mapping only for these known paths; never guess the port or replace a
-	// conflicting pending mapping.
-	if pendingParam == "" && (fullPath == "/nvidia/link/type/value" || breakoutPlanesXPath.MatchString(fullPath)) {
-		pendingParam = param
-	}
 	if param == "" || pendingParam == "" {
 		return "", fmt.Errorf("DMS NVConfig mapping metadata is required for XPath %q and its pending value when native overrides are present; use a DMS build with NVConfig GET metadata support", fullPath)
 	}

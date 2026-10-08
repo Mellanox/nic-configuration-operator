@@ -92,3 +92,12 @@ func NewSpectrumXManager(t interface {
 	t.Cleanup(func() { manager.AssertExpectations(t) })
 	return manager
 }
+
+// IsDocaSpcXCCRunning provides a mock function with the given fields: rdma.
+func (_m *SpectrumXManager) IsDocaSpcXCCRunning(rdma string) bool {
+	ret := _m.Called(rdma)
+	if fn, ok := ret.Get(0).(func(string) bool); ok {
+		return fn(rdma)
+	}
+	return ret.Bool(0)
+}

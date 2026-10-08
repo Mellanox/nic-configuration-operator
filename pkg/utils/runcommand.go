@@ -20,14 +20,16 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+	"time"
 
 	execUtils "k8s.io/utils/exec"
 )
 
 // CommandOutput contains the two output streams produced by a command.
 type CommandOutput struct {
-	Stdout []byte
-	Stderr []byte
+	Stdout   []byte
+	Stderr   []byte
+	Duration time.Duration
 }
 
 // RunCommandWithStreams executes a command while keeping stdout and stderr
@@ -38,8 +40,9 @@ func RunCommandWithStreams(cmd execUtils.Cmd) (CommandOutput, error) {
 	var stderr bytes.Buffer
 	cmd.SetStdout(&stdout)
 	cmd.SetStderr(&stderr)
+	started := time.Now()
 	err := cmd.Run()
-	return CommandOutput{Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}, err
+	return CommandOutput{Stdout: stdout.Bytes(), Stderr: stderr.Bytes(), Duration: time.Since(started)}, err
 }
 
 // RunCommand runs a command and captures stderr separately for better error reporting

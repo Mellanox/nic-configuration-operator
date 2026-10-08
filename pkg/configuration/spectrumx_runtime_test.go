@@ -17,6 +17,9 @@ package configuration
 
 import (
 	"context"
+	"fmt"
+	"sync"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -65,12 +68,73 @@ func spectrumXRuntimeTargetNames(targets []spectrumXRuntimeTarget) []string {
 	return names
 }
 
+type runtimeContextExec struct {
+	execUtils.Interface
+	command func(context.Context, string, ...string) execUtils.Cmd
+}
+
+func (e runtimeContextExec) CommandContext(ctx context.Context, name string, args ...string) execUtils.Cmd {
+	return e.command(ctx, name, args...)
+}
+
 var _ = Describe("doSPCX runtime configuration", func() {
+	DescribeTable("cancels and joins parallel sections on mismatch or error", func(fail bool) {
+		started := make(chan struct{})
+		exited := make(chan struct{})
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		manager := configurationManager{execInterface: runtimeContextExec{command: func(ctx context.Context, _ string, args ...string) execUtils.Cmd {
+			cmd := &execTesting.FakeCmd{}
+			cmd.RunScript = []execTesting.FakeAction{func() ([]byte, []byte, error) {
+				if args[3] == "/nvidia/link/physical" {
+					close(started)
+					<-ctx.Done()
+					close(exited)
+					return nil, nil, ctx.Err()
+				}
+				select {
+				case <-started:
+				case <-ctx.Done():
+					return nil, nil, ctx.Err()
+				}
+				if fail {
+					return nil, nil, fmt.Errorf("fixture read failed")
+				}
+				return []byte(`{"status":"ok","values":{"/nvidia/link/ipg/admin":12},"failures":{}}`), nil, nil
+			}}
+			return cmd
+		}}}
+		plan := &spectrumx.Plan{RuntimeConfig: []spectrumx.OperationGroup{
+			{Name: "blocked", Scope: spectrumXRuntimeScopePerDevice, Operations: []dmscli.XPathOperation{{Path: "/nvidia/link/physical", Values: map[string]any{"admin-status": "up"}, TargetClass: spectrumXRuntimeTargetPFRDMAScope}}},
+			{Name: "mismatch", Scope: spectrumXRuntimeScopePerDevice, Operations: []dmscli.XPathOperation{{Path: "/nvidia/link/ipg", Values: map[string]any{"admin": 25}, TargetClass: spectrumXRuntimeTargetPFRDMAScope}}},
+		}}
+		matches, err := manager.validateSpectrumXRuntimeConfig(ctx, spectrumXRuntimeTestDevice(), plan)
+		Expect(matches).To(BeFalse())
+		if fail {
+			Expect(err).To(MatchError(ContainSubstring("fixture read failed")))
+		} else {
+			Expect(err).NotTo(HaveOccurred())
+		}
+		Expect(ctx.Err()).NotTo(HaveOccurred())
+		Expect(exited).To(BeClosed())
+	}, Entry("mismatch", false), Entry("error", true))
+
+	It("returns immediately when a required CC process is absent without querying or starting it", func() {
+		device := spectrumXRuntimeTestDevice()
+		managerMock := spectrumxmocks.NewSpectrumXManager(GinkgoT())
+		managerMock.On("IsDocaSpcXCCRunning", device.Status.Ports[0].RdmaInterface).Return(false).Once()
+		manager := configurationManager{spectrumXConfigManager: managerMock, execInterface: &execTesting.FakeExec{}}
+		plan := &spectrumx.Plan{RuntimeConfig: []spectrumx.OperationGroup{{Name: spectrumXRuntimeGroupCC, Scope: spectrumXRuntimeScopePerRDMABond, Operations: []dmscli.XPathOperation{{Path: "/nvidia/cc/algo/slot/[0]", Values: map[string]any{"enabled": true}, TargetClass: spectrumXRuntimeTargetPFRDMAScope}}}}}
+		matches, err := manager.validateSpectrumXRuntimeConfig(context.Background(), device, plan)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(matches).To(BeFalse())
+	})
+
 	It("validates final writes across runtime groups", func() {
 		calls := [][]string{}
 		manager := configurationManager{execInterface: &execTesting.FakeExec{CommandScript: []execTesting.FakeCommandAction{
-			runtimeFakeCommand(`{"admin-status":"up"}`, &calls),
-			runtimeFakeCommand(`{"admin-status":"up"}`, &calls),
+			runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"up"},"failures":{}}`, &calls),
+			runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"up"},"failures":{}}`, &calls),
 		}}}
 		plan := &spectrumx.Plan{RuntimeConfig: []spectrumx.OperationGroup{
 			{Name: "link-runtime", Scope: spectrumXRuntimeScopePerDevice, Operations: []dmscli.XPathOperation{
@@ -88,10 +152,17 @@ var _ = Describe("doSPCX runtime configuration", func() {
 	DescribeTable("keeps final runtime writes scoped to their targets across groups",
 		func(secondaryState string, expected bool) {
 			calls := [][]string{}
-			manager := configurationManager{execInterface: &execTesting.FakeExec{CommandScript: []execTesting.FakeCommandAction{
-				runtimeFakeCommand(`{"admin-status":"`+secondaryState+`"}`, &calls),
-				runtimeFakeCommand(`{"admin-status":"up"}`, &calls),
+			var mu sync.Mutex
+			manager := configurationManager{execInterface: runtimeContextExec{command: func(_ context.Context, executable string, args ...string) execUtils.Cmd {
+				mu.Lock()
+				defer mu.Unlock()
+				state := "up"
+				if args[2] == "pci/0000:64:00.1" {
+					state = secondaryState
+				}
+				return runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"`+state+`"},"failures":{}}`, &calls)(executable, args...)
 			}}}
+
 			plan := &spectrumx.Plan{RuntimeConfig: []spectrumx.OperationGroup{
 				{Name: "link-runtime", Scope: spectrumXRuntimeScopePerDevice, Operations: []dmscli.XPathOperation{
 					{Path: "/nvidia/link/physical", Values: map[string]any{"admin-status": "down"}, TargetClass: spectrumXRuntimeTargetPFNetdevAll},
@@ -103,10 +174,10 @@ var _ = Describe("doSPCX runtime configuration", func() {
 			matches, err := manager.validateSpectrumXRuntimeConfig(context.Background(), spectrumXRuntimeTestDevice(), plan)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(matches).To(Equal(expected))
-			Expect(calls[0]).To(ContainElement("pci/0000:64:00.1"))
+			Expect(calls).To(ContainElement(ContainElement("pci/0000:64:00.1")))
 			if expected {
 				Expect(calls).To(HaveLen(2))
-				Expect(calls[1]).To(ContainElement("pci/0000:64:00.0"))
+				Expect(calls).To(ContainElement(ContainElement("pci/0000:64:00.0")))
 			}
 		},
 		Entry("converged", "down", true),
@@ -234,9 +305,9 @@ var _ = Describe("doSPCX runtime configuration", func() {
 		calls := [][]string{}
 		manager := configurationManager{execInterface: &execTesting.FakeExec{
 			CommandScript: []execTesting.FakeCommandAction{
-				runtimeFakeCommand(`{"trust-mode":"dscp"}`, &calls),
-				runtimeFakeCommand(`{"trust-mode":"dscp"}`, &calls),
-				runtimeFakeCommand(`{"traffic-class":96}`, &calls),
+				runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/qos/trust-mode":"dscp"},"failures":{}}`, &calls),
+				runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/qos/trust-mode":"dscp"},"failures":{}}`, &calls),
+				runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/roce/tos/traffic-class":96},"failures":{}}`, &calls),
 			},
 		}}
 		plan := &spectrumx.Plan{RuntimeConfig: []spectrumx.OperationGroup{{
@@ -269,9 +340,9 @@ var _ = Describe("doSPCX runtime configuration", func() {
 		calls := [][]string{}
 		manager := configurationManager{execInterface: &execTesting.FakeExec{
 			CommandScript: []execTesting.FakeCommandAction{
-				runtimeFakeCommand(`{"traffic-class":96}`, &calls),
-				runtimeFakeCommand(`{"admin-status":"up"}`, &calls),
-				runtimeFakeCommand(`{"admin-status":"up"}`, &calls),
+				runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/roce/tos/traffic-class":96},"failures":{}}`, &calls),
+				runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"up"},"failures":{}}`, &calls),
+				runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"up"},"failures":{}}`, &calls),
 			},
 		}}
 		plan := &spectrumx.Plan{RuntimeConfig: []spectrumx.OperationGroup{{
@@ -388,15 +459,15 @@ var _ = Describe("doSPCX runtime configuration", func() {
 		Expect(calls[0]).NotTo(ContainElement("pci/0000:64:00.1"))
 	})
 
-	It("starts CC and validates its group only on the RDMA-bond owner", func() {
+	It("checks CC and validates its group only on the RDMA-bond owner", func() {
 		device := spectrumXRuntimeTestDevice()
 		managerMock := spectrumxmocks.NewSpectrumXManager(GinkgoT())
-		managerMock.On("RunDocaSpcXCC", device.Status.Ports[0]).Return(nil).Once()
+		managerMock.On("IsDocaSpcXCCRunning", device.Status.Ports[0].RdmaInterface).Return(true).Once()
 		calls := [][]string{}
 		manager := configurationManager{
 			spectrumXConfigManager: managerMock,
 			execInterface: &execTesting.FakeExec{CommandScript: []execTesting.FakeCommandAction{
-				runtimeFakeCommand(`{"enabled":true}`, &calls),
+				runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/cc/algo/slot/[0]/enabled":true},"failures":{}}`, &calls),
 			}},
 		}
 		plan := &spectrumx.Plan{RuntimeConfig: []spectrumx.OperationGroup{{
@@ -421,12 +492,12 @@ var _ = Describe("doSPCX runtime configuration", func() {
 	It("uses readable slot 0 as the validation proxy for the write-only slot 15 disable", func() {
 		device := spectrumXRuntimeTestDevice()
 		managerMock := spectrumxmocks.NewSpectrumXManager(GinkgoT())
-		managerMock.On("RunDocaSpcXCC", device.Status.Ports[0]).Return(nil).Once()
+		managerMock.On("IsDocaSpcXCCRunning", device.Status.Ports[0].RdmaInterface).Return(true).Once()
 		calls := [][]string{}
 		manager := configurationManager{
 			spectrumXConfigManager: managerMock,
 			execInterface: &execTesting.FakeExec{CommandScript: []execTesting.FakeCommandAction{
-				runtimeFakeCommand(`{"enabled":true}`, &calls),
+				runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/cc/algo/slot/[0]/enabled":true},"failures":{}}`, &calls),
 			}},
 		}
 		plan := &spectrumx.Plan{RuntimeConfig: []spectrumx.OperationGroup{{
@@ -454,7 +525,7 @@ var _ = Describe("doSPCX runtime configuration", func() {
 		Expect(calls[0]).NotTo(ContainElement(spectrumXRuntimeWriteOnlyPPCCSlot15))
 	})
 
-	It("queries indexed paths separately and detects a mismatch on a later index", func() {
+	It("batches indexed paths and detects a mismatch on a later index", func() {
 		const (
 			target     = "pci/0000:64:00.0"
 			firstIndex = "/nvidia/cc/algo/slot/[0]/param/[0]"
@@ -475,9 +546,11 @@ var _ = Describe("doSPCX runtime configuration", func() {
 		calls := [][]string{}
 		manager := configurationManager{execInterface: &execTesting.FakeExec{
 			CommandScript: []execTesting.FakeCommandAction{
-				runtimeFakeCommand(`{"/nvidia/qos":{"trust-mode":"dscp"},"/nvidia/roce":{"adaptive-routing":true}}`, &calls),
-				runtimeFakeCommand(`{"value":400}`, &calls),
-				runtimeFakeCommand(`{"value":999}`, &calls),
+				runtimeFakeCommand(`{"status":"ok","values":{
+                  "/nvidia/qos/trust-mode":"dscp", "/nvidia/roce/adaptive-routing":true,
+                  "/nvidia/cc/algo/slot/[0]/param/[0]/value":400,
+                  "/nvidia/cc/algo/slot/[0]/param/[1]/value":999
+                },"failures":{}}`, &calls),
 			},
 		}}
 
@@ -485,14 +558,8 @@ var _ = Describe("doSPCX runtime configuration", func() {
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(matches).To(BeFalse())
-		Expect(calls).To(HaveLen(3))
-		Expect(calls[0]).To(ContainElements("/nvidia/qos", "/nvidia/roce", ";"))
-		Expect(calls[0]).NotTo(ContainElement(firstIndex))
-		Expect(calls[0]).NotTo(ContainElement(lastIndex))
-		Expect(calls[1]).To(ContainElement(firstIndex))
-		Expect(calls[1]).NotTo(ContainElement(";"))
-		Expect(calls[2]).To(ContainElement(lastIndex))
-		Expect(calls[2]).NotTo(ContainElement(";"))
+		Expect(calls).To(HaveLen(1))
+		Expect(calls[0]).To(ContainElements("--batch-xpaths", "/nvidia/qos", "/nvidia/roce", firstIndex, lastIndex, ";"))
 	})
 
 	It("batches link-event operations and post-validates the prepared runtime plan", func() {
@@ -512,13 +579,13 @@ var _ = Describe("doSPCX runtime configuration", func() {
 		calls := [][]string{}
 		executor := &execTesting.FakeExec{CommandScript: []execTesting.FakeCommandAction{
 			// Initial validation stops on the first mismatching target.
-			runtimeFakeCommand(`{"admin-status":"down"}`, &calls),
+			runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"down"},"failures":{}}`, &calls),
 			// Apply the full ordered group to both target functions.
 			runtimeFakeCommand(`{"status":"ok"}`, &calls),
 			runtimeFakeCommand(`{"status":"ok"}`, &calls),
 			// Post-validation checks both target functions.
-			runtimeFakeCommand(`{"admin-status":"up"}`, &calls),
-			runtimeFakeCommand(`{"admin-status":"up"}`, &calls),
+			runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"up"},"failures":{}}`, &calls),
+			runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"up"},"failures":{}}`, &calls),
 		}}
 		manager := configurationManager{
 			configValidation: validationMock, spectrumXConfigManager: managerMock, execInterface: executor,
@@ -550,13 +617,13 @@ var _ = Describe("doSPCX runtime configuration", func() {
 		calls := [][]string{}
 		executor := &execTesting.FakeExec{CommandScript: []execTesting.FakeCommandAction{
 			// The plan initially matches both functions.
-			runtimeFakeCommand(`{"admin-status":"up"}`, &calls),
-			runtimeFakeCommand(`{"admin-status":"up"}`, &calls),
+			runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"up"},"failures":{}}`, &calls),
+			runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"up"},"failures":{}}`, &calls),
 			// It is still applied after generic runtime configuration to preserve final precedence.
 			runtimeFakeCommand(`{"status":"ok"}`, &calls),
 			runtimeFakeCommand(`{"status":"ok"}`, &calls),
-			runtimeFakeCommand(`{"admin-status":"up"}`, &calls),
-			runtimeFakeCommand(`{"admin-status":"up"}`, &calls),
+			runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"up"},"failures":{}}`, &calls),
+			runtimeFakeCommand(`{"status":"ok","values":{"/nvidia/link/physical/admin-status":"up"},"failures":{}}`, &calls),
 		}}
 		manager := configurationManager{
 			configurationUtils: &configurationmocks.ConfigurationUtils{},

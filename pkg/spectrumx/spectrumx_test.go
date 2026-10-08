@@ -81,6 +81,19 @@ var _ = Describe("SpectrumXManager", func() {
 		Expect(implementation.execInterface).NotTo(BeNil())
 	})
 
+	It("only reports running CC processes after successful startup", func() {
+		process := &ccProcess{}
+		manager := &spectrumXConfigManager{ccProcesses: map[string]*ccProcess{"rdma0": process}}
+		Expect(manager.IsDocaSpcXCCRunning("missing")).To(BeFalse())
+		Expect(manager.IsDocaSpcXCCRunning("rdma0")).To(BeFalse())
+		process.running.Store(true)
+		Expect(manager.IsDocaSpcXCCRunning("rdma0")).To(BeFalse())
+		process.startupCheckPassed.Store(true)
+		Expect(manager.IsDocaSpcXCCRunning("rdma0")).To(BeTrue())
+		process.running.Store(false)
+		Expect(manager.IsDocaSpcXCCRunning("rdma0")).To(BeFalse())
+	})
+
 	It("starts and tracks DOCA SPC-X CC", func() {
 		release := make(chan struct{})
 		executor := &fakeExec{command: &fakeCmd{release: release}}
