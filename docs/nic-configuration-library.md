@@ -408,7 +408,7 @@ func SetXPaths(
 ) (*SetXPathsResult, error)
 ```
 
-`QueryXPathsFullPaths` uses local `dms-cli --json-xpaths` to preserve concrete
+`QueryXPathsFullPaths` uses local `dms-cli --batch-xpaths` to preserve concrete
 indices in batched GET responses. It normalizes full leaf XPath keys into
 `QueryXPathsResult.Values[path][leaf]`, retains optional `_nvconfig` ownership,
 and rejects missing values, partial failures, and malformed responses. doSPCX

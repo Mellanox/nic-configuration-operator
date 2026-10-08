@@ -48,7 +48,7 @@ var _ = Describe("full XPath queries", func() {
 		Expect(result.Values[queries[2].Path]["value"]).To(Equal(json.Number("1")))
 		Expect(result.Values[queries[3].Path]["value"]).To(Equal(json.Number("3")))
 		Expect(commands).To(HaveLen(1))
-		Expect(commands[0].args[0]).To(Equal("--json-xpaths"))
+		Expect(commands[0].args[0]).To(Equal("--batch-xpaths"))
 	})
 	DescribeTable("rejects incomplete or ambiguous responses", func(response string) {
 		executor := fakeExecutor([]byte(response), nil, &commands)
@@ -77,7 +77,7 @@ var _ = Describe("full XPath queries", func() {
 		Expect(result.Failures).To(HaveKey("/nvidia/x/[1]/value"))
 	})
 	It("returns unsupported flag errors without retrying legacy reads", func() {
-		executor := fakeExecutorWithStderr(nil, []byte("unknown flag: --json-xpaths"), errors.New("exit status 1"), &commands)
+		executor := fakeExecutorWithStderr(nil, []byte("unknown flag: --batch-xpaths"), errors.New("exit status 1"), &commands)
 		_, err := QueryXPathsFullPaths(context.Background(), executor, target, []XPathQuery{{Path: "/nvidia/x/[0]", Leaves: []string{"value"}}})
 		Expect(err).To(MatchError(ContainSubstring("unknown flag")))
 		Expect(commands).To(HaveLen(1))

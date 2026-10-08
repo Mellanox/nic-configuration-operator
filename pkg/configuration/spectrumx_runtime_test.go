@@ -488,7 +488,7 @@ var _ = Describe("doSPCX runtime configuration", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(matches).To(BeFalse())
 		Expect(calls).To(HaveLen(1))
-		Expect(calls[0]).To(ContainElements("--json-xpaths", "/nvidia/qos", "/nvidia/roce", firstIndex, lastIndex, ";"))
+		Expect(calls[0]).To(ContainElements("--batch-xpaths", "/nvidia/qos", "/nvidia/roce", firstIndex, lastIndex, ";"))
 	})
 
 	It("batches link-event operations and post-validates the prepared runtime plan", func() {

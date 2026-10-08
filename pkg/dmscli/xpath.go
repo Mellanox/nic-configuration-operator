@@ -138,7 +138,7 @@ func QueryXPaths(
 }
 
 // QueryXPathsFullPaths reads explicit leaves with an unambiguous full-XPath response.
-// This requires DMS --json-xpaths support; older DMS versions return an error.
+// This requires DMS --batch-xpaths support; older DMS versions return an error.
 func QueryXPathsFullPaths(
 	ctx context.Context,
 	execInterface execUtils.Interface,
@@ -152,7 +152,7 @@ func QueryXPathsFullPaths(
 		return nil, err
 	}
 	args := xpathQueryArgs(target, queries)
-	args[0] = "--json-xpaths"
+	args[0] = "--batch-xpaths"
 	command := execInterface.CommandContext(ctx, dmsCLIExecutable, args...)
 	output, commandErr := utils.RunCommandWithStreams(command)
 	logDMSCLIOutput(ctx, append([]string{dmsCLIExecutable}, args...), target, output, commandErr)
