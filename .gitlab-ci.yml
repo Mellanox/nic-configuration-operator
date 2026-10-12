@@ -74,6 +74,12 @@ variables:  # additional variables are defined at the gitlab group scope
   DOCKER_REGISTRY: nvcr.io/nvstaging/mellanox
   OPERATOR_IMAGE_NAME: nic-configuration-operator-stig-fips
   DAEMON_IMAGE_NAME: nic-configuration-operator-daemon-stig-fips
+  REGULAR_OPERATOR_IMAGE_NAME: nic-configuration-operator
+  REGULAR_DAEMON_IMAGE_NAME: nic-configuration-operator-daemon
+  BASE_IMAGE_DOCA_FULL_RT_HOST: nvcr.io/nvstaging/doca/doca:full-rt-3.5.0-host-dev
+  DOCA_DMS_URL: "https://nbu-nfs.gtm.nvidia.com/auto/swgwork8/dpf/DMS_DPF_26.8/doca_3.5_dms_fur_{arch}/doca-dms_99.99.9999-9_{arch}64-3.deb"
+  DOCA_DMS_SHA256_AMD64: ccdd7ae85fcbfedb651fc1307bcd0cc059285a7c496a7a09f9ac6f59460a58f4
+  DOCA_DMS_SHA256_ARM64: 711a95895f17c6244cd630e34837ca3f874d1fdc1eea1d5ac36034d6070e1831
   # Pin the DOCA series per release branch; the resolver selects its latest patch.
   DOCA_SERIES: "3.5"
   GOV_READY_POLICY_FILE_PATH: pulse-scan-policies/prodsec_approved_govready_release_policy.json
@@ -94,9 +100,8 @@ resolve-doca-host:
     reports:
       dotenv: doca.env
 
-# Common job template for building STIG images
-.build-stig-image:
-  stage: build
+# Reuse the existing Docker-in-Docker job images for native builds.
+.docker-job:
   tags:
     - os/linux
     - type/docker
@@ -108,6 +113,86 @@ resolve-doca-host:
   image: docker:24
   variables:
     DOCKER_TLS_CERTDIR: /certs
+
+.native-architectures:
+  parallel:
+    matrix:
+      - TARGETARCH: amd64
+        RUNNER_OS: os/linux
+      - TARGETARCH: arm64
+        RUNNER_OS: os/linux-arm
+  tags:
+    - $RUNNER_OS
+    - type/docker
+
+.regular-image-job:
+  extends: .docker-job
+  before_script:
+    - ': "${NVCR_USERNAME:?NVCR_USERNAME is required}"'
+    - ': "${NVCR_TOKEN:?NVCR_TOKEN is required}"'
+    - printf '%s' "$NVCR_TOKEN" | docker login "$DOCKER_REGISTRY" -u "$NVCR_USERNAME" --password-stdin
+    # Keep regular and STIG tags separate.
+    - REGULAR_DOCKER_TAG=${CI_COMMIT_TAG:-$(git rev-parse --short HEAD)}
+
+.build-regular-image:
+  extends: [.regular-image-job, .native-architectures]
+  stage: build
+  script:
+    - |
+      docker buildx build --load \
+        --platform "linux/$TARGETARCH" \
+        --build-arg GOPROXY="$GOPROXY" \
+        --build-arg BASE_IMAGE_DOCA_FULL_RT_HOST="$BASE_IMAGE_DOCA_FULL_RT_HOST" \
+        --build-arg DOCA_DMS_URL="$DOCA_DMS_URL" \
+        --build-arg DOCA_DMS_SHA256_AMD64="$DOCA_DMS_SHA256_AMD64" \
+        --build-arg DOCA_DMS_SHA256_ARM64="$DOCA_DMS_SHA256_ARM64" \
+        --file "$REGULAR_DOCKERFILE" \
+        --tag "$DOCKER_REGISTRY/$REGULAR_IMAGE_NAME:$REGULAR_DOCKER_TAG-$TARGETARCH" \
+        .
+    - docker push "$DOCKER_REGISTRY/$REGULAR_IMAGE_NAME:$REGULAR_DOCKER_TAG-$TARGETARCH"
+
+build-operator-image:
+  extends: .build-regular-image
+  variables:
+    REGULAR_DOCKERFILE: Dockerfile
+    REGULAR_IMAGE_NAME: $REGULAR_OPERATOR_IMAGE_NAME
+
+build-daemon-image:
+  extends: .build-regular-image
+  variables:
+    REGULAR_DOCKERFILE: Dockerfile.nic-configuration-daemon
+    REGULAR_IMAGE_NAME: $REGULAR_DAEMON_IMAGE_NAME
+
+.publish-regular-image:
+  extends: .regular-image-job
+  stage: build
+  script:
+    - |
+      docker buildx imagetools create \
+        --tag "$DOCKER_REGISTRY/$REGULAR_IMAGE_NAME:$REGULAR_DOCKER_TAG" \
+        "$DOCKER_REGISTRY/$REGULAR_IMAGE_NAME:$REGULAR_DOCKER_TAG-amd64" \
+        "$DOCKER_REGISTRY/$REGULAR_IMAGE_NAME:$REGULAR_DOCKER_TAG-arm64"
+
+publish-operator-image:
+  extends: .publish-regular-image
+  needs:
+    - job: build-operator-image
+      artifacts: false
+  variables:
+    REGULAR_IMAGE_NAME: $REGULAR_OPERATOR_IMAGE_NAME
+
+publish-daemon-image:
+  extends: .publish-regular-image
+  needs:
+    - job: build-daemon-image
+      artifacts: false
+  variables:
+    REGULAR_IMAGE_NAME: $REGULAR_DAEMON_IMAGE_NAME
+
+# Common job template for building STIG images
+.build-stig-image:
+  extends: .docker-job
+  stage: build
   before_script:
     # validate variables (including gitlab group scoped variables)
     - |
@@ -207,6 +292,9 @@ build-daemon-stig-image-ubuntu:
         --build-arg GOPROXY=$GOPROXY \
         --build-arg UBUNTU_STIG_BASE_IMAGE=$UBUNTU_STIG_BASE_IMAGE \
         --build-arg DOCA_HOST_URL="$DOCA_HOST_UBUNTU_URL" \
+        --build-arg DOCA_DMS_URL="$DOCA_DMS_URL" \
+        --build-arg DOCA_DMS_SHA256_AMD64="$DOCA_DMS_SHA256_AMD64" \
+        --build-arg DOCA_DMS_SHA256_ARM64="$DOCA_DMS_SHA256_ARM64" \
         --file      Dockerfile.daemon.stig-ubuntu \
         --tag       $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG-ubuntu \
         .
