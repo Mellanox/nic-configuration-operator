@@ -173,6 +173,7 @@ func SetXPaths(
 
 func logDMSCLIOutput(ctx context.Context, command []string, target string, output utils.CommandOutput, commandErr error) {
 	fields := []any{
+		commandDurationLogKey, float64(output.Duration.Microseconds()) / 1000,
 		commandLogKey, command,
 		"target", target,
 		"stdout", boundedCommandOutput(output.Stdout),
