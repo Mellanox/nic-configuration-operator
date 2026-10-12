@@ -173,7 +173,7 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 		// historical P1/P2 behavior, which emits these params unconditionally.
 		for portIdx := 1; portIdx <= portCount; portIdx++ {
 			desiredParameters[consts.PortParam(consts.RoceCcPrioMaskParamBase, portIdx)] = "255"
-			desiredParameters[consts.PortParam(consts.CnpDscpParamBase, portIdx)] = "4"
+			desiredParameters[consts.PortParam(consts.CnpDscpParamBase, portIdx)] = "48"
 			desiredParameters[consts.PortParam(consts.Cnp802pPrioParamBase, portIdx)] = "6"
 		}
 

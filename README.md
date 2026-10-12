@@ -89,7 +89,7 @@ spec:
   * Nvconfig set for both ports (can be applied from PF0)
     * Conditionally applied for second port if present
       * `ROCE_CC_PRIO_MASK_P1=255`, `ROCE_CC_PRIO_MASK_P2=255`
-      * `CNP_DSCP_P1=4`, `CNP_DSCP_P2=4`
+      * `CNP_DSCP_P1=48`, `CNP_DSCP_P2=48`
       * `CNP_802P_PRIO_P1=6`, `CNP_802P_PRIO_P2=6`
   * Configure pfc (Priority Flow Control) for priority 3, set trust to dscp on each PF, set ToS (Type of Service) to 0.
     * Non-persistent (need to be applied after each boot)
