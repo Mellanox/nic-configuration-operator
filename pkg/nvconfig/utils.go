@@ -342,23 +342,9 @@ func (h *nvConfigUtils) ValidateNvConfigXPathsWithOverrides(
 			"pciAddr", port.PCI,
 			"target", target,
 			"batches", len(queryBatches))
-		result := &dmscli.QueryXPathsResult{Status: "ok", Values: map[string]map[string]any{}, NVConfig: map[string]string{}}
-		for batchIndex, queryBatch := range queryBatches {
-			logger.V(2).Info("querying doSPCX NVConfig batch",
-				"target", target,
-				"batch", batchIndex+1,
-				"totalBatches", len(queryBatches),
-				"paths", len(queryBatch))
-			batchResult, queryErr := dmscli.QueryXPaths(ctx, h.execInterface, target, queryBatch)
-			if queryErr != nil {
-				return false, false, fmt.Errorf("query NVConfig XPaths on target %q: %w", target, queryErr)
-			}
-			for path, param := range batchResult.NVConfig {
-				result.NVConfig[path] = param
-			}
-			for path, values := range batchResult.Values {
-				result.Values[path] = values
-			}
+		result, queryErr := queryNVConfigXPaths(ctx, h.execInterface, target, queryBatches)
+		if queryErr != nil {
+			return false, false, queryErr
 		}
 		config, found := configs[port.PCI]
 		if len(nativeParams) > 0 && !found {
@@ -428,6 +414,28 @@ func xpathQueryBatches(queries []dmscli.XPathQuery) [][]dmscli.XPathQuery {
 	return append([][]dmscli.XPathQuery{batched}, individual...)
 }
 
+// queryNVConfigXPaths shares the indexed-query batching between validation and profile filtering.
+func queryNVConfigXPaths(ctx context.Context, executor execUtils.Interface, target string,
+	batches [][]dmscli.XPathQuery,
+) (*dmscli.QueryXPathsResult, error) {
+	result := &dmscli.QueryXPathsResult{Status: "ok", Values: map[string]map[string]any{}, NVConfig: map[string]string{}}
+	for index, batch := range batches {
+		logr.FromContextOrDiscard(ctx).V(2).Info("querying doSPCX NVConfig batch",
+			"target", target, "batch", index+1, "totalBatches", len(batches), "paths", len(batch))
+		part, err := dmscli.QueryXPaths(ctx, executor, target, batch)
+		if err != nil {
+			return nil, fmt.Errorf("query NVConfig XPaths on target %q: %w", target, err)
+		}
+		for path, param := range part.NVConfig {
+			result.NVConfig[path] = param
+		}
+		for path, values := range part.Values {
+			result.Values[path] = values
+		}
+	}
+	return result, nil
+}
+
 func matchXPathValues(result *dmscli.QueryXPathsResult, operations []dmscli.XPathOperation) (updateNeeded, rebootNeeded bool, err error) {
 	return matchXPathValuesWithOverrides(result, operations, nil, types.NvConfigQuery{})
 }
@@ -456,8 +464,17 @@ func matchXPathValuesWithOverrides(
 			if !found {
 				return false, false, fmt.Errorf("DMS response does not contain XPath leaf %q/%s", operation.Path, pendingLeaf)
 			}
+			if isBreakoutLanes(operation.Path, leaf) {
+				update, reboot, err := matchLaneValues(operation.Path, desired, current, pending, nativeParams, config)
+				if err != nil {
+					return false, false, err
+				}
+				updateNeeded = updateNeeded || update
+				rebootNeeded = rebootNeeded || reboot
+				continue
+			}
 			if len(nativeParams) > 0 {
-				param, mappingErr := overrideParameter(result.NVConfig, operation.Path, leaf, nativeParams)
+				param, mappingErr := overrideParameter(result.NVConfig, operation.Path, leaf)
 				if mappingErr != nil {
 					return false, false, mappingErr
 				}
@@ -482,17 +499,8 @@ func matchXPathValuesWithOverrides(
 	return updateNeeded, rebootNeeded, nil
 }
 
-// DMS intentionally omits composite lane mappings. They remain typed-only until
-// DMS exposes their native ownership; a raw lane assignment could otherwise loop.
-func overrideParameter(mappings map[string]string, path, leaf string, nativeParams map[string]string) (string, error) {
-	if strings.HasPrefix(path, "/nvidia/link/breakout/") && leaf == "lanes" {
-		for param := range nativeParams {
-			if strings.HasPrefix(param, "MODULE_SPLIT_") {
-				return "", fmt.Errorf("native parameter %q cannot override doSPCX breakout lanes: DMS does not expose composite NVConfig mappings", param)
-			}
-		}
-		return "", nil
-	}
+// overrideParameter requires explicit and consistent ownership of a direct typed leaf.
+func overrideParameter(mappings map[string]string, path, leaf string) (string, error) {
 	fullPath := strings.TrimRight(path, "/") + "/" + leaf
 	param := mappings[fullPath]
 	pendingParam := mappings[fullPath+xPathPendingSuffix]

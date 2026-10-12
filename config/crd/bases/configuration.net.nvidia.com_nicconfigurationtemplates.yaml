@@ -348,9 +348,6 @@ spec:
                     like NAME[0..3]; list each index explicitly (NAME[0], NAME[1],
                     ...)
                   rule: '!has(self.rawNvConfig) || self.rawNvConfig.all(p, !p.name.matches(''.*[[][0-9]+[.][.][0-9]+[]].*''))'
-                - message: networkBay cannot currently be combined with spectrumXOptimized
-                  rule: '!(has(self.spectrumXOptimized) && self.spectrumXOptimized.enabled)
-                    || !has(self.networkBay)'
             required:
             - nicSelector
             - template

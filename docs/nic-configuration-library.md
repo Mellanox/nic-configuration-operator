@@ -161,7 +161,7 @@ func NewConfigurationManager(
 
 1. **Spectrum-X plan precondition** — before per-device validation, the controller generates or reuses one node-scoped `prepare` plan. Spectrum-X devices require a matching cached plan; validation and apply fail closed when it is missing
 2. **Native query and validation** — query current NV config via `nvConfigUtils.QueryNvConfig()` and validate the template-derived native parameter map with `rawNvConfig` merged last. These native values take precedence over doSPCX typed intent
-3. **Network Bay profile resolution** — for non-Spectrum-X Network Bay devices, run `show_system_conf`, select the named profile and detected ASIC, and expand range assignments such as `MODULE_SPLIT_M0[4..15]=FF` into concrete keys. The profile is the lowest-priority native layer; template and `rawNvConfig` values override it. `networkBay` remains temporarily rejected with Spectrum-X until DMS can represent and validate profile parameters below typed doSPCX operations
+3. **Network Bay profile resolution** — run `show_system_conf`, select the named profile and detected ASIC, and expand range assignments such as `MODULE_SPLIT_M0[4..15]=FF` into concrete keys. Before merging template and `rawNvConfig` overrides, remove profile defaults owned by the prepared doSPCX breakout and post-breakout operations. Direct ownership comes from DMS current/pending `_nvconfig` metadata and must agree across PCI functions; lane ownership comes from each typed operation's module and listed lane indices. The resulting precedence is system profile < doSPCX < template < `rawNvConfig`
 4. **Native diff** — compare the complete native map against every target, normalizing symbolic, decimal, `0x` hexadecimal, and bare hexadecimal values; skip hidden/unsupported params and preserve the existing `with-default` and `force` behavior
 5. **doSPCX query and barrier** — query each plan leaf and its `-pending` leaf separately through DMS on every discovered PCI function, using `pci/<BDF>?port=1` because split functions expose their NVConfig as port 1. Use the returned `_nvconfig` metadata to associate each concrete XPath with its native parameter. For an overridden leaf, compare native current/next-boot values with the effective native value; validate all other leaves against typed intent. Validate breakout first; post-breakout becomes active only after its effective configuration matches both current and pending state on every function
 6. **Combined NVConfig batch** — send template-derived native parameters and doSPCX typed operations in one `/nvidia/nvconfig/apply` action per discovered PCI function, with `ports: [1]` for its local port. Normal apply sends the active phase; `Force` sends breakout plus post-breakout immediately, and post-breakout `WithDefault` resends both phases
@@ -174,9 +174,16 @@ retain their own keys. Both mappings must be present and refer to the same nativ
 parameter, including link type and indexed breakout planes. Missing or
 inconsistent direct mappings produce an error before apply, even when `Force`
 is enabled.
-Composite breakout `lanes` have no direct mapping;
-they remain validated as typed values and reject accompanying `MODULE_SPLIT_*`
-native assignments. Network Bay with Spectrum-X remains unsupported.
+Composite breakout `lanes` have no direct mapping. Supported native
+`MODULE_SPLIT_M<module>[lane]` assignments are validated against native current
+and next-boot values; their indices are excluded from the desired, current, and
+pending typed lane lists before comparing the remaining membership. Unsupported
+native assignments do not suppress typed validation. Other modules are unaffected.
+This supports Network Bay defaults and explicit lane overrides without DMS changes.
+With `Force`, profile and explicit-override port parameters are expanded before
+profile filtering, so expansion cannot restore a default shadowed by doSPCX.
+Inferred sibling-port overrides do not replace explicit profile values; an
+explicit override for that sibling still takes precedence.
 
 The public base `NVConfigUtils` interface is unchanged. Implementations used
 with combined native and typed intent must also provide the optional method:

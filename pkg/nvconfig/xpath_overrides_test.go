@@ -256,21 +256,6 @@ var _ = Describe("typed NVConfig native overrides", func() {
 		Expect(update).To(BeTrue())
 	})
 
-	It("rejects composite lane overrides but permits unrelated native values", func() {
-		const lanes = "/nvidia/link/breakout/module/[0]/port/[1]"
-		operations = []dmscli.XPathOperation{{Path: lanes, Values: map[string]any{"lanes": []int{0, 1}}}}
-		state.Values = map[string]map[string]any{lanes: {"lanes": "0,1", "lanes-pending": "0,1"}}
-		state.NVConfig = nil
-		_, _, err := matchXPathValuesWithOverrides(state, operations,
-			map[string]string{"MODULE_SPLIT_M0[0]": "0xff"}, types.NewNvConfigQuery())
-		Expect(err).To(MatchError(ContainSubstring("cannot override doSPCX breakout lanes")))
-		update, reboot, err := matchXPathValuesWithOverrides(state, operations,
-			map[string]string{param: "0"}, types.NewNvConfigQuery())
-		Expect(err).NotTo(HaveOccurred())
-		Expect(update).To(BeFalse())
-		Expect(reboot).To(BeFalse())
-	})
-
 	It("keeps native state and metadata local to each PCI function", func() {
 		const secondary = "0000:3b:00.1"
 		configs := map[string]types.NvConfigQuery{pci: types.NewNvConfigQuery(), secondary: types.NewNvConfigQuery()}
