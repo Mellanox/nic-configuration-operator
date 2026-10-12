@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - network-operator-*
+      # DOCA 3.5 DMS packages for 26.7 are built on internal GitLab runners.
+      - '!network-operator-v26.7.*'
+      - '!network-operator-26.7.*'
     branches:
       - main
 
