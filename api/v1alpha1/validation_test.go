@@ -262,13 +262,12 @@ var _ = Describe("NicConfigurationTemplate CEL validation", func() {
 			Expect(err.Error()).To(ContainSubstring("linkType is required unless networkBay is configured"))
 		})
 
-		It("rejects networkBay together with spectrumXOptimized", func() {
-			obj := newNicConfigurationTemplate("bay-reject-with-spcx", "", 1, &SpectrumXOptimizedSpec{Enabled: true, Version: "RA2.0"})
+		It("allows networkBay together with spectrumXOptimized", func() {
+			obj := newNicConfigurationTemplate("bay-with-spcx", "", 1, &SpectrumXOptimizedSpec{Enabled: true, Version: "RA2.0"})
 			obj.Spec.NicSelector.NicType = nicTypeConnectX9
 			obj.Spec.Template.NetworkBay = &NetworkBaySpec{Conf: "3"}
 			err := k8sClient.Create(ctx, obj)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("networkBay cannot currently be combined with spectrumXOptimized"))
+			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 

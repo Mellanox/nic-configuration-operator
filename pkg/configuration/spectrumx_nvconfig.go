@@ -119,23 +119,6 @@ func (h configurationManager) preparedSpectrumXNVConfig(
 	return plan, utils, err
 }
 
-// validateSpectrumXNVConfigCompatibility rejects combinations whose native
-// NVConfig ownership cannot yet be reconciled with typed doSPCX operations.
-//
-// TODO(dospcx-nvconfig): Restore Network Bay once DMS exposes complete typed
-// ownership, including composite lanes, to layer the system profile below it.
-func validateSpectrumXNVConfigCompatibility(device *v1alpha1.NicDevice) error {
-	if !spectrumXEnabled(device) || device.Spec.Configuration.ResetToDefault {
-		return nil
-	}
-	template := device.Spec.Configuration.Template
-	if template.NetworkBay != nil {
-		return types.IncorrectSpecError(
-			"networkBay cannot currently be combined with spectrumXOptimized")
-	}
-	return nil
-}
-
 func (h configurationManager) spectrumXNVConfigPhase(
 	ctx context.Context,
 	device *v1alpha1.NicDevice,
