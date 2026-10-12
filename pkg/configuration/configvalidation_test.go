@@ -231,10 +231,10 @@ var _ = Describe("ConfigValidationImpl", func() {
 			Expect(nvParams).To(HaveKeyWithValue(consts.MaxAccOutReadParam, "1337"))
 			Expect(nvParams).To(HaveKeyWithValue(consts.AtsEnabledParam, "0"))
 			Expect(nvParams).To(HaveKeyWithValue(consts.RoceCcPrioMaskP1Param, "255"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.CnpDscpP1Param, "4"))
+			Expect(nvParams).To(HaveKeyWithValue(consts.CnpDscpP1Param, "48"))
 			Expect(nvParams).To(HaveKeyWithValue(consts.Cnp802pPrioP1Param, "6"))
 			Expect(nvParams).To(HaveKeyWithValue(consts.RoceCcPrioMaskP2Param, "255"))
-			Expect(nvParams).To(HaveKeyWithValue(consts.CnpDscpP2Param, "4"))
+			Expect(nvParams).To(HaveKeyWithValue(consts.CnpDscpP2Param, "48"))
 			Expect(nvParams).To(HaveKeyWithValue(consts.Cnp802pPrioP2Param, "6"))
 		})
 
@@ -488,7 +488,7 @@ var _ = Describe("ConfigValidationImpl", func() {
 				Expect(nvParams).To(HaveKeyWithValue(name, "255"))
 			}
 			for _, name := range []string{"CNP_DSCP_P1", "CNP_DSCP_P2", "CNP_DSCP_P3", "CNP_DSCP_P4"} {
-				Expect(nvParams).To(HaveKeyWithValue(name, "4"))
+				Expect(nvParams).To(HaveKeyWithValue(name, "48"))
 			}
 			for _, name := range []string{"CNP_802P_PRIO_P1", "CNP_802P_PRIO_P2", "CNP_802P_PRIO_P3", "CNP_802P_PRIO_P4"} {
 				Expect(nvParams).To(HaveKeyWithValue(name, "6"))
