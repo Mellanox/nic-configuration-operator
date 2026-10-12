@@ -112,7 +112,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			FirmwareManager:      firmwareManager,
 			MaintenanceManager:   maintenanceManager,
 			HostUtils:            hostUtils,
-			EventRecorder:        mgr.GetEventRecorderFor("testReconciler"),
+			EventRecorder:        mgr.GetEventRecorderFor("testReconciler"), //nolint:staticcheck // record.EventRecorder; GetEventRecorder uses a different API.
 			SpectrumXManager:     spectrumXManager,
 			UdevManager:          udevManager,
 			DeviceDiscoveryUtils: deviceDiscoveryUtils,
@@ -642,7 +642,13 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
 			configurationManager.On("ApplyNVConfiguration", mock.Anything, mock.Anything, mock.Anything).Return(&types.ConfigurationApplyResult{Status: types.ApplyStatusSuccess, RebootRequired: true}, nil)
-			maintenanceManager.On("Reboot").Return(errors.New(errorText))
+			rebooted := make(chan struct{}, 1)
+			maintenanceManager.On("Reboot").Run(func(mock.Arguments) {
+				select {
+				case rebooted <- struct{}{}:
+				default:
+				}
+			}).Return(errors.New(errorText))
 
 			// Fix for flaky test: Don't pre-set annotation to avoid optimistic concurrency conflicts
 			createDevice(false, nil)
@@ -652,6 +658,9 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Status: metav1.ConditionTrue,
 				Reason: consts.PendingRebootReason,
 			}))
+			// PendingReboot is written before the reboot call. Wait for that call so the
+			// assertion does not race the rest of the reconcile.
+			Eventually(rebooted, timeout).Should(Receive())
 
 			// Should reset last applied state annotation if tried to reboot but failed
 			Eventually(lastAppliedStateAnnotationExists).Should(BeFalse())
@@ -705,7 +714,13 @@ var _ = Describe("NicDeviceReconciler", func() {
 		})
 		It("Should request maintenance if runtime config needs to be reset", func() {
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil, nil)
-			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
+			scheduled := make(chan struct{}, 1)
+			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Run(func(mock.Arguments) {
+				select {
+				case scheduled <- struct{}{}:
+				default:
+				}
+			}).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(false, nil)
 
 			createDevice(true, nil) // lastAppliedSpec will not match the current resulting in need to reboot
@@ -715,6 +730,9 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Status: metav1.ConditionTrue,
 				Reason: consts.PendingRebootReason,
 			}))
+			// PendingReboot is written before maintenance is requested. Wait for that call
+			// so the assertion does not race the rest of the reconcile.
+			Eventually(scheduled, timeout).Should(Receive())
 
 			configurationManager.AssertNotCalled(GinkgoT(), "ApplyNVConfiguration", mock.Anything, mock.Anything, mock.Anything)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
@@ -1024,6 +1042,13 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Reason: consts.PendingNodeMaintenanceReason,
 			}))
 
+			// Firmware status is written before the configuration status in the same reconcile.
+			Eventually(getDeviceConditions, time.Second*10).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.ConfigUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.PendingFirmwareUpdateReason,
+				Message: consts.PendingOwnFirmwareUpdateMessage,
+			}))
 			Consistently(getDeviceConditions, time.Second).Should(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.ConfigUpdateInProgressCondition,
 				Status:  metav1.ConditionFalse,
@@ -1051,6 +1076,13 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Message: consts.DeviceFwMismatchMessage,
 			}))
 
+			// Firmware status is written before the configuration status in the same reconcile.
+			Eventually(getDeviceConditions, time.Second*10).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.ConfigUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.PendingFirmwareUpdateReason,
+				Message: consts.PendingOwnFirmwareUpdateMessage,
+			}))
 			Consistently(getDeviceConditions, time.Second).Should(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.ConfigUpdateInProgressCondition,
 				Status:  metav1.ConditionFalse,

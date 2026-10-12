@@ -190,7 +190,7 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 				return ctrl.Result{}, err
 			}
 		}
-		return ctrl.Result{Requeue: true, RequeueAfter: longRequeueTime}, nil
+		return ctrl.Result{RequeueAfter: longRequeueTime}, nil
 	}
 
 	log.Log.Info("firmware is ready for all devices, proceeding with NIC configuration")
@@ -238,7 +238,7 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	if !configStatuses.nvConfigReadyForAll() {
 		log.Log.Info("nv config not ready for some devices, requeue")
-		return ctrl.Result{Requeue: true, RequeueAfter: longRequeueTime}, nil
+		return ctrl.Result{RequeueAfter: longRequeueTime}, nil
 	}
 
 	log.Log.Info("applying runtime config")
