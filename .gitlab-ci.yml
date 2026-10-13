@@ -77,9 +77,9 @@ variables:  # additional variables are defined at the gitlab group scope
   REGULAR_OPERATOR_IMAGE_NAME: nic-configuration-operator
   REGULAR_DAEMON_IMAGE_NAME: nic-configuration-operator-daemon
   BASE_IMAGE_DOCA_FULL_RT_HOST: nvcr.io/nvstaging/doca/doca:full-rt-3.5.0-host-dev
-  DOCA_DMS_URL: "https://nbu-nfs.gtm.nvidia.com/auto/swgwork8/dpf/DMS_DPF_26.8/doca_3.5_dms_fur_{arch}/doca-dms_99.99.9999-9_{arch}64-3.deb"
-  DOCA_DMS_SHA256_AMD64: ccdd7ae85fcbfedb651fc1307bcd0cc059285a7c496a7a09f9ac6f59460a58f4
-  DOCA_DMS_SHA256_ARM64: 711a95895f17c6244cd630e34837ca3f874d1fdc1eea1d5ac36034d6070e1831
+  DOCA_DMS_SHA256_AMD64: 51e26e74be2d0506c369595c6a548d73924c038d335c7488a678d9ca779197fd
+  DOCA_DMS_SHA256_ARM64: ca033f1fd31986bda899b98f78fd99a5be50facd819fe48bc00efe937f05670d
+  DOCA_DMS_SHA256_RHEL_AMD64: 1f5cc0e2ae606cb6484184d8a3af3695703b2137814532a08f75c68268088098
   # Pin the DOCA series per release branch; the resolver selects its latest patch.
   DOCA_SERIES: "3.5"
   GOV_READY_POLICY_FILE_PATH: pulse-scan-policies/prodsec_approved_govready_release_policy.json
@@ -143,7 +143,7 @@ resolve-doca-host:
         --platform "linux/$TARGETARCH" \
         --build-arg GOPROXY="$GOPROXY" \
         --build-arg BASE_IMAGE_DOCA_FULL_RT_HOST="$BASE_IMAGE_DOCA_FULL_RT_HOST" \
-        --build-arg DOCA_DMS_URL="$DOCA_DMS_URL" \
+        --build-arg DOCA_DMS_URL="${DOCA_DMS_URL_26_7:?DOCA_DMS_URL_26_7 is required}" \
         --build-arg DOCA_DMS_SHA256_AMD64="$DOCA_DMS_SHA256_AMD64" \
         --build-arg DOCA_DMS_SHA256_ARM64="$DOCA_DMS_SHA256_ARM64" \
         --file "$REGULAR_DOCKERFILE" \
@@ -292,7 +292,7 @@ build-daemon-stig-image-ubuntu:
         --build-arg GOPROXY=$GOPROXY \
         --build-arg UBUNTU_STIG_BASE_IMAGE=$UBUNTU_STIG_BASE_IMAGE \
         --build-arg DOCA_HOST_URL="$DOCA_HOST_UBUNTU_URL" \
-        --build-arg DOCA_DMS_URL="$DOCA_DMS_URL" \
+        --build-arg DOCA_DMS_URL="${DOCA_DMS_URL_26_7:?DOCA_DMS_URL_26_7 is required}" \
         --build-arg DOCA_DMS_SHA256_AMD64="$DOCA_DMS_SHA256_AMD64" \
         --build-arg DOCA_DMS_SHA256_ARM64="$DOCA_DMS_SHA256_ARM64" \
         --file      Dockerfile.daemon.stig-ubuntu \
@@ -340,6 +340,8 @@ build-daemon-stig-image-rhel:
         --build-arg GOPROXY=$GOPROXY \
         --build-arg RHEL_STIG_BASE_IMAGE=$RHEL_STIG_BASE_IMAGE \
         --build-arg DOCA_HOST_URL="$DOCA_HOST_RHEL_URL" \
+        --build-arg DOCA_DMS_URL="${DOCA_DMS_RPM_URL_26_7:?DOCA_DMS_RPM_URL_26_7 is required}" \
+        --build-arg DOCA_DMS_SHA256_AMD64="$DOCA_DMS_SHA256_RHEL_AMD64" \
         --build-arg CVE_UPDATES_RHEL="$CVE_UPDATES_RHEL" \
         --file      Dockerfile.daemon.stig-rhel \
         --tag       $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG-rhel \
