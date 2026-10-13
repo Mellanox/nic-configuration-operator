@@ -93,7 +93,7 @@ RUN if [ -n "${CVE_UPDATES_RHEL}" ]; then \
 
 RUN --mount=type=bind,from=doca-dms,source=/rpms,target=/tmp/doca-dms \
     if [ -f /tmp/doca-dms/doca-dms.rpm ]; then \
-        rpm -Uvh /tmp/doca-dms/doca-dms.rpm; \
+        rpm -Uvh --oldpackage /tmp/doca-dms/doca-dms.rpm; \
     fi
 
 WORKDIR /
