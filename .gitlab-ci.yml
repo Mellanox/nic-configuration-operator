@@ -77,7 +77,7 @@ variables:  # additional variables are defined at the gitlab group scope
   # Pin the DOCA series per release branch; the resolver selects its latest patch.
   DOCA_SERIES: "3.5"
   GOV_READY_POLICY_FILE_PATH: pulse-scan-policies/prodsec_approved_govready_release_policy.json
-  CVE_UPDATES_RHEL: "openssl openssl-libs python3 python3-libs python3-urllib3 glib2 util-linux libnghttp2 vim-minimal libarchive"
+  CVE_UPDATES_RHEL: "openssl openssl-libs python3 python3-libs python3-urllib3 glib2 util-linux libnghttp2 vim-minimal libarchive libcurl-minimal curl-minimal sqlite-libs libxml2 gzip unbound-libs expat python3-idna attr libattr dbus-broker coreutils-single"
 
 resolve-doca-host:
   stage: resolve
