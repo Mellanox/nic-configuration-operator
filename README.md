@@ -363,6 +363,8 @@ spec:
 The NICDevice CRD is created automatically by the configuration daemon and represents a specific NVIDIA NIC on a specific K8s node.
 The name of the device combines the node name, device type and its PCI device address (`Domain:Bus:Device`, with `:` and `.` replaced by `-`). PCI device address is used for uniqueness because serial numbers are not guaranteed unique on systems with embedded NICs that share a flashed VPD image (e.g. HGX B300).
 
+`status.node` is a selectable field, so the devices on one node can be listed with `kubectl get nicdevices -A --field-selector status.node=<node>`. The configuration daemon uses the same selector to cache only its own node's devices.
+
 `FirmwareUpdateInProgress` status condition can be used for tracking the state of the FW validation/update on a specific device. If an error occurs during FW update, it will be reflected in this field.
 `ConfigUpdateInProgress` status condition can be used for tracking the state of the FW configuration update on a specific device. If an error occurs during FW configuration update, it will be reflected in this field.
 Before validating runtime configuration, the configuration daemon checks every discovered network interface for carrier. Runtime validation fails only when all interfaces on the NIC report `NO-CARRIER`, and the failure is reflected in `ConfigUpdateInProgress` with reason `RuntimeConfigUpdateFailed` until at least one interface has carrier. This allows available planes to be configured while other planes are disconnected.
