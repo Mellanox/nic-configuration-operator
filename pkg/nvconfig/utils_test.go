@@ -138,6 +138,8 @@ Configurations:                              Default         Current         Nex
 			query, err := h.QueryNvConfig(context.TODO(), nvconfigPort(pciAddress), nil)
 			Expect(err).ToNot(HaveOccurred())
 
+			Expect(query.AllParameters).To(BeTrue())
+
 			// Verify regular parameters
 			Expect(query.DefaultConfig).To(HaveKeyWithValue("KEEP_IB_LINK_UP_P2", []string{"false", "0"}))
 			Expect(query.CurrentConfig).To(HaveKeyWithValue("KEEP_IB_LINK_UP_P2", []string{"true", "1"}))
@@ -222,6 +224,7 @@ Configurations:                              Default         Current         Nex
 			Expect(err).ToNot(HaveOccurred())
 
 			// Verify regular parameters
+			Expect(query.AllParameters).To(BeFalse())
 			Expect(query.DefaultConfig).To(HaveKeyWithValue("INTERNAL_CPU_OFFLOAD_ENGINE", []string{"enabled", "0"}))
 			Expect(query.CurrentConfig).To(HaveKeyWithValue("INTERNAL_CPU_OFFLOAD_ENGINE", []string{"enabled", "0"}))
 			Expect(query.NextBootConfig).To(HaveKeyWithValue("INTERNAL_CPU_OFFLOAD_ENGINE", []string{"enabled", "0"}))
@@ -803,55 +806,6 @@ Result: Device configuration does NOT match the system configuration.
 			Expect(rebootNeeded).To(BeFalse())
 			Expect(commandArgs[0][0:4]).To(Equal([]string{"--json", "-t", "pci/" + pciAddress + "?port=1", "/nvidia/pci"}))
 			Expect(commandArgs[1][0:4]).To(Equal([]string{"--json", "-t", "pci/0000:3b:00.1?port=1", "/nvidia/pci"}))
-		})
-
-		It("queries indexed breakout lanes separately from the remaining XPaths", func() {
-			var commandArgs [][]string
-			outputs := [][]byte{
-				[]byte(`{"num-pfs":2,"num-pfs-pending":2}`),
-				[]byte(`{"lanes":"0,1,2,3,4,5,6,7","lanes-pending":"0,1,2,3,4,5,6,7"}`),
-				[]byte(`{"lanes":"8,9,10,11,12,13,14,15","lanes-pending":"8,9,10,11,12,13,14,15"}`),
-			}
-			commands := make([]execTesting.FakeCommandAction, len(outputs))
-			for index := range outputs {
-				output := outputs[index]
-				commands[index] = func(_ string, args ...string) exec.Cmd {
-					commandArgs = append(commandArgs, append([]string(nil), args...))
-					cmd := &execTesting.FakeCmd{}
-					cmd.RunScript = append(cmd.RunScript, func() ([]byte, []byte, error) {
-						return output, nil, nil
-					})
-					return cmd
-				}
-			}
-			h := &nvConfigUtils{execInterface: &execTesting.FakeExec{CommandScript: commands}}
-			lane1 := "/nvidia/link/breakout/module/[0]/port/[1]"
-			lane255 := "/nvidia/link/breakout/module/[0]/port/[255]"
-			planOperations := []dmscli.XPathOperation{
-				{Path: "/nvidia/pci", Values: map[string]any{"num-pfs": 2}},
-				{Path: lane1, Values: map[string]any{"lanes": []int{0, 1, 2, 3, 4, 5, 6, 7}}},
-				{Path: lane255, Values: map[string]any{"lanes": []int{8, 9, 10, 11, 12, 13, 14, 15}}},
-			}
-
-			updateNeeded, rebootNeeded, err := h.ValidateNvConfigXPaths(
-				context.Background(), []v1alpha1.NicDevicePortSpec{nvconfigPort(pciAddress)}, planOperations)
-
-			Expect(err).NotTo(HaveOccurred())
-			Expect(updateNeeded).To(BeFalse())
-			Expect(rebootNeeded).To(BeFalse())
-			Expect(commandArgs).To(HaveLen(3))
-			Expect(commandArgs[0]).To(Equal([]string{
-				"--json", "-t", "pci/" + pciAddress + "?port=1",
-				"/nvidia/pci", "num-pfs", "num-pfs-pending",
-			}))
-			Expect(commandArgs[1]).To(Equal([]string{
-				"--json", "-t", "pci/" + pciAddress + "?port=1",
-				lane1, "lanes", "lanes-pending",
-			}))
-			Expect(commandArgs[2]).To(Equal([]string{
-				"--json", "-t", "pci/" + pciAddress + "?port=1",
-				lane255, "lanes", "lanes-pending",
-			}))
 		})
 
 		It("applies raw and typed NVConfig together with all-port fanout and flags", func() {

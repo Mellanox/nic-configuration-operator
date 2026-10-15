@@ -178,7 +178,10 @@ Composite breakout `lanes` have no direct mapping. Supported native
 `MODULE_SPLIT_M<module>[lane]` assignments are validated against native current
 and next-boot values; their indices are excluded from the desired, current, and
 pending typed lane lists before comparing the remaining membership. Unsupported
-native assignments do not suppress typed validation. Other modules are unaffected.
+native assignments do not suppress typed validation. Breakout lane GETs are
+replaced by native array reads to avoid DMS sibling-query failures. Lane writes
+are compiled to native assignments within the same combined DMS apply action.
+Other modules are unaffected.
 This supports Network Bay defaults and explicit lane overrides without DMS changes.
 With `Force`, profile and explicit-override port parameters are expanded before
 profile filtering, so expansion cannot restore a default shadowed by doSPCX.
@@ -198,9 +201,13 @@ ValidateNvConfigXPathsWithOverrides(
 ) (updateNeeded, rebootNeeded bool, err error)
 ```
 
-`configs` contains fresh native state keyed by PCI address. The standard utility
-implements this method. Secondary-function verification refreshes native state
-after apply before checking overrides. Hidden native parameters remain reported
+`configs` contains fresh native state keyed by PCI address. `QueryNvConfig`
+marks unfiltered results with `AllParameters=true`; those snapshots can be reused
+for complete lane membership checks. Filtered and manually assembled snapshots
+leave this flag false, so the utility refreshes the required module arrays and
+preserves unrelated native override state without mutating caller maps. The
+standard utility implements this method. Secondary-function verification refreshes
+native state after apply before checking overrides. Hidden native parameters remain reported
 as unsupported and do not suppress typed validation when omitted from apply.
 
 **`ConfigurationOptions`:**
@@ -762,6 +769,7 @@ type NvConfigQuery struct {
     DefaultConfig  map[string][]string // Default NV config values
     CurrentConfig  map[string][]string // Currently applied values
     NextBootConfig map[string][]string // Values effective after next boot
+    AllParameters  bool                // True only for an unfiltered native query
 }
 
 type VPD struct {

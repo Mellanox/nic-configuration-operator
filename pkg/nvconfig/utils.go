@@ -19,6 +19,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"maps"
 	"regexp"
 	"sort"
 	"strings"
@@ -193,6 +194,7 @@ func (h *nvConfigUtils) QueryNvConfig(ctx context.Context, port v1alpha1.NicDevi
 		}
 	}
 
+	query.AllParameters = len(parameters) == 0
 	return query, nil
 }
 
@@ -264,6 +266,18 @@ func (h *nvConfigUtils) setNvConfigParametersBatchWithXPaths(
 		return types.ApplyStatusFailed, fmt.Errorf("command executor must not be nil")
 	}
 
+	operations, laneParams, err := splitBreakoutLanes(operations)
+	if err != nil {
+		return types.ApplyStatusFailed, err
+	}
+	combined := maps.Clone(laneParams)
+	// Explicit native settings retain precedence over generated doSPCX defaults.
+	maps.Copy(combined, params)
+	params = combined
+	if len(params) == 0 && len(operations) == 0 {
+		return types.ApplyStatusNothingToDo, nil
+	}
+
 	target := "pci/" + primaryPort.PCI
 	logger := logr.FromContextOrDiscard(ctx)
 	logger.Info("applying NVConfig through DMS",
@@ -329,7 +343,11 @@ func (h *nvConfigUtils) ValidateNvConfigXPathsWithOverrides(
 		return false, false, nil
 	}
 	logger := logr.FromContextOrDiscard(ctx)
-	queries := xpathQueries(operations)
+	direct, _, err := splitBreakoutLanes(operations)
+	if err != nil {
+		return false, false, err
+	}
+	queries := xpathQueries(direct)
 	queryBatches := xpathQueryBatches(queries)
 	logger.V(2).Info("validating doSPCX NVConfig on all device ports",
 		"ports", len(ports),
@@ -349,6 +367,10 @@ func (h *nvConfigUtils) ValidateNvConfigXPathsWithOverrides(
 		config, found := configs[port.PCI]
 		if len(nativeParams) > 0 && !found {
 			return false, false, fmt.Errorf("native NVConfig state is missing for target %q", target)
+		}
+		config, stateErr := h.nativeBreakoutState(ctx, port, operations, config, result)
+		if stateErr != nil {
+			return false, false, stateErr
 		}
 		portUpdateNeeded, portRebootNeeded, matchErr := matchXPathValuesWithOverrides(result, operations, nativeParams, config)
 		if matchErr != nil {
