@@ -32,7 +32,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 )
 
-var breakoutLanePath = regexp.MustCompile(`^/nvidia/link/breakout/module/\[([0-9]+)\]/port/\[[0-9]+\]$`)
+var breakoutLanePath = regexp.MustCompile(`^/nvidia/link/breakout/module/\[([0-9]+)\]/port/\[([0-9]+)\]$`)
 
 // FilterProfileParams removes defaults owned by typed operations before explicit
 // template/raw overrides are merged. The caller's profile and operations are not mutated.

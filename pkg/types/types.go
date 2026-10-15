@@ -34,6 +34,10 @@ type NvConfigQuery struct {
 	DefaultConfig  map[string][]string
 	CurrentConfig  map[string][]string
 	NextBootConfig map[string][]string
+	// AllParameters is true only for an unfiltered QueryNvConfig result. Leave
+	// false for filtered or manually assembled snapshots: they cannot establish
+	// complete breakout lane membership.
+	AllParameters bool
 }
 
 func NewNvConfigQuery() NvConfigQuery {
@@ -41,6 +45,7 @@ func NewNvConfigQuery() NvConfigQuery {
 		DefaultConfig:  make(map[string][]string),
 		CurrentConfig:  make(map[string][]string),
 		NextBootConfig: make(map[string][]string),
+		AllParameters:  false,
 	}
 }
 
