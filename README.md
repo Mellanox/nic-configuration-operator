@@ -516,3 +516,10 @@ Supported flags:
 * `SKIP_VM_CHECK`=`true`: pass `--skip_vm_check` to `mlxfwreset` resetting NIC firmware while running on VMs.
 
 * `SKIP_DEVICE_ON_DISCOVERY_ERROR`=`true`: skip a physical NIC during device discovery when firmware/PSID lookup or BlueField operation-mode lookup fails. When unset, these errors fail discovery so the daemon retries. Existing `NicDevice` CRs are preserved for skipped devices to avoid delete/recreate churn during transient per-device discovery failures.
+
+## Go library profile delivery
+
+Library consumers can install a local doSPCX profile archive with
+`spectrumXMgr.InstallBlueprintsData("/path/to/dospcx-data.tar.gz")` before preparing
+plans. In-memory archives use `InstallBlueprintsDataBytes(archive)`.
+See the [library API guide](docs/nic-configuration-library.md) for details.

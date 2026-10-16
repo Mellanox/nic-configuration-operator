@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -56,9 +57,37 @@ var requiredBlueprintsDataFiles = []string{
 	"platform-types.yaml",
 }
 
-// InstallBlueprintsData restores a doSPCX data archive under the DMS installation directory.
+// InstallBlueprintsData reads a local doSPCX archive and installs its data tree.
+func (m *Manager) InstallBlueprintsData(archivePath string) error {
+	if m == nil {
+		return fmt.Errorf("doSPCX manager must not be nil")
+	}
+	if strings.TrimSpace(archivePath) == "" {
+		return fmt.Errorf("doSPCX data archive path must not be empty")
+	}
+	// Nonblocking open lets us reject FIFOs without waiting for a writer.
+	file, err := os.OpenFile(archivePath, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return fmt.Errorf("open doSPCX data archive %q: %w", archivePath, err)
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("stat doSPCX data archive %q: %w", archivePath, err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("doSPCX data archive %q must be a regular file", archivePath)
+	}
+	archive, err := io.ReadAll(io.LimitReader(file, maxBlueprintsArchiveBytes+1))
+	if err != nil {
+		return fmt.Errorf("read doSPCX data archive %q: %w", archivePath, err)
+	}
+	return m.InstallBlueprintsDataBytes(archive)
+}
+
+// InstallBlueprintsDataBytes restores a doSPCX data archive under the DMS installation directory.
 // The previous valid tree remains active if validation, extraction, or activation fails.
-func (m *Manager) InstallBlueprintsData(archive []byte) error {
+func (m *Manager) InstallBlueprintsDataBytes(archive []byte) error {
 	if m == nil {
 		return fmt.Errorf("doSPCX manager must not be nil")
 	}

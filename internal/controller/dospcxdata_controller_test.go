@@ -90,7 +90,7 @@ var _ = Describe("DospcxDataReconciler", func() {
 	It("installs the selected data bundle", func() {
 		archive := []byte("archive")
 		Expect(k8sClient.Create(ctx, newBundle("dospcx-data-main", archive))).To(Succeed())
-		manager.On("InstallBlueprintsData", archive).Return(nil).Once()
+		manager.On("InstallBlueprintsDataBytes", archive).Return(nil).Once()
 
 		_, err := reconciler.Reconcile(ctx, ctrl.Request{})
 		Expect(err).NotTo(HaveOccurred())
@@ -110,7 +110,7 @@ var _ = Describe("DospcxDataReconciler", func() {
 
 		_, err := reconciler.Reconcile(ctx, ctrl.Request{})
 		Expect(err).To(MatchError(ContainSubstring("multiple doSPCX data ConfigMaps")))
-		manager.AssertNotCalled(GinkgoT(), "InstallBlueprintsData")
+		manager.AssertNotCalled(GinkgoT(), "InstallBlueprintsDataBytes")
 	})
 
 	It("reports a failure to deactivate conflicting data", func() {
@@ -129,7 +129,7 @@ var _ = Describe("DospcxDataReconciler", func() {
 
 		_, err := reconciler.Reconcile(ctx, ctrl.Request{})
 		Expect(err).To(MatchError(ContainSubstring("unsupported")))
-		manager.AssertNotCalled(GinkgoT(), "InstallBlueprintsData")
+		manager.AssertNotCalled(GinkgoT(), "InstallBlueprintsDataBytes")
 	})
 
 	It("rejects an empty archive", func() {
@@ -137,13 +137,13 @@ var _ = Describe("DospcxDataReconciler", func() {
 
 		_, err := reconciler.Reconcile(ctx, ctrl.Request{})
 		Expect(err).To(MatchError(ContainSubstring("missing or has an empty")))
-		manager.AssertNotCalled(GinkgoT(), "InstallBlueprintsData")
+		manager.AssertNotCalled(GinkgoT(), "InstallBlueprintsDataBytes")
 	})
 
 	It("returns bundle installation errors", func() {
 		archive := []byte("archive")
 		Expect(k8sClient.Create(ctx, newBundle("dospcx-data-main", archive))).To(Succeed())
-		manager.On("InstallBlueprintsData", archive).Return(errors.New("install failed")).Once()
+		manager.On("InstallBlueprintsDataBytes", archive).Return(errors.New("install failed")).Once()
 
 		_, err := reconciler.Reconcile(ctx, ctrl.Request{})
 		Expect(err).To(HaveOccurred())
