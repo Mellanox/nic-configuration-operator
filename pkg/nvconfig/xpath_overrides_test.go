@@ -258,6 +258,9 @@ var _ = Describe("typed NVConfig native overrides", func() {
 
 	It("keeps native state and metadata local to each PCI function", func() {
 		const secondary = "0000:3b:00.1"
+		const path = "/nvidia/cc/config"
+		const param = "USER_PROGRAMMABLE_CC"
+		operations = []dmscli.XPathOperation{{Path: path, Values: map[string]any{"user-programmable": true}}}
 		configs := map[string]types.NvConfigQuery{pci: types.NewNvConfigQuery(), secondary: types.NewNvConfigQuery()}
 		for _, config := range configs {
 			config.CurrentConfig[param] = []string{"0"}
@@ -265,10 +268,10 @@ var _ = Describe("typed NVConfig native overrides", func() {
 		}
 		commands := make([]execTesting.FakeCommandAction, 0, 2)
 		for _, mapping := range []string{param, "OTHER_PARAM"} {
-			state.NVConfig[path+"/adaptive-routing"] = mapping
-			state.NVConfig[path+"/adaptive-routing-pending"] = mapping
+			state.NVConfig[path+"/user-programmable"] = mapping
+			state.NVConfig[path+"/user-programmable-pending"] = mapping
 			output := map[string]any{
-				"adaptive-routing": false, "adaptive-routing-pending": false, "_nvconfig": state.NVConfig,
+				"user-programmable": false, "user-programmable-pending": false, "_nvconfig": state.NVConfig,
 			}
 			data, err := json.Marshal(output)
 			Expect(err).NotTo(HaveOccurred())
