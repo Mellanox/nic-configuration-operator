@@ -23,6 +23,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"syscall"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -94,6 +96,80 @@ func newBlueprintsDataManager(dataRoot string) *Manager {
 }
 
 var _ = Describe("doSPCX data archive installation", func() {
+	It("installs a local archive and invalidates plans only when the content changes", func() {
+		dir := GinkgoT().TempDir()
+		archivePath := filepath.Join(dir, "dospcx-data.tar.gz")
+		archive := validBlueprintsArchive()
+		Expect(os.WriteFile(archivePath, archive, 0o600)).To(Succeed())
+		manager := newBlueprintsDataManager(filepath.Join(dir, "installed", "data"))
+		manager.preparedPlans["old-plan"] = &preparedPlan{plan: &Plan{}}
+
+		Expect(manager.InstallBlueprintsData(archivePath)).To(Succeed())
+		Expect(manager.dospcxDataDigest).To(Equal(sha256Digest(archive)))
+		Expect(manager.preparedPlans).To(BeEmpty())
+		Expect(validateBlueprintsDataLayout(manager.dospcxDataRoot)).To(Succeed())
+		manager.preparedPlans["current-plan"] = &preparedPlan{plan: &Plan{}}
+		Expect(manager.InstallBlueprintsData(archivePath)).To(Succeed())
+		Expect(manager.preparedPlans).To(HaveKey("current-plan"))
+
+		updated := validBlueprintsArchive(blueprintsArchiveEntry{
+			name: "data/profiles/new.yaml", typeFlag: tar.TypeReg, mode: 0o644, content: "profile: new",
+		})
+		Expect(os.WriteFile(archivePath, updated, 0o600)).To(Succeed())
+		Expect(manager.InstallBlueprintsData(archivePath)).To(Succeed())
+		Expect(manager.dospcxDataDigest).To(Equal(sha256Digest(updated)))
+		Expect(manager.preparedPlans).To(BeEmpty())
+	})
+
+	DescribeTable("preserves installed data and plans when a local archive cannot be installed",
+		func(filename string, content []byte, expectedError string) {
+			dir := GinkgoT().TempDir()
+			manager := newBlueprintsDataManager(filepath.Join(dir, "installed", "data"))
+			archive := validBlueprintsArchive()
+			Expect(manager.InstallBlueprintsDataBytes(archive)).To(Succeed())
+			manager.preparedPlans["active-plan"] = &preparedPlan{plan: &Plan{}}
+			archivePath := filename
+			if filename != "" && filename != " " {
+				archivePath = filepath.Join(dir, filename)
+				if content != nil {
+					Expect(os.WriteFile(archivePath, content, 0o600)).To(Succeed())
+				}
+			}
+
+			Expect(manager.InstallBlueprintsData(archivePath)).To(MatchError(ContainSubstring(expectedError)))
+			Expect(manager.dospcxDataDigest).To(Equal(sha256Digest(archive)))
+			Expect(manager.preparedPlans).To(HaveKey("active-plan"))
+			Expect(validateBlueprintsDataLayout(manager.dospcxDataRoot)).To(Succeed())
+		},
+		Entry("empty path", "", nil, "path must not be empty"),
+		Entry("blank path", " ", nil, "path must not be empty"),
+		Entry("missing file", "missing.tar.gz", nil, "open doSPCX data archive"),
+		Entry("empty file", "empty.tar.gz", []byte{}, "archive must not be empty"),
+		Entry("invalid archive", "invalid.tar.gz", []byte("not gzip"), "gzip"),
+		Entry("oversized file", "large.tar.gz", make([]byte, maxBlueprintsArchiveBytes+1), "compressed size limit"),
+	)
+
+	It("rejects a directory instead of an archive file", func() {
+		manager := newBlueprintsDataManager(filepath.Join(GinkgoT().TempDir(), "data"))
+		Expect(manager.InstallBlueprintsData(GinkgoT().TempDir())).To(MatchError(ContainSubstring("regular file")))
+	})
+
+	It("rejects a named pipe without waiting for a writer", func() {
+		dir := GinkgoT().TempDir()
+		archivePath := filepath.Join(dir, "archive.fifo")
+		Expect(syscall.Mkfifo(archivePath, 0o600)).To(Succeed())
+		manager := newBlueprintsDataManager(filepath.Join(dir, "data"))
+		result := make(chan error, 1)
+		go func() { result <- manager.InstallBlueprintsData(archivePath) }()
+
+		Eventually(result, time.Second).Should(Receive(MatchError(ContainSubstring("regular file"))))
+	})
+
+	It("rejects a nil manager before opening the archive", func() {
+		var manager *Manager
+		Expect(manager.InstallBlueprintsData("missing.tar.gz")).To(MatchError("doSPCX manager must not be nil"))
+	})
+
 	It("restores the data tree and replaces obsolete files", func() {
 		dataRoot := filepath.Join(GinkgoT().TempDir(), "doSpcx", "data")
 		Expect(os.MkdirAll(dataRoot, 0o755)).To(Succeed())
@@ -102,7 +178,7 @@ var _ = Describe("doSPCX data archive installation", func() {
 		manager := newBlueprintsDataManager(dataRoot)
 		manager.preparedPlans["old-plan"] = &preparedPlan{plan: &Plan{}}
 
-		Expect(manager.InstallBlueprintsData(archive)).To(Succeed())
+		Expect(manager.InstallBlueprintsDataBytes(archive)).To(Succeed())
 
 		content, err := os.ReadFile(filepath.Join(dataRoot, "execution-groups.yaml"))
 		Expect(err).NotTo(HaveOccurred())
@@ -125,7 +201,7 @@ var _ = Describe("doSPCX data archive installation", func() {
 		})
 		manager := newBlueprintsDataManager(dataRoot)
 
-		Expect(manager.InstallBlueprintsData(archive)).To(Succeed())
+		Expect(manager.InstallBlueprintsDataBytes(archive)).To(Succeed())
 		Expect(filepath.Join(dataRoot, "platform-types.yaml")).To(BeAnExistingFile())
 	})
 
@@ -135,7 +211,7 @@ var _ = Describe("doSPCX data archive installation", func() {
 		Expect(os.WriteFile(filepath.Join(dataRoot, "active"), []byte("keep"), 0o644)).To(Succeed())
 		manager := newBlueprintsDataManager(dataRoot)
 
-		Expect(manager.InstallBlueprintsData([]byte("not gzip"))).NotTo(Succeed())
+		Expect(manager.InstallBlueprintsDataBytes([]byte("not gzip"))).NotTo(Succeed())
 
 		content, err := os.ReadFile(filepath.Join(dataRoot, "active"))
 		Expect(err).NotTo(HaveOccurred())
@@ -149,7 +225,7 @@ var _ = Describe("doSPCX data archive installation", func() {
 		archive[len(archive)-1] ^= 0xff
 		manager := newBlueprintsDataManager(dataRoot)
 
-		Expect(manager.InstallBlueprintsData(archive)).NotTo(Succeed())
+		Expect(manager.InstallBlueprintsDataBytes(archive)).NotTo(Succeed())
 		Expect(dataRoot).NotTo(BeADirectory())
 		Expect(manager.dospcxDataDigest).To(BeEmpty())
 	})
@@ -165,7 +241,7 @@ var _ = Describe("doSPCX data archive installation", func() {
 		Expect(len(archive)).To(BeNumerically("<", maxBlueprintsArchiveBytes))
 		manager := newBlueprintsDataManager(filepath.Join(GinkgoT().TempDir(), "data"))
 
-		Expect(manager.InstallBlueprintsData(archive)).To(
+		Expect(manager.InstallBlueprintsDataBytes(archive)).To(
 			MatchError(ContainSubstring("decompressed size limit")))
 		Expect(manager.dospcxDataDigest).To(BeEmpty())
 	})
@@ -179,7 +255,7 @@ var _ = Describe("doSPCX data archive installation", func() {
 		})
 		manager := newBlueprintsDataManager(dataRoot)
 
-		err := manager.InstallBlueprintsData(archive)
+		err := manager.InstallBlueprintsDataBytes(archive)
 		Expect(err).To(MatchError(ContainSubstring("unsafe path")))
 		Expect(filepath.Join(filepath.Dir(dataRoot), "outside")).NotTo(BeAnExistingFile())
 		Expect(filepath.Join(dataRoot, "active")).To(BeAnExistingFile())
@@ -192,7 +268,7 @@ var _ = Describe("doSPCX data archive installation", func() {
 		})
 		manager := newBlueprintsDataManager(dataRoot)
 
-		Expect(manager.InstallBlueprintsData(archive)).To(MatchError(ContainSubstring("unsupported tar entry type")))
+		Expect(manager.InstallBlueprintsDataBytes(archive)).To(MatchError(ContainSubstring("unsupported tar entry type")))
 		Expect(dataRoot).NotTo(BeADirectory())
 	})
 
@@ -204,28 +280,28 @@ var _ = Describe("doSPCX data archive installation", func() {
 		)
 		manager := newBlueprintsDataManager(dataRoot)
 
-		Expect(manager.InstallBlueprintsData(archive)).To(MatchError(ContainSubstring("missing required path")))
+		Expect(manager.InstallBlueprintsDataBytes(archive)).To(MatchError(ContainSubstring("missing required path")))
 		Expect(dataRoot).NotTo(BeADirectory())
 	})
 
 	It("rejects archives larger than the compressed size limit", func() {
 		manager := newBlueprintsDataManager(filepath.Join(GinkgoT().TempDir(), "data"))
 
-		Expect(manager.InstallBlueprintsData(make([]byte, maxBlueprintsArchiveBytes+1))).To(
+		Expect(manager.InstallBlueprintsDataBytes(make([]byte, maxBlueprintsArchiveBytes+1))).To(
 			MatchError(ContainSubstring("compressed size limit")))
 	})
 
 	It("requires an absolute installation path", func() {
 		manager := newBlueprintsDataManager("relative/data")
 
-		Expect(manager.InstallBlueprintsData(validBlueprintsArchive())).To(
+		Expect(manager.InstallBlueprintsDataBytes(validBlueprintsArchive())).To(
 			MatchError(ContainSubstring("non-empty absolute path")))
 	})
 
 	It("keeps the active data and digest consistent when backup cleanup fails", func() {
 		dataRoot := filepath.Join(GinkgoT().TempDir(), "doSpcx", "data")
 		manager := newBlueprintsDataManager(dataRoot)
-		Expect(manager.InstallBlueprintsData(validBlueprintsArchive())).To(Succeed())
+		Expect(manager.InstallBlueprintsDataBytes(validBlueprintsArchive())).To(Succeed())
 		manager.preparedPlans["old-plan"] = &preparedPlan{plan: &Plan{}}
 		updatedArchive := validBlueprintsArchive(blueprintsArchiveEntry{
 			name: "data/new-profile-marker", typeFlag: tar.TypeReg, mode: 0o644, content: "new",
@@ -239,7 +315,7 @@ var _ = Describe("doSPCX data archive installation", func() {
 			return errors.New("injected cleanup failure")
 		}
 
-		Expect(manager.InstallBlueprintsData(updatedArchive)).To(Succeed())
+		Expect(manager.InstallBlueprintsDataBytes(updatedArchive)).To(Succeed())
 		Expect(cleanupAttempted).To(BeTrue())
 		Expect(filepath.Join(dataRoot, "new-profile-marker")).To(BeAnExistingFile())
 		Expect(manager.dospcxDataDigest).To(Equal(sha256Digest(updatedArchive)))
@@ -249,7 +325,7 @@ var _ = Describe("doSPCX data archive installation", func() {
 	It("removes data installed from a ConfigMap and clears its digest", func() {
 		dataRoot := filepath.Join(GinkgoT().TempDir(), "doSpcx", "data")
 		manager := newBlueprintsDataManager(dataRoot)
-		Expect(manager.InstallBlueprintsData(validBlueprintsArchive())).To(Succeed())
+		Expect(manager.InstallBlueprintsDataBytes(validBlueprintsArchive())).To(Succeed())
 		manager.preparedPlans["old-plan"] = &preparedPlan{plan: &Plan{}}
 
 		Expect(manager.RemoveBlueprintsData()).To(Succeed())
@@ -262,7 +338,7 @@ var _ = Describe("doSPCX data archive installation", func() {
 		dataRoot := filepath.Join(GinkgoT().TempDir(), "doSpcx", "data")
 		manager := newBlueprintsDataManager(dataRoot)
 		archive := validBlueprintsArchive()
-		Expect(manager.InstallBlueprintsData(archive)).To(Succeed())
+		Expect(manager.InstallBlueprintsDataBytes(archive)).To(Succeed())
 		manager.preparedPlans["active-plan"] = &preparedPlan{plan: &Plan{}}
 
 		originalRemove := removeBlueprintsDataDirectory

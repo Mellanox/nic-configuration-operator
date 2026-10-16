@@ -16,10 +16,18 @@ type SpectrumXManager struct {
 	mock.Mock
 }
 
-func (_m *SpectrumXManager) InstallBlueprintsData(archive []byte) error {
-	ret := _m.Called(archive)
+func (_m *SpectrumXManager) InstallBlueprintsData(archivePath string) error {
+	ret := _m.Called(archivePath)
 	if len(ret) == 0 {
 		panic("no return value specified for InstallBlueprintsData")
+	}
+	return ret.Error(0)
+}
+
+func (_m *SpectrumXManager) InstallBlueprintsDataBytes(archive []byte) error {
+	ret := _m.Called(archive)
+	if len(ret) == 0 {
+		panic("no return value specified for InstallBlueprintsDataBytes")
 	}
 	return ret.Error(0)
 }

@@ -97,7 +97,7 @@ func (r *DospcxDataReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (c
 			"doSPCX data ConfigMap %s/%s is missing or has an empty binaryData %q key",
 			bundle.Namespace, bundle.Name, consts.DospcxDataConfigMapArchiveKey)
 	}
-	if err := r.SpectrumXManager.InstallBlueprintsData(archive); err != nil {
+	if err := r.SpectrumXManager.InstallBlueprintsDataBytes(archive); err != nil {
 		return ctrl.Result{}, fmt.Errorf(
 			"failed to install doSPCX data from ConfigMap %s/%s: %w", bundle.Namespace, bundle.Name, err)
 	}

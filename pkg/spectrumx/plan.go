@@ -38,7 +38,8 @@ type PlanManager interface {
 
 // BlueprintsDataManager installs the authored data consumed by the doSPCX planner.
 type BlueprintsDataManager interface {
-	InstallBlueprintsData(archive []byte) error
+	InstallBlueprintsData(archivePath string) error
+	InstallBlueprintsDataBytes(archive []byte) error
 	RemoveBlueprintsData() error
 }
 
@@ -64,11 +65,19 @@ func (m *spectrumXConfigManager) GetPreparedPlan(device *v1alpha1.NicDevice) (*P
 	return m.dospcxManager.GetPreparedPlan(device)
 }
 
-func (m *spectrumXConfigManager) InstallBlueprintsData(archive []byte) error {
+// InstallBlueprintsData installs a doSPCX archive from the local filesystem.
+func (m *spectrumXConfigManager) InstallBlueprintsData(archivePath string) error {
 	if m == nil || m.dospcxManager == nil {
 		return fmt.Errorf("doSPCX planner manager must not be nil")
 	}
-	return m.dospcxManager.InstallBlueprintsData(archive)
+	return m.dospcxManager.InstallBlueprintsData(archivePath)
+}
+
+func (m *spectrumXConfigManager) InstallBlueprintsDataBytes(archive []byte) error {
+	if m == nil || m.dospcxManager == nil {
+		return fmt.Errorf("doSPCX planner manager must not be nil")
+	}
+	return m.dospcxManager.InstallBlueprintsDataBytes(archive)
 }
 
 func (m *spectrumXConfigManager) RemoveBlueprintsData() error {

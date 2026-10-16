@@ -543,13 +543,32 @@ Blueprint data installation is a separate capability embedded by
 
 ```go
 type BlueprintsDataManager interface {
-    InstallBlueprintsData(archive []byte) error
+    InstallBlueprintsData(archivePath string) error
+    InstallBlueprintsDataBytes(archive []byte) error
     RemoveBlueprintsData() error
 }
 ```
 
-`InstallBlueprintsData` accepts the decoded `dospcx-data.tar.gz/v1` archive,
-validates and stages its `data/` tree, and activates it under the DMS
+`InstallBlueprintsData` accepts the path to a local `dospcx-data.tar.gz` file,
+so library consumers can install a mounted or downloaded archive directly:
+
+```go
+if err := spectrumXMgr.InstallBlueprintsData("/etc/dospcx/dospcx-data.tar.gz"); err != nil {
+    return err
+}
+// PreparePlan must run after installing the data and before applying configuration.
+```
+
+The path is resolved in the calling process's filesystem; the library does not
+fetch remote files or read Kubernetes ConfigMaps. The file must be regular, and
+reads are bounded by the compressed archive size limit. Empty, unreadable, invalid,
+or oversized files fail without replacing the installed data or cached plans.
+
+`InstallBlueprintsDataBytes` accepts the decoded `dospcx-data.tar.gz/v1` archive
+bytes from the ConfigMap controller. This replaces the former byte-taking
+`InstallBlueprintsData` signature; byte-based callers must use the new method.
+Both entry points use the same installer, which validates and stages the
+`data/` tree, then activates it under the DMS
 installation directory. It rejects paths outside `data/`, non-regular archive
 entries, oversized payloads, and incomplete layouts. Activation retains the
 previous valid tree when an update fails. The installed archive digest is part
