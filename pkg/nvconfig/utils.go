@@ -343,7 +343,8 @@ func (h *nvConfigUtils) ValidateNvConfigXPathsWithOverrides(
 		return false, false, nil
 	}
 	logger := logr.FromContextOrDiscard(ctx)
-	direct, _, err := splitBreakoutLanes(operations)
+	dmsOperations, roceOperations := splitRoceValidation(operations)
+	direct, _, err := splitBreakoutLanes(dmsOperations)
 	if err != nil {
 		return false, false, err
 	}
@@ -372,10 +373,16 @@ func (h *nvConfigUtils) ValidateNvConfigXPathsWithOverrides(
 		if stateErr != nil {
 			return false, false, stateErr
 		}
-		portUpdateNeeded, portRebootNeeded, matchErr := matchXPathValuesWithOverrides(result, operations, nativeParams, config)
+		portUpdateNeeded, portRebootNeeded, matchErr := matchXPathValuesWithOverrides(result, dmsOperations, nativeParams, config)
 		if matchErr != nil {
 			return false, false, fmt.Errorf("validate NVConfig XPaths on target %q: %w", target, matchErr)
 		}
+		roceUpdate, roceReboot, roceErr := h.validateNativeRoce(ctx, port, roceOperations, nativeParams, config)
+		if roceErr != nil {
+			return false, false, roceErr
+		}
+		portUpdateNeeded = portUpdateNeeded || roceUpdate
+		portRebootNeeded = portRebootNeeded || roceReboot
 		updateNeeded = updateNeeded || portUpdateNeeded
 		rebootNeeded = rebootNeeded || portRebootNeeded
 		logger.V(2).Info("doSPCX NVConfig validation complete for device port",

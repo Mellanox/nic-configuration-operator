@@ -50,6 +50,12 @@ func FilterProfileParams(ctx context.Context, executor execUtils.Interface, port
 	direct := make([]dmscli.XPathOperation, 0, len(operations))
 	for _, operation := range operations {
 		values := maps.Clone(operation.Values)
+		for leaf := range values {
+			if parameter := roceParameter(operation.Path, leaf); parameter != "" {
+				delete(filtered, parameter)
+				delete(values, leaf)
+			}
+		}
 		if lanes, found := values["lanes"]; found && isBreakoutLanes(operation.Path, "lanes") {
 			prefix, err := laneParamPrefix(operation.Path)
 			if err != nil {
