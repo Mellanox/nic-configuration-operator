@@ -1032,3 +1032,12 @@ CC process that is absent or still starting makes validation return false immedi
 process startup remains in the apply phase. Custom implementations of
 `SpectrumXManager` must implement `IsDocaSpcXCCRunning` without starting a process.
 DMS CLI command-output logs include elapsed command execution time as `duration_ms`.
+
+### DPF 26.10 dependency compatibility
+
+The `26.10.x-dpf` branch retains the 26.10 doSPCX library while using
+`k8s.io/api`, `k8s.io/apimachinery`, and `k8s.io/client-go` v0.35.4 and
+controller-runtime v0.22.3. This lets DPF consume the library without upgrading
+those dependencies. Pin the resulting NCO commit in both DPF's root module and
+`hack/tools/dpfdev`. The doSPCX runtime still requires DOCA 3.6.0066-1;
+the Go dependency downgrade does not lower that runtime requirement.
