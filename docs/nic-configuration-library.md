@@ -183,6 +183,12 @@ replaced by native array reads to avoid DMS sibling-query failures. Lane writes
 are compiled to native assignments within the same combined DMS apply action.
 Other modules are unaffected.
 This supports Network Bay defaults and explicit lane overrides without DMS changes.
+RoCE NVConfig leaves under `/nvidia/roce` use native current/next-boot validation
+and local ownership mappings to avoid legacy DMS GET reading unsupported, unrequested
+siblings such as `MULTIPATH_DSCP`. Only requested parameters are checked; a missing
+requested value remains an error. Fresh complete native snapshots are reused; other
+callers query the requested parameters. Explicit native overrides retain precedence.
+RoCE writes remain typed operations in the same combined DMS apply action.
 With `Force`, profile and explicit-override port parameters are expanded before
 profile filtering, so expansion cannot restore a default shadowed by doSPCX.
 Inferred sibling-port overrides do not replace explicit profile values; an
