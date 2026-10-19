@@ -15,7 +15,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Focused checks for DOCA release selection and metadata consistency."""
+"""Focused checks for DOCA release selection and installer consistency."""
 
 import io
 import unittest
@@ -24,57 +24,88 @@ from urllib.error import HTTPError
 
 import resolve_doca_host as resolver
 
+ROOT = "https://example.test/doca-host-repo"
+UBUNTU = "doca-host_3.6.0-059000-26.10-ubuntu2404_amd64.deb"
+RHEL = "doca-host-3.6.0-059000_26.10_rhel9.x86_64.rpm"
+
+
+def fake_links(listings):
+    def links(url, timeout):
+        if url not in listings:
+            raise HTTPError(url, 404, "Not Found", {}, io.BytesIO())
+        return listings[url]
+    return links
+
 
 class ResolveDocaHostTests(unittest.TestCase):
+    def setUp(self):
+        repo_root = patch.object(resolver, "REPO_ROOT", ROOT)
+        repo_root.start()
+        self.addCleanup(repo_root.stop)
+
     def test_gitlab_dotenv_contains_resolved_urls(self):
         result = {
-            "doca_version": "3.5.0",
+            "doca_version": "3.6.0",
+            "doca_build": "3.6.0-059000",
             "ubuntu_2404_amd64_url": "https://example.test/host.deb",
             "rhel_9_x86_64_url": "https://example.test/host.rpm",
         }
         self.assertEqual(
             resolver.dotenv(result),
-            "DOCA_HOST_VERSION=3.5.0\n"
+            "DOCA_HOST_VERSION=3.6.0\n"
+            "DOCA_HOST_BUILD=3.6.0-059000\n"
             "DOCA_HOST_UBUNTU_URL=https://example.test/host.deb\n"
             "DOCA_HOST_RHEL_URL=https://example.test/host.rpm\n",
         )
 
-    def test_published_patches_skip_only_missing_versions(self):
-        def fake_request(url, **kwargs):
-            if "/3.2.1/" in url or "/3.2.3/" in url:
-                return None
-            raise HTTPError(url, 404, "Not Found", {}, io.BytesIO())
+    def test_patch_versions_are_sorted_numerically_and_skip_suffixed_trees(self):
+        root = ["doca-repo-3.4.2/", "doca-repo-3.4.10/", "doca-repo-3.4.1_anth/", "doca-repo-3.40.0/", "doca-repo-3.5.0/"]
+        with patch.object(resolver, "links", side_effect=fake_links({f"{ROOT}/": root})):
+            self.assertEqual(resolver.patch_versions("3.4", 1), ["3.4.10", "3.4.2"])
 
-        with patch.object(resolver, "request", side_effect=fake_request):
-            self.assertEqual(resolver.published_patches("3.2", 3, 1), ["3.2.1", "3.2.3"])
+    def test_urls_point_at_fixed_build_directory(self):
+        listings = {
+            f"{ROOT}/": ["doca-repo-3.6.0/", "doca-repo-3.6.0_riscv/"],
+            f"{ROOT}/doca-repo-3.6.0/last_stable/": [UBUNTU, RHEL, "doca-host_3.6.0-059000-26.10-ubuntu2404_arm64.deb"],
+        }
+        with patch.object(resolver, "links", side_effect=fake_links(listings)), \
+             patch.object(resolver, "request") as request:
+            result = resolver.resolve("3.6")
+        base = f"{ROOT}/doca-repo-3.6.0/doca-repo-3.6.0-059000"
+        self.assertEqual(result["doca_build"], "3.6.0-059000")
+        self.assertEqual(result["ubuntu_2404_amd64_url"], f"{base}/{UBUNTU}")
+        self.assertEqual(result["rhel_9_x86_64_url"], f"{base}/{RHEL}")
+        self.assertEqual(request.call_count, 2)
 
-    def test_highest_published_patch_is_selected(self):
-        with patch.object(resolver, "published_patches", return_value=["3.4.0", "3.4.1"]), \
-             patch.object(resolver, "apt_versions", return_value=("3.4.1-011000", "26.04")) as apt, \
-             patch.object(resolver, "rpm_versions", return_value=("3.4.1-011000", "26.04")), \
+    def test_patch_without_last_stable_falls_back_to_previous_patch(self):
+        listings = {
+            f"{ROOT}/": ["doca-repo-3.6.0/", "doca-repo-3.6.1/"],
+            f"{ROOT}/doca-repo-3.6.0/last_stable/": [UBUNTU, RHEL],
+        }
+        with patch.object(resolver, "links", side_effect=fake_links(listings)), \
              patch.object(resolver, "request"):
-            result = resolver.resolve("3.4")
-        apt.assert_called_once_with("3.4.1", 15)
-        self.assertEqual(result["doca_version"], "3.4.1")
-        self.assertIn("DOCA_v3.4.1", result["ubuntu_2404_amd64_url"])
+            self.assertEqual(resolver.resolve("3.6")["doca_version"], "3.6.0")
 
-    def test_duplicate_apt_package_versions_are_rejected(self):
-        packages = "\n\n".join((
-            "Package: doca-all\nVersion: 3.5.0-082000",
-            "Package: doca-all\nVersion: 3.5.0-083000",
-            "Package: ofed-scripts\nVersion: 26.07.OFED.26.07.0.7.7-1",
-        ))
-        with self.assertRaisesRegex(ValueError, "ambiguous"):
-            resolver.unique_package_versions(packages, ("doca-all", "ofed-scripts"))
-
-    def test_apt_and_rpm_disagreement_prevents_url_use(self):
-        with patch.object(resolver, "published_patches", return_value=["3.5.0"]), \
-             patch.object(resolver, "apt_versions", return_value=("3.5.0-082000", "26.07")), \
-             patch.object(resolver, "rpm_versions", return_value=("3.5.0-083000", "26.07")), \
+    def test_mismatched_installers_prevent_url_use(self):
+        listings = {
+            f"{ROOT}/": ["doca-repo-3.6.0/"],
+            f"{ROOT}/doca-repo-3.6.0/last_stable/": [UBUNTU, RHEL.replace("059000", "058000")],
+        }
+        with patch.object(resolver, "links", side_effect=fake_links(listings)), \
              patch.object(resolver, "request") as request:
             with self.assertRaisesRegex(ValueError, "disagree"):
-                resolver.resolve("3.5")
+                resolver.resolve("3.6")
             request.assert_not_called()
+
+    def test_missing_installer_is_rejected(self):
+        listings = {
+            f"{ROOT}/": ["doca-repo-3.6.0/"],
+            f"{ROOT}/doca-repo-3.6.0/last_stable/": [UBUNTU],
+        }
+        with patch.object(resolver, "links", side_effect=fake_links(listings)), \
+             patch.object(resolver, "request"):
+            with self.assertRaisesRegex(ValueError, "expected one"):
+                resolver.resolve("3.6")
 
 
 if __name__ == "__main__":
