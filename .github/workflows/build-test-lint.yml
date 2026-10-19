@@ -6,7 +6,7 @@ permissions:
 
 jobs:
   ci:
-    uses: Mellanox/cloud-orchestration-reusable-workflows/.github/workflows/go-ci-reusable.yml@main
+    uses: Mellanox/cloud-orchestration-reusable-workflows/.github/workflows/go-ci-reusable.yml@network-operator-26.10.x
     with:
       test-command: make test
       coverage-file: cover.out

@@ -14,4 +14,4 @@ jobs:
       actions: read
       contents: read
       security-events: write
-    uses: Mellanox/cloud-orchestration-reusable-workflows/.github/workflows/codeql-reusable.yml@main
+    uses: Mellanox/cloud-orchestration-reusable-workflows/.github/workflows/codeql-reusable.yml@network-operator-26.10.x
