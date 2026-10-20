@@ -566,6 +566,26 @@ var _ = Describe("doSPCX runtime configuration", func() {
 		Expect(calls[2]).NotTo(ContainElement(";"))
 	})
 
+	It("rejects deferred configure plans before runtime validation or changes", func() {
+		device := spectrumXRuntimeTestDevice()
+		deferredErr := fmt.Errorf("target map fingerprint mismatch: no live device matches plane1")
+		plan := &spectrumx.Plan{ConfigureError: deferredErr}
+		managerMock := spectrumxmocks.NewSpectrumXManager(GinkgoT())
+		managerMock.On("GetPreparedPlan", device).Return(plan, nil).Once()
+		validationMock := &configurationmocks.ConfigValidation{}
+		manager := configurationManager{configValidation: validationMock, spectrumXConfigManager: managerMock}
+
+		result, err := manager.ApplyRuntimeConfiguration(context.Background(), device)
+		Expect(result.Status).To(Equal(types.ApplyStatusFailed))
+		Expect(err).To(MatchError(ContainSubstring(deferredErr.Error())))
+		validationMock.AssertNotCalled(GinkgoT(), "RuntimeConfigApplied", device)
+		matches, err := manager.validateSpectrumXRuntimeConfig(context.Background(), device, plan)
+		Expect(matches).To(BeFalse())
+		Expect(err).To(MatchError(ContainSubstring(deferredErr.Error())))
+		Expect(manager.applySpectrumXRuntimeConfig(context.Background(), device, plan)).
+			To(MatchError(ContainSubstring(deferredErr.Error())))
+	})
+
 	It("batches link-event operations and post-validates the prepared runtime plan", func() {
 		device := spectrumXRuntimeTestDevice()
 		plan := &spectrumx.Plan{RuntimeConfig: []spectrumx.OperationGroup{{

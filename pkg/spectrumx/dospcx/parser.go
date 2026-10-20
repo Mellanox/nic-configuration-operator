@@ -357,9 +357,10 @@ func clonePlan(source *Plan) *Plan {
 		return nil
 	}
 	result := &Plan{
-		Breakout:      cloneXPathOperations(source.Breakout),
-		PostBreakout:  cloneXPathOperations(source.PostBreakout),
-		RuntimeConfig: cloneOperationGroups(source.RuntimeConfig),
+		Breakout:       cloneXPathOperations(source.Breakout),
+		PostBreakout:   cloneXPathOperations(source.PostBreakout),
+		RuntimeConfig:  cloneOperationGroups(source.RuntimeConfig),
+		ConfigureError: source.ConfigureError,
 	}
 	return result
 }

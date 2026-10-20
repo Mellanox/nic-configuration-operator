@@ -40,6 +40,7 @@ import (
 	firmwareMocks "github.com/Mellanox/nic-configuration-operator/pkg/firmware/mocks"
 	hostMocks "github.com/Mellanox/nic-configuration-operator/pkg/host/mocks"
 	maintenanceMocks "github.com/Mellanox/nic-configuration-operator/pkg/maintenance/mocks"
+	"github.com/Mellanox/nic-configuration-operator/pkg/spectrumx"
 	spectrumxMocks "github.com/Mellanox/nic-configuration-operator/pkg/spectrumx/mocks"
 	"github.com/Mellanox/nic-configuration-operator/pkg/testutils"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
@@ -552,6 +553,57 @@ var _ = Describe("NicDeviceReconciler", func() {
 
 			configurationManager.AssertNotCalled(GinkgoT(), "ResetNicFirmware", mock.Anything, mock.Anything)
 		})
+		DescribeTable("blocks runtime and the spec-change reboot when configure is unavailable",
+			func(plan *spectrumx.Plan, message string) {
+				spectrumXManager.On("PreparePlan", mock.Anything, mock.Anything).Return(nil)
+				spectrumXManager.On("GetPreparedPlan", mock.Anything).Return(plan, nil)
+				configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil, nil)
+
+				createDevice(true, nil, true)
+
+				Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
+					Type: consts.ConfigUpdateInProgressCondition, Status: metav1.ConditionFalse,
+					Reason:  consts.SpecValidationFailed,
+					Message: "doSPCX configure plan is not ready: " + message,
+				}))
+				Expect(getLastAppliedStateAnnotation()).To(Equal("some-state"))
+				configurationManager.AssertNotCalled(GinkgoT(), "ApplyRuntimeConfiguration", mock.Anything, mock.Anything)
+				maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
+				maintenanceManager.AssertNotCalled(GinkgoT(), "Reboot")
+			},
+			Entry("deferred configure plan",
+				&spectrumx.Plan{ConfigureError: errors.New("target map fingerprint mismatch: no live device matches plane1")},
+				"target map fingerprint mismatch: no live device matches plane1"),
+			Entry("missing plan", (*spectrumx.Plan)(nil), "prepared plan is missing for device \"test-device\""),
+		)
+
+		It("allows prepare NVConfig changes and reboot while configure is deferred", func() {
+			spectrumXManager.On("PreparePlan", mock.Anything, mock.Anything).Return(nil)
+			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(true, true, nil, nil)
+			configurationManager.On("ApplyNVConfiguration", mock.Anything, mock.Anything, mock.Anything).
+				Return(&types.ConfigurationApplyResult{Status: types.ApplyStatusSuccess, RebootRequired: true}, nil)
+			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
+			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
+			rebooted := make(chan struct{}, 1)
+			maintenanceManager.On("Reboot").Run(func(mock.Arguments) {
+				select {
+				case rebooted <- struct{}{}:
+				default:
+				}
+			}).Return(errors.New("reboot requested"))
+
+			createDevice(false, nil, true)
+
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
+				Type: consts.ConfigUpdateInProgressCondition, Status: metav1.ConditionTrue,
+				Reason: consts.PendingRebootReason,
+			}))
+			Eventually(rebooted, timeout).Should(Receive())
+			configurationManager.AssertCalled(GinkgoT(), "ApplyNVConfiguration", mock.Anything, mock.Anything, mock.Anything)
+			spectrumXManager.AssertNotCalled(GinkgoT(), "GetPreparedPlan", mock.Anything)
+			configurationManager.AssertNotCalled(GinkgoT(), "ApplyRuntimeConfiguration", mock.Anything, mock.Anything)
+		})
+
 		It("Should prepare the complete Spectrum-X plan before requesting maintenance", func() {
 			planErr := errors.New("plan generation failed")
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(true, false, nil, nil)
