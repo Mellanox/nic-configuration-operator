@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,6 +49,42 @@ type BlueprintPlanResult struct {
 	Status       string
 	PlanJSON     json.RawMessage
 	ErrorMessage string
+}
+
+// BlueprintTargetUnavailableError identifies a configure plan whose expected
+// target is not present in the current live inventory. It does not establish
+// whether applying prepare settings will make that target available.
+type BlueprintTargetUnavailableError struct {
+	cause error
+}
+
+func (e *BlueprintTargetUnavailableError) Error() string { return e.cause.Error() }
+
+// Unwrap preserves the original command failure for callers.
+func (e *BlueprintTargetUnavailableError) Unwrap() error { return e.cause }
+
+// classifyBlueprintPlanError deliberately uses only a valid structured response.
+// An exit code or a diagnostic embedded in raw stderr is not sufficient evidence
+// that a failure can be deferred.
+func classifyBlueprintPlanError(ctx context.Context, request BlueprintPlanRequest,
+	result *BlueprintPlanResult, decodeErr, err error,
+) error {
+	if request.Stage != "configure" || ctx.Err() != nil || decodeErr != nil || result == nil ||
+		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+		(result.Status != "error" && result.Status != "failed") {
+		return err
+	}
+	message := strings.TrimSpace(result.ErrorMessage)
+	message = strings.TrimPrefix(message, "planning started\n")
+	const prefix = "target map resolution failed: target map fingerprint mismatch: no live device matches "
+	target, found := strings.CutPrefix(message, prefix)
+	// Target IDs are single tokens. Reject trailing diagnostics or additional
+	// failures rather than accidentally hiding them behind a retryable error.
+	if !found || target == "" || len(strings.Fields(target)) != 1 || strings.TrimSpace(target) != target ||
+		strings.ContainsAny(target, "\r\n\t ") {
+		return err
+	}
+	return &BlueprintTargetUnavailableError{cause: err}
 }
 
 // GenerateBlueprintPlan invokes the agentless DMS Blueprints planner.
@@ -95,7 +132,8 @@ func GenerateBlueprintPlan(
 		}
 		detail := commandErrorDetail(output.Stdout, output.Stderr, structured)
 		if detail != "" {
-			return result, fmt.Errorf("generate Blueprint plan %q: %w: %s", request.Name, commandErr, detail)
+			err := fmt.Errorf("generate Blueprint plan %q: %w: %s", request.Name, commandErr, detail)
+			return result, classifyBlueprintPlanError(ctx, request, result, decodeErr, err)
 		}
 		return result, fmt.Errorf("generate Blueprint plan %q: %w", request.Name, commandErr)
 	}
@@ -107,7 +145,8 @@ func GenerateBlueprintPlan(
 		if detail == "" {
 			detail = fmt.Sprintf("unexpected status %q", result.Status)
 		}
-		return result, fmt.Errorf("generate Blueprint plan %q: %s", request.Name, detail)
+		err := fmt.Errorf("generate Blueprint plan %q: %s", request.Name, detail)
+		return result, classifyBlueprintPlanError(ctx, request, result, decodeErr, err)
 	}
 	return result, nil
 }

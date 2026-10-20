@@ -195,8 +195,8 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	log.Log.Info("firmware is ready for all devices, proceeding with NIC configuration")
 
-	// Build or retrieve the complete node-scoped doSPCX plan before validating
-	// and applying individual devices.
+	// Prepare the node-scoped doSPCX plan. Configure may be deferred until
+	// the prepare NVConfig changes have taken effect.
 	planDevices, err := r.prepareSpectrumXPlan(ctx, configStatuses)
 	if err != nil {
 		planErr := fmt.Errorf("prepare doSPCX configuration plan: %w", err)
@@ -239,6 +239,15 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if !configStatuses.nvConfigReadyForAll() {
 		log.Log.Info("nv config not ready for some devices, requeue")
 		return ctrl.Result{RequeueAfter: longRequeueTime}, nil
+	}
+
+	// Require configure before runtime handling, including its spec-change reboot.
+	// A missing configure target must not trigger another reboot once NVConfig is ready.
+	if planErr := r.validateSpectrumXConfigurePlans(planDevices); planErr != nil {
+		planErr = fmt.Errorf("doSPCX configure plan is not ready: %w", planErr)
+		statusErr := r.updateSpectrumXPlanFailureStatus(
+			ctx, planDevices, consts.SpecValidationFailed, planErr)
+		return ctrl.Result{}, errors.Join(planErr, statusErr)
 	}
 
 	log.Log.Info("applying runtime config")
@@ -512,6 +521,22 @@ func (r *NicDeviceReconciler) prepareSpectrumXPlan(
 		return nil, nil
 	}
 	return devices, r.SpectrumXManager.PreparePlan(ctx, devices)
+}
+
+func (r *NicDeviceReconciler) validateSpectrumXConfigurePlans(devices []*v1alpha1.NicDevice) error {
+	for _, device := range devices {
+		plan, err := r.SpectrumXManager.GetPreparedPlan(device)
+		if err != nil {
+			return err
+		}
+		if plan == nil {
+			return fmt.Errorf("prepared plan is missing for device %q", device.Name)
+		}
+		if plan.ConfigureError != nil {
+			return plan.ConfigureError
+		}
+	}
+	return nil
 }
 
 func spectrumXDevicesForPlan(statuses nicDeviceConfigurationStatuses) []*v1alpha1.NicDevice {

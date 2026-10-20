@@ -558,6 +558,11 @@ func (h configurationManager) ApplyRuntimeConfiguration(ctx context.Context, dev
 		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}
 
+	if plan != nil && plan.ConfigureError != nil {
+		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed},
+			fmt.Errorf("doSPCX configure plan is not ready: %w", plan.ConfigureError)
+	}
+
 	genericApplied, err := h.configValidation.RuntimeConfigApplied(device)
 	if err != nil {
 		logger.Error(err, "failed to validate generic runtime configuration", "device", device.Name)
