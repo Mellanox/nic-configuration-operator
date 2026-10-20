@@ -77,6 +77,10 @@ RUN if [ -n "${CVE_UPDATES_RHEL}" ]; then \
         dnf clean all; \
     fi
 
+# Work around DMS selecting switchdev representors instead of PF uplinks.
+COPY scripts/dms/ /tmp/nco-dms-workaround/
+RUN bash /tmp/nco-dms-workaround/patch-netdev-resolver.sh && rm -rf /tmp/nco-dms-workaround
+
 WORKDIR /
 COPY --from=builder /workspace/build/nic-configuration-daemon .
 
