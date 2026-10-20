@@ -76,7 +76,7 @@ variables:  # additional variables are defined at the gitlab group scope
   DAEMON_IMAGE_NAME: nic-configuration-operator-daemon-stig-fips
   # Pin the DOCA series per release branch; the resolver selects the last_stable
   # internal build of its latest patch.
-  DOCA_SERIES: "3.5"
+  DOCA_SERIES: "3.6"
   GOV_READY_POLICY_FILE_PATH: pulse-scan-policies/prodsec_approved_govready_release_policy.json
   CVE_UPDATES_RHEL: "openssl openssl-libs python3 python3-libs python3-urllib3 glib2 util-linux libnghttp2 vim-minimal libarchive libcurl-minimal curl-minimal sqlite-libs libxml2 gzip unbound-libs expat python3-idna attr libattr dbus-broker coreutils-single"
 
