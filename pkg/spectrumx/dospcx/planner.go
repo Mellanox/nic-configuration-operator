@@ -21,6 +21,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -63,6 +64,8 @@ type Plan struct {
 	Breakout      []dmscli.XPathOperation
 	PostBreakout  []dmscli.XPathOperation
 	RuntimeConfig []OperationGroup
+	// ConfigureError records a deferred configure plan; runtime configuration must not proceed.
+	ConfigureError error
 }
 
 // OperationGroup is an ordered group of runtime configuration operations.
@@ -155,7 +158,8 @@ type preparedStagePlan struct {
 }
 
 // PreparePlan ensures that one matching node-scoped plan containing persistent
-// and runtime configuration is cached. It is a no-op when none of the devices
+// and runtime configuration is cached. Configure planning may be deferred until
+// prepare NVConfig establishes the required topology. It is a no-op when none of the devices
 // enable Spectrum-X.
 func (m *Manager) PreparePlan(
 	ctx context.Context,
@@ -184,6 +188,11 @@ func (m *Manager) PreparePlan(
 	m.planMutex.Lock()
 	defer m.planMutex.Unlock()
 
+	cacheKey := targetMapName(config.nodeName)
+	cached := m.preparedPlans[cacheKey]
+	// Publish only a successfully prepared or explicitly deferred replacement.
+	delete(m.preparedPlans, cacheKey)
+
 	targetMapPath := filepath.Join(stateDir, "target-maps", targetMapName(config.nodeName)+".json")
 	targetMapContent, err := marshalJSONFile(config.targetMap)
 	if err != nil {
@@ -197,14 +206,22 @@ func (m *Manager) PreparePlan(
 		m.preparedPlans = make(map[string]*preparedPlan)
 	}
 
-	cacheKey := targetMapName(config.nodeName)
-	cached := m.preparedPlans[cacheKey]
 	stagePlans := make(map[planStage]*preparedStagePlan, 2)
 	for _, stage := range []planStage{planStagePrepare, planStageConfigure} {
 		stagePlan, stageErr := m.prepareStagePlan(
 			ctx, config, params, stateDir, targetMapPath, targetMapDigest, stage, cached)
 		if stageErr != nil {
-			return fmt.Errorf("prepare doSPCX %s plan: %w", stage, stageErr)
+			wrappedErr := fmt.Errorf("prepare doSPCX %s plan: %w", stage, stageErr)
+			var unavailable *dmscli.BlueprintTargetUnavailableError
+			if stage == planStageConfigure && ctx.Err() == nil && errors.As(stageErr, &unavailable) {
+				deferred := combineStagePlans(stagePlans[planStagePrepare], nil)
+				deferred.plan.ConfigureError = wrappedErr
+				m.preparedPlans[cacheKey] = deferred
+				log.FromContext(ctx).Info("deferring doSPCX configure plan until prepare configuration is applied",
+					"node", config.nodeName, "error", wrappedErr.Error())
+				return nil
+			}
+			return wrappedErr
 		}
 		stagePlans[stage] = stagePlan
 	}
@@ -305,6 +322,9 @@ func (m *Manager) GetPreparedPlan(device *v1alpha1.NicDevice) (*Plan, error) {
 		return nil, fmt.Errorf("doSPCX plan is not prepared for device %q", device.Name)
 	}
 	for _, stage := range []planStage{planStagePrepare, planStageConfigure} {
+		if stage == planStageConfigure && cached.plan.ConfigureError != nil {
+			continue
+		}
 		metadata, metadataFound := cached.metadata[stage]
 		if !metadataFound || metadata.TargetMapDigest == "" {
 			return nil, fmt.Errorf("cached doSPCX plan is incomplete for device %q", device.Name)
@@ -322,18 +342,19 @@ func (m *Manager) GetPreparedPlan(device *v1alpha1.NicDevice) (*Plan, error) {
 }
 
 func combineStagePlans(prepare, configure *preparedStagePlan) *preparedPlan {
-	return &preparedPlan{
-		metadata: map[planStage]planMetadata{
-			planStagePrepare:   prepare.metadata,
-			planStageConfigure: configure.metadata,
-		},
+	combined := &preparedPlan{
+		metadata:  map[planStage]planMetadata{planStagePrepare: prepare.metadata},
 		targetMap: prepare.targetMap,
 		plan: &Plan{
-			Breakout:      cloneXPathOperations(prepare.plan.Breakout),
-			PostBreakout:  cloneXPathOperations(prepare.plan.PostBreakout),
-			RuntimeConfig: cloneOperationGroups(configure.plan.RuntimeConfig),
+			Breakout:     cloneXPathOperations(prepare.plan.Breakout),
+			PostBreakout: cloneXPathOperations(prepare.plan.PostBreakout),
 		},
 	}
+	if configure != nil {
+		combined.metadata[planStageConfigure] = configure.metadata
+		combined.plan.RuntimeConfig = cloneOperationGroups(configure.plan.RuntimeConfig)
+	}
+	return combined
 }
 
 func planForStage(plan *Plan, stage planStage) *Plan {
