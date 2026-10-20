@@ -11,6 +11,7 @@ jobs:
       test-command: make test
       coverage-file: cover.out
       validate-command: |
+        bash scripts/dms/test-netdev-resolver.sh
         go mod tidy
         git diff --exit-code
         make generate
