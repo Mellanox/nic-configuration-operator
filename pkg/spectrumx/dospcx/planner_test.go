@@ -471,6 +471,84 @@ var _ = Describe("doSPCX planning", func() {
 		Expect(getErr).To(MatchError(ContainSubstring("is not prepared")))
 	})
 
+	It("defers only configure target unavailability and retries without losing prepare configuration", func() {
+		stateDir := GinkgoT().TempDir()
+		device := newDevice("rail-0", "0000:64:00.0", "hwplb")
+		commands := []preparePlanCommand{}
+		response := planResponse(planName(nodeName, prepareStage), "SPX_Multiplane", prepareStage, 2, 1)
+		unavailable := []byte(`{"status":"error","error_msg":"planning started\ntarget map resolution failed: target map fingerprint mismatch: no live device matches ew-rail0-prebreakout-plane1"}`)
+		configureReady := false
+		executor := preparePlanFakeExecutor(response, &commands)
+		for i := range executor.CommandScript {
+			executor.CommandScript[i] = func(executable string, args ...string) execUtils.Cmd {
+				command := &execTesting.FakeCmd{}
+				command.RunScript = append(command.RunScript, func() ([]byte, []byte, error) {
+					if argumentValue(args, "stage=") == configureStage && !configureReady {
+						return unavailable, nil, nil
+					}
+					return responseForPlanCommand(response, args), nil, nil
+				})
+				commands = append(commands, preparePlanCommand{executable: executable, args: args, command: command})
+				return command
+			}
+		}
+		manager := newTestPlanManager(executor, stateDir)
+		devices := []*v1alpha1.NicDevice{device}
+		Expect(manager.PreparePlan(context.Background(), devices)).To(Succeed())
+		plan, err := manager.GetPreparedPlan(device)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(plan.ConfigureError).To(MatchError(ContainSubstring("no live device matches")))
+		Expect(plan.Breakout).To(HaveLen(1))
+		Expect(plan.RuntimeConfig).To(BeEmpty())
+		Expect(manager.preparedPlans[targetMapName(nodeName)].metadata).NotTo(HaveKey(planStageConfigure))
+
+		// The deferred error survives cloning, but changes to the returned plan do not affect the cache.
+		plan.ConfigureError = nil
+		Expect(manager.PreparePlan(context.Background(), devices)).To(Succeed())
+		Expect(commands).To(HaveLen(3))
+		plan, err = manager.GetPreparedPlan(device)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(plan.ConfigureError).To(HaveOccurred())
+
+		// A new process can reuse persisted prepare data, but must regenerate configure.
+		configureReady = true
+		manager = newTestPlanManager(executor, stateDir)
+		Expect(manager.PreparePlan(context.Background(), devices)).To(Succeed())
+		Expect(commands).To(HaveLen(4))
+		plan, err = manager.GetPreparedPlan(device)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(plan.ConfigureError).NotTo(HaveOccurred())
+		Expect(plan.RuntimeConfig).NotTo(BeEmpty())
+		Expect(manager.PreparePlan(context.Background(), devices)).To(Succeed())
+		Expect(commands).To(HaveLen(4))
+	})
+
+	It("does not defer missing live targets in prepare", func() {
+		commands := []preparePlanCommand{}
+		response := []byte(`{"status":"error","error_msg":"target map resolution failed: target map fingerprint mismatch: no live device matches ew-rail0-prebreakout"}`)
+		manager := newTestPlanManager(preparePlanFakeExecutor(response, &commands), GinkgoT().TempDir())
+		device := newDevice("rail-0", "0000:64:00.0", "hwplb")
+		Expect(manager.PreparePlan(context.Background(), []*v1alpha1.NicDevice{device})).To(
+			MatchError(ContainSubstring("prepare doSPCX prepare plan")))
+		_, err := manager.GetPreparedPlan(device)
+		Expect(err).To(MatchError(ContainSubstring("is not prepared")))
+		Expect(commands).To(HaveLen(1))
+	})
+
+	It("removes an old cached plan when regeneration fails", func() {
+		stateDir := GinkgoT().TempDir()
+		commands := []preparePlanCommand{}
+		device := newDevice("rail-0", "0000:64:00.0", "hwplb")
+		manager := newTestPlanManager(preparePlanFakeExecutor(
+			planResponse(planName(nodeName, prepareStage), "SPX_Multiplane", prepareStage, 2, 1), &commands), stateDir)
+		Expect(manager.PreparePlan(context.Background(), []*v1alpha1.NicDevice{device})).To(Succeed())
+		manager.dospcxDataDigest = "changed-bundle"
+		manager.execInterface = preparePlanFakeExecutor([]byte(`{"status":"error","error_msg":"data folder not found"}`), &commands)
+		Expect(manager.PreparePlan(context.Background(), []*v1alpha1.NicDevice{device})).NotTo(Succeed())
+		_, err := manager.GetPreparedPlan(device)
+		Expect(err).To(MatchError(ContainSubstring("is not prepared")))
+	})
+
 	It("does not load a persisted plan through the per-device retrieval path", func() {
 		manager := newTestPlanManager(nil, GinkgoT().TempDir())
 		device := newDevice("device", "0000:64:00.0", "hwplb")

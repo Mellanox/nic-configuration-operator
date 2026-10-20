@@ -61,6 +61,9 @@ func (h configurationManager) validateSpectrumXRuntimeConfig(
 	if plan == nil {
 		return false, fmt.Errorf("cannot validate a nil doSPCX runtime plan")
 	}
+	if plan.ConfigureError != nil {
+		return false, fmt.Errorf("doSPCX configure plan is not ready: %w", plan.ConfigureError)
+	}
 	groupBatches := make([][]spectrumXRuntimeOperationBatch, len(plan.RuntimeConfig))
 	var allBatches []spectrumXRuntimeOperationBatch
 	for i, group := range plan.RuntimeConfig {
@@ -214,6 +217,9 @@ func (h configurationManager) applySpectrumXRuntimeConfig(
 ) error {
 	if plan == nil {
 		return fmt.Errorf("cannot apply a nil doSPCX runtime plan")
+	}
+	if plan.ConfigureError != nil {
+		return fmt.Errorf("doSPCX configure plan is not ready: %w", plan.ConfigureError)
 	}
 	for _, group := range plan.RuntimeConfig {
 		batches, err := spectrumXRuntimeOperationBatches(ctx, device, group)

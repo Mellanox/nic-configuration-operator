@@ -173,6 +173,61 @@ var _ = Describe("Blueprint plan", func() {
 		Expect(err).To(MatchError(ContainSubstring("invalid profile parameters")))
 	})
 
+	Describe("unavailable configure targets", func() {
+		const diagnostic = "target map resolution failed: target map fingerprint mismatch: no live device matches ew-rail0-prebreakout-plane1"
+
+		DescribeTable("classifies only the known structured planner failure",
+			func(stage, status, message string, commandErr error, expected bool) {
+				request := newRequest()
+				request.Stage = stage
+				stdout, marshalErr := json.Marshal(map[string]string{"status": status, "error_msg": message})
+				Expect(marshalErr).NotTo(HaveOccurred())
+				_, err := GenerateBlueprintPlan(context.Background(), fakeExecutor(stdout, commandErr, &commands), request)
+				Expect(err).To(HaveOccurred())
+				var unavailable *BlueprintTargetUnavailableError
+				Expect(errors.As(err, &unavailable)).To(Equal(expected))
+				if commandErr != nil {
+					Expect(errors.Is(err, commandErr)).To(BeTrue())
+				}
+				Expect(err.Error()).To(ContainSubstring(strings.TrimSpace(message)))
+			},
+			Entry("DMS error", "configure", "error", "planning started\n"+diagnostic, errors.New("exit status 9"), true),
+			Entry("shell failed status", "configure", "failed", diagnostic, errors.New("exit status 9"), true),
+			Entry("structured failure with successful exit", "configure", "failed", diagnostic, nil, true),
+			Entry("prepare failure", "prepare", "error", diagnostic, errors.New("exit status 9"), false),
+			Entry("unknown status", "configure", "partial", diagnostic, errors.New("exit status 9"), false),
+			Entry("empty target", "configure", "error", "target map resolution failed: target map fingerprint mismatch: no live device matches ", errors.New("exit status 9"), false),
+			Entry("ambiguous target", "configure", "error", "target map resolution failed: target map fingerprint mismatch: multiple live devices match rail0", errors.New("exit status 9"), false),
+			Entry("missing bundle", "configure", "error", "DoSpcx data folder not found", errors.New("exit status 9"), false),
+			Entry("additional failure", "configure", "error", diagnostic+"\npermission denied", errors.New("exit status 9"), false),
+			Entry("cancellation", "configure", "error", diagnostic, context.Canceled, false),
+			Entry("deadline", "configure", "error", diagnostic, context.DeadlineExceeded, false),
+		)
+
+		It("does not classify diagnostic text in malformed stdout or stderr", func() {
+			request := newRequest()
+			request.Stage = "configure"
+			for _, stdout := range [][]byte{[]byte(diagnostic), []byte(`{"status":"error","error_msg":`)} {
+				executor := fakeExecutorWithStderr(stdout, []byte(diagnostic), errors.New("exit status 9"), &commands)
+				_, err := GenerateBlueprintPlan(context.Background(), executor, request)
+				var unavailable *BlueprintTargetUnavailableError
+				Expect(errors.As(err, &unavailable)).To(BeFalse())
+			}
+		})
+
+		It("does not defer after the caller cancels its context", func() {
+			request := newRequest()
+			request.Stage = "configure"
+			stdout, err := json.Marshal(map[string]string{"status": "error", "error_msg": diagnostic})
+			Expect(err).NotTo(HaveOccurred())
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			_, err = GenerateBlueprintPlan(ctx, fakeExecutor(stdout, errors.New("signal: killed"), &commands), request)
+			var unavailable *BlueprintTargetUnavailableError
+			Expect(errors.As(err, &unavailable)).To(BeFalse())
+		})
+	})
+
 	DescribeTable("validates requests",
 		func(mutate func(*BlueprintPlanRequest), expected string) {
 			request := newRequest()
