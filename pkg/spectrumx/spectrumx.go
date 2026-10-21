@@ -351,7 +351,7 @@ func (m *spectrumXConfigManager) checkMlxRegParamApplied(device *v1alpha1.NicDev
 
 	log.Log.V(2).Info("SpectrumXConfigManager.checkMlxRegParamApplied()", "device", device.Name, "param", param.Name)
 	for _, port := range device.Status.Ports {
-		args := []string{"-d", port.PCI, "--reg_name", param.MlxReg.Register, "--get"}
+		args := []string{"-d", resolveMlxRegTarget(port), "--reg_name", param.MlxReg.Register, "--get"}
 		command := commandLine(mlxregBinary, args)
 		log.Log.V(2).Info("checkMlxRegParamApplied(): running mlxreg get",
 			"device", device.Name, "pci", port.PCI, "param", param.Name, "field", param.MlxReg.Field,

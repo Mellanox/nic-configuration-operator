@@ -1130,6 +1130,28 @@ var _ = Describe("SpectrumXConfigManager", func() {
 			Expect(applied).To(BeTrue())
 		})
 
+		It("uses each port's fwctl device or PCI fallback for mlxreg verification", func() {
+			device.Status.Ports = []v1alpha1.NicDevicePortSpec{
+				{PCI: "0000:00:00.0", FwctlDevice: "/dev/fwctl/fwctl3"},
+				{PCI: "0000:00:00.1", FwctlDevice: ""},
+			}
+			execFake.cmds = []*fakeCmd{
+				{output: []byte(mlxregGetCCProbeMPSet), err: nil},
+				{output: []byte(mlxregGetCCProbeMPSet), err: nil},
+			}
+
+			applied, err := manager.checkMlxRegParamApplied(device, ccProbeMPModeParam())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(applied).To(BeTrue())
+			Expect(execFake.calls).To(HaveLen(2))
+			for n, target := range []string{"/dev/fwctl/fwctl3", "0000:00:00.1"} {
+				Expect(execFake.calls[n].name).To(Equal(mlxregBinary))
+				Expect(execFake.calls[n].args).To(Equal([]string{
+					"-d", target, "--reg_name", "ROCE_ACCL", "--get",
+				}))
+			}
+		})
+
 		It("returns false when an mlxreg value does not match", func() {
 			execFake.cmds = []*fakeCmd{{output: []byte(mlxregGetCCProbeMPUnset), err: nil}}
 
