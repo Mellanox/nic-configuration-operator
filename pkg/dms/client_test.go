@@ -166,6 +166,42 @@ var _ = Describe("DMSClient", func() {
 		Expect(found).To(BeTrue(), "Expected --target %s in args: %v", testPCI, args)
 	}
 
+	DescribeTable("gNMI target selection",
+		func(ports []v1alpha1.NicDevicePortSpec, expected string) {
+			client.device.Ports = ports
+			checkCommand := func(cmd string, args ...string) exec.Cmd {
+				Expect(cmd).To(Equal(dmsClientPath))
+				Expect(args).To(ContainElement("--target"))
+				for n, arg := range args {
+					if arg == "--target" {
+						Expect(args[n+1]).To(Equal(expected))
+					}
+				}
+				return createFakeCmd(makeGetOutput("/test", "/test", "value"), nil)
+			}
+			fakeExec.CommandScript = []execTesting.FakeCommandAction{checkCommand, checkCommand, checkCommand}
+			_, err := client.RunGetPathCommand("/test", nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(client.RunSetPathCommand("/test", "value", "string", nil)).To(Succeed())
+			Expect(client.SetParameters([]types.ConfigurationParameter{
+				{Name: "test", DMSPath: "/test", Value: "value", ValueType: "string"},
+			})).To(Succeed())
+			Expect(fakeExec.CommandCalls).To(Equal(3))
+		},
+		Entry("normalizes the first port's fwctl path", []v1alpha1.NicDevicePortSpec{
+			{PCI: testPCI, FwctlDevice: "/dev/fwctl/fwctl3"},
+			{PCI: "0000:00:00.1", FwctlDevice: "/dev/fwctl/fwctl4"},
+		}, "fwctl3"),
+		Entry("accepts a bare fwctl name", []v1alpha1.NicDevicePortSpec{
+			{PCI: testPCI, FwctlDevice: "fwctl3"},
+		}, "fwctl3"),
+		Entry("falls back to PCI without using another port's fwctl", []v1alpha1.NicDevicePortSpec{
+			{PCI: testPCI, FwctlDevice: ""},
+			{PCI: "0000:00:00.1", FwctlDevice: "/dev/fwctl/fwctl4"},
+		}, testPCI),
+		Entry("falls back to PCI with no ports", []v1alpha1.NicDevicePortSpec{}, testPCI),
+	)
+
 	Describe("GetQoSSettings", func() {
 		Context("with successful commands", func() {
 			BeforeEach(func() {
@@ -1367,7 +1403,8 @@ var _ = Describe("DMSClient", func() {
 				client.device = device
 			})
 
-			It("should install and activate BFB successfully", func() {
+			It("should install and activate BFB via PCI even when fwctl is available", func() {
+				client.device.Ports[0].FwctlDevice = "/dev/fwctl/fwctl3"
 				fakeInstallCmd := createFakeCmd([]byte("BFB install successful"), nil)
 				fakeActivateCmd := createFakeCmd([]byte("BFB activate successful"), nil)
 

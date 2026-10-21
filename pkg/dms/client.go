@@ -107,6 +107,15 @@ func (i *dmsClient) deviceSnapshot() v1alpha1.NicDeviceStatus {
 	return *i.device.DeepCopy()
 }
 
+// gnmiTarget prefers the first port's discovered fwctl device, keeping PCI as a fallback.
+func (i *dmsClient) gnmiTarget(device v1alpha1.NicDeviceStatus) string {
+	if len(device.Ports) > 0 && device.Ports[0].FwctlDevice != "" {
+		// dmsc can route an absolute path before the subcommand to the XPath CLI.
+		return strings.TrimPrefix(device.Ports[0].FwctlDevice, "/dev/fwctl/")
+	}
+	return i.targetPCI
+}
+
 // injectFilterRules takes a DMS path and a map of filter rules, and injects the rules into the path
 // Example:
 // path: /interfaces/interface/nvidia/qos/config/trust-mode
@@ -218,7 +227,7 @@ func (i *dmsClient) RunGetPathCommands(batch getPathRequestBatch) (map[string]st
 	log.Log.V(2).Info("dmsClient.RunGetPathCommands()", "requestCount", len(requests), "batchKey", batchKey, "device", device.SerialNumber)
 
 	args := append([]string{dmsClientPath, "-a", i.bindAddress}, i.authParams...)
-	args = append(args, "--target", i.targetPCI, "--timeout", dmsClientTimeout, "get")
+	args = append(args, "--target", i.gnmiTarget(device), "--timeout", dmsClientTimeout, "get")
 	for _, request := range requests {
 		args = append(args, "--path", request.queryPath)
 	}
@@ -320,7 +329,7 @@ func (i *dmsClient) RunSetPathCommand(path, value, valueType string, filterRules
 	log.Log.V(2).Info("dmsClient.RunSetPathCommand()", "path", path, "value", value, "valueType", valueType, "device", device.SerialNumber)
 
 	args := append([]string{dmsClientPath, "-a", i.bindAddress}, i.authParams...)
-	args = append(args, "--target", i.targetPCI, "--timeout", dmsClientTimeout, "set", "--update", formatSetUpdate(path, value, valueType, filterRules))
+	args = append(args, "--target", i.gnmiTarget(device), "--timeout", dmsClientTimeout, "set", "--update", formatSetUpdate(path, value, valueType, filterRules))
 	log.Log.V(2).Info("dmsClient.RunSetPathCommand()", "args", strings.Join(args, " "))
 
 	command := i.execInterface.Command(args[0], args[1:]...)
@@ -606,7 +615,7 @@ func (i *dmsClient) SetParameters(params []types.ConfigurationParameter) error {
 	log.Log.V(2).Info("Collected set updates", "device", device.SerialNumber, "updateCount", len(updates))
 
 	args := append([]string{dmsClientPath, "-a", i.bindAddress}, i.authParams...)
-	args = append(args, "--target", i.targetPCI, "--timeout", dmsClientTimeout, "set")
+	args = append(args, "--target", i.gnmiTarget(device), "--timeout", dmsClientTimeout, "set")
 	for _, update := range updates {
 		args = append(args, "--update", update)
 	}
