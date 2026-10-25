@@ -78,6 +78,10 @@ RUN curl -fsSL https://www.mellanox.com/downloads/MFT/mft-${MFT_VERSION}-x86_64-
     ./install.sh --without-kernel && \
     rm -rf /tmp/mft-${MFT_VERSION}-x86_64-deb
 
+# Work around DMS selecting switchdev representors instead of PF uplinks.
+COPY scripts/dms/ /tmp/nco-dms-workaround/
+RUN bash /tmp/nco-dms-workaround/patch-netdev-resolver.sh && rm -rf /tmp/nco-dms-workaround
+
 WORKDIR /
 COPY --from=builder /workspace/build/nic-configuration-daemon .
 
