@@ -144,7 +144,7 @@ type SpectrumXOptimizedSpec struct {
 	// +optional
 	MultiplaneMode string `json:"multiplaneMode,omitempty"`
 	// Number of planes to be configured
-	// +kubebuilder:validation:Enum=1;2;4
+	// +kubebuilder:validation:Enum=1;2;4;8
 	// +kubebuilder:default:=1
 	// +optional
 	NumberOfPlanes int `json:"numberOfPlanes,omitempty"`
