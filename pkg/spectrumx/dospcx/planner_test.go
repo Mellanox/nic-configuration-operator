@@ -829,7 +829,11 @@ var _ = Describe("doSPCX planning", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(commands).To(HaveLen(2))
 			for _, command := range commands {
-				Expect(command.args).To(ContainElement("profile=" + profile))
+				Expect(command.args).To(ContainElements(
+					"profile="+profile,
+					"params=planes="+strconv.Itoa(planes),
+					"params=deployment_mode=host-k8s",
+				))
 				if mode == "hwplb" {
 					Expect(command.args).NotTo(ContainElement("params=overlay=none"))
 				}
@@ -844,6 +848,8 @@ var _ = Describe("doSPCX planning", func() {
 		Entry("RTX omitted mode and padded platform", " rtx ", "", "rtx", 1),
 		Entry("VR software multiplane", "vr", "swplb", "vr-SPX_NetPlugin", 2),
 		Entry("VR hardware multiplane profile routing", "vr", "hwplb", "vr-SPX_Multiplane", 4),
+		Entry("GB300 eight software planes", "gb300", "swplb", "SPX_NetPlugin", 8),
+		Entry("GB300 eight hardware planes", "gb300", "hwplb", "SPX_Multiplane", 8),
 	)
 
 	DescribeTable("rejects unsupported platform modes before invoking the planner",

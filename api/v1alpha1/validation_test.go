@@ -17,6 +17,7 @@ package v1alpha1
 
 import (
 	"context"
+	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -273,6 +274,62 @@ var _ = Describe("NicConfigurationTemplate CEL validation", func() {
 
 	// Tests for MultiplaneMode and NumberOfPlanes validation rules
 	Context("MultiplaneMode and NumberOfPlanes validation", func() {
+		DescribeTable("validates plane counts in templates and devices",
+			func(mode string, planes int, errorMessage string) {
+				template := newNicConfigurationTemplate(fmt.Sprintf("spcx-planes-%s-%d", mode, planes), "Ethernet", 1, &SpectrumXOptimizedSpec{
+					Enabled:        true,
+					Version:        "RA2.1",
+					PlatformType:   "gb300",
+					Overlay:        "none",
+					MultiplaneMode: mode,
+					NumberOfPlanes: planes,
+				})
+				template.Spec.NicSelector.NicType = nicTypeConnectX9
+				device := &NicDevice{
+					ObjectMeta: metav1.ObjectMeta{Name: template.Name, Namespace: template.Namespace},
+					Spec: NicDeviceSpec{
+						Configuration: &NicDeviceConfigurationSpec{
+							ResetToDefault: false,
+							Template:       template.Spec.Template.DeepCopy(),
+						},
+						Firmware:              nil,
+						InterfaceNameTemplate: nil,
+					},
+				}
+				for _, obj := range []client.Object{template, device} {
+					err := k8sClient.Create(ctx, obj)
+					if errorMessage != "" {
+						Expect(err).To(HaveOccurred())
+						Expect(err.Error()).To(ContainSubstring(errorMessage))
+					} else {
+						Expect(err).NotTo(HaveOccurred())
+					}
+				}
+				if errorMessage == "" {
+					expectedPlanes := planes
+					if expectedPlanes == 0 {
+						expectedPlanes = 1
+					}
+					Expect(template.Spec.Template.SpectrumXOptimized.NumberOfPlanes).To(Equal(expectedPlanes))
+					Expect(device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes).To(Equal(expectedPlanes))
+				}
+			},
+			Entry("defaults to one plane", "none", 0, ""),
+			Entry("accepts one plane", "none", 1, ""),
+			Entry("accepts two software planes", "swplb", 2, ""),
+			Entry("accepts four software planes", "swplb", 4, ""),
+			Entry("accepts eight software planes", "swplb", 8, ""),
+			Entry("accepts two hardware planes", "hwplb", 2, ""),
+			Entry("accepts four hardware planes", "hwplb", 4, ""),
+			Entry("accepts eight hardware planes", "hwplb", 8, ""),
+			Entry("rejects eight planes without multiplane mode", "none", 8, "when MultiplaneMode is none, numberOfPlanes must be 1"),
+			Entry("rejects eight planes with omitted mode", "", 8, "when MultiplaneMode is none, numberOfPlanes must be 1"),
+			Entry("rejects one software plane", "swplb", 1, "when MultiplaneMode is not none, numberOfPlanes must not be 1"),
+			Entry("rejects one hardware plane", "hwplb", 1, "when MultiplaneMode is not none, numberOfPlanes must not be 1"),
+			Entry("rejects non-power-of-two planes", "swplb", 3, "Unsupported value: 3"),
+			Entry("rejects more than eight planes", "hwplb", 16, "Unsupported value: 16"),
+		)
+
 		It("allows MultiplaneMode=none with numberOfPlanes=1", func() {
 			obj := newNicConfigurationTemplate("spcx-none-1plane", "Ethernet", 1, &SpectrumXOptimizedSpec{
 				Enabled:        true,
