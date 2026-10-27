@@ -24,47 +24,62 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// useVRTargetMap preserves the VR topology authored in the installed data bundle.
+// loadVRTargetMap preserves the VR topology authored in the installed data bundle.
 // PCI addresses must match the selected NICs exactly; rail membership cannot be
 // inferred from PCI ordering or physical Network Bay pairing.
 // The caller holds planMutex to serialize this read with data bundle replacement.
-func (m *Manager) useVRTargetMap(config *planConfig) error {
-	if config.platformType != "vr" {
-		return nil
-	}
+func (m *Manager) loadVRTargetMap(devices []planDevice) (targetMap, error) {
 	path := filepath.Join(m.dospcxDataRoot, "target-maps", "VR-SPX_Multiplane.yaml")
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("read VR reference target map %q: %w", path, err)
+		return targetMap{}, fmt.Errorf("read VR reference target map %q: %w", path, err)
 	}
 	var reference targetMap
 	if err := yaml.Unmarshal(content, &reference); err != nil {
-		return fmt.Errorf("decode VR reference target map %q: %w", path, err)
+		return targetMap{}, fmt.Errorf("decode VR reference target map %q: %w", path, err)
 	}
-	selected := make(map[string]struct{}, len(config.targetMap.PreBreakout.Targets))
-	for _, target := range config.targetMap.PreBreakout.Targets {
-		selected[target.BDF] = struct{}{}
+	selected := make(map[string]struct{}, len(devices))
+	for _, device := range devices {
+		selected[device.bdf] = struct{}{}
 	}
 	seen := make(map[string]struct{}, len(reference.PreBreakout.Targets))
 	for i := range reference.PreBreakout.Targets {
 		target := &reference.PreBreakout.Targets[i]
 		target.BDF = strings.ToLower(strings.TrimSpace(target.BDF))
 		if !isCanonicalFunctionZeroBDF(target.BDF) {
-			return fmt.Errorf("VR reference target map %q has invalid function-zero PCI address %q", path, target.BDF)
+			return targetMap{}, fmt.Errorf("VR reference target map %q has invalid function-zero PCI address %q", path, target.BDF)
 		}
 		if _, duplicate := seen[target.BDF]; duplicate {
-			return fmt.Errorf("VR reference target map %q has duplicate PCI address %q", path, target.BDF)
+			return targetMap{}, fmt.Errorf("VR reference target map %q has duplicate PCI address %q", path, target.BDF)
 		}
 		seen[target.BDF] = struct{}{}
 		if _, found := selected[target.BDF]; !found {
-			return fmt.Errorf("VR reference target map %q PCI address %q is not selected for the Spectrum-X plan", path, target.BDF)
+			return targetMap{}, fmt.Errorf("VR reference target map %q PCI address %q is not selected for the Spectrum-X plan", path, target.BDF)
 		}
 	}
-	for _, target := range config.targetMap.PreBreakout.Targets {
-		if _, found := seen[target.BDF]; !found {
-			return fmt.Errorf("selected PCI address %q is missing from VR reference target map %q", target.BDF, path)
+	for _, device := range devices {
+		if _, found := seen[device.bdf]; !found {
+			return targetMap{}, fmt.Errorf("selected PCI address %q is missing from VR reference target map %q", device.bdf, path)
 		}
 	}
-	config.targetMap = reference
-	return nil
+	return reference, nil
+}
+
+// buildTargetMap assigns one rail per PCI-sorted device for non-VR platforms.
+func buildTargetMap(config *planConfig) targetMap {
+	targets := targetMap{
+		SchemaVersion: targetMapSchemaVersion,
+		PlatformType:  config.platformType,
+		PreBreakout:   targetMapTarget{Targets: make([]preBreakoutTarget, 0, len(config.devices))},
+	}
+	for rail, device := range config.devices {
+		targets.PreBreakout.Targets = append(targets.PreBreakout.Targets, preBreakoutTarget{
+			ID:       fmt.Sprintf("ew-rail%d-prebreakout", rail),
+			BDF:      device.bdf,
+			DeviceID: device.deviceID,
+			Role:     targetRoleEW,
+			Rail:     rail,
+		})
+	}
+	return targets
 }

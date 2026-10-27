@@ -1212,7 +1212,7 @@ pre_breakout:
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(config.platformType).To(Equal("gb300"))
-		Expect(config.targetMap.PlatformType).To(Equal("gb300"))
+		Expect(buildTargetMap(config).PlatformType).To(Equal("gb300"))
 	})
 
 	It("ignores interface-name configuration when assigning target-map rails", func() {
@@ -1226,7 +1226,7 @@ pre_breakout:
 		config, err := buildPlanConfig([]*v1alpha1.NicDevice{second, first})
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(config.targetMap.PreBreakout.Targets).To(Equal([]preBreakoutTarget{
+		Expect(buildTargetMap(config).PreBreakout.Targets).To(Equal([]preBreakoutTarget{
 			{ID: "ew-rail0-prebreakout", BDF: "0000:64:00.0", DeviceID: "0x1023", Role: "ew", Rail: 0},
 			{ID: "ew-rail1-prebreakout", BDF: "0001:15:00.0", DeviceID: "0x1023", Role: "ew", Rail: 1},
 		}))

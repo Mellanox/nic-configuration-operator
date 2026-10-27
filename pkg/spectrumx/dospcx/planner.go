@@ -124,7 +124,12 @@ type planConfig struct {
 	multiplane   string
 	overlay      string
 	planes       int
-	targetMap    targetMap
+	devices      []planDevice
+}
+
+type planDevice struct {
+	bdf      string
+	deviceID string
 }
 
 // planMetadata contains only the inputs used to generate a doSPCX plan.
@@ -193,12 +198,18 @@ func (m *Manager) PreparePlan(
 	cached := m.preparedPlans[cacheKey]
 	// Publish only a successfully prepared or explicitly deferred replacement.
 	delete(m.preparedPlans, cacheKey)
-	if err := m.useVRTargetMap(config); err != nil {
-		return err
+	var targets targetMap
+	if config.platformType == "vr" {
+		targets, err = m.loadVRTargetMap(config.devices)
+		if err != nil {
+			return err
+		}
+	} else {
+		targets = buildTargetMap(config)
 	}
 
 	targetMapPath := filepath.Join(stateDir, "target-maps", targetMapName(config.nodeName)+".json")
-	targetMapContent, err := marshalJSONFile(config.targetMap)
+	targetMapContent, err := marshalJSONFile(targets)
 	if err != nil {
 		return fmt.Errorf("marshal doSPCX target map: %w", err)
 	}
@@ -213,7 +224,7 @@ func (m *Manager) PreparePlan(
 	stagePlans := make(map[planStage]*preparedStagePlan, 2)
 	for _, stage := range []planStage{planStagePrepare, planStageConfigure} {
 		stagePlan, stageErr := m.prepareStagePlan(
-			ctx, config, params, stateDir, targetMapPath, targetMapDigest, stage, cached)
+			ctx, config, targets, params, stateDir, targetMapPath, targetMapDigest, stage, cached)
 		if stageErr != nil {
 			wrappedErr := fmt.Errorf("prepare doSPCX %s plan: %w", stage, stageErr)
 			var unavailable *dmscli.BlueprintTargetUnavailableError
@@ -239,6 +250,7 @@ func (m *Manager) PreparePlan(
 func (m *Manager) prepareStagePlan(
 	ctx context.Context,
 	config *planConfig,
+	targets targetMap,
 	params []string,
 	stateDir string,
 	targetMapPath string,
@@ -289,9 +301,9 @@ func (m *Manager) prepareStagePlan(
 	}
 	log.FromContext(ctx).Info("generated doSPCX plan",
 		"node", config.nodeName, "stage", stage, "profile", config.profile,
-		"platformType", config.platformType, "devices", len(config.targetMap.PreBreakout.Targets),
+		"platformType", config.platformType, "devices", len(config.devices),
 		"targetMap", targetMapPath, "plan", planPath, "metadata", metadataPath)
-	return &preparedStagePlan{metadata: metadata, targetMap: config.targetMap, plan: plan}, nil
+	return &preparedStagePlan{metadata: metadata, targetMap: targets, plan: plan}, nil
 }
 
 // GetPreparedPlan retrieves a cached plan only when it still matches the
@@ -422,22 +434,22 @@ func validateDeviceInTargetMap(config *planConfig, saved targetMap) error {
 	if saved.SchemaVersion != targetMapSchemaVersion || saved.PlatformType != config.platformType {
 		return fmt.Errorf("target map identity changed")
 	}
-	expectedTarget := config.targetMap.PreBreakout.Targets[0]
+	expectedDevice := config.devices[0]
 	for _, target := range saved.PreBreakout.Targets {
-		if target.BDF == expectedTarget.BDF {
+		if target.BDF == expectedDevice.bdf {
 			if strings.TrimSpace(target.ID) == "" {
-				return fmt.Errorf("BDF %q has no target ID", expectedTarget.BDF)
+				return fmt.Errorf("BDF %q has no target ID", expectedDevice.bdf)
 			}
-			if target.DeviceID != expectedTarget.DeviceID {
-				return fmt.Errorf("BDF %q device ID is %q, expected %q", expectedTarget.BDF, target.DeviceID, expectedTarget.DeviceID)
+			if target.DeviceID != expectedDevice.deviceID {
+				return fmt.Errorf("BDF %q device ID is %q, expected %q", expectedDevice.bdf, target.DeviceID, expectedDevice.deviceID)
 			}
 			if target.Role != targetRoleEW {
-				return fmt.Errorf("BDF %q role is %q, expected %q", expectedTarget.BDF, target.Role, targetRoleEW)
+				return fmt.Errorf("BDF %q role is %q, expected %q", expectedDevice.bdf, target.Role, targetRoleEW)
 			}
 			return nil
 		}
 	}
-	return fmt.Errorf("BDF %q is absent from the target map", expectedTarget.BDF)
+	return fmt.Errorf("BDF %q is absent from the target map", expectedDevice.bdf)
 }
 
 func (m *Manager) resolvedStateDir() string {
@@ -546,17 +558,8 @@ func buildPlanConfig(devices []*v1alpha1.NicDevice) (*planConfig, error) {
 		multiplane:   normalizedMultiplaneMode(firstSpec.MultiplaneMode),
 		overlay:      firstSpec.Overlay,
 		planes:       planes,
-		targetMap: targetMap{
-			SchemaVersion: targetMapSchemaVersion,
-			PlatformType:  platformType,
-			PreBreakout:   targetMapTarget{Targets: make([]preBreakoutTarget, 0, len(selected))},
-		},
+		devices:      make([]planDevice, 0, len(selected)),
 	}
-	type orderedDevice struct {
-		bdf      string
-		deviceID string
-	}
-	ordered := make([]orderedDevice, 0, len(selected))
 	seenBDFs := map[string]string{}
 	for _, device := range selected {
 		if strings.TrimSpace(device.Status.Node) != config.nodeName {
@@ -598,21 +601,12 @@ func buildPlanConfig(devices []*v1alpha1.NicDevice) (*planConfig, error) {
 			return nil, fmt.Errorf("devices %q and %q resolve to the same pre-breakout BDF %q", otherDevice, device.Name, bdf)
 		}
 		seenBDFs[bdf] = device.Name
-		ordered = append(ordered, orderedDevice{bdf: bdf, deviceID: deviceID})
+		config.devices = append(config.devices, planDevice{bdf: bdf, deviceID: deviceID})
 	}
 
-	sort.Slice(ordered, func(i, j int) bool {
-		return ordered[i].bdf < ordered[j].bdf
+	sort.Slice(config.devices, func(i, j int) bool {
+		return config.devices[i].bdf < config.devices[j].bdf
 	})
-	for rail, item := range ordered {
-		config.targetMap.PreBreakout.Targets = append(config.targetMap.PreBreakout.Targets, preBreakoutTarget{
-			ID:       fmt.Sprintf("ew-rail%d-prebreakout", rail),
-			BDF:      item.bdf,
-			DeviceID: item.deviceID,
-			Role:     targetRoleEW,
-			Rail:     rail,
-		})
-	}
 
 	return config, nil
 }
