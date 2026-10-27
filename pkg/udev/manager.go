@@ -30,6 +30,7 @@ import (
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
 
@@ -86,7 +87,7 @@ func NewUdevManager() UdevManager {
 // - bool: true if any rules were updated, false if no change
 // - error: any error that occurred
 func (m *udevManager) ApplyUdevRules(ctx context.Context, devices []*v1alpha1.NicDevice) (map[string]ExpectedInterfaceNames, bool, error) {
-	log.Log.V(2).Info("UdevManager.ApplyUdevRules", "deviceCount", len(devices))
+	log.Log.V(ncolog.DebugLevel).Info("UdevManager.ApplyUdevRules", "deviceCount", len(devices))
 
 	// Generate rules content for net and RDMA devices separately, and collect expected names
 	netRulesContent, rdmaRulesContent, expectedNames, err := m.generateUdevRules(devices)
@@ -170,7 +171,7 @@ func (m *udevManager) writeRulesFile(rulesFile, content string) (bool, error) {
 	existingContent, err := os.ReadFile(rulesFilePath)
 	if err == nil {
 		if bytes.Equal(existingContent, []byte(content)) {
-			log.Log.V(2).Info("Udev rules file already up to date, skipping write", "path", rulesFilePath)
+			log.Log.V(ncolog.DebugLevel).Info("Udev rules file already up to date, skipping write", "path", rulesFilePath)
 			return false, nil
 		}
 		// Debug: log why content differs

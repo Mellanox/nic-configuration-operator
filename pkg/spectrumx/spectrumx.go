@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 	"github.com/Mellanox/nic-configuration-operator/pkg/spectrumx/dospcx"
 )
 
@@ -97,7 +98,7 @@ func (m *spectrumXConfigManager) RunDocaSpcXCC(port v1alpha1.NicDevicePortSpec) 
 		if !process.running.Load() {
 			return fmt.Errorf("DOCA SPC-X CC process for RDMA interface %q terminated after startup", port.RdmaInterface)
 		}
-		log.Log.V(2).Info("DOCA SPC-X CC process is already running", "rdma", port.RdmaInterface)
+		log.Log.V(ncolog.DebugLevel).Info("DOCA SPC-X CC process is already running", "rdma", port.RdmaInterface)
 		return nil
 	}
 
@@ -118,7 +119,7 @@ func (m *spectrumXConfigManager) RunDocaSpcXCC(port v1alpha1.NicDevicePortSpec) 
 			process.errMutex.Unlock()
 			log.Log.Error(err, "DOCA SPC-X CC process failed", "rdma", port.RdmaInterface)
 		}
-		log.Log.V(2).Info("DOCA SPC-X CC process output", "rdma", port.RdmaInterface, "output", string(output))
+		log.Log.V(ncolog.DebugLevel).Info("DOCA SPC-X CC process output", "rdma", port.RdmaInterface, "output", string(output))
 		process.running.Store(false)
 		m.ccProcessesMutex.Lock()
 		if m.ccProcesses[port.RdmaInterface] == process {
@@ -131,13 +132,13 @@ func (m *spectrumXConfigManager) RunDocaSpcXCC(port v1alpha1.NicDevicePortSpec) 
 			select {
 			case m.ccTerminationChan <- port.RdmaInterface:
 			default:
-				log.Log.V(2).Info("DOCA SPC-X CC termination notification dropped because the channel is full",
+				log.Log.V(ncolog.DebugLevel).Info("DOCA SPC-X CC termination notification dropped because the channel is full",
 					"rdma", port.RdmaInterface)
 			}
 		}
 	}()
 
-	log.Log.V(2).Info("Waiting for DOCA SPC-X CC process startup", "rdma", port.RdmaInterface, "wait", ccStartupWait)
+	log.Log.V(ncolog.DebugLevel).Info("Waiting for DOCA SPC-X CC process startup", "rdma", port.RdmaInterface, "wait", ccStartupWait)
 	time.Sleep(ccStartupWait)
 	if !process.running.Load() {
 		process.errMutex.RLock()

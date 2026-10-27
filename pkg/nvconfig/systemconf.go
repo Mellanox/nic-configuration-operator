@@ -26,6 +26,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
+
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 )
 
 const maxSystemConfOutputSize = 1024 * 1024
@@ -49,7 +51,7 @@ func (h *nvConfigUtils) GetSystemConfParams(
 	log.Log.Info("ConfigurationUtils.GetSystemConfParams()", "pciAddr", port.PCI, "targetDevice", targetDevice, "conf", conf, "asic", asic)
 
 	output, err := h.execInterface.CommandContext(ctx, "mlxconfig", "-d", targetDevice, "show_system_conf").CombinedOutput()
-	log.Log.V(2).Info("command output", "command", "mlxconfig show_system_conf", "pciAddr", port.PCI, "targetDevice", targetDevice, "output", string(output))
+	log.Log.V(ncolog.DebugLevel).Info("command output", "command", "mlxconfig show_system_conf", "pciAddr", port.PCI, "targetDevice", targetDevice, "output", string(output))
 	if err != nil {
 		log.Log.Error(err, "GetSystemConfParams(): Failed to run mlxconfig", "pciAddr", port.PCI, "targetDevice", targetDevice)
 		return nil, fmt.Errorf("failed to show mlxconfig system configurations: %w: %s", err, strings.TrimSpace(string(output)))

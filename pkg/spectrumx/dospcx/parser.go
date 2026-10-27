@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/Mellanox/nic-configuration-operator/pkg/dmscli"
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 )
 
 const (
@@ -129,7 +130,7 @@ func buildPlan(document *planDocument, expectedStage planStage) (*Plan, error) {
 		// alone is insufficient because the group also contains pf_netdev_all
 		// legacy/HMFS/switchdev operations.
 		if reason := skippedGroupReason(expectedStage, group.Name); reason != "" {
-			log.Log.V(2).Info("skipping doSPCX semantic group",
+			log.Log.V(ncolog.DebugLevel).Info("skipping doSPCX semantic group",
 				"group", group.Name, "stage", expectedStage, "reason", reason)
 			continue
 		}
@@ -145,7 +146,7 @@ func buildPlan(document *planDocument, expectedStage planStage) (*Plan, error) {
 			if len(group.OperationRefs) > 0 {
 				reason = "all operations were filtered by scope or target class"
 			}
-			log.Log.V(2).Info("skipping doSPCX semantic group",
+			log.Log.V(ncolog.DebugLevel).Info("skipping doSPCX semantic group",
 				"group", group.Name, "stage", expectedStage,
 				"reason", reason)
 			continue
@@ -280,7 +281,7 @@ func resolveGroupOperations(
 		}
 		targetClass := strings.TrimSpace(record.TargetClass)
 		if reason := semanticOperationFilterReason(scope, targetClass); reason != "" {
-			log.Log.V(2).Info("skipping doSPCX semantic operation",
+			log.Log.V(ncolog.DebugLevel).Info("skipping doSPCX semantic operation",
 				"group", group.Name, "operation", ref, "path", record.Path,
 				"scope", scope, "targetClass", targetClass, "reason", reason)
 			continue
