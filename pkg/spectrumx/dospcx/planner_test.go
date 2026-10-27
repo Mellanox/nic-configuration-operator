@@ -329,6 +329,12 @@ var _ = Describe("doSPCX planning", func() {
 		return planResponseForPlatform(name, profile, stage, "gb300", planes, deviceCount)
 	}
 
+	writeVRReference := func(stateDir, content string) {
+		path := filepath.Join(stateDir, "dospcx-data", "target-maps", "VR-SPX_Multiplane.yaml")
+		Expect(os.MkdirAll(filepath.Dir(path), 0o755)).To(Succeed())
+		Expect(os.WriteFile(path, []byte(content), 0o644)).To(Succeed())
+	}
+
 	It("builds a schema-v1 target map and saves the returned prepare plan", func() {
 		stateDir := GinkgoT().TempDir()
 		commands := []preparePlanCommand{}
@@ -410,6 +416,174 @@ var _ = Describe("doSPCX planning", func() {
 			TargetMapDigest:    sha256Digest(targetMapContent),
 		}))
 		Expect(string(metadataContent)).NotTo(ContainSubstring(`"inputs"`))
+	})
+
+	Describe("bundled VR target maps", func() {
+		const reference = `schema_version: 1
+platform_type: vr
+description: Authored topology, deliberately different from PCI ordering.
+pre_breakout:
+  targets:
+    - {id: authored-second, bdf: "0000:65:00.0", device_id: "0x1025", role: ew, rail: 9, nic_index_in_rail: 0}
+    - {id: authored-first, bdf: "0000:64:00.0", device_id: "0x1025", role: ew, rail: 9, nic_index_in_rail: 1}
+`
+		newVRDevices := func(mode string, planes int) []*v1alpha1.NicDevice {
+			devices := []*v1alpha1.NicDevice{
+				newDevice("first", "0000:64:00.0", mode),
+				newDevice("second", secondBDF, mode),
+			}
+			for _, device := range devices {
+				device.Status.Type = "1025"
+				device.Spec.Configuration.Template.SpectrumXOptimized.PlatformType = "vr"
+				device.Spec.Configuration.Template.SpectrumXOptimized.NumberOfPlanes = planes
+			}
+			return devices
+		}
+		newVRManager := func(stateDir string, commands *[]preparePlanCommand, mode string, planes int) *Manager {
+			profile := "vr-SPX_Multiplane"
+			if mode == "swplb" {
+				profile = "vr-SPX_NetPlugin"
+			}
+			response := planResponseForPlatform(planName(nodeName, prepareStage), profile, prepareStage, "vr", planes, 2)
+			return newTestPlanManager(preparePlanFakeExecutor(response, commands), stateDir)
+		}
+		readTargetMap := func(stateDir string) ([]byte, targetMap) {
+			content, err := os.ReadFile(filepath.Join(stateDir, "target-maps", targetMapName(nodeName)+".json"))
+			Expect(err).NotTo(HaveOccurred())
+			var result targetMap
+			Expect(json.Unmarshal(content, &result)).To(Succeed())
+			return content, result
+		}
+
+		DescribeTable("preserves authored topology independently of Network Bay status",
+			func(mode string, planes int) {
+				devices := newVRDevices(mode, planes)
+				// Physical ASIC identity is not consulted: one NIC lacks it entirely,
+				// and the other has no resolvable physical peer.
+				devices[0].Status.NetworkBay = &v1alpha1.NicDeviceNetworkBayStatus{Asic: 1, PeerPCI: ""}
+				stateDir := GinkgoT().TempDir()
+				writeVRReference(stateDir, reference)
+				commands := []preparePlanCommand{}
+				manager := newVRManager(stateDir, &commands, mode, planes)
+
+				Expect(manager.PreparePlan(context.Background(), devices)).To(Succeed())
+				content, generated := readTargetMap(stateDir)
+				zero, one := 0, 1
+				Expect(generated.PreBreakout.Targets).To(Equal([]preBreakoutTarget{
+					{ID: "authored-second", BDF: secondBDF, DeviceID: "0x1025", Role: "ew", Rail: 9, NicIndexInRail: &zero},
+					{ID: "authored-first", BDF: "0000:64:00.0", DeviceID: "0x1025", Role: "ew", Rail: 9, NicIndexInRail: &one},
+				}))
+				Expect(string(content)).To(ContainSubstring(`"nic_index_in_rail": 0`))
+				Expect(commands).To(HaveLen(2))
+				for _, device := range devices {
+					_, err := manager.GetPreparedPlan(device)
+					Expect(err).NotTo(HaveOccurred())
+				}
+			},
+			Entry("software multiplane", "swplb", 2),
+			Entry("hardware multiplane", "hwplb", 8),
+		)
+
+		It("normalizes reference PCI addresses before matching", func() {
+			devices := newVRDevices("hwplb", 8)
+			devices[0].Status.Ports[0].PCI = "0000:ab:00.0"
+			stateDir := GinkgoT().TempDir()
+			writeVRReference(stateDir, strings.ReplaceAll(reference, "0000:64:00.0", " 0000:AB:00.0 "))
+			commands := []preparePlanCommand{}
+			manager := newVRManager(stateDir, &commands, "hwplb", 8)
+			Expect(manager.PreparePlan(context.Background(), devices)).To(Succeed())
+			_, generated := readTargetMap(stateDir)
+			Expect(generated.PreBreakout.Targets[1].BDF).To(Equal("0000:ab:00.0"))
+			_, err := manager.GetPreparedPlan(devices[0])
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		DescribeTable("rejects unavailable or mismatching reference maps before planning",
+			func(content, expected string) {
+				stateDir := GinkgoT().TempDir()
+				if content != "" {
+					writeVRReference(stateDir, content)
+				}
+				commands := []preparePlanCommand{}
+				manager := newVRManager(stateDir, &commands, "hwplb", 8)
+				Expect(manager.PreparePlan(context.Background(), newVRDevices("hwplb", 8))).To(MatchError(ContainSubstring(expected)))
+				Expect(commands).To(BeEmpty())
+				_, err := os.Stat(filepath.Join(stateDir, "target-maps", targetMapName(nodeName)+".json"))
+				Expect(os.IsNotExist(err)).To(BeTrue())
+			},
+			Entry("missing file", "", "read VR reference target map"),
+			Entry("malformed YAML", "pre_breakout: [", "decode VR reference target map"),
+			Entry("invalid PCI", strings.ReplaceAll(reference, secondBDF, "invalid"), "invalid function-zero PCI"),
+			Entry("nonzero function", strings.ReplaceAll(reference, secondBDF, "0000:65:00.1"), "invalid function-zero PCI"),
+			Entry("duplicate PCI", strings.ReplaceAll(reference, secondBDF, "0000:64:00.0"), "duplicate PCI"),
+			Entry("unselected PCI", reference+"    - {id: extra, bdf: '0000:66:00.0'}\n", "not selected"),
+			Entry("missing selected PCI", strings.ReplaceAll(reference,
+				"    - {id: authored-first, bdf: \"0000:64:00.0\", device_id: \"0x1025\", role: ew, rail: 9, nic_index_in_rail: 1}\n", ""), "missing from VR reference"),
+		)
+
+		It("reuses memory and disk plans when the authored map and selected PCI set stay unchanged", func() {
+			stateDir := GinkgoT().TempDir()
+			writeVRReference(stateDir, reference)
+			devices := newVRDevices("hwplb", 8)
+			commands := []preparePlanCommand{}
+			manager := newVRManager(stateDir, &commands, "hwplb", 8)
+			Expect(manager.PreparePlan(context.Background(), devices)).To(Succeed())
+			original, _ := readTargetMap(stateDir)
+			devices[0], devices[1] = devices[1], devices[0]
+			Expect(manager.PreparePlan(context.Background(), devices)).To(Succeed())
+			reordered, _ := readTargetMap(stateDir)
+			Expect(reordered).To(Equal(original))
+			Expect(commands).To(HaveLen(2))
+
+			restartedCommands := []preparePlanCommand{}
+			manager = newTestPlanManager(preparePlanFakeExecutor(nil, &restartedCommands), stateDir)
+			Expect(manager.PreparePlan(context.Background(), devices)).To(Succeed())
+			Expect(restartedCommands).To(BeEmpty())
+			for _, device := range devices {
+				_, err := manager.GetPreparedPlan(device)
+				Expect(err).NotTo(HaveOccurred())
+			}
+		})
+
+		DescribeTable("regenerates plans when the authored topology changes",
+			func(restart bool) {
+				stateDir := GinkgoT().TempDir()
+				writeVRReference(stateDir, reference)
+				devices := newVRDevices("hwplb", 8)
+				commands := []preparePlanCommand{}
+				manager := newVRManager(stateDir, &commands, "hwplb", 8)
+				Expect(manager.PreparePlan(context.Background(), devices)).To(Succeed())
+				changed := strings.NewReplacer(
+					"rail: 9", "rail: 3", "nic_index_in_rail: 0", "nic_index_in_rail: 1",
+					"nic_index_in_rail: 1", "nic_index_in_rail: 0").Replace(reference)
+				writeVRReference(stateDir, changed)
+				if restart {
+					manager = newVRManager(stateDir, &commands, "hwplb", 8)
+				}
+				Expect(manager.PreparePlan(context.Background(), devices)).To(Succeed())
+				Expect(commands).To(HaveLen(4))
+				_, generated := readTargetMap(stateDir)
+				Expect(generated.PreBreakout.Targets[0].Rail).To(Equal(3))
+				Expect(*generated.PreBreakout.Targets[0].NicIndexInRail).To(Equal(1))
+			},
+			Entry("in-memory plan", false),
+			Entry("persisted plan", true),
+		)
+
+		It("discards the previous cached plan when the reference map becomes unavailable", func() {
+			stateDir := GinkgoT().TempDir()
+			writeVRReference(stateDir, reference)
+			devices := newVRDevices("hwplb", 8)
+			commands := []preparePlanCommand{}
+			manager := newVRManager(stateDir, &commands, "hwplb", 8)
+			Expect(manager.PreparePlan(context.Background(), devices)).To(Succeed())
+			Expect(os.Remove(filepath.Join(stateDir, "dospcx-data", "target-maps", "VR-SPX_Multiplane.yaml"))).To(Succeed())
+			Expect(manager.PreparePlan(context.Background(), devices)).NotTo(Succeed())
+			plan, err := manager.GetPreparedPlan(devices[0])
+			Expect(err).To(HaveOccurred())
+			Expect(plan).To(BeNil())
+			Expect(commands).To(HaveLen(2))
+		})
 	})
 
 	It("serves prepared plans from memory without rereading persisted files", func() {
@@ -818,6 +992,14 @@ var _ = Describe("doSPCX planning", func() {
 	DescribeTable("routes platform-specific profiles through both planning stages",
 		func(platform, mode, profile string, planes int) {
 			stateDir := GinkgoT().TempDir()
+			if strings.TrimSpace(platform) == "vr" {
+				writeVRReference(stateDir, `schema_version: 1
+platform_type: vr
+pre_breakout:
+  targets:
+    - {id: vr-target, bdf: "0000:64:00.0", device_id: "0x1023", role: ew, rail: 0, nic_index_in_rail: 0}
+`)
+			}
 			commands := []preparePlanCommand{}
 			device := newDevice("platform-profile", "0000:64:00.0", mode)
 			device.Spec.Configuration.Template.SpectrumXOptimized.PlatformType = platform
@@ -1030,7 +1212,7 @@ var _ = Describe("doSPCX planning", func() {
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(config.platformType).To(Equal("gb300"))
-		Expect(config.targetMap.PlatformType).To(Equal("gb300"))
+		Expect(buildTargetMap(config).PlatformType).To(Equal("gb300"))
 	})
 
 	It("ignores interface-name configuration when assigning target-map rails", func() {
@@ -1044,7 +1226,7 @@ var _ = Describe("doSPCX planning", func() {
 		config, err := buildPlanConfig([]*v1alpha1.NicDevice{second, first})
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(config.targetMap.PreBreakout.Targets).To(Equal([]preBreakoutTarget{
+		Expect(buildTargetMap(config).PreBreakout.Targets).To(Equal([]preBreakoutTarget{
 			{ID: "ew-rail0-prebreakout", BDF: "0000:64:00.0", DeviceID: "0x1023", Role: "ew", Rail: 0},
 			{ID: "ew-rail1-prebreakout", BDF: "0001:15:00.0", DeviceID: "0x1023", Role: "ew", Rail: 1},
 		}))
