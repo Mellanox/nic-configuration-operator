@@ -108,11 +108,12 @@ type targetMapTarget struct {
 }
 
 type preBreakoutTarget struct {
-	ID       string `json:"id"`
-	BDF      string `json:"bdf"`
-	DeviceID string `json:"device_id"`
-	Role     string `json:"role"`
-	Rail     int    `json:"rail"`
+	ID             string `json:"id"`
+	BDF            string `json:"bdf"`
+	DeviceID       string `json:"device_id"`
+	Role           string `json:"role"`
+	Rail           int    `json:"rail"`
+	NicIndexInRail *int   `json:"nic_index_in_rail,omitempty"`
 }
 
 type planConfig struct {
@@ -192,6 +193,9 @@ func (m *Manager) PreparePlan(
 	cached := m.preparedPlans[cacheKey]
 	// Publish only a successfully prepared or explicitly deferred replacement.
 	delete(m.preparedPlans, cacheKey)
+	if err := m.useVRTargetMap(config); err != nil {
+		return err
+	}
 
 	targetMapPath := filepath.Join(stateDir, "target-maps", targetMapName(config.nodeName)+".json")
 	targetMapContent, err := marshalJSONFile(config.targetMap)
