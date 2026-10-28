@@ -19,7 +19,9 @@ package main
 import (
 	"context"
 	"flag"
+	"maps"
 	"os"
+	"slices"
 	"time"
 
 	maintenanceoperator "github.com/Mellanox/maintenance-operator/api/v1alpha1"
@@ -42,6 +44,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/internal/controller"
 	"github.com/Mellanox/nic-configuration-operator/pkg/configuration"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	"github.com/Mellanox/nic-configuration-operator/pkg/devicediscovery"
 	"github.com/Mellanox/nic-configuration-operator/pkg/dms"
 	"github.com/Mellanox/nic-configuration-operator/pkg/firmware"
 	"github.com/Mellanox/nic-configuration-operator/pkg/helper"
@@ -140,23 +143,19 @@ func main() {
 	hostUtils := host.NewHostUtils()
 	nvConfigUtils := nvconfig.NewNVConfigUtils()
 
-	discover := func(ctx context.Context) (device.Inventory, error) { return device.Discover(ctx, device.Options{}) }
+	deviceDiscovery := devicediscovery.NewDeviceDiscovery(nodeName)
 
 	// Initialize DMS server
 	dmsServer := dms.NewDMSServer()
 
 	// Start DMS server for all discovered devices
-	inventory, err := discover(context.Background())
-	var devices []v1alpha1.NicDevice
-	if err == nil {
-		devices, err = controller.DiscoveredNicDevices(inventory, nodeName)
-	}
+	devices, err := deviceDiscovery.DiscoverNicDevices()
 	if err != nil {
 		log.Log.Error(err, "failed to discover NIC devices")
 		os.Exit(1)
 	}
 
-	if err := dmsServer.StartDMSServer(devices); err != nil {
+	if err := dmsServer.StartDMSServer(slices.Collect(maps.Values(devices))); err != nil {
 		log.Log.Error(err, "failed to start DMS server")
 		os.Exit(1)
 	}
@@ -180,7 +179,7 @@ func main() {
 	}
 
 	deviceDiscoveryController := controller.NewDeviceDiscoveryController(
-		mgr.GetClient(), mgr.GetAPIReader(), discover, hostUtils, nodeName, namespace)
+		mgr.GetClient(), mgr.GetAPIReader(), deviceDiscovery, hostUtils, nodeName, namespace)
 	if err = mgr.Add(deviceDiscoveryController); err != nil {
 		log.Log.Error(err, "unable to add device discovery runnable")
 		os.Exit(1)
@@ -200,7 +199,6 @@ func main() {
 		SpectrumXManager:     spectrumXConfigManager,
 		HostUtils:            hostUtils,
 		UdevManager:          udevManager,
-		Discover:             discover,
 		ReadInterfaceNames:   device.ReadInterfaceNames,
 	}
 	err = nicDeviceReconciler.SetupWithManager(mgr, true)

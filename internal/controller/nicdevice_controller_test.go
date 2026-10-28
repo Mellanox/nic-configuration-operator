@@ -117,17 +117,6 @@ var _ = Describe("NicDeviceReconciler", func() {
 			EventRecorder:        mgr.GetEventRecorderFor("testReconciler"), //nolint:staticcheck // record.EventRecorder; GetEventRecorder uses a different API.
 			SpectrumXManager:     spectrumXManager,
 			UdevManager:          udevManager,
-			Discover: func(ctx context.Context) (device.Inventory, error) {
-				list := &v1alpha1.NicDeviceList{}
-				if err := mgr.GetAPIReader().List(ctx, list); err != nil {
-					return device.Inventory{}, err
-				}
-				records := make(map[string]v1alpha1.NicDevice)
-				for _, d := range list.Items {
-					records[d.Name] = d
-				}
-				return inventoryFixture(records), nil
-			},
 			ReadInterfaceNames: func(ctx context.Context, pci string) (device.InterfaceNames, error) {
 				if names, ok := interfaceNames.Load(pci); ok {
 					return names.(device.InterfaceNames), nil
@@ -1556,6 +1545,22 @@ var _ = Describe("NicDeviceReconciler", func() {
 			return device
 		}
 
+		It("Should retain port names and return library read errors", func() {
+			d := &v1alpha1.NicDevice{
+				Spec:   v1alpha1.NicDeviceSpec{InterfaceNameTemplate: &v1alpha1.NicDeviceInterfaceNameSpec{}},
+				Status: v1alpha1.NicDeviceStatus{Ports: []v1alpha1.NicDevicePortSpec{{PCI: pciAddress, NetworkInterface: "eth0", RdmaInterface: "mlx5_0"}}},
+			}
+			u := &udevMocks.UdevManager{}
+			u.On("ApplyUdevRules", mock.Anything, mock.Anything).Return(map[string]udev.ExpectedInterfaceNames{pciAddress: {NetDevice: "net0"}}, false, nil)
+			r := &NicDeviceReconciler{UdevManager: u, ReadInterfaceNames: func(context.Context, string) (device.InterfaceNames, error) {
+				return device.InterfaceNames{}, errors.New("sysfs unavailable")
+			}}
+			err := r.reconcileInterfaceNameTemplates(ctx, nicDeviceConfigurationStatuses{{device: d}})
+			Expect(err).To(MatchError(ContainSubstring("sysfs unavailable")))
+			Expect(d.Status.Ports[0].NetworkInterface).To(Equal("eth0"))
+			Expect(d.Status.Ports[0].RdmaInterface).To(Equal("mlx5_0"))
+		})
+
 		It("Should set success condition when interface names match expected", func() {
 			expectedNames := map[string]udev.ExpectedInterfaceNames{
 				pciAddress: {NetDevice: "net1p1", RdmaDevice: "rdma1p1"},
@@ -1748,14 +1753,16 @@ var _ = Describe("NicDeviceReconciler", func() {
 			device.Spec.InterfaceNameTemplate = nil
 			Expect(k8sClient.Update(ctx, device)).To(Succeed())
 
-			// Successful complete-rule cleanup and readback remove the obsolete condition.
+			// The condition should be cleared to False with InterfaceNameSpecEmpty reason
 			Eventually(func() bool {
 				d := &v1alpha1.NicDevice{}
 				if err := k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, d); err != nil {
 					return false
 				}
 				cond := meta.FindStatusCondition(d.Status.Conditions, consts.InterfaceNameCondition)
-				return cond == nil
+				return cond != nil &&
+					cond.Status == metav1.ConditionFalse &&
+					cond.Reason == consts.InterfaceNameSpecEmptyReason
 			}, timeout).Should(BeTrue())
 		})
 

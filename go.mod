@@ -3,12 +3,9 @@ module github.com/Mellanox/nic-configuration-operator
 go 1.26.0
 
 require (
-	github.com/Mellanox/dms-lib v0.0.0-20261028165810-8bd85336c3d8
+	github.com/Mellanox/dms-lib v0.0.0-20261028181729-3e34495565cd
 	github.com/Mellanox/maintenance-operator/api v0.4.0
-	github.com/Mellanox/rdmamap v1.2.0
 	github.com/go-logr/logr v1.4.4
-	github.com/jaypipes/ghw v0.26.0
-	github.com/jaypipes/pcidb v1.1.1
 	github.com/onsi/ginkgo/v2 v2.33.1
 	github.com/onsi/gomega v1.44.0
 	github.com/stretchr/testify v1.12.1
@@ -34,7 +31,6 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/go-logr/zapr v1.3.0 // indirect
-	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect
 	github.com/go-openapi/jsonreference v0.21.0 // indirect
 	github.com/go-openapi/swag v0.23.0 // indirect
@@ -60,7 +56,6 @@ require (
 	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/vishvananda/netns v0.0.5 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
-	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
@@ -77,7 +72,6 @@ require (
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	howett.net/plist v1.0.2-0.20250314012144-ee69052608d9 // indirect
 	k8s.io/apiextensions-apiserver v0.36.0 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260317180543-43fb72c5454a // indirect

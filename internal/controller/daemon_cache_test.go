@@ -21,8 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Mellanox/dms-lib/pkg/device"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
@@ -161,10 +159,7 @@ var _ = Describe("Node-scoped daemon cache", func() {
 		deviceDiscovery := &deviceDiscoveryMocks.DeviceDiscovery{}
 		hostUtils := &hostMocks.HostUtils{}
 		discoveryController := NewDeviceDiscoveryController(
-			k8sClient, mgr.GetAPIReader(), func(context.Context) (device.Inventory, error) {
-				records, err := deviceDiscovery.DiscoverNicDevices()
-				return inventoryFixture(records), err
-			}, hostUtils, nodeName, namespaceName)
+			k8sClient, mgr.GetAPIReader(), deviceDiscovery, hostUtils, nodeName, namespaceName)
 		Expect(mgr.Add(discoveryController)).To(Succeed())
 
 		pciDevKey := "0000:3b:00"

@@ -64,7 +64,7 @@ var _ = Describe("UdevManager", func() {
 	It("retains existing future-PF naming policy without treating it as discovery", func() {
 		d := namingDevice("nic", "0000:03:00.0")
 		d.Spec.InterfaceNameTemplate.PlaneIndices = []int{2, 3}
-		expected, err := ExpectedNames([]*v1alpha1.NicDevice{d})
+		_, expected, err := namingAssignments([]*v1alpha1.NicDevice{d})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(expected["0000:03:00.1"]).To(Equal(ExpectedInterfaceNames{NetDevice: "n1r2p3", RdmaDevice: "r1p3"}))
 		Expect(d.Status.Ports).To(HaveLen(1))
@@ -89,7 +89,7 @@ var _ = Describe("UdevManager", func() {
 		d.Spec.InterfaceNameTemplate.RdmaDevicePrefix = "same"
 		Expect(ValidateInterfaceNames([]*v1alpha1.NicDevice{d})).To(Succeed())
 		d.Spec.InterfaceNameTemplate.RdmaDevicePrefix = ""
-		expected, err := ExpectedNames([]*v1alpha1.NicDevice{d})
+		_, expected, err := namingAssignments([]*v1alpha1.NicDevice{d})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(expected["0000:03:00.0"].RdmaDevice).To(BeEmpty())
 	})

@@ -75,7 +75,6 @@ type NicDeviceReconciler struct {
 	MaintenanceManager   maintenance.MaintenanceManager
 	SpectrumXManager     spectrumx.SpectrumXManager
 	UdevManager          udev.UdevManager
-	Discover             func(context.Context) (device.Inventory, error)
 	ReadInterfaceNames   func(context.Context, string) (device.InterfaceNames, error)
 
 	EventRecorder record.EventRecorder
@@ -107,17 +106,12 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
-	configStatuses, pending, err := r.freshDevices(ctx, configStatuses)
+	// Always reconcile InterfaceNameTemplates to clean up stale udev rules
+	// even when no devices have specs to reconcile
+	err = r.reconcileInterfaceNameTemplates(ctx, configStatuses)
 	if err != nil {
+		log.Log.Error(err, "failed to reconcile interface name templates")
 		return ctrl.Result{}, err
-	}
-	if !pending {
-		if err := r.reconcileInterfaceNameTemplates(ctx, configStatuses); err != nil {
-			return ctrl.Result{}, err
-		}
-	}
-	if len(configStatuses) == 0 && pending {
-		return ctrl.Result{RequeueAfter: shortRequeueTime}, nil
 	}
 
 	if len(configStatuses) == 0 {
@@ -134,9 +128,72 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	log.Log.V(2).Info(fmt.Sprintf("reconciling %d NicDevices", len(configStatuses)))
 
-	if result, stop, err := r.reconcileFirmware(ctx, configStatuses, pending); stop || err != nil {
-		return result, err
+	// Next we need to validate the firmware spec of all devices
+	// NicDevices with empty FW specs are skipped during this step
+	// 1. If the NicFirmwareSource object, referenced in the spec, is not ready or has failed, update the status and proceed with other devices
+	// 2. If the updatePolicy is set to Validate and the installed FW version doesn't match the spec, update the status and requeue
+	// 3. If the updatePolicy is set to Update and the installed FW version doesn't match the spec, update the firmware to the version from NicFirmwareSource
+	// 4. If FW update failed, update the status and return an error to try again.
+	// 5. If after the FW update FW is still not ready on some devices, requeue to try again later
+	// Unavailable NicFirmwareSource for one device shouldn't block the FW update for all of them
+	// If FW failed the validation / to update on at least one device, NIC configuration won't start until the error is resolved
+
+	err = runInParallel(ctx, configStatuses, r.handleFirmwareValidation)
+	if err != nil {
+		log.Log.Error(err, "failed to validate device's firmware source")
+		return ctrl.Result{}, err
 	}
+
+	// If Firmware is not ready, update NIC configuration status to "Pending Firmware Update"
+	if !configStatuses.firmwareReady() {
+		log.Log.V(2).Info("firmware is not ready for some devices, set PendingFirmwareUpdate status to ConfigUpdateInProgress condition")
+
+		err = runInParallel(ctx, configStatuses, r.handleConfigurationPendingFirmwareUpdate)
+		if err != nil {
+			log.Log.Error(err, "failed to update device's status")
+			return ctrl.Result{}, err
+		}
+	}
+
+	if configStatuses.firmwareUpdateRequired() {
+		log.Log.Info("firmware update is required for some devices, scheduling maintenance to perform update")
+
+		result, err := r.ensureMaintenance(ctx)
+		if err != nil {
+			log.Log.V(2).Error(err, "failed to schedule maintenance")
+			return ctrl.Result{}, err
+		}
+		if !result.IsZero() {
+			return result, nil
+		}
+
+		err = runInParallel(ctx, configStatuses, r.handleFirmwareUpdate)
+		if err != nil {
+			log.Log.Error(err, "failed to update device's firmware")
+			return ctrl.Result{RequeueAfter: shortRequeueTime}, err
+		}
+
+		if configStatuses.rebootRequired() {
+			return r.handleReboot(ctx, configStatuses)
+		}
+	}
+
+	// If FW is not ready for all devices after update, requeue the request
+	if !configStatuses.firmwareReady() {
+		log.Log.Info("firmware is not ready for some devices, requeue to try again later")
+		// If FW is not ready but FW update is not required, we can release maintenance
+		// If FW update is required but failed, the reconcile request would be rescheduled and won't reach this point
+		if !configStatuses.firmwareUpdateRequired() {
+			err = r.MaintenanceManager.ReleaseMaintenance(ctx)
+			if err != nil {
+				log.Log.Error(err, "failed to release maintenance")
+				return ctrl.Result{}, err
+			}
+		}
+		return ctrl.Result{RequeueAfter: longRequeueTime}, nil
+	}
+
+	log.Log.Info("firmware is ready for all devices, proceeding with NIC configuration")
 
 	// Prepare the node-scoped doSPCX plan. Configure may be deferred until
 	// the prepare NVConfig changes have taken effect.
@@ -176,16 +233,9 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	if configStatuses.rebootRequired() {
-		if pending {
-			return ctrl.Result{RequeueAfter: shortRequeueTime}, nil
-		}
 		return r.handleReboot(ctx, configStatuses)
 	}
 
-	// The optional reset after an NV update also invalidates this pass.
-	if os.Getenv(consts.FEATURE_GATE_FW_RESET_AFTER_CONFIG_UPDATE) == consts.LabelValueTrue && configStatuses.nvConfigUpdateRequired() {
-		return ctrl.Result{RequeueAfter: shortRequeueTime}, nil
-	}
 	if !configStatuses.nvConfigReadyForAll() {
 		log.Log.Info("nv config not ready for some devices, requeue")
 		return ctrl.Result{RequeueAfter: longRequeueTime}, nil
@@ -207,15 +257,9 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	if configStatuses.rebootRequired() {
-		if pending {
-			return ctrl.Result{RequeueAfter: shortRequeueTime}, nil
-		}
 		return r.handleReboot(ctx, configStatuses)
 	}
 
-	if pending {
-		return ctrl.Result{RequeueAfter: shortRequeueTime}, nil
-	}
 	log.Log.Info("all configuration are successful, releasing maintenance")
 	err = r.MaintenanceManager.ReleaseMaintenance(ctx)
 	if err != nil {
@@ -226,121 +270,142 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	return ctrl.Result{RequeueAfter: longRequeueTime * 20}, nil
 }
 
-// reconcileFirmware finishes the firmware phase or returns a result that stops
-// this pass. Any activation requires a new inventory before configuration.
-func (r *NicDeviceReconciler) reconcileFirmware(ctx context.Context, configStatuses nicDeviceConfigurationStatuses, pending bool) (ctrl.Result, bool, error) {
-	// Next we need to validate the firmware spec of all devices
-	// NicDevices with empty FW specs are skipped during this step
-	// 1. If the NicFirmwareSource object, referenced in the spec, is not ready or has failed, update the status and proceed with other devices
-	// 2. If the updatePolicy is set to Validate and the installed FW version doesn't match the spec, update the status and requeue
-	// 3. If the updatePolicy is set to Update and the installed FW version doesn't match the spec, update the firmware to the version from NicFirmwareSource
-	// 4. If FW update failed, update the status and return an error to try again.
-	// 5. If after the FW update FW is still not ready on some devices, requeue to try again later
-	// Unavailable NicFirmwareSource for one device shouldn't block the FW update for all of them
-	// If FW failed the validation / to update on at least one device, NIC configuration won't start until the error is resolved
-
-	err := runInParallel(ctx, configStatuses, r.handleFirmwareValidation)
-	if err != nil {
-		log.Log.Error(err, "failed to validate device's firmware source")
-		return ctrl.Result{}, true, err
-	}
-
-	// If Firmware is not ready, update NIC configuration status to "Pending Firmware Update"
-	if !configStatuses.firmwareReady() {
-		log.Log.V(2).Info("firmware is not ready for some devices, set PendingFirmwareUpdate status to ConfigUpdateInProgress condition")
-
-		err = runInParallel(ctx, configStatuses, r.handleConfigurationPendingFirmwareUpdate)
-		if err != nil {
-			log.Log.Error(err, "failed to update device's status")
-			return ctrl.Result{}, true, err
-		}
-	}
-
-	if configStatuses.firmwareUpdateRequired() {
-		log.Log.Info("firmware update is required for some devices, scheduling maintenance to perform update")
-
-		result, err := r.ensureMaintenance(ctx)
-		if err != nil {
-			log.Log.V(2).Error(err, "failed to schedule maintenance")
-			return ctrl.Result{}, true, err
-		}
-		if !result.IsZero() {
-			return result, true, nil
-		}
-
-		err = runInParallel(ctx, configStatuses, r.handleFirmwareUpdate)
-		if err != nil {
-			log.Log.Error(err, "failed to update device's firmware")
-			return ctrl.Result{RequeueAfter: shortRequeueTime}, true, err
-		}
-
-		if configStatuses.rebootRequired() {
-			if pending {
-				return ctrl.Result{RequeueAfter: shortRequeueTime}, true, nil
-			}
-			result, err := r.handleReboot(ctx, configStatuses)
-			return result, true, err
-		}
-		// Firmware activation invalidates the PF/name snapshot used by this pass.
-		return ctrl.Result{RequeueAfter: shortRequeueTime}, true, nil
-	}
-
-	// If FW is not ready for all devices after update, requeue the request
-	if !configStatuses.firmwareReady() {
-		log.Log.Info("firmware is not ready for some devices, requeue to try again later")
-		// If FW is not ready but FW update is not required, we can release maintenance
-		// If FW update is required but failed, the reconcile request would be rescheduled and won't reach this point
-		if !configStatuses.firmwareUpdateRequired() && !pending {
-			err = r.MaintenanceManager.ReleaseMaintenance(ctx)
-			if err != nil {
-				log.Log.Error(err, "failed to release maintenance")
-				return ctrl.Result{}, true, err
-			}
-		}
-		return ctrl.Result{RequeueAfter: longRequeueTime}, true, nil
-	}
-
-	log.Log.Info("firmware is ready for all devices, proceeding with NIC configuration")
-
-	return ctrl.Result{}, false, nil
-}
-
 // reconcileInterfaceNameTemplates collects all devices with InterfaceNameTemplate specs, applies udev rules,
 // and verifies the interface names have been applied correctly
 func (r *NicDeviceReconciler) reconcileInterfaceNameTemplates(ctx context.Context, statuses nicDeviceConfigurationStatuses) error {
-	var devices []*v1alpha1.NicDevice
+	// Collect devices with InterfaceNameTemplate specs
+	var devicesWithTemplates []*v1alpha1.NicDevice
 	for _, status := range statuses {
 		if status.device.Spec.InterfaceNameTemplate != nil {
-			devices = append(devices, status.device)
+			devicesWithTemplates = append(devicesWithTemplates, status.device)
 		}
 	}
-	expected, _, err := r.UdevManager.ApplyUdevRules(ctx, devices)
+
+	log.Log.V(2).Info("Reconciling InterfaceNameTemplate specs", "deviceCount", len(devicesWithTemplates))
+
+	// Apply udev rules for all devices with templates and get expected interface names
+	expectedNames, updated, err := r.UdevManager.ApplyUdevRules(ctx, devicesWithTemplates)
 	if err != nil {
+		log.Log.Error(err, "Failed to apply udev rules")
 		return err
 	}
-	// Apply activates both namespaces even when file bytes were unchanged. Read
-	// all endpoints before downstream runtime consumers use their names.
-	var failures []error
-	for _, status := range statuses {
-		d := status.device
-		if err := r.refreshInterfaceNames(ctx, d, expected); err != nil {
-			failures = append(failures, err)
-			continue
+
+	if updated {
+		log.Log.Info("Udev rules updated for InterfaceNameTemplate specs")
+	}
+
+	// Track if any device has mismatched names
+	var hasError bool
+
+	// Iterate over devices and verify interface names for each port
+	for _, device := range devicesWithTemplates {
+		var mismatchedPorts []string
+
+		for i := range device.Status.Ports {
+			port := &device.Status.Ports[i]
+			expected, exists := expectedNames[port.PCI]
+			if !exists {
+				log.Log.V(2).Info("expected interface names not found for port, skipping the check", "device", device.Name, "port", port.PCI)
+				continue
+			}
+
+			// Get actual interface names from sysfs
+			names, err := r.ReadInterfaceNames(ctx, port.PCI)
+			if err != nil {
+				return fmt.Errorf("read interface names for %s: %w", port.PCI, err)
+			}
+			actualNetDevice, actualRdmaDevice := names.Netdev, names.RDMA
+
+			// Update port status with actual names
+			port.NetworkInterface = actualNetDevice
+			port.RdmaInterface = actualRdmaDevice
+
+			// Compare actual vs expected
+			if expected.NetDevice != "" && actualNetDevice != expected.NetDevice {
+				mismatchedPorts = append(mismatchedPorts,
+					fmt.Sprintf("net:%s expected=%s actual=%s", port.PCI, expected.NetDevice, actualNetDevice))
+			}
+			if expected.RdmaDevice != "" && actualRdmaDevice != expected.RdmaDevice {
+				mismatchedPorts = append(mismatchedPorts,
+					fmt.Sprintf("rdma:%s expected=%s actual=%s", port.PCI, expected.RdmaDevice, actualRdmaDevice))
+			}
 		}
-		// Only this caller knows the complete owned rule set was activated.
-		// Clearing the old condition records verified removal; read-only naming
-		// checks during partial inventory must never acknowledge cleanup.
-		if d.Spec.InterfaceNameTemplate == nil && meta.RemoveStatusCondition(&d.Status.Conditions, consts.InterfaceNameCondition) {
-			if err := r.Status().Update(ctx, d); err != nil {
-				failures = append(failures, err)
+
+		// Set condition based on whether names match
+		if len(mismatchedPorts) > 0 {
+			errMsg := fmt.Sprintf("interface name mismatch for ports: %v", mismatchedPorts)
+			log.Log.Error(nil, errMsg, "device", device.Name)
+
+			meta.SetStatusCondition(&device.Status.Conditions, metav1.Condition{
+				Type:               consts.InterfaceNameCondition,
+				Status:             metav1.ConditionFalse,
+				Reason:             consts.InterfaceNameMismatchReason,
+				ObservedGeneration: device.Generation,
+				Message:            errMsg,
+			})
+			hasError = true
+		} else {
+			meta.SetStatusCondition(&device.Status.Conditions, metav1.Condition{
+				Type:               consts.InterfaceNameCondition,
+				Status:             metav1.ConditionTrue,
+				Reason:             consts.InterfaceNameAppliedReason,
+				ObservedGeneration: device.Generation,
+				Message:            "Interface names applied successfully",
+			})
+		}
+
+		// Always update device status since we modify ports and conditions
+		if err := r.Client.Status().Update(ctx, device); err != nil {
+			log.Log.Error(err, "Failed to update device status", "device", device.Name)
+			return err
+		}
+	}
+
+	// When udev rules changed, refresh port names for devices being reconciled on this node.
+	// Udev rule changes (additions or removals) can affect any device's interface names.
+	// Downstream consumers (DMS QoS, Spectrum-X runtime config, DOCA CC) rely on
+	// accurate port names in the same reconcile loop.
+	if updated {
+		for _, status := range statuses {
+			device := status.device
+			if device.Spec.InterfaceNameTemplate != nil {
+				continue // already updated in the loop above
+			}
+			portsChanged := false
+			for i := range device.Status.Ports {
+				port := &device.Status.Ports[i]
+				if port.PCI == "" {
+					continue
+				}
+				names, err := r.ReadInterfaceNames(ctx, port.PCI)
+				if err != nil {
+					return fmt.Errorf("read interface names for %s: %w", port.PCI, err)
+				}
+				actualNetDevice, actualRdmaDevice := names.Netdev, names.RDMA
+				if port.NetworkInterface != actualNetDevice || port.RdmaInterface != actualRdmaDevice {
+					port.NetworkInterface = actualNetDevice
+					port.RdmaInterface = actualRdmaDevice
+					portsChanged = true
+				}
+			}
+			if portsChanged {
+				if err := r.Client.Status().Update(ctx, device); err != nil {
+					log.Log.Error(err, "Failed to update device port status after udev rules change", "device", device.Name)
+					return err
+				}
 			}
 		}
 	}
-	return errors.Join(failures...)
+
+	if hasError {
+		return fmt.Errorf("one or more devices have mismatched interface names")
+	}
+
+	return nil
 }
 
-// getDevices lists this node's devices with configuration intent or pending naming cleanup.
-// It updates relevant status conditions when configuration or firmware specs are empty.
+// getDevices lists all the NicDevice objects from this node and filters those with non-empty specs,
+// updates relevant status conditions if configuration or firmware specs are empty
 func (r *NicDeviceReconciler) getDevices(ctx context.Context) (nicDeviceConfigurationStatuses, error) {
 	devices := &v1alpha1.NicDeviceList{}
 
@@ -393,9 +458,8 @@ func (r *NicDeviceReconciler) getDevices(ctx context.Context) (nicDeviceConfigur
 			}
 		}
 
-		cleanupPending := device.Spec.InterfaceNameTemplate == nil && meta.FindStatusCondition(device.Status.Conditions, consts.InterfaceNameCondition) != nil
-		if device.Spec.Firmware != nil || device.Spec.Configuration != nil || device.Spec.InterfaceNameTemplate != nil || cleanupPending {
-			log.Log.V(2).Info("device has intent or pending naming cleanup, adding it to the list to reconcile", "name", device.Name)
+		if device.Spec.Firmware != nil || device.Spec.Configuration != nil || device.Spec.InterfaceNameTemplate != nil {
+			log.Log.V(2).Info("device has non-nil spec, adding it to the list to reconcile", "name", device.Name)
 			configStatuses = append(configStatuses, &nicDeviceConfigurationStatus{
 				device: &devices.Items[i],
 			})
@@ -964,7 +1028,7 @@ func (r *NicDeviceReconciler) SetupWithManager(mgr ctrl.Manager, watchForMainten
 				newStatus.Conditions = nil
 
 				// No need to reconcile if only status conditions got updated
-				if reflect.DeepEqual(oldStatus, newStatus) && reflect.DeepEqual(meta.FindStatusCondition(oldDevice.Status.Conditions, consts.DiscoveryReadyCondition), meta.FindStatusCondition(newDevice.Status.Conditions, consts.DiscoveryReadyCondition)) {
+				if reflect.DeepEqual(oldStatus, newStatus) {
 					return
 				}
 			}

@@ -58,15 +58,8 @@ func (m *udevManager) ApplyUdevRules(ctx context.Context, devices []*v1alpha1.Ni
 	return expected, changed, err
 }
 
-// ExpectedNames resolves template placeholders and future PF naming policy without
-// writing rules. Physical naming validation is owned by the generic library.
-func ExpectedNames(devices []*v1alpha1.NicDevice) (map[string]ExpectedInterfaceNames, error) {
-	_, expected, err := namingAssignments(devices)
-	return expected, err
-}
-
 func ValidateInterfaceNames(devices []*v1alpha1.NicDevice) error {
-	_, err := ExpectedNames(devices)
+	_, _, err := namingAssignments(devices)
 	return err
 }
 
