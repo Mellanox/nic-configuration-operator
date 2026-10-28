@@ -322,15 +322,25 @@ func (r *NicDeviceReconciler) reconcileInterfaceNameTemplates(ctx context.Contex
 	// all endpoints before downstream runtime consumers use their names.
 	var failures []error
 	for _, status := range statuses {
-		if err := r.refreshInterfaceNames(ctx, status.device, expected); err != nil {
+		d := status.device
+		if err := r.refreshInterfaceNames(ctx, d, expected); err != nil {
 			failures = append(failures, err)
+			continue
+		}
+		// Only this caller knows the complete owned rule set was activated.
+		// Clearing the old condition records verified removal; read-only naming
+		// checks during partial inventory must never acknowledge cleanup.
+		if d.Spec.InterfaceNameTemplate == nil && meta.RemoveStatusCondition(&d.Status.Conditions, consts.InterfaceNameCondition) {
+			if err := r.Status().Update(ctx, d); err != nil {
+				failures = append(failures, err)
+			}
 		}
 	}
 	return errors.Join(failures...)
 }
 
-// getDevices lists all the NicDevice objects from this node and filters those with non-empty specs,
-// updates relevant status conditions if configuration or firmware specs are empty
+// getDevices lists this node's devices with configuration intent or pending naming cleanup.
+// It updates relevant status conditions when configuration or firmware specs are empty.
 func (r *NicDeviceReconciler) getDevices(ctx context.Context) (nicDeviceConfigurationStatuses, error) {
 	devices := &v1alpha1.NicDeviceList{}
 
@@ -383,8 +393,9 @@ func (r *NicDeviceReconciler) getDevices(ctx context.Context) (nicDeviceConfigur
 			}
 		}
 
-		if device.Spec.Firmware != nil || device.Spec.Configuration != nil || device.Spec.InterfaceNameTemplate != nil {
-			log.Log.V(2).Info("device has non-nil spec, adding it to the list to reconcile", "name", device.Name)
+		cleanupPending := device.Spec.InterfaceNameTemplate == nil && meta.FindStatusCondition(device.Status.Conditions, consts.InterfaceNameCondition) != nil
+		if device.Spec.Firmware != nil || device.Spec.Configuration != nil || device.Spec.InterfaceNameTemplate != nil || cleanupPending {
+			log.Log.V(2).Info("device has intent or pending naming cleanup, adding it to the list to reconcile", "name", device.Name)
 			configStatuses = append(configStatuses, &nicDeviceConfigurationStatus{
 				device: &devices.Items[i],
 			})

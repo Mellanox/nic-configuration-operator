@@ -19,7 +19,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -126,6 +128,13 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 	var failures []error
 	if discoveryErr != nil {
 		failures = append(failures, discoveryErr)
+	}
+	// Scoped failures still need a prompt retry, but must not suppress the
+	// healthy device/status work performed below when the skip switch is set.
+	if discoveryErr == nil {
+		for _, key := range slices.Sorted(maps.Keys(incompleteDevices)) {
+			failures = append(failures, incompleteDevices[key])
+		}
 	}
 
 	list := &v1alpha1.NicDeviceList{}

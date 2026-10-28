@@ -118,7 +118,7 @@ var _ = Describe("Library discovery freshness", func() {
 	})
 	It("retains failed CR data, marks it stale and recovers from a fresh pass", func() {
 		scopedFailure()
-		Expect(registry.reconcile(ctx)).To(Succeed())
+		Expect(registry.reconcile(ctx)).To(MatchError(ContainSubstring("firmware read failed")))
 		d := &v1alpha1.NicDevice{}
 		Expect(c.Get(ctx, client.ObjectKeyFromObject(statuses[1].device), d)).To(Succeed())
 		Expect(d.Status.Ports).To(Equal(records["rail-b"].Status.Ports))
@@ -127,6 +127,19 @@ var _ = Describe("Library discovery freshness", func() {
 		inventory.Issues = nil
 		Expect(registry.reconcile(ctx)).To(Succeed())
 		Expect(c.Get(ctx, client.ObjectKeyFromObject(d), d)).To(Succeed())
+		Expect(meta.IsStatusConditionTrue(d.Status.Conditions, consts.DiscoveryReadyCondition)).To(BeTrue())
+	})
+	It("returns scoped failures for prompt retry after updating healthy records", func() {
+		scopedFailure()
+		for i := range inventory.Devices {
+			if inventory.Devices[i].ID == "rail-a" {
+				inventory.Devices[i].PartNumber = "new-part"
+			}
+		}
+		Expect(registry.reconcile(ctx)).To(MatchError(ContainSubstring("firmware read failed")))
+		d := &v1alpha1.NicDevice{}
+		Expect(c.Get(ctx, client.ObjectKeyFromObject(statuses[0].device), d)).To(Succeed())
+		Expect(d.Status.PartNumber).To(Equal("new-part"))
 		Expect(meta.IsStatusConditionTrue(d.Status.Conditions, consts.DiscoveryReadyCondition)).To(BeTrue())
 	})
 	It("marks all retained CRs stale on a global error even with useful devices", func() {
@@ -298,6 +311,72 @@ var _ = Describe("Library discovery freshness", func() {
 		configuration.AssertNotCalled(GinkgoT(), "ApplyRuntimeConfiguration", mock.Anything, mock.Anything)
 		Expect(c.Get(ctx, client.ObjectKeyFromObject(d), d)).To(Succeed())
 		Expect(d.Status.FirmwareVersion).To(Equal("40.2"))
+	})
+	It("closes overlapping Bay and node-plan domains after naming becomes ineligible", func() {
+		third := &v1alpha1.NicDevice{ObjectMeta: metav1.ObjectMeta{Name: "rail-c", Namespace: namespace}, Spec: statuses[1].device.Spec}
+		Expect(c.Create(ctx, third)).To(Succeed())
+		third.Status = *statuses[1].device.Status.DeepCopy()
+		third.Status.Ports = []v1alpha1.NicDevicePortSpec{{PCI: "0002:64:00.0", NetworkInterface: "ethrail-c", RdmaInterface: "rdmarail-c"}}
+		Expect(c.Status().Update(ctx, third)).To(Succeed())
+		statuses = append(statuses, &nicDeviceConfigurationStatus{device: third})
+		for i, status := range statuses {
+			d := status.device
+			if i > 0 {
+				d.Spec.Configuration.Template = &v1alpha1.ConfigurationTemplateSpec{LinkType: "Ethernet", NumVfs: 1, SpectrumXOptimized: &v1alpha1.SpectrumXOptimizedSpec{Enabled: true, Version: "RA2.1", PlatformType: "h100"}}
+			}
+			d.Spec.InterfaceNameTemplate = &v1alpha1.NicDeviceInterfaceNameSpec{PlaneIndices: []int{0}, NetDevicePrefix: d.Status.Ports[0].NetworkInterface, RdmaDevicePrefix: d.Status.Ports[0].RdmaInterface}
+			Expect(c.Update(ctx, d)).To(Succeed())
+			if i < 2 {
+				d.Status.NetworkBay = &v1alpha1.NicDeviceNetworkBayStatus{Asic: i, PeerPCI: statuses[1-i].device.Status.Ports[0].PCI}
+				Expect(c.Status().Update(ctx, d)).To(Succeed())
+			}
+			records[d.Name] = *d.DeepCopy()
+		}
+		inventory = inventoryFixture(records)
+		inventory.Issues = []device.DiscoveryIssue{{PCI: "0003:64:00.0", Err: errors.New("unrelated scoped failure")}}
+		readNames := r.ReadInterfaceNames
+		r.ReadInterfaceNames = func(ctx context.Context, pci string) (device.InterfaceNames, error) {
+			if pci == "0002:64:00.0" {
+				return device.InterfaceNames{Netdev: "wrong", RDMA: "wrong"}, nil
+			}
+			return readNames(ctx, pci)
+		}
+		fresh, pending, err := r.freshDevices(ctx, statuses)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(pending).To(BeTrue())
+		Expect(fresh).To(BeEmpty())
+	})
+	It("completes naming removal even when no other configuration intent remains", func() {
+		for _, status := range statuses {
+			status.device.Spec.Configuration = nil
+			Expect(c.Update(ctx, status.device)).To(Succeed())
+		}
+		d := statuses[0].device
+		meta.SetStatusCondition(&d.Status.Conditions, metav1.Condition{Type: consts.InterfaceNameCondition, Status: metav1.ConditionFalse, Reason: consts.InterfaceNameSpecEmptyReason})
+		Expect(c.Status().Update(ctx, d)).To(Succeed())
+		naming.On("ApplyUdevRules", mock.Anything, mock.Anything).Return(nil, false, nil)
+		maintenance.On("ReleaseMaintenance", mock.Anything).Return(nil)
+		_, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKey{Name: nicDeviceSyncEventName}})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.Get(ctx, client.ObjectKeyFromObject(d), d)).To(Succeed())
+		Expect(meta.FindStatusCondition(d.Status.Conditions, consts.InterfaceNameCondition)).To(BeNil())
+		scopedFailure()
+		fresh, pending, err := r.freshDevices(ctx, statuses[:1])
+		Expect(err).NotTo(HaveOccurred())
+		Expect(pending).To(BeTrue())
+		Expect(fresh).To(HaveLen(1))
+	})
+	It("keeps unsuccessful naming cleanup pending", func() {
+		d := statuses[0].device
+		meta.SetStatusCondition(&d.Status.Conditions, metav1.Condition{Type: consts.InterfaceNameCondition, Status: metav1.ConditionFalse, Reason: consts.InterfaceNameSpecEmptyReason})
+		Expect(c.Status().Update(ctx, d)).To(Succeed())
+		naming.On("ApplyUdevRules", mock.Anything, mock.Anything).Return(nil, false, nil)
+		r.ReadInterfaceNames = func(context.Context, string) (device.InterfaceNames, error) {
+			return device.InterfaceNames{}, errors.New("readback failed")
+		}
+		Expect(r.reconcileInterfaceNameTemplates(ctx, statuses[:1])).To(HaveOccurred())
+		Expect(c.Get(ctx, client.ObjectKeyFromObject(d), d)).To(Succeed())
+		Expect(meta.FindStatusCondition(d.Status.Conditions, consts.InterfaceNameCondition)).NotTo(BeNil())
 	})
 	It("retains last-known names on a failed read, including partial reader output", func() {
 		r.ReadInterfaceNames = func(context.Context, string) (device.InterfaceNames, error) {

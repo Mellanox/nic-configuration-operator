@@ -87,53 +87,78 @@ func (r *NicDeviceReconciler) freshDevices(ctx context.Context, statuses nicDevi
 			return nil, true, err
 		}
 	}
-	fresh := make(nicDeviceConfigurationStatuses, 0, len(statuses))
-	for _, status := range statuses {
-		d := status.device
-		if stale[client.ObjectKeyFromObject(d)] {
-			continue
-		}
-		if pending {
-			// A removed template may still own rules. Its cleanup must wait for the
-			// complete host naming domain; current names alone cannot prove removal.
+	if pending {
+		for _, status := range statuses {
+			d := status.device
+			key := client.ObjectKeyFromObject(d)
+			if stale[key] {
+				continue
+			}
+			// Current names cannot prove that a removed template's rules were
+			// cleaned up. That requires a successful full-domain Apply.
 			if d.Spec.InterfaceNameTemplate == nil && meta.FindStatusCondition(d.Status.Conditions, consts.InterfaceNameCondition) != nil {
+				stale[key] = true
 				continue
 			}
 			if err := r.refreshInterfaceNames(ctx, d, expected); err != nil {
-				continue
+				stale[key] = true
 			}
 		}
-		fresh = append(fresh, status)
+		// Naming eligibility can invalidate a member after inventory validation.
+		// Re-close all shared domains before returning any mutating workset.
+		markStaleDiscoveryGroups(statuses, stale, presentKeys, staleKeys)
 	}
+	fresh := make(nicDeviceConfigurationStatuses, 0, len(statuses))
+	for _, status := range statuses {
+		if !stale[client.ObjectKeyFromObject(status.device)] {
+			fresh = append(fresh, status)
+		}
+	}
+
 	return fresh, pending, nil
 }
 
 // markStaleDiscoveryGroups expands the blocked workset to NCO's shared
 // configuration domains. It only changes this pass's stale map; it performs no IO.
 func markStaleDiscoveryGroups(statuses nicDeviceConfigurationStatuses, stale map[client.ObjectKey]bool, presentKeys, staleKeys map[string]bool) {
-	// A validated hardware pair also needs both current CRs before NCO can
-	// act on either participant's intent. An absent peer is not fresh evidence.
-	for _, status := range statuses {
-		d := status.device
-		if d.Status.NetworkBay != nil {
-			peer := utils.PCIDeviceAddress(d.Status.NetworkBay.PeerPCI)
-			if !presentKeys[peer] || staleKeys[peer] {
-				stale[client.ObjectKeyFromObject(d)] = true
+	planDevices := spectrumXDevicesForPlan(statuses)
+	// Domains can overlap: a Bay peer may participate in the node plan while
+	// its sibling does not. Iterate monotonically until no domain adds a block.
+	for changed := true; changed; {
+		changed = false
+		mark := func(d *v1alpha1.NicDevice) {
+			key := client.ObjectKeyFromObject(d)
+			if !stale[key] {
+				stale[key] = true
+				changed = true
+			}
+		}
+		for _, status := range statuses {
+			d := status.device
+			if stale[client.ObjectKeyFromObject(d)] && len(d.Status.Ports) > 0 {
+				staleKeys[utils.PCIDeviceAddress(d.Status.Ports[0].PCI)] = true
+			}
+		}
+		for _, status := range statuses {
+			d := status.device
+			if d.Status.NetworkBay != nil {
+				peer := utils.PCIDeviceAddress(d.Status.NetworkBay.PeerPCI)
+				if !presentKeys[peer] || staleKeys[peer] {
+					mark(d)
+				}
+			}
+		}
+		planStale := false
+		for _, d := range planDevices {
+			planStale = planStale || stale[client.ObjectKeyFromObject(d)]
+		}
+		if planStale {
+			for _, d := range planDevices {
+				mark(d)
 			}
 		}
 	}
-	// The legacy doSPCX plan is node-scoped. A stale participant must not
-	// cause it to be rebuilt from a different subset of the configured rails.
-	planDevices := spectrumXDevicesForPlan(statuses)
-	planStale := false
-	for _, d := range planDevices {
-		planStale = planStale || stale[client.ObjectKeyFromObject(d)]
-	}
-	if planStale {
-		for _, d := range planDevices {
-			stale[client.ObjectKeyFromObject(d)] = true
-		}
-	}
+
 }
 
 // refreshInterfaceNames reads each PF atomically. A failed read keeps the last

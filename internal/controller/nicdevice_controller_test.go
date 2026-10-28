@@ -1748,16 +1748,14 @@ var _ = Describe("NicDeviceReconciler", func() {
 			device.Spec.InterfaceNameTemplate = nil
 			Expect(k8sClient.Update(ctx, device)).To(Succeed())
 
-			// The condition should be cleared to False with InterfaceNameSpecEmpty reason
+			// Successful complete-rule cleanup and readback remove the obsolete condition.
 			Eventually(func() bool {
 				d := &v1alpha1.NicDevice{}
 				if err := k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, d); err != nil {
 					return false
 				}
 				cond := meta.FindStatusCondition(d.Status.Conditions, consts.InterfaceNameCondition)
-				return cond != nil &&
-					cond.Status == metav1.ConditionFalse &&
-					cond.Reason == consts.InterfaceNameSpecEmptyReason
+				return cond == nil
 			}, timeout).Should(BeTrue())
 		})
 

@@ -50,7 +50,11 @@ endpoint is represented by an empty name only when its read succeeds.
 Naming files and activation are host-wide. If any known device is stale, NCO
 leaves the complete naming domain alone rather than writing rules from a filtered
 set. A healthy named ASIC can continue only when fresh name reads match its
-resolved intent. A pending template removal waits for the complete naming domain.
+resolved intent. A pending template removal waits for the complete naming domain. Its condition
+is cleared only after the complete rule set is activated and interface-name
+readback succeeds, including when no other configuration intent remains. Shared
+configuration groups are checked again after naming eligibility, so a failed
+name check cannot produce a partial node plan or Network Bay pair.
 
 ## Validation scope
 
