@@ -81,11 +81,12 @@ type semanticGroupRecord struct {
 }
 
 type semanticOperationRecord struct {
-	Path        string         `json:"path"`
-	Values      map[string]any `json:"values"`
-	Kind        string         `json:"kind"`
-	Scope       string         `json:"scope"`
-	TargetClass string         `json:"target_class"`
+	Path         string          `json:"path"`
+	Values       map[string]any  `json:"values"`
+	Kind         string          `json:"kind"`
+	Scope        string          `json:"scope"`
+	TargetClass  string          `json:"target_class"`
+	TargetFilter json.RawMessage `json:"target_filter"`
 }
 
 func decodePlanDocument(planJSON []byte) (*planDocument, error) {
@@ -109,7 +110,7 @@ func decodePlanDocument(planJSON []byte) (*planDocument, error) {
 	return &document, nil
 }
 
-func buildPlan(document *planDocument, expectedStage planStage) (*Plan, error) {
+func buildPlan(document *planDocument, expectedStage planStage) (*compiledPlan, error) {
 	if err := validateSemanticPlan(document, expectedStage); err != nil {
 		return nil, err
 	}
@@ -119,7 +120,7 @@ func buildPlan(document *planDocument, expectedStage planStage) (*Plan, error) {
 		return groups[left].Order < groups[right].Order
 	})
 
-	result := &Plan{}
+	result := &compiledPlan{}
 	seenGroups := make(map[string]struct{}, len(groups))
 	for index, group := range groups {
 		if err := validateSemanticGroup(group, index, expectedStage, seenGroups); err != nil {
@@ -157,12 +158,12 @@ func buildPlan(document *planDocument, expectedStage planStage) (*Plan, error) {
 		case planStagePrepare:
 			switch group.Name {
 			case semanticGroupBreakout:
-				result.Breakout = stripXPathOperationMetadata(operations)
+				result.Breakout = operations
 			case semanticGroupPostBreakout:
-				result.PostBreakout = stripXPathOperationMetadata(operations)
+				result.PostBreakout = operations
 			}
 		case planStageConfigure:
-			result.RuntimeConfig = append(result.RuntimeConfig, OperationGroup{
+			result.RuntimeConfig = append(result.RuntimeConfig, compiledOperationGroup{
 				Name:       group.Name,
 				Scope:      strings.TrimSpace(group.Scope),
 				Operations: operations,
@@ -252,8 +253,8 @@ func validateSupportedGroup(stage planStage, name string) error {
 func resolveGroupOperations(
 	group semanticGroupRecord,
 	operations map[string]semanticOperationRecord,
-) ([]dmscli.XPathOperation, error) {
-	result := make([]dmscli.XPathOperation, 0, len(group.OperationRefs))
+) ([]compiledOperation, error) {
+	result := make([]compiledOperation, 0, len(group.OperationRefs))
 	seenRefs := make(map[string]struct{}, len(group.OperationRefs))
 	for index, ref := range group.OperationRefs {
 		if strings.TrimSpace(ref) == "" {
@@ -291,12 +292,18 @@ func resolveGroupOperations(
 		if targetClass == "" && scope == semanticScopePerDevice {
 			targetClass = semanticTargetClassPFNetdevAll
 		}
-		result = append(result, dmscli.XPathOperation{
-			Path:        record.Path,
-			Values:      cloneValueMap(record.Values),
-			Scope:       scope,
-			TargetClass: targetClass,
-		})
+		filter, err := parseTargetFilter(record.TargetFilter)
+		if err != nil {
+			return nil, fmt.Errorf("doSPCX semantic operation %q: %w", ref, err)
+		}
+		result = append(result, compiledOperation{
+			filter: filter,
+			XPathOperation: dmscli.XPathOperation{
+				Path:        record.Path,
+				Values:      cloneValueMap(record.Values),
+				Scope:       scope,
+				TargetClass: targetClass,
+			}})
 	}
 	return result, nil
 }
@@ -350,55 +357,6 @@ func validSemanticValue(value any) bool {
 	default:
 		return false
 	}
-}
-
-func clonePlan(source *Plan) *Plan {
-	if source == nil {
-		return nil
-	}
-	result := &Plan{
-		Breakout:       cloneXPathOperations(source.Breakout),
-		PostBreakout:   cloneXPathOperations(source.PostBreakout),
-		RuntimeConfig:  cloneOperationGroups(source.RuntimeConfig),
-		ConfigureError: source.ConfigureError,
-	}
-	return result
-}
-
-func cloneOperationGroups(source []OperationGroup) []OperationGroup {
-	result := make([]OperationGroup, len(source))
-	for index, group := range source {
-		result[index] = OperationGroup{
-			Name:       group.Name,
-			Scope:      group.Scope,
-			Operations: cloneXPathOperations(group.Operations),
-		}
-	}
-	return result
-}
-
-func stripXPathOperationMetadata(source []dmscli.XPathOperation) []dmscli.XPathOperation {
-	result := make([]dmscli.XPathOperation, len(source))
-	for index, operation := range source {
-		result[index] = dmscli.XPathOperation{
-			Path:   operation.Path,
-			Values: cloneValueMap(operation.Values),
-		}
-	}
-	return result
-}
-
-func cloneXPathOperations(source []dmscli.XPathOperation) []dmscli.XPathOperation {
-	result := make([]dmscli.XPathOperation, len(source))
-	for index, operation := range source {
-		result[index] = dmscli.XPathOperation{
-			Path:        operation.Path,
-			Values:      cloneValueMap(operation.Values),
-			Scope:       operation.Scope,
-			TargetClass: operation.TargetClass,
-		}
-	}
-	return result
 }
 
 func cloneValueMap(values map[string]any) map[string]any {
