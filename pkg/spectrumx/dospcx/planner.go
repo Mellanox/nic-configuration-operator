@@ -59,7 +59,7 @@ const (
 	planStageConfigure planStage = "configure"
 )
 
-// Plan is the homogeneous configuration intent compiled from doSPCX plans.
+// Plan is the configuration intent selected for one NIC from doSPCX plans.
 type Plan struct {
 	Breakout      []dmscli.XPathOperation
 	PostBreakout  []dmscli.XPathOperation
@@ -154,13 +154,13 @@ type planMetadata struct {
 type preparedPlan struct {
 	metadata  map[planStage]planMetadata
 	targetMap targetMap
-	plan      *Plan
+	plan      *compiledPlan
 }
 
 type preparedStagePlan struct {
 	metadata  planMetadata
 	targetMap targetMap
-	plan      *Plan
+	plan      *compiledPlan
 }
 
 // PreparePlan ensures that one matching node-scoped plan containing persistent
@@ -351,39 +351,41 @@ func (m *Manager) GetPreparedPlan(device *v1alpha1.NicDevice) (*Plan, error) {
 			return nil, fmt.Errorf("cached doSPCX plan does not match device %q inputs", device.Name)
 		}
 	}
-	if err := validateDeviceInTargetMap(config, cached.targetMap); err != nil {
+	target, err := deviceInTargetMap(config, cached.targetMap)
+	if err != nil {
 		return nil, fmt.Errorf("cached doSPCX plan does not match device %q: %w", device.Name, err)
 	}
-	return clonePlan(cached.plan), nil
+	return projectPlan(cached.plan, target, config.platformType)
 }
 
 func combineStagePlans(prepare, configure *preparedStagePlan) *preparedPlan {
 	combined := &preparedPlan{
 		metadata:  map[planStage]planMetadata{planStagePrepare: prepare.metadata},
 		targetMap: prepare.targetMap,
-		plan: &Plan{
-			Breakout:     cloneXPathOperations(prepare.plan.Breakout),
-			PostBreakout: cloneXPathOperations(prepare.plan.PostBreakout),
+		plan: &compiledPlan{
+			Breakout:     prepare.plan.Breakout,
+			PostBreakout: prepare.plan.PostBreakout,
 		},
 	}
 	if configure != nil {
 		combined.metadata[planStageConfigure] = configure.metadata
-		combined.plan.RuntimeConfig = cloneOperationGroups(configure.plan.RuntimeConfig)
+		combined.plan.RuntimeConfig = configure.plan.RuntimeConfig
 	}
 	return combined
 }
 
-func planForStage(plan *Plan, stage planStage) *Plan {
+// Cached compiled operations are immutable and can be shared between stage views.
+func planForStage(plan *compiledPlan, stage planStage) *compiledPlan {
 	if plan == nil {
 		return nil
 	}
 	if stage == planStagePrepare {
-		return &Plan{
-			Breakout:     cloneXPathOperations(plan.Breakout),
-			PostBreakout: cloneXPathOperations(plan.PostBreakout),
+		return &compiledPlan{
+			Breakout:     plan.Breakout,
+			PostBreakout: plan.PostBreakout,
 		}
 	}
-	return &Plan{RuntimeConfig: cloneOperationGroups(plan.RuntimeConfig)}
+	return &compiledPlan{RuntimeConfig: plan.RuntimeConfig}
 }
 
 func newPlanMetadata(
@@ -430,26 +432,26 @@ func planParameters(config *planConfig) ([]string, error) {
 	return append(params, "overlay="+config.overlay), nil
 }
 
-func validateDeviceInTargetMap(config *planConfig, saved targetMap) error {
+func deviceInTargetMap(config *planConfig, saved targetMap) (preBreakoutTarget, error) {
 	if saved.SchemaVersion != targetMapSchemaVersion || saved.PlatformType != config.platformType {
-		return fmt.Errorf("target map identity changed")
+		return preBreakoutTarget{}, fmt.Errorf("target map identity changed")
 	}
 	expectedDevice := config.devices[0]
 	for _, target := range saved.PreBreakout.Targets {
 		if target.BDF == expectedDevice.bdf {
 			if strings.TrimSpace(target.ID) == "" {
-				return fmt.Errorf("BDF %q has no target ID", expectedDevice.bdf)
+				return preBreakoutTarget{}, fmt.Errorf("BDF %q has no target ID", expectedDevice.bdf)
 			}
 			if target.DeviceID != expectedDevice.deviceID {
-				return fmt.Errorf("BDF %q device ID is %q, expected %q", expectedDevice.bdf, target.DeviceID, expectedDevice.deviceID)
+				return preBreakoutTarget{}, fmt.Errorf("BDF %q device ID is %q, expected %q", expectedDevice.bdf, target.DeviceID, expectedDevice.deviceID)
 			}
 			if target.Role != targetRoleEW {
-				return fmt.Errorf("BDF %q role is %q, expected %q", expectedDevice.bdf, target.Role, targetRoleEW)
+				return preBreakoutTarget{}, fmt.Errorf("BDF %q role is %q, expected %q", expectedDevice.bdf, target.Role, targetRoleEW)
 			}
-			return nil
+			return target, nil
 		}
 	}
-	return fmt.Errorf("BDF %q is absent from the target map", expectedDevice.bdf)
+	return preBreakoutTarget{}, fmt.Errorf("BDF %q is absent from the target map", expectedDevice.bdf)
 }
 
 func (m *Manager) resolvedStateDir() string {
@@ -705,7 +707,7 @@ func validateGeneratedPlan(
 	expectedName string,
 	config *planConfig,
 	expectedStage planStage,
-) (*Plan, error) {
+) (*compiledPlan, error) {
 	document, err := decodePlanDocument(planJSON)
 	if err != nil {
 		return nil, fmt.Errorf("decode generated doSPCX %s plan: %w", expectedStage, err)

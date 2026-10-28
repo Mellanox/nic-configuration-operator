@@ -40,7 +40,7 @@ var _ = Describe("doSPCX semantic plan parsing", func() {
 	}
 
 	compileFixture := func(name string, stage PlanStage) *Plan {
-		plan, err := buildPlan(decodeFixture(name), stage)
+		plan, err := buildTestPlan(decodeFixture(name), stage)
 		Expect(err).NotTo(HaveOccurred())
 		return plan
 	}
@@ -65,7 +65,7 @@ var _ = Describe("doSPCX semantic plan parsing", func() {
 			Values: map[string]any{"dscp": json.Number("48")},
 		}
 
-		plan, err := buildPlan(document, PlanStagePrepare)
+		plan, err := buildTestPlan(document, PlanStagePrepare)
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(plan.PostBreakout).To(Equal([]dmscli.XPathOperation{
@@ -112,7 +112,7 @@ var _ = Describe("doSPCX semantic plan parsing", func() {
 			groups[left], groups[right] = groups[right], groups[left]
 		}
 
-		plan, err := buildPlan(document, PlanStageConfigure)
+		plan, err := buildTestPlan(document, PlanStageConfigure)
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(runtimeGroupNames(plan)).To(Equal([]string{"link-runtime", "link-event", "cc"}))
@@ -122,7 +122,7 @@ var _ = Describe("doSPCX semantic plan parsing", func() {
 		document := decodeFixture("configure-plan.json")
 		findGroup(document, semanticGroupESwitch).OperationRefs = []string{"missing-operation"}
 
-		plan, err := buildPlan(document, PlanStageConfigure)
+		plan, err := buildTestPlan(document, PlanStageConfigure)
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(runtimeGroupNames(plan)).To(Equal([]string{"link-runtime", "link-event", "cc"}))
@@ -135,7 +135,7 @@ var _ = Describe("doSPCX semantic plan parsing", func() {
 			"ra22-hwmp-data-direct.data-direct.enabled",
 			"spcx-eswitch.eswitch.multiport")
 
-		plan, err := buildPlan(document, PlanStageConfigure)
+		plan, err := buildTestPlan(document, PlanStageConfigure)
 
 		Expect(err).NotTo(HaveOccurred())
 		operations := plan.RuntimeConfig[1].Operations
@@ -154,27 +154,38 @@ var _ = Describe("doSPCX semantic plan parsing", func() {
 		operation.TargetClass = "pf_netdev_all"
 		document.Plan.Operations[ref] = operation
 
-		_, err := buildPlan(document, PlanStageConfigure)
+		_, err := buildTestPlan(document, PlanStageConfigure)
 
 		Expect(err).To(MatchError(ContainSubstring("unsupported doSPCX semantic group \"vf-lifecycle\"")))
 	})
 
-	It("deep-clones parsed operations", func() {
-		preparePlan := compileFixture("prepare-plan.json", PlanStagePrepare)
-		prepareClone := clonePlan(preparePlan)
-		prepareClone.Breakout[0].Values["adaptive-routing"] = false
-
-		Expect(preparePlan.Breakout[0].Values).To(HaveKeyWithValue("adaptive-routing", true))
-
-		configurePlan := compileFixture("configure-plan.json", PlanStageConfigure)
-		configureClone := clonePlan(configurePlan)
-		configureClone.RuntimeConfig[1].Operations[0].Values["trust-mode"] = "pcp"
-		configureClone.RuntimeConfig[1].Operations[0].Scope = "modified_scope"
-		configureClone.RuntimeConfig[1].Operations[0].TargetClass = "modified_target_class"
-
-		Expect(configurePlan.RuntimeConfig[1].Operations[0].Values).To(HaveKeyWithValue("trust-mode", "dscp"))
-		Expect(configurePlan.RuntimeConfig[1].Operations[0].Scope).To(Equal("per_device"))
-		Expect(configurePlan.RuntimeConfig[1].Operations[0].TargetClass).To(Equal("pf_netdev_all"))
+	It("projects independent values from the same compiled operations", func() {
+		for _, fixture := range []struct {
+			name  string
+			stage planStage
+		}{
+			{name: "prepare-plan.json", stage: planStagePrepare},
+			{name: "configure-plan.json", stage: planStageConfigure},
+		} {
+			compiled, err := buildPlan(decodeFixture(fixture.name), fixture.stage)
+			Expect(err).NotTo(HaveOccurred())
+			target := preBreakoutTarget{DeviceID: "0x1023"}
+			original, err := projectPlan(compiled, target, "gb300")
+			Expect(err).NotTo(HaveOccurred())
+			modified, err := projectPlan(compiled, target, "gb300")
+			Expect(err).NotTo(HaveOccurred())
+			if fixture.stage == planStagePrepare {
+				modified.Breakout[0].Values["adaptive-routing"] = false
+				Expect(original.Breakout[0].Values).To(HaveKeyWithValue("adaptive-routing", true))
+			} else {
+				modified.RuntimeConfig[1].Operations[0].Values["trust-mode"] = "pcp"
+				modified.RuntimeConfig[1].Operations[0].Scope = "changed"
+				modified.RuntimeConfig[1].Operations[0].TargetClass = "changed"
+				Expect(original.RuntimeConfig[1].Operations[0].Values).To(HaveKeyWithValue("trust-mode", "dscp"))
+				Expect(original.RuntimeConfig[1].Operations[0].Scope).To(Equal("per_device"))
+				Expect(original.RuntimeConfig[1].Operations[0].TargetClass).To(Equal("pf_netdev_all"))
+			}
+		}
 	})
 
 	DescribeTable("rejects invalid semantic plans",
@@ -185,7 +196,7 @@ var _ = Describe("doSPCX semantic plan parsing", func() {
 			}
 			mutate(document)
 
-			_, err := buildPlan(document, stage)
+			_, err := buildTestPlan(document, stage)
 
 			Expect(err).To(MatchError(ContainSubstring(expected)))
 		},
@@ -258,7 +269,7 @@ var _ = Describe("doSPCX semantic plan parsing", func() {
 	)
 
 	It("rejects a nil plan", func() {
-		_, err := buildPlan(nil, PlanStagePrepare)
+		_, err := buildTestPlan(nil, PlanStagePrepare)
 		Expect(err).To(MatchError(ContainSubstring("must not be nil")))
 	})
 
@@ -296,4 +307,13 @@ func mutateFirstOperation(document *planDocument, mutate func(*semanticOperation
 	operation := document.Plan.Operations[ref]
 	mutate(&operation)
 	document.Plan.Operations[ref] = operation
+}
+
+// Existing parser assertions inspect the public projection for an unfiltered CX8.
+func buildTestPlan(document *planDocument, stage planStage) (*Plan, error) {
+	compiled, err := buildPlan(document, stage)
+	if err != nil {
+		return nil, err
+	}
+	return projectPlan(compiled, preBreakoutTarget{DeviceID: "0x1023"}, "gb300")
 }

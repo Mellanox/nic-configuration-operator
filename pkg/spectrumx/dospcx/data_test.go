@@ -100,7 +100,7 @@ var _ = Describe("doSPCX data archive installation", func() {
 		Expect(os.WriteFile(filepath.Join(dataRoot, "obsolete"), []byte("old"), 0o644)).To(Succeed())
 		archive := validBlueprintsArchive()
 		manager := newBlueprintsDataManager(dataRoot)
-		manager.preparedPlans["old-plan"] = &preparedPlan{plan: &Plan{}}
+		manager.preparedPlans["old-plan"] = &preparedPlan{plan: &compiledPlan{}}
 
 		Expect(manager.InstallBlueprintsData(archive)).To(Succeed())
 
@@ -226,7 +226,7 @@ var _ = Describe("doSPCX data archive installation", func() {
 		dataRoot := filepath.Join(GinkgoT().TempDir(), "doSpcx", "data")
 		manager := newBlueprintsDataManager(dataRoot)
 		Expect(manager.InstallBlueprintsData(validBlueprintsArchive())).To(Succeed())
-		manager.preparedPlans["old-plan"] = &preparedPlan{plan: &Plan{}}
+		manager.preparedPlans["old-plan"] = &preparedPlan{plan: &compiledPlan{}}
 		updatedArchive := validBlueprintsArchive(blueprintsArchiveEntry{
 			name: "data/new-profile-marker", typeFlag: tar.TypeReg, mode: 0o644, content: "new",
 		})
@@ -250,7 +250,7 @@ var _ = Describe("doSPCX data archive installation", func() {
 		dataRoot := filepath.Join(GinkgoT().TempDir(), "doSpcx", "data")
 		manager := newBlueprintsDataManager(dataRoot)
 		Expect(manager.InstallBlueprintsData(validBlueprintsArchive())).To(Succeed())
-		manager.preparedPlans["old-plan"] = &preparedPlan{plan: &Plan{}}
+		manager.preparedPlans["old-plan"] = &preparedPlan{plan: &compiledPlan{}}
 
 		Expect(manager.RemoveBlueprintsData()).To(Succeed())
 		Expect(dataRoot).NotTo(BeADirectory())
@@ -263,7 +263,7 @@ var _ = Describe("doSPCX data archive installation", func() {
 		manager := newBlueprintsDataManager(dataRoot)
 		archive := validBlueprintsArchive()
 		Expect(manager.InstallBlueprintsData(archive)).To(Succeed())
-		manager.preparedPlans["active-plan"] = &preparedPlan{plan: &Plan{}}
+		manager.preparedPlans["active-plan"] = &preparedPlan{plan: &compiledPlan{}}
 
 		originalRemove := removeBlueprintsDataDirectory
 		DeferCleanup(func() { removeBlueprintsDataDirectory = originalRemove })
