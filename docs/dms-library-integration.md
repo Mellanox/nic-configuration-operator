@@ -15,8 +15,10 @@ healthy records update. Without the switch, required discovery failures fail the
 scan. Optional missing VPD metadata does not omit an otherwise usable device.
 
 The controller reads expected interface names through `device.ReadInterfaceNames`
-and refreshes other devices after rule changes, preserving its existing behavior.
-Read errors are returned without replacing stored names with invented empty strings.
+and refreshes other reconciled devices after every successful rule application.
+This read-only refresh also retries failed reads or status updates when rule files
+are already unchanged; it does not reactivate udev. Read errors are returned
+without replacing stored names with invented empty strings.
 
 ## Consumer compatibility
 

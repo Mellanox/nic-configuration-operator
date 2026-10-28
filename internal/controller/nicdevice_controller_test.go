@@ -1561,6 +1561,36 @@ var _ = Describe("NicDeviceReconciler", func() {
 			Expect(d.Status.Ports[0].RdmaInterface).To(Equal("mlx5_0"))
 		})
 
+		It("Should retry unnamed device name reads when udev rules are unchanged", func() {
+			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
+			d := &v1alpha1.NicDevice{ObjectMeta: metav1.ObjectMeta{Name: "readback-retry", Namespace: namespaceName}}
+			Expect(k8sClient.Create(ctx, d)).To(Succeed())
+			d.Status = v1alpha1.NicDeviceStatus{Node: "another-node", Ports: []v1alpha1.NicDevicePortSpec{{PCI: pciAddress, NetworkInterface: "old_eth0", RdmaInterface: "old_mlx5_0"}}}
+			Expect(k8sClient.Status().Update(ctx, d)).To(Succeed())
+			u := &udevMocks.UdevManager{}
+			u.On("ApplyUdevRules", mock.Anything, mock.Anything).Return(nil, true, nil).Once()
+			u.On("ApplyUdevRules", mock.Anything, mock.Anything).Return(nil, false, nil).Once()
+			reads := 0
+			r := &NicDeviceReconciler{Client: k8sClient, UdevManager: u, ReadInterfaceNames: func(context.Context, string) (device.InterfaceNames, error) {
+				reads++
+				if reads == 1 {
+					return device.InterfaceNames{}, errors.New("temporary sysfs failure")
+				}
+				return device.InterfaceNames{Netdev: "new_eth0", RDMA: "new_mlx5_0"}, nil
+			}}
+			err := r.reconcileInterfaceNameTemplates(ctx, nicDeviceConfigurationStatuses{{device: d}})
+			Expect(err).To(MatchError(ContainSubstring("temporary sysfs failure")))
+			Expect(mgr.GetAPIReader().Get(ctx, client.ObjectKeyFromObject(d), d)).To(Succeed())
+			Expect(d.Status.Ports[0].NetworkInterface).To(Equal("old_eth0"))
+			Expect(d.Status.Ports[0].RdmaInterface).To(Equal("old_mlx5_0"))
+			Expect(r.reconcileInterfaceNameTemplates(ctx, nicDeviceConfigurationStatuses{{device: d}})).To(Succeed())
+			Expect(mgr.GetAPIReader().Get(ctx, client.ObjectKeyFromObject(d), d)).To(Succeed())
+			Expect(d.Status.Ports[0].NetworkInterface).To(Equal("new_eth0"))
+			Expect(d.Status.Ports[0].RdmaInterface).To(Equal("new_mlx5_0"))
+			Expect(reads).To(Equal(2))
+			u.AssertExpectations(GinkgoT())
+		})
+
 		It("Should set success condition when interface names match expected", func() {
 			expectedNames := map[string]udev.ExpectedInterfaceNames{
 				pciAddress: {NetDevice: "net1p1", RdmaDevice: "rdma1p1"},

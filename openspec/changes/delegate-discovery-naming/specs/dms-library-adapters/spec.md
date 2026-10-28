@@ -39,6 +39,11 @@ NCO SHALL retain template selection, placeholder expansion, shared-RDMA naming a
 - **WHEN** the library cannot read interface names for a PF
 - **THEN** NCO returns the error and retains that PF's previously recorded names
 
+#### Scenario: Readback retry after rule files changed
+
+- **WHEN** a name read fails after rule application and the next Apply reports unchanged files
+- **THEN** NCO retries the read and updates stored names without requiring another rule activation
+
 ### Requirement: Extraction preserves controller lifecycle
 
 The migration SHALL preserve the existing discovery controller and firmware, NV/runtime, reset, maintenance and CC reconciliation paths; it SHALL NOT add discovery freshness conditions or a new lifecycle gate.

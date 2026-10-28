@@ -14,7 +14,7 @@ NCO owns Kubernetes records and naming intent. dms-lib owns native discovery, AS
 
 1. Keep `DeviceDiscovery`, `SkippedDeviceReporter` and `IncompleteDeviceReporter`; adapt library inventory inside `pkg/devicediscovery`. This avoids controller-side inventory state and preserves physical-PCI CR identity. Process scoped issues before projecting Orchid peers.
 2. Remove the constructor's obsolete NVConfigUtils argument rather than silently ignoring it. The known DPF caller requires coordinated migration; DPF is outside this PR.
-3. Keep NCO naming expansion and future-PF policy, then pass explicit assignments to the library. Preserve changed-file-only activation and the controller's existing readback flow; return interface-name query errors without publishing empty names for failed reads.
+3. Keep NCO naming expansion and future-PF policy, then pass explicit assignments to the library. Preserve changed-file-only activation; refresh all reconciled device names after successful Apply, including unchanged-file retries after a query or status update failure. Return interface-name query errors without publishing empty names for failed reads. This read-only retry needs no persistent state or new lifecycle gate.
 4. Retain the existing firmware, configuration, maintenance and CC paths. A second reconciliation framework is unnecessary for this extraction.
 
 ## Risks / Trade-offs
