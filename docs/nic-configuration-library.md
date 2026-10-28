@@ -576,16 +576,25 @@ startup; later `PreparePlan` calls reuse memory while the inputs match.
 the request unless both cached stages and target-map membership match the
 supplied device.
 
-Compilation produces homogeneous configuration intent rather than resolving
-operations onto individual devices. Prepare-stage `breakout` and `post-breakout`
+Compilation retains operation target filters in an immutable internal cache.
+`GetPreparedPlan` selects operations for the requesting NIC using its validated
+pre-breakout target-map entry and returns independent operation values. It
+supports `target_filter.hca_type` and `target_filter.nic_index_in_rail`; both
+constraints must match. An absent NIC-index filter is unrestricted, while an
+explicit empty list selects no NIC. A constrained VR operation requires an
+explicit NIC index in the target map; non-VR single-NIC rails default to index
+zero. Unsupported selectors, including `planes`, and malformed filters fail
+explicitly rather than broadening the operation's scope.
+
+Prepare-stage `breakout` and `post-breakout`
 groups become ordered XPath operation slices. Configure-stage `link-runtime`,
 `cc`, and `link-event` groups become ordered `OperationGroup` values. Each group
 preserves its scope and the order of `semantic.groups[].operation_refs`, including
 repeated writes. Each runtime XPath operation preserves its effective `scope` and
 `target_class`. Operations with `scope=per_vf` or `target_class=per_eswitch` are
-excluded from the host-Kubernetes runtime plan. Device targeting and construction
-of validation queries belong to the configuration manager when it consumes this
-plan. Runtime apply preserves the authored batch order. Validation ignores values
+excluded from the host-Kubernetes runtime plan. Per-port runtime targeting and
+construction of validation queries belong to the configuration manager when it
+consumes this per-NIC plan. Runtime apply preserves the authored batch order. Validation ignores values
 shadowed by later batches across all runtime groups on the same target, while keeping different scope and
 target-class pairs in separate DMS commands.
 
