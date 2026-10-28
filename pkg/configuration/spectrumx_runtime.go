@@ -473,7 +473,32 @@ func (h configurationManager) validateSpectrumXRuntimeTarget(
 	queries []dmscli.XPathQuery,
 	desiredValues map[string]map[string]any,
 ) (bool, error) {
+	return h.validateSpectrumXRuntimeTargetWithSysfs(ctx, target, queries, desiredValues, "/sys")
+}
+
+func (h configurationManager) validateSpectrumXRuntimeTargetWithSysfs(
+	ctx context.Context,
+	target string,
+	queries []dmscli.XPathQuery,
+	desiredValues map[string]map[string]any,
+	sysRoot string,
+) (bool, error) {
 	for _, batch := range spectrumXRuntimeQueryBatches(queries) {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		if len(batch) == 1 {
+			query := batch[0]
+			if actual, ok := readCCGlobalStatus(sysRoot, target, query); ok {
+				if !dmscli.XPathValuesEqual(actual, desiredValues[query.Path]["enabled"]) {
+					log.FromContext(ctx).V(2).Info("doSPCX runtime value differs",
+						"target", target, "path", query.Path, "leaf", "enabled",
+						"current", actual, "desired", desiredValues[query.Path]["enabled"])
+					return false, nil
+				}
+				continue
+			}
+		}
 		result, err := dmscli.QueryXPaths(ctx, h.execInterface, target, batch)
 		if err != nil {
 			return false, err
