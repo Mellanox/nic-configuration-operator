@@ -31,6 +31,8 @@ import (
 	execTesting "k8s.io/utils/exec/testing"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
+	"github.com/Mellanox/nic-configuration-operator/pkg/dmscli"
+	"github.com/Mellanox/nic-configuration-operator/pkg/nvconfig"
 )
 
 type PlanStage = planStage
@@ -454,6 +456,94 @@ pre_breakout:
 			Expect(json.Unmarshal(content, &result)).To(Succeed())
 			return content, result
 		}
+
+		DescribeTable("selects each VR recipe across plan cache lifecycles",
+			func(restart, deferConfigure bool) {
+				stateDir := GinkgoT().TempDir()
+				writeVRReference(stateDir, reference)
+				devices := newVRDevices("hwplb", 8)
+				response := planResponseForPlatform(planName(nodeName, prepareStage), "vr-SPX_Multiplane", prepareStage, "vr", 8, 2)
+				commands := []preparePlanCommand{}
+				configureReady := !deferConfigure
+				executor := preparePlanFakeExecutor(response, &commands)
+				for i := range executor.CommandScript {
+					executor.CommandScript[i] = func(executable string, args ...string) execUtils.Cmd {
+						command := &execTesting.FakeCmd{}
+						command.RunScript = append(command.RunScript, func() ([]byte, []byte, error) {
+							if argumentValue(args, "stage=") == configureStage && !configureReady {
+								return []byte(`{"status":"error","error_msg":"target map resolution failed: target map fingerprint mismatch: no live device matches plane1"}`), nil, nil
+							}
+							return withVRTargetFilters(responseForPlanCommand(response, args)), nil, nil
+						})
+						commands = append(commands, preparePlanCommand{executable: executable, args: args, command: command})
+						return command
+					}
+				}
+				manager := newTestPlanManager(executor, stateDir)
+				assertPlans := func() {
+					// The authored map deliberately reverses PCI ordering:
+					// devices[0] is NIC1, devices[1] is NIC0.
+					for _, deviceIndex := range []int{0, 1, 0} {
+						plan, err := manager.GetPreparedPlan(devices[deviceIndex])
+						Expect(err).NotTo(HaveOccurred())
+						Expect(plan.Breakout).To(HaveLen(3))
+						Expect(plan.PostBreakout).To(HaveLen(1))
+						nicIndex := 1 - deviceIndex
+						Expect(plan.PostBreakout[0].Values["nic"]).To(Equal(json.Number(strconv.Itoa(nicIndex))))
+						active := []any{json.Number("0"), json.Number("1"), json.Number("2"), json.Number("3")}
+						if nicIndex == 0 {
+							active = []any{json.Number("4"), json.Number("5"), json.Number("6"), json.Number("7")}
+						}
+						Expect(plan.Breakout[1].Path).To(Equal("/nvidia/link/breakout/module/[0]/port/[1]"))
+						Expect(plan.Breakout[1].Values["lanes"]).To(Equal(active))
+						// This exercises the native conflict guard without issuing
+						// hardware queries (no ports). The two selected lane ops
+						// must be a non-overlapping complete partition of 0..15.
+						_, _, err = nvconfig.NewNVConfigUtils().(interface {
+							ValidateNvConfigXPaths(context.Context, []v1alpha1.NicDevicePortSpec, []dmscli.XPathOperation) (bool, bool, error)
+						}).ValidateNvConfigXPaths(context.Background(), nil, plan.Breakout)
+						Expect(err).NotTo(HaveOccurred())
+						lanes := append([]any{}, plan.Breakout[1].Values["lanes"].([]any)...)
+						lanes = append(lanes, plan.Breakout[2].Values["lanes"].([]any)...)
+						Expect(lanes).To(HaveLen(16))
+						for lane := range 16 {
+							Expect(lanes).To(ContainElement(json.Number(strconv.Itoa(lane))))
+						}
+						if configureReady {
+							Expect(plan.ConfigureError).NotTo(HaveOccurred())
+							Expect(plan.RuntimeConfig).To(HaveLen(1))
+							Expect(plan.RuntimeConfig[0].Operations).To(HaveLen(3))
+							Expect(plan.RuntimeConfig[0].Operations[1].Values["nic"]).To(Equal(json.Number(strconv.Itoa(nicIndex))))
+							Expect(plan.RuntimeConfig[0].Operations[2].Values["nic"]).To(Equal(json.Number(strconv.Itoa(nicIndex))))
+							plan.RuntimeConfig[0].Operations[1].Values["nic"] = "mutated"
+						} else {
+							Expect(plan.ConfigureError).To(HaveOccurred())
+							Expect(plan.RuntimeConfig).To(BeEmpty())
+						}
+						plan.Breakout[1].Values["lanes"].([]any)[0] = "mutated"
+						plan.PostBreakout[0].Values["nic"] = "mutated"
+					}
+				}
+				Expect(manager.PreparePlan(context.Background(), devices)).To(Succeed())
+				assertPlans()
+				Expect(commands).To(HaveLen(2))
+				if restart {
+					manager = newTestPlanManager(executor, stateDir)
+				}
+				configureReady = true
+				Expect(manager.PreparePlan(context.Background(), devices)).To(Succeed())
+				assertPlans()
+				expectedCommands := 2
+				if deferConfigure {
+					expectedCommands = 3
+				}
+				Expect(commands).To(HaveLen(expectedCommands))
+			},
+			Entry("in-memory", false, false),
+			Entry("persisted reload", true, false),
+			Entry("deferred configure then in-memory retry", false, true),
+			Entry("deferred configure then restart", true, true),
+		)
 
 		DescribeTable("preserves authored topology independently of Network Bay status",
 			func(mode string, planes int) {
@@ -1306,4 +1396,56 @@ func testBDFForPlane(baseBDF string, plane int) (string, error) {
 		return "", fmt.Errorf("cannot derive PCI function for plane %d", plane)
 	}
 	return strings.TrimSuffix(baseBDF, ".0") + "." + strconv.Itoa(plane), nil
+}
+
+// Reproduce the opposing VR recipes while retaining a common operation and
+// explicit runtime order. This response passes through the real JSON parser.
+func withVRTargetFilters(response []byte) []byte {
+	var document map[string]any
+	Expect(json.Unmarshal(response, &document)).To(Succeed())
+	plan := document["plan-json"].(map[string]any)["plan"].(map[string]any)
+	operations := plan["operations"].(map[string]any)
+	groups := plan["semantic"].(map[string]any)["groups"].([]any)
+	for _, rawGroup := range groups {
+		group := rawGroup.(map[string]any)
+		refs := group["operation_refs"].([]any)
+		for nic := range 2 {
+			count := 1
+			if group["name"] != semanticGroupPostBreakout {
+				count = 2
+			}
+			for step := range count {
+				ref := fmt.Sprintf("%s.nic%d.step%d", group["name"], nic, step)
+				path := "/nvidia/test"
+				values := map[string]any{"nic": nic}
+				if group["name"] == semanticGroupBreakout {
+					port := 1
+					if step == 1 {
+						port = 255
+					}
+					path = fmt.Sprintf("/nvidia/link/breakout/module/[0]/port/[%d]", port)
+					lanes := []int{}
+					for lane := range 16 {
+						active := lane >= 4 && lane < 8
+						if nic == 1 {
+							active = lane < 4
+						}
+						if active == (step == 0) {
+							lanes = append(lanes, lane)
+						}
+					}
+					values = map[string]any{"lanes": lanes}
+				}
+				operations[ref] = map[string]any{
+					"path": path, "values": values, "kind": "set", "scope": "per_device", "target_class": "pf_netdev_all",
+					"target_filter": map[string]any{"hca_type": []string{"ConnectX-9"}, "nic_index_in_rail": []int{nic}},
+				}
+				refs = append(refs, ref)
+			}
+		}
+		group["operation_refs"] = refs
+	}
+	result, err := json.Marshal(document)
+	Expect(err).NotTo(HaveOccurred())
+	return result
 }
