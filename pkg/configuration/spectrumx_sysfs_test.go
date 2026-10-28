@@ -17,13 +17,13 @@ package configuration
 
 import (
 	"context"
-	execTesting "k8s.io/utils/exec/testing"
 	"os"
 	"path/filepath"
 
 	"github.com/Mellanox/nic-configuration-operator/pkg/dmscli"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	execTesting "k8s.io/utils/exec/testing"
 )
 
 var _ = Describe("CC global-status sysfs readback", func() {
