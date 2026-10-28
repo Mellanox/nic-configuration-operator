@@ -16,6 +16,8 @@ limitations under the License.
 package configuration
 
 import (
+	"context"
+	execTesting "k8s.io/utils/exec/testing"
 	"os"
 	"path/filepath"
 
@@ -45,6 +47,28 @@ var _ = Describe("CC global-status sysfs readback", func() {
 		Entry("netdev enabled", "net", "1\n", true),
 		Entry("netdev disabled", "net", "0\n", false),
 		Entry("RDMA fallback", "infiniband", "1\n", true))
+	DescribeTable("validates through sysfs without invoking DMS", func(desired bool) {
+		write("net", "eth0", "1")
+		h := configurationManager{execInterface: &execTesting.FakeExec{}}
+		match, err := h.validateSpectrumXRuntimeTargetWithSysfs(context.Background(),
+			"pci/0001:03:00.0", []dmscli.XPathQuery{query},
+			map[string]map[string]any{query.Path: {"enabled": desired}}, root)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(match).To(Equal(desired))
+	}, Entry("matching value", true), Entry("mismatched value", false))
+	It("falls back to DMS when sysfs cannot supply a value", func() {
+		calls := [][]string{}
+		h := configurationManager{execInterface: &execTesting.FakeExec{
+			CommandScript: []execTesting.FakeCommandAction{runtimeFakeCommand(`{"enabled":true}`, &calls)},
+		}}
+		match, err := h.validateSpectrumXRuntimeTargetWithSysfs(context.Background(),
+			"pci/0001:03:00.0", []dmscli.XPathQuery{query},
+			map[string]map[string]any{query.Path: {"enabled": true}}, root)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(match).To(BeTrue())
+		Expect(calls).To(HaveLen(1))
+		Expect(calls[0]).To(ContainElement(query.Path))
+	})
 	It("reads RP priorities and falls back on read errors", func() {
 		write("net", "eth0", "1")
 		base := filepath.Join(root, "bus/pci/devices/0001:03:00.0/net/eth0/ecn")
