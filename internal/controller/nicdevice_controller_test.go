@@ -20,6 +20,7 @@ import (
 	"errors"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -633,20 +634,14 @@ var _ = Describe("NicDeviceReconciler", func() {
 
 		It("Should prepare the complete Spectrum-X plan before requesting maintenance", func() {
 			planErr := errors.New("plan generation failed")
+			var prepareCalls atomic.Int64
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(true, false, nil, nil)
 			spectrumXManager.On("PreparePlan", mock.Anything, mock.Anything).
-				Return(planErr).Maybe()
+				Return(planErr).Run(func(mock.Arguments) { prepareCalls.Add(1) }).Maybe()
 
 			createDevice(false, nil, true)
 
-			Eventually(func() bool {
-				for _, call := range spectrumXManager.Calls {
-					if call.Method == "PreparePlan" {
-						return true
-					}
-				}
-				return false
-			}, timeout).Should(BeTrue())
+			Eventually(prepareCalls.Load, timeout).Should(BeNumerically(">", 0))
 			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.ConfigUpdateInProgressCondition,
 				Status:  metav1.ConditionFalse,
@@ -1855,8 +1850,9 @@ var _ = Describe("NicDeviceReconciler", func() {
 
 	Describe("reconcile triggered by CC process termination", func() {
 		It("Should re-reconcile when CC termination channel fires", func() {
+			var runtimeCalls atomic.Int64
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil, nil)
-			configurationManager.On("ApplyRuntimeConfiguration", mock.Anything, mock.Anything).Return(&types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusSuccess}, nil)
+			configurationManager.On("ApplyRuntimeConfiguration", mock.Anything, mock.Anything).Return(&types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusSuccess}, nil).Run(func(mock.Arguments) { runtimeCalls.Add(1) })
 			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
 
 			device := &v1alpha1.NicDevice{
@@ -1885,15 +1881,13 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Reason: consts.UpdateSuccessfulReason,
 			}))
 
-			initialCallCount := countCalls(configurationManager.Calls, "ApplyRuntimeConfiguration")
+			initialCallCount := runtimeCalls.Load()
 
 			// Simulate CC process termination
 			ccTerminationChan <- "mlx5_0"
 
 			// Verify reconcile ran again
-			Eventually(func() int {
-				return countCalls(configurationManager.Calls, "ApplyRuntimeConfiguration")
-			}, timeout).Should(BeNumerically(">", initialCallCount))
+			Eventually(runtimeCalls.Load, timeout).Should(BeNumerically(">", initialCallCount))
 		})
 	})
 })
