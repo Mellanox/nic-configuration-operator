@@ -21,6 +21,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Mellanox/dms-lib/pkg/device"
+
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -63,7 +65,10 @@ var _ = Describe("DeviceDiscoveryController", func() {
 		deviceDiscovery = &deviceDiscoveryMocks.DeviceDiscovery{}
 		hostUtils = &hostMocks.HostUtils{}
 
-		deviceRegistry = NewDeviceDiscoveryController(k8sClient, mgr.GetAPIReader(), deviceDiscovery, hostUtils, nodeName, namespaceName)
+		deviceRegistry = NewDeviceDiscoveryController(k8sClient, mgr.GetAPIReader(), func(context.Context) (device.Inventory, error) {
+			records, err := deviceDiscovery.DiscoverNicDevices()
+			return inventoryFixture(records), err
+		}, hostUtils, nodeName, namespaceName)
 		Expect(mgr.Add(deviceRegistry)).To(Succeed())
 	})
 
@@ -194,11 +199,8 @@ var _ = Describe("DeviceDiscoveryController", func() {
 			})
 
 			It("should preserve CRs for devices skipped during discovery", func() {
-				deviceRegistry.deviceDiscovery = &skippedDeviceDiscovery{
-					devices: map[string]v1alpha1.NicDevice{},
-					skipped: map[string]error{
-						pciDevKey: errors.New("firmware error"),
-					},
+				deviceRegistry.discover = func(context.Context) (device.Inventory, error) {
+					return device.Inventory{Complete: true, Issues: []device.DiscoveryIssue{{PCI: pciDevKey + ".0", Err: errors.New("firmware error")}}}, nil
 				}
 
 				startManager(mgr, ctx, &wg)
@@ -217,11 +219,8 @@ var _ = Describe("DeviceDiscoveryController", func() {
 			})
 
 			It("should preserve CRs for devices with incomplete discovery", func() {
-				deviceRegistry.deviceDiscovery = &skippedDeviceDiscovery{
-					devices: map[string]v1alpha1.NicDevice{},
-					incomplete: map[string]error{
-						pciDevKey: errors.New("vpd error"),
-					},
+				deviceRegistry.discover = func(context.Context) (device.Inventory, error) {
+					return device.Inventory{Complete: false, Issues: []device.DiscoveryIssue{{PCI: pciDevKey + ".0", Err: errors.New("enumeration error")}}}, nil
 				}
 
 				startManager(mgr, ctx, &wg)
@@ -325,21 +324,3 @@ var _ = Describe("DeviceDiscoveryController", func() {
 		})
 	})
 })
-
-type skippedDeviceDiscovery struct {
-	devices    map[string]v1alpha1.NicDevice
-	skipped    map[string]error
-	incomplete map[string]error
-}
-
-func (d *skippedDeviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, error) {
-	return d.devices, nil
-}
-
-func (d *skippedDeviceDiscovery) SkippedDevices() map[string]error {
-	return d.skipped
-}
-
-func (d *skippedDeviceDiscovery) IncompleteDevices() map[string]error {
-	return d.incomplete
-}

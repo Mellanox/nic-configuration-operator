@@ -20,6 +20,9 @@ import (
 	"strings"
 )
 
+// DiscoveryReadyCondition records whether the last discovery pass observed usable device data.
+const DiscoveryReadyCondition = "DiscoveryReady"
+
 const (
 	MellanoxVendor       = "15b3"
 	BlueField3DeviceID   = "a2dc"

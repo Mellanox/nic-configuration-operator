@@ -33,10 +33,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	"github.com/Mellanox/dms-lib/pkg/device"
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	configurationMocks "github.com/Mellanox/nic-configuration-operator/pkg/configuration/mocks"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
-	devicediscoveryMocks "github.com/Mellanox/nic-configuration-operator/pkg/devicediscovery/mocks"
 	firmwareMocks "github.com/Mellanox/nic-configuration-operator/pkg/firmware/mocks"
 	hostMocks "github.com/Mellanox/nic-configuration-operator/pkg/host/mocks"
 	maintenanceMocks "github.com/Mellanox/nic-configuration-operator/pkg/maintenance/mocks"
@@ -61,7 +61,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 		hostUtils            *hostMocks.HostUtils
 		spectrumXManager     *spectrumxMocks.SpectrumXManager
 		udevManager          *udevMocks.UdevManager
-		deviceDiscoveryUtils *devicediscoveryMocks.DeviceDiscoveryUtils
+		interfaceNames       sync.Map
 		ccTerminationChan    chan string
 		deviceName           = "test-device"
 		ctx                  context.Context
@@ -102,7 +102,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 		spectrumXManager.On("GetCCTerminationChannel").Return((<-chan string)(ccTerminationChan))
 		udevManager = &udevMocks.UdevManager{}
 		udevManager.On("ApplyUdevRules", mock.Anything, mock.Anything).Return(nil, false, nil)
-		deviceDiscoveryUtils = &devicediscoveryMocks.DeviceDiscoveryUtils{}
+		interfaceNames = sync.Map{}
 
 		reconciler = &NicDeviceReconciler{
 			Client:               mgr.GetClient(),
@@ -116,7 +116,34 @@ var _ = Describe("NicDeviceReconciler", func() {
 			EventRecorder:        mgr.GetEventRecorderFor("testReconciler"), //nolint:staticcheck // record.EventRecorder; GetEventRecorder uses a different API.
 			SpectrumXManager:     spectrumXManager,
 			UdevManager:          udevManager,
-			DeviceDiscoveryUtils: deviceDiscoveryUtils,
+			Discover: func(ctx context.Context) (device.Inventory, error) {
+				list := &v1alpha1.NicDeviceList{}
+				if err := mgr.GetAPIReader().List(ctx, list); err != nil {
+					return device.Inventory{}, err
+				}
+				records := make(map[string]v1alpha1.NicDevice)
+				for _, d := range list.Items {
+					records[d.Name] = d
+				}
+				return inventoryFixture(records), nil
+			},
+			ReadInterfaceNames: func(ctx context.Context, pci string) (device.InterfaceNames, error) {
+				if names, ok := interfaceNames.Load(pci); ok {
+					return names.(device.InterfaceNames), nil
+				}
+				list := &v1alpha1.NicDeviceList{}
+				if err := mgr.GetAPIReader().List(ctx, list); err != nil {
+					return device.InterfaceNames{}, err
+				}
+				for _, d := range list.Items {
+					for _, p := range d.Status.Ports {
+						if p.PCI == pci {
+							return device.InterfaceNames{Netdev: p.NetworkInterface, RDMA: p.RdmaInterface}, nil
+						}
+					}
+				}
+				return device.InterfaceNames{}, errors.New("missing fixture PF")
+			},
 		}
 		Expect(reconciler.SetupWithManager(mgr, false)).To(Succeed())
 
@@ -1544,8 +1571,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			udevManager.On("ApplyUdevRules", mock.Anything, mock.Anything).Return(expectedNames, true, nil)
 
 			// Mock device discovery to return matching names
-			deviceDiscoveryUtils.On("GetInterfaceName", pciAddress).Return("net1p1")
-			deviceDiscoveryUtils.On("GetRDMADeviceName", pciAddress).Return("rdma1p1")
+			interfaceNames.Store(pciAddress, device.InterfaceNames{Netdev: "net1p1", RDMA: "rdma1p1"})
 
 			// Mock maintenance manager to release maintenance at the end
 			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
@@ -1570,8 +1596,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			udevManager.On("ApplyUdevRules", mock.Anything, mock.Anything).Return(expectedNames, true, nil)
 
 			// Mock device discovery to return NON-matching names
-			deviceDiscoveryUtils.On("GetInterfaceName", pciAddress).Return("eth0")
-			deviceDiscoveryUtils.On("GetRDMADeviceName", pciAddress).Return("mlx5_0")
+			interfaceNames.Store(pciAddress, device.InterfaceNames{Netdev: "eth0", RDMA: "mlx5_0"})
 
 			createDeviceWithInterfaceNameTemplate()
 
@@ -1600,8 +1625,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			udevManager.On("ApplyUdevRules", mock.Anything, mock.Anything).Return(expectedNames, true, nil)
 
 			// Mock device discovery — net matches, RDMA returns something (should be ignored)
-			deviceDiscoveryUtils.On("GetInterfaceName", pciAddress).Return("net1p1")
-			deviceDiscoveryUtils.On("GetRDMADeviceName", pciAddress).Return("some_rdma_device")
+			interfaceNames.Store(pciAddress, device.InterfaceNames{Netdev: "net1p1", RDMA: "some_rdma_device"})
 
 			// Mock maintenance manager to release maintenance at the end
 			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
@@ -1625,8 +1649,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			udevManager.ExpectedCalls = nil
 			udevManager.On("ApplyUdevRules", mock.Anything, mock.Anything).Return(expectedNames, true, nil)
 
-			deviceDiscoveryUtils.On("GetInterfaceName", pciAddress).Return("existing-net-device")
-			deviceDiscoveryUtils.On("GetRDMADeviceName", pciAddress).Return("rdma1p1")
+			interfaceNames.Store(pciAddress, device.InterfaceNames{Netdev: "existing-net-device", RDMA: "rdma1p1"})
 
 			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
 
@@ -1650,8 +1673,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			udevManager.On("ApplyUdevRules", mock.Anything, mock.Anything).Return(expectedNames, true, nil)
 
 			// Mock device discovery to return matching names
-			deviceDiscoveryUtils.On("GetInterfaceName", pciAddress).Return("net1p1")
-			deviceDiscoveryUtils.On("GetRDMADeviceName", pciAddress).Return("rdma1p1")
+			interfaceNames.Store(pciAddress, device.InterfaceNames{Netdev: "net1p1", RDMA: "rdma1p1"})
 
 			// Mock maintenance manager to release maintenance at the end
 			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
@@ -1711,8 +1733,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			udevManager.On("ApplyUdevRules", mock.Anything, mock.Anything).Return(expectedNames, true, nil)
 
 			// Mock device discovery to return matching names
-			deviceDiscoveryUtils.On("GetInterfaceName", pciAddress).Return("net1p1")
-			deviceDiscoveryUtils.On("GetRDMADeviceName", pciAddress).Return("rdma1p1")
+			interfaceNames.Store(pciAddress, device.InterfaceNames{Netdev: "net1p1", RDMA: "rdma1p1"})
 
 			// Mock maintenance manager to release maintenance at the end
 			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
@@ -1755,8 +1776,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			udevManager.On("ApplyUdevRules", mock.Anything, mock.Anything).Return(expectedNames, true, nil)
 
 			// Mock device discovery to return matching names for the template device
-			deviceDiscoveryUtils.On("GetInterfaceName", pciAddress).Return("net1p1")
-			deviceDiscoveryUtils.On("GetRDMADeviceName", pciAddress).Return("rdma1p1")
+			interfaceNames.Store(pciAddress, device.InterfaceNames{Netdev: "net1p1", RDMA: "rdma1p1"})
 
 			// Mock maintenance manager
 			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
@@ -1783,8 +1803,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			Expect(k8sClient.Status().Update(ctx, secondDevice)).To(Succeed())
 
 			// Mock device discovery for the second device to return updated names
-			deviceDiscoveryUtils.On("GetInterfaceName", secondPCI).Return("new_eth0")
-			deviceDiscoveryUtils.On("GetRDMADeviceName", secondPCI).Return("new_mlx5_0")
+			interfaceNames.Store(secondPCI, device.InterfaceNames{Netdev: "new_eth0", RDMA: "new_mlx5_0"})
 
 			// Mock configuration validation for the second device
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil, nil)

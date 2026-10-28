@@ -3,6 +3,7 @@ module github.com/Mellanox/nic-configuration-operator
 go 1.26.0
 
 require (
+	github.com/Mellanox/dms-lib v0.0.0-20261028165810-8bd85336c3d8
 	github.com/Mellanox/maintenance-operator/api v0.4.0
 	github.com/Mellanox/rdmamap v1.2.0
 	github.com/go-logr/logr v1.4.4
@@ -49,6 +50,7 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
+	github.com/openconfig/goyang v1.6.0 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect

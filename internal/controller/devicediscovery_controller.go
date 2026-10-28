@@ -17,10 +17,13 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
 	"time"
+
+	"github.com/Mellanox/dms-lib/pkg/device"
 
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -34,7 +37,6 @@ import (
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
-	"github.com/Mellanox/nic-configuration-operator/pkg/devicediscovery"
 	"github.com/Mellanox/nic-configuration-operator/pkg/helper"
 	"github.com/Mellanox/nic-configuration-operator/pkg/host"
 	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
@@ -50,10 +52,10 @@ type DeviceDiscoveryController struct {
 	// status.node is not set yet.
 	apiReader client.Reader
 
-	deviceDiscovery devicediscovery.DeviceDiscovery
-	hostUtils       host.HostUtils
-	nodeName        string
-	namespace       string
+	discover  func(context.Context) (device.Inventory, error)
+	hostUtils host.HostUtils
+	nodeName  string
+	namespace string
 }
 
 // crNameSanitizer replaces PCI-address punctuation (:, .) with DNS-1123-safe dashes.
@@ -119,27 +121,18 @@ func setFwConfigConditionsForDevice(device *v1alpha1.NicDevice, recommendedFirmw
 // It deletes CRs that do not represent observed devices, updates the CRs if the status of the device changes,
 // and creates new CRs for devices that do not have a CR representation.
 func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
-	observedDevices, err := d.deviceDiscovery.DiscoverNicDevices()
-	if err != nil {
-		return err
-	}
-	incompleteDevices := map[string]error{}
-	if incompleteDeviceReporter, ok := d.deviceDiscovery.(devicediscovery.IncompleteDeviceReporter); ok {
-		for pciKey, err := range incompleteDeviceReporter.IncompleteDevices() {
-			incompleteDevices[pciKey] = err
-		}
-	}
-	if skippedDeviceReporter, ok := d.deviceDiscovery.(devicediscovery.SkippedDeviceReporter); ok {
-		for pciKey, err := range skippedDeviceReporter.SkippedDevices() {
-			incompleteDevices[pciKey] = err
-		}
+	inventory, discoveryErr := d.discover(ctx)
+	observedDevices, incompleteDevices, discoveryErr := inventoryDevices(inventory, d.nodeName, discoveryErr)
+	var failures []error
+	if discoveryErr != nil {
+		failures = append(failures, discoveryErr)
 	}
 
 	list := &v1alpha1.NicDeviceList{}
 
 	selectorFields := fields.OneTermEqualSelector("status.node", d.nodeName)
 
-	err = d.List(ctx, list, &client.ListOptions{FieldSelector: selectorFields})
+	err := d.List(ctx, list, client.InNamespace(d.namespace), &client.ListOptions{FieldSelector: selectorFields})
 	if err != nil {
 		log.Log.Error(err, "failed to list NicDevice CRs")
 		return err
@@ -156,24 +149,30 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 
 	for _, nicDeviceCR := range list.Items {
 		if len(nicDeviceCR.Status.Ports) == 0 {
-			log.Log.V(2).Info("NicDevice CR has no ports, skipping reconciliation", "device", nicDeviceCR.Name)
+			if setDiscoveryCondition(&nicDeviceCR, errors.New("device has no observed PF endpoints")) {
+				if err := d.Status().Update(ctx, &nicDeviceCR); err != nil {
+					failures = append(failures, err)
+				}
+			}
 			continue
 		}
 		pciKey := utils.PCIDeviceAddress(nicDeviceCR.Status.Ports[0].PCI)
 		observedDevice, exists := observedDevices[pciKey]
 
+		issue := errors.Join(discoveryErr, incompleteDevices[pciKey])
+		if issue != nil {
+			delete(observedDevices, pciKey)
+			if setDiscoveryCondition(&nicDeviceCR, issue) {
+				if err := d.Status().Update(ctx, &nicDeviceCR); err != nil {
+					failures = append(failures, err)
+				}
+			}
+			continue
+		}
 		if !exists {
-			if incompleteErr, incomplete := incompleteDevices[pciKey]; incomplete {
-				log.Log.Info("device discovery was incomplete, preserving existing NicDevice CR", "device", nicDeviceCR.Name, "pciKey", pciKey, "error", incompleteErr)
-				continue
+			if err := d.Delete(ctx, &nicDeviceCR); err != nil {
+				failures = append(failures, err)
 			}
-			log.Log.V(2).Info("device doesn't exist on the node anymore, deleting", "device", nicDeviceCR.Name)
-			// Need to delete this CR, it doesn't represent the observedDevice on host anymore
-			err = d.Delete(ctx, &nicDeviceCR)
-			if err != nil {
-				log.Log.Error(err, "failed  to delete NicDevice CR", "device", nicDeviceCR.Name)
-			}
-
 			continue
 		}
 
@@ -183,13 +182,18 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 			log.Log.V(2).Info("FirmwareConfigMatch condition changed, updating device", "nicDeviceCR", nicDeviceCR)
 			err = d.Client.Status().Update(ctx, &nicDeviceCR)
 			if err != nil {
+				failures = append(failures, err)
 				log.Log.Error(err, "failed to update FirmwareConfigMatchCondition", "device", nicDeviceCR.Name)
 				continue
 			}
 		}
 
 		// Need to nullify conditions for deep equal
-		observedDeviceStatus.Conditions = nicDeviceCR.Status.Conditions
+		observedDeviceStatus.Conditions = append([]metav1.Condition(nil), nicDeviceCR.Status.Conditions...)
+		observedDevice.ObjectMeta = nicDeviceCR.ObjectMeta
+		observedDevice.Status = observedDeviceStatus
+		setDiscoveryCondition(&observedDevice, nil)
+		observedDeviceStatus = observedDevice.Status
 
 		if !reflect.DeepEqual(nicDeviceCR.Status, observedDeviceStatus) {
 			log.Log.V(2).Info("device status changed, updating", "device", nicDeviceCR.Name, "crStatus", nicDeviceCR.Status, "observedStatus", observedDeviceStatus)
@@ -198,12 +202,18 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 
 			err := d.Client.Status().Update(ctx, &nicDeviceCR)
 			if err != nil {
+				failures = append(failures, err)
 				log.Log.Error(err, "failed to update NicDevice CR status", "device", nicDeviceCR.Name)
 			}
 		}
 
 		// Device was processed, cleaning it from the map
 		delete(observedDevices, pciKey)
+	}
+
+	// A failed host observation cannot create authoritative device records.
+	if discoveryErr != nil {
+		return errors.Join(failures...)
 	}
 
 	// Remaining devices don't have CR representation, need to create a CR
@@ -239,6 +249,7 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 		device.Status = deviceStatus
 		device.Status.Node = d.nodeName
 		setInitialsConditionsForDevice(device)
+		setDiscoveryCondition(device, nil)
 
 		d.updateFwCondition(device)
 		log.Log.V(2).Info("updated device", "device", device)
@@ -248,7 +259,7 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 			continue
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 // updateFwCondition updates the FirmwareConfigMatch status condition
@@ -266,45 +277,32 @@ func (d *DeviceDiscoveryController) updateFwCondition(nicDeviceCR *v1alpha1.NicD
 func (d *DeviceDiscoveryController) Start(ctx context.Context) error {
 	log.Log.Info("Device discovery started")
 
-	t := time.NewTicker(deviceDiscoveryReconcileTime)
-	defer t.Stop()
-
-	retryChan := make(chan struct{}, 1) // Channel to trigger immediate retries
-
-	runReconcile := func() {
-		err := d.reconcile(ctx)
-		if err != nil {
-			log.Log.Error(err, "failed to run reconcile, requeueing")
-			// Retry the request if there's an error
-			retryChan <- struct{}{}
-		}
-	}
-
-	runReconcile()
-
-OUTER:
+	timer := time.NewTimer(0)
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			break OUTER
-		case <-t.C:
-			runReconcile()
-		case <-retryChan:
-			runReconcile()
+			return nil
+		case <-timer.C:
+			interval := deviceDiscoveryReconcileTime
+			if err := d.reconcile(ctx); err != nil {
+				log.Log.Error(err, "failed to run discovery, retrying after delay")
+				interval = shortRequeueTime
+			}
+			timer.Reset(interval)
 		}
 	}
 
-	return nil
 }
 
 // NewDeviceDiscoveryController creates a new instance of DeviceDiscoveryController with the specified parameters.
-func NewDeviceDiscoveryController(client client.Client, apiReader client.Reader, deviceDiscovery devicediscovery.DeviceDiscovery, hostUtils host.HostUtils, node string, namespace string) *DeviceDiscoveryController {
+func NewDeviceDiscoveryController(client client.Client, apiReader client.Reader, discover func(context.Context) (device.Inventory, error), hostUtils host.HostUtils, node string, namespace string) *DeviceDiscoveryController {
 	return &DeviceDiscoveryController{
-		Client:          client,
-		apiReader:       apiReader,
-		deviceDiscovery: deviceDiscovery,
-		hostUtils:       hostUtils,
-		nodeName:        node,
-		namespace:       namespace,
+		Client:    client,
+		apiReader: apiReader,
+		discover:  discover,
+		hostUtils: hostUtils,
+		nodeName:  node,
+		namespace: namespace,
 	}
 }
