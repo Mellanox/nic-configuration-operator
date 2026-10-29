@@ -39,6 +39,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
+	"github.com/Mellanox/dms-lib/pkg/device"
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/internal/controller"
 	"github.com/Mellanox/nic-configuration-operator/pkg/configuration"
@@ -142,7 +143,7 @@ func main() {
 	hostUtils := host.NewHostUtils()
 	nvConfigUtils := nvconfig.NewNVConfigUtils()
 
-	deviceDiscovery := devicediscovery.NewDeviceDiscovery(nodeName, nvConfigUtils)
+	deviceDiscovery := devicediscovery.NewDeviceDiscovery(nodeName)
 
 	// Initialize DMS server
 	dmsServer := dms.NewDMSServer()
@@ -198,7 +199,7 @@ func main() {
 		SpectrumXManager:     spectrumXConfigManager,
 		HostUtils:            hostUtils,
 		UdevManager:          udevManager,
-		DeviceDiscoveryUtils: devicediscovery.NewDeviceDiscoveryUtils(),
+		ReadInterfaceNames:   device.ReadInterfaceNames,
 	}
 	err = nicDeviceReconciler.SetupWithManager(mgr, true)
 	if err != nil {

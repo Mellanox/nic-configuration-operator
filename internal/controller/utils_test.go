@@ -19,7 +19,6 @@ import (
 	"context"
 	"sync"
 
-	"github.com/stretchr/testify/mock"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/rand"
@@ -84,14 +83,4 @@ func startManager(manager manager.Manager, ctx context.Context, wg *sync.WaitGro
 	}
 
 	log.Log.Info("synced manager cache for test", "test", GinkgoT().Name())
-}
-
-func countCalls(calls []mock.Call, method string) int {
-	count := 0
-	for _, call := range calls {
-		if call.Method == method {
-			count++
-		}
-	}
-	return count
 }

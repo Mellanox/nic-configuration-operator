@@ -43,10 +43,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
+	"github.com/Mellanox/dms-lib/pkg/device"
 	v1alpha1 "github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/configuration"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
-	"github.com/Mellanox/nic-configuration-operator/pkg/devicediscovery"
 	"github.com/Mellanox/nic-configuration-operator/pkg/firmware"
 	"github.com/Mellanox/nic-configuration-operator/pkg/host"
 	"github.com/Mellanox/nic-configuration-operator/pkg/maintenance"
@@ -75,7 +75,7 @@ type NicDeviceReconciler struct {
 	MaintenanceManager   maintenance.MaintenanceManager
 	SpectrumXManager     spectrumx.SpectrumXManager
 	UdevManager          udev.UdevManager
-	DeviceDiscoveryUtils devicediscovery.DeviceDiscoveryUtils
+	ReadInterfaceNames   func(context.Context, string) (device.InterfaceNames, error)
 
 	EventRecorder record.EventRecorder
 }
@@ -310,8 +310,11 @@ func (r *NicDeviceReconciler) reconcileInterfaceNameTemplates(ctx context.Contex
 			}
 
 			// Get actual interface names from sysfs
-			actualNetDevice := r.DeviceDiscoveryUtils.GetInterfaceName(port.PCI)
-			actualRdmaDevice := r.DeviceDiscoveryUtils.GetRDMADeviceName(port.PCI)
+			names, err := r.ReadInterfaceNames(ctx, port.PCI)
+			if err != nil {
+				return fmt.Errorf("read interface names for %s: %w", port.PCI, err)
+			}
+			actualNetDevice, actualRdmaDevice := names.Netdev, names.RDMA
 
 			// Update port status with actual names
 			port.NetworkInterface = actualNetDevice
@@ -358,35 +361,35 @@ func (r *NicDeviceReconciler) reconcileInterfaceNameTemplates(ctx context.Contex
 		}
 	}
 
-	// When udev rules changed, refresh port names for devices being reconciled on this node.
-	// Udev rule changes (additions or removals) can affect any device's interface names.
-	// Downstream consumers (DMS QoS, Spectrum-X runtime config, DOCA CC) rely on
-	// accurate port names in the same reconcile loop.
-	if updated {
-		for _, status := range statuses {
-			device := status.device
-			if device.Spec.InterfaceNameTemplate != nil {
-				continue // already updated in the loop above
+	// Refresh remaining devices after every successful rule application, including
+	// unchanged-file retries after a name read or status update failed. This is
+	// read-only; the library still activates udev only when rule files change.
+	for _, status := range statuses {
+		device := status.device
+		if device.Spec.InterfaceNameTemplate != nil {
+			continue // already updated in the loop above
+		}
+		portsChanged := false
+		for i := range device.Status.Ports {
+			port := &device.Status.Ports[i]
+			if port.PCI == "" {
+				continue
 			}
-			portsChanged := false
-			for i := range device.Status.Ports {
-				port := &device.Status.Ports[i]
-				if port.PCI == "" {
-					continue
-				}
-				actualNetDevice := r.DeviceDiscoveryUtils.GetInterfaceName(port.PCI)
-				actualRdmaDevice := r.DeviceDiscoveryUtils.GetRDMADeviceName(port.PCI)
-				if port.NetworkInterface != actualNetDevice || port.RdmaInterface != actualRdmaDevice {
-					port.NetworkInterface = actualNetDevice
-					port.RdmaInterface = actualRdmaDevice
-					portsChanged = true
-				}
+			names, err := r.ReadInterfaceNames(ctx, port.PCI)
+			if err != nil {
+				return fmt.Errorf("read interface names for %s: %w", port.PCI, err)
 			}
-			if portsChanged {
-				if err := r.Client.Status().Update(ctx, device); err != nil {
-					log.Log.Error(err, "Failed to update device port status after udev rules change", "device", device.Name)
-					return err
-				}
+			actualNetDevice, actualRdmaDevice := names.Netdev, names.RDMA
+			if port.NetworkInterface != actualNetDevice || port.RdmaInterface != actualRdmaDevice {
+				port.NetworkInterface = actualNetDevice
+				port.RdmaInterface = actualRdmaDevice
+				portsChanged = true
+			}
+		}
+		if portsChanged {
+			if err := r.Client.Status().Update(ctx, device); err != nil {
+				log.Log.Error(err, "Failed to update device port status after udev rule application", "device", device.Name)
+				return err
 			}
 		}
 	}
