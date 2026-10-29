@@ -41,7 +41,6 @@ import (
 	firmwareMocks "github.com/Mellanox/nic-configuration-operator/pkg/firmware/mocks"
 	hostMocks "github.com/Mellanox/nic-configuration-operator/pkg/host/mocks"
 	maintenanceMocks "github.com/Mellanox/nic-configuration-operator/pkg/maintenance/mocks"
-	"github.com/Mellanox/nic-configuration-operator/pkg/spectrumx"
 	spectrumxMocks "github.com/Mellanox/nic-configuration-operator/pkg/spectrumx/mocks"
 	"github.com/Mellanox/nic-configuration-operator/pkg/testutils"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
@@ -70,22 +69,22 @@ var _ = Describe("NicDeviceReconciler", func() {
 		timeout              = time.Second * 10
 		namespaceName        string
 		wg                   sync.WaitGroup
-		getDeviceConditions  = func() []metav1.Condition {
+		getDeviceConditions  = func() ([]metav1.Condition, error) {
 			device := &v1alpha1.NicDevice{}
-			Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
-			return device.Status.Conditions
+			err := k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)
+			return device.Status.Conditions, err
 		}
-		getLastAppliedStateAnnotation = func() string {
+		getLastAppliedStateAnnotation = func() (string, error) {
 			device := &v1alpha1.NicDevice{}
-			Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
+			err := k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)
 			val := device.Annotations[consts.LastAppliedStateAnnotation]
-			return val
+			return val, err
 		}
-		lastAppliedStateAnnotationExists = func() bool {
+		lastAppliedStateAnnotationExists = func() (bool, error) {
 			device := &v1alpha1.NicDevice{}
-			Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
+			err := k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)
 			_, found := device.Annotations[consts.LastAppliedStateAnnotation]
-			return found
+			return found, err
 		}
 	)
 
@@ -135,6 +134,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 				return device.InterfaceNames{}, errors.New("missing fixture PF")
 			},
 		}
+		reconciler.PlanConfiguration, reconciler.DiscoverPlanDevices = controllerLibraryFixture(mgr.GetAPIReader(), configurationManager)
+		reconciler.CheckRuntimePrerequisites = func(*v1alpha1.NicDevice) error { return nil }
 		Expect(reconciler.SetupWithManager(mgr, false)).To(Succeed())
 
 		k8sClient = mgr.GetClient()
@@ -290,69 +291,6 @@ var _ = Describe("NicDeviceReconciler", func() {
 		})
 	})
 
-	Describe("prepareSpectrumXPlan", func() {
-		newSpectrumXDevice := func(name string) *v1alpha1.NicDevice {
-			return &v1alpha1.NicDevice{
-				ObjectMeta: metav1.ObjectMeta{Name: name},
-				Spec: v1alpha1.NicDeviceSpec{Configuration: &v1alpha1.NicDeviceConfigurationSpec{
-					Template: &v1alpha1.ConfigurationTemplateSpec{SpectrumXOptimized: &v1alpha1.SpectrumXOptimizedSpec{Enabled: true}},
-				}},
-			}
-		}
-
-		It("does nothing when no device enables Spectrum-X", func() {
-			statuses := nicDeviceConfigurationStatuses{{device: &v1alpha1.NicDevice{}}}
-
-			devices, err := reconciler.prepareSpectrumXPlan(ctx, statuses)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(devices).To(BeEmpty())
-			spectrumXManager.AssertNotCalled(GinkgoT(), "PreparePlan", mock.Anything, mock.Anything)
-		})
-
-		It("includes devices that reset NVConfig because runtime configuration still uses the plan", func() {
-			resetting := newSpectrumXDevice("resetting")
-			resetting.Spec.Configuration.ResetToDefault = true
-			configured := newSpectrumXDevice("configured")
-			spectrumXManager.On(
-				"PreparePlan", mock.Anything, []*v1alpha1.NicDevice{resetting, configured},
-			).Return(nil).Once()
-
-			_, err := reconciler.prepareSpectrumXPlan(
-				ctx,
-				nicDeviceConfigurationStatuses{{device: resetting}, {device: configured}},
-			)
-			Expect(err).NotTo(HaveOccurred())
-		})
-
-		It("prepares one complete plan for the Spectrum-X device group", func() {
-			first := newSpectrumXDevice("first")
-			second := newSpectrumXDevice("second")
-			statuses := nicDeviceConfigurationStatuses{
-				{device: first},
-				{device: &v1alpha1.NicDevice{}},
-				{device: second},
-			}
-			spectrumXManager.On("PreparePlan", mock.Anything, []*v1alpha1.NicDevice{first, second}).Return(nil).Once()
-
-			devices, err := reconciler.prepareSpectrumXPlan(ctx, statuses)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(devices).To(Equal([]*v1alpha1.NicDevice{first, second}))
-		})
-
-		It("returns the group planning error", func() {
-			device := newSpectrumXDevice("first")
-			planErr := errors.New("plan generation failed")
-			spectrumXManager.On("PreparePlan", mock.Anything, []*v1alpha1.NicDevice{device}).
-				Return(planErr).Once()
-
-			devices, err := reconciler.prepareSpectrumXPlan(
-				ctx, nicDeviceConfigurationStatuses{{device: device}},
-			)
-			Expect(err).To(MatchError(planErr))
-			Expect(devices).To(Equal([]*v1alpha1.NicDevice{device}))
-		})
-	})
-
 	Describe("updateDeviceStatusCondition", func() {
 		It("should set the given status condition for device", func() {
 			device := &v1alpha1.NicDevice{ObjectMeta: metav1.ObjectMeta{Name: deviceName, Namespace: namespaceName}}
@@ -406,7 +344,6 @@ var _ = Describe("NicDeviceReconciler", func() {
 		var createDevice = func(
 			setLastSpecAnnotation bool,
 			initialStatusCondition *metav1.Condition,
-			spectrumXEnabled ...bool,
 		) *v1alpha1.NicDevice {
 			device := &v1alpha1.NicDevice{
 				ObjectMeta: metav1.ObjectMeta{Name: deviceName, Namespace: namespaceName},
@@ -423,13 +360,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 					},
 				},
 			}
-			if len(spectrumXEnabled) > 0 && spectrumXEnabled[0] {
-				device.Spec.Configuration.Template.NumVfs = 1
-				device.Spec.Configuration.Template.SpectrumXOptimized = &v1alpha1.SpectrumXOptimizedSpec{
-					Enabled:      true,
-					PlatformType: "gb300",
-				}
-			}
+
 			if setLastSpecAnnotation {
 				device.SetAnnotations(map[string]string{consts.LastAppliedStateAnnotation: "some-state"})
 			}
@@ -497,7 +428,13 @@ var _ = Describe("NicDeviceReconciler", func() {
 		It("Should result in UpdateSuccessful status if nv config updates or reboot are not required", func() {
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil, nil)
 			configurationManager.On("ApplyRuntimeConfiguration", mock.Anything, mock.Anything).Return(&types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusSuccess}, nil)
-			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
+			released := make(chan struct{}, 1)
+			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Run(func(mock.Arguments) {
+				select {
+				case released <- struct{}{}:
+				default:
+				}
+			}).Return(nil)
 
 			createDevice(false, nil)
 
@@ -515,7 +452,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			// Should dump the last applied state to annotations
 			Eventually(getLastAppliedStateAnnotation).Should(Equal(string(spec)))
 
-			maintenanceManager.AssertCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
+			Eventually(released, timeout).Should(Receive())
 			maintenanceManager.AssertExpectations(GinkgoT())
 		})
 		//nolint:errcheck
@@ -525,7 +462,13 @@ var _ = Describe("NicDeviceReconciler", func() {
 
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(true, true, nil, nil)
 			configurationManager.On("ApplyNVConfiguration", mock.Anything, mock.Anything, mock.Anything).Return(&types.ConfigurationApplyResult{Status: types.ApplyStatusSuccess, RebootRequired: true}, nil)
-			configurationManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Return(nil)
+			resetCalled := make(chan struct{}, 1)
+			configurationManager.On("ResetNicFirmware", mock.Anything, mock.Anything).Run(func(mock.Arguments) {
+				select {
+				case resetCalled <- struct{}{}:
+				default:
+				}
+			}).Return(nil)
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
 
@@ -544,7 +487,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Reason: consts.PendingRebootReason,
 			}))
 
-			configurationManager.AssertCalled(GinkgoT(), "ResetNicFirmware", mock.Anything, mock.Anything)
+			Eventually(resetCalled, timeout).Should(Receive())
 		})
 		It("Should NOT reset FW after nv config update if feature gate FW_RESET_AFTER_CONFIG_UPDATE is NOT enabled", func() {
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(true, true, nil, nil)
@@ -570,76 +513,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 
 			configurationManager.AssertNotCalled(GinkgoT(), "ResetNicFirmware", mock.Anything, mock.Anything)
 		})
-		DescribeTable("blocks runtime and the spec-change reboot when configure is unavailable",
-			func(plan *spectrumx.Plan, message string) {
-				spectrumXManager.On("PreparePlan", mock.Anything, mock.Anything).Return(nil)
-				spectrumXManager.On("GetPreparedPlan", mock.Anything).Return(plan, nil)
-				configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil, nil)
 
-				createDevice(true, nil, true)
-
-				Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
-					Type: consts.ConfigUpdateInProgressCondition, Status: metav1.ConditionFalse,
-					Reason:  consts.SpecValidationFailed,
-					Message: "doSPCX configure plan is not ready: " + message,
-				}))
-				Expect(getLastAppliedStateAnnotation()).To(Equal("some-state"))
-				configurationManager.AssertNotCalled(GinkgoT(), "ApplyRuntimeConfiguration", mock.Anything, mock.Anything)
-				maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
-				maintenanceManager.AssertNotCalled(GinkgoT(), "Reboot")
-			},
-			Entry("deferred configure plan",
-				&spectrumx.Plan{ConfigureError: errors.New("target map fingerprint mismatch: no live device matches plane1")},
-				"target map fingerprint mismatch: no live device matches plane1"),
-			Entry("missing plan", (*spectrumx.Plan)(nil), "prepared plan is missing for device \"test-device\""),
-		)
-
-		It("allows prepare NVConfig changes and reboot while configure is deferred", func() {
-			spectrumXManager.On("PreparePlan", mock.Anything, mock.Anything).Return(nil)
-			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(true, true, nil, nil)
-			configurationManager.On("ApplyNVConfiguration", mock.Anything, mock.Anything, mock.Anything).
-				Return(&types.ConfigurationApplyResult{Status: types.ApplyStatusSuccess, RebootRequired: true}, nil)
-			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
-			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
-			rebooted := make(chan struct{}, 1)
-			maintenanceManager.On("Reboot").Run(func(mock.Arguments) {
-				select {
-				case rebooted <- struct{}{}:
-				default:
-				}
-			}).Return(errors.New("reboot requested"))
-
-			createDevice(false, nil, true)
-
-			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
-				Type: consts.ConfigUpdateInProgressCondition, Status: metav1.ConditionTrue,
-				Reason: consts.PendingRebootReason,
-			}))
-			Eventually(rebooted, timeout).Should(Receive())
-			configurationManager.AssertCalled(GinkgoT(), "ApplyNVConfiguration", mock.Anything, mock.Anything, mock.Anything)
-			spectrumXManager.AssertNotCalled(GinkgoT(), "GetPreparedPlan", mock.Anything)
-			configurationManager.AssertNotCalled(GinkgoT(), "ApplyRuntimeConfiguration", mock.Anything, mock.Anything)
-		})
-
-		It("Should prepare the complete Spectrum-X plan before requesting maintenance", func() {
-			planErr := errors.New("plan generation failed")
-			var prepareCalls atomic.Int64
-			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(true, false, nil, nil)
-			spectrumXManager.On("PreparePlan", mock.Anything, mock.Anything).
-				Return(planErr).Run(func(mock.Arguments) { prepareCalls.Add(1) }).Maybe()
-
-			createDevice(false, nil, true)
-
-			Eventually(prepareCalls.Load, timeout).Should(BeNumerically(">", 0))
-			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
-				Type:    consts.ConfigUpdateInProgressCondition,
-				Status:  metav1.ConditionFalse,
-				Reason:  consts.SpecValidationFailed,
-				Message: "prepare doSPCX configuration plan: plan generation failed",
-			}))
-			maintenanceManager.AssertNotCalled(GinkgoT(), "ScheduleMaintenance", mock.Anything)
-			maintenanceManager.AssertNotCalled(GinkgoT(), "MaintenanceAllowed", mock.Anything)
-		})
 		It("Should keep in UpdateStarted status if maintenance fails to schedule", func() {
 			errorText := "maintenance request failed"
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(true, false, nil, nil)

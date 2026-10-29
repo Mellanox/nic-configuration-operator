@@ -14,7 +14,23 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-# Example: Spectrum-X RA2.1 configuration with multiplane mode
+# Supply a structured spcx-blueprint ConfigMap with data["blueprint.yaml"] in
+# this namespace, and run Spectrum-X Operator to resolve the host bindings.
+# Profile/platform and hardware/software PLB recipe must match that blueprint.
+apiVersion: dms.nvidia.com/v1alpha1
+kind: DMSPlanParams
+metadata:
+  name: spectrum-x-multiplane
+  namespace: nvidia-network-operator
+spec:
+  nodeSelector:
+    feature.node.kubernetes.io/network-sriov.capable: "true"
+  blueprintRef: spcx-blueprint
+  profile: SPX_Multiplane
+  platformType: gb300
+  planes: 4
+  overlay: none
+---
 apiVersion: configuration.net.nvidia.com/v1alpha1
 kind: NicConfigurationTemplate
 metadata:
@@ -22,18 +38,9 @@ metadata:
   namespace: nvidia-network-operator
 spec:
   nodeSelector:
-      feature.node.kubernetes.io/network-sriov.capable: "true"
+    feature.node.kubernetes.io/network-sriov.capable: "true"
   nicSelector:
-      nicType: "1023" # ConnectX-8. Use "1025" for ConnectX-9, or "a2dc" for BlueField-3 SuperNIC (hwplb not supported on BF3). ConnectX-7 (`1021`) is single-plane only.
-      # partNumbers:
-      #   - "MCX713106AEHEA_QP1"
-  template:
-      numVfs: 1
-      linkType: Ethernet
-      spectrumXOptimized:
-          enabled: true
-          version: "RA2.1"
-          platformType: "gb300"
-          overlay: "none"
-          multiplaneMode: "hwplb" # Hardware Packet Load Balancing, ConnectX-8 only
-          numberOfPlanes: 4
+    nicType: "1023"
+  planRef:
+    namespace: nvidia-network-operator
+    name: spectrum-x-multiplane

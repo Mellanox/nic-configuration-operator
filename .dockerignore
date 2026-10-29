@@ -3,3 +3,6 @@
 bin/
 
 **/.git
+
+# Local qualification drivers and evidence are not product image sources.
+.lab*
