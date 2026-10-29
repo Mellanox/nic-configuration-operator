@@ -9,8 +9,8 @@ github.com/MakeNowJust/heredoc v1.0.0 h1:cXCdzVdstXyiTqTvfqk9SDHpKNjxuom+DOlyEeQ
 github.com/MakeNowJust/heredoc v1.0.0/go.mod h1:mG5amYoWBHf8vpLOuehzbGGw0EHxpZZ6lCpQ4fNJ8LE=
 github.com/Masterminds/semver/v3 v3.4.0 h1:Zog+i5UMtVoCU8oKka5P7i9q9HgrJeGzI9SA1Xbatp0=
 github.com/Masterminds/semver/v3 v3.4.0/go.mod h1:4V+yj/TJE1HU9XfppCwVMZq3I84lprf4nC11bSS5beM=
-github.com/Mellanox/dms-lib v0.0.0-20261029094238-9db732a9f4ce h1:JijStceVdQZVNFuDYX/nVqDRMajXXlLspP8DBMwMFhU=
-github.com/Mellanox/dms-lib v0.0.0-20261029094238-9db732a9f4ce/go.mod h1:i6sCek3zEM30TRGmN1tSCRD2KXqdH3WCwVF4/c3ouSY=
+github.com/Mellanox/dms-lib v0.0.0-20261029115835-0b6d7aa1d8e4 h1:uAu3YM4FAS9YomOETCvusMgh5TtDvrLS0hfRFLMVDXk=
+github.com/Mellanox/dms-lib v0.0.0-20261029115835-0b6d7aa1d8e4/go.mod h1:i6sCek3zEM30TRGmN1tSCRD2KXqdH3WCwVF4/c3ouSY=
 github.com/Mellanox/dms-lib/api v0.0.0-20261029094238-9db732a9f4ce h1:r9NlhyUko07ilRTHIGqDfV0N6At39wr7IJyaRogTAeU=
 github.com/Mellanox/dms-lib/api v0.0.0-20261029094238-9db732a9f4ce/go.mod h1:Wl6m/sWgrD6e/65abzzhLcFA+/7lfw4DHYPSaxMVIb4=
 github.com/Mellanox/maintenance-operator/api v0.4.0 h1:6amxdFiUlwudPf/089cP2GfAvPf8wSlvcJr/ob+o/Ig=

@@ -21,7 +21,7 @@ func ValidateRuntimePrerequisites(nic *v1alpha1.NicDevice) error {
 	if nic == nil {
 		return fmt.Errorf("NIC device must not be nil")
 	}
-	return (&configValidationImpl{utils: newConfigurationUtils(nil)}).validatePortCarrierState(nic)
+	return (&configValidationImpl{utils: newConfigurationUtils()}).validatePortCarrierState(nic)
 }
 
 type ordinaryNVPort struct {

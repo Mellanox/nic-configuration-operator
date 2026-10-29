@@ -18,9 +18,7 @@ package firmware
 
 import (
 	"archive/zip"
-	"bufio"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -32,7 +30,7 @@ import (
 	execUtils "k8s.io/utils/exec"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	libfirmware "github.com/Mellanox/dms-lib/pkg/firmware"
 )
 
 type FirmwareUtils interface {
@@ -41,46 +39,28 @@ type FirmwareUtils interface {
 	// UnzipFiles extract files from the zip archive to destDir
 	// Returns a list of extracted files, error if occurred
 	UnzipFiles(zipPath, destDir string) ([]string, error)
-	// GetFirmwareVersionsFromDevice retrieves the burned and running FW versions from the device
-	// returns string - burned FW version
-	// returns string - running FW version
-	// returns error - there were errors while retrieving the firmware versions
-	GetFirmwareVersionsFromDevice(pciAddress string) (string, string, error)
 	// GetFirmwareVersionAndPSIDFromFWBinary retrieves the version and PSID from the firmware binary
 	GetFirmwareVersionAndPSIDFromFWBinary(firmwareBinaryPath string) (string, string, error)
 	// GetFWVersionsFromBFB retrieves the FW versions from the BFB file
 	GetFWVersionsFromBFB(bfbPath string) (map[string]string, error)
 	// GetDocaSpcXCCVersion retrieves the version from the DOCA SPC-X PCC file
 	GetDocaSpcXCCVersion(docaSpcXCCPath string) (string, error)
-	// VerifyImageBootable verifies if the image file is valid and bootable
-	VerifyImageBootable(firmwareBinaryPath string) error
 	// CleanupDirectory deletes any file inside a root directory except for allowedSet. Empty directories are cleaned up as well at the end
 	CleanupDirectory(root string, allowedSet map[string]struct{}) error
-	// BurnNicFirmware burns the requested firmware on the requested device
-	// Operation can be long, require context to be able to terminate by timeout
-	BurnNicFirmware(ctx context.Context, pciAddress, fwPath string) error
-	// ResetNicFirmware resets NIC's firmware
-	// Operation can be long, requires context to be able to terminate by timeout
-	ResetNicFirmware(ctx context.Context, pciAddress string) error
 	// InstallDebPackage installs the .deb package
 	InstallDebPackage(debPath string) error
 	// GetInstalledDebPackageVersion retrieves the version from the installed .deb package
 	// Return empty string if the package is not installed
 	GetInstalledDebPackageVersion(packageName string) string
-	// EnsureDeviceBoundToMlx5Core verifies that the given PCI device is bound to mlx5_core,
-	// and binds it if it is currently unbound. Returns an error if the device is bound to a
-	// different driver or if the bind write fails.
-	EnsureDeviceBoundToMlx5Core(pciAddress string) error
 }
 
-// pciDevicesSysfsPath and mlx5CoreBindPath are package-level vars so tests can point them
-// at a fake sysfs tree. In production they resolve to the real sysfs paths from consts.
-var (
-	pciDevicesSysfsPath = consts.PCIDevicesSysfsPath
-	mlx5CoreBindPath    = consts.Mlx5CoreDriverBindPath
-)
+type imageInspector interface {
+	InspectBinary(context.Context, string) (libfirmware.BinaryInfo, error)
+	InspectBFB(context.Context, string) (map[string]string, error)
+}
 
 type utils struct {
+	inspector     imageInspector
 	execInterface execUtils.Interface
 }
 
@@ -184,167 +164,13 @@ func extractFile(zf *zip.File, destPath string) error {
 	return nil
 }
 
-// GetFirmwareVersionsFromDevice retrieves the burned and running FW versions from the device
-// returns string - burned FW version
-// returns string - running FW version
-// returns error - there were errors while retrieving the firmware versions
-func (u *utils) GetFirmwareVersionsFromDevice(pciAddress string) (string, string, error) {
-	log.Log.V(2).Info("FirmwareUtils.GetFirmwareVersionsFromDevice()", "pciAddress", pciAddress)
-
-	cmd := u.execInterface.Command("mlxfwmanager", "-d", pciAddress)
-	output, err := cmd.CombinedOutput()
-	log.Log.V(2).Info("GetFirmwareVersionsFromDevice(): command output", "output", string(output))
-	if err != nil {
-		log.Log.Error(err, "GetFirmwareVersionsFromDevice(): Failed to run mlxfwmanager")
-		return "", "", err
-	}
-
-	var burnedVersion, runningVersion string
-
-	// Parse the output for FW versions
-	scanner := bufio.NewScanner(strings.NewReader(string(output)))
-
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-
-		// Look for FW version line under Versions section. Skip FW (Running) line as it might be different from the burned version
-		if strings.HasPrefix(line, "FW") && !strings.HasPrefix(line, "FW (Running)") {
-			parts := strings.Fields(line)
-			if len(parts) >= 2 {
-				burnedVersion = parts[1]
-			}
-		}
-		if strings.HasPrefix(line, "FW (Running)") {
-			parts := strings.Fields(line)
-			if len(parts) >= 3 {
-				runningVersion = parts[2]
-			}
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		log.Log.Error(err, "GetFirmwareVersionsFromDevice(): Error reading mlxfwmanager output")
-		return "", "", err
-	}
-
-	if burnedVersion == "" {
-		return "", "", fmt.Errorf("GetFirmwareVersionsFromDevice(): burned firmware version is empty")
-	}
-	if runningVersion == "" {
-		runningVersion = burnedVersion
-	}
-	return burnedVersion, runningVersion, nil
+func (u *utils) GetFirmwareVersionAndPSIDFromFWBinary(path string) (string, string, error) {
+	info, err := u.inspector.InspectBinary(context.Background(), path)
+	return info.Version, info.PSID, err
 }
 
-// GetFirmwareVersionAndPSIDFromFWBinary retrieves the version and PSID from the firmware binary
-func (u *utils) GetFirmwareVersionAndPSIDFromFWBinary(firmwareBinaryPath string) (string, string, error) {
-	log.Log.V(2).Info("FirmwareUtils.GetFirmwareVersionAndPSIDFromFWBinary()", "firmwareBinaryPath", firmwareBinaryPath)
-	cmd := u.execInterface.Command("flint", "-i", firmwareBinaryPath, "q")
-	output, err := cmd.CombinedOutput()
-	log.Log.V(2).Info("GetFirmwareVersionAndPSIDFromFWBinary(): command output", "output", string(output))
-	if err != nil {
-		log.Log.Error(err, "GetFirmwareVersionAndPSIDFromFWBinary(): Failed to run flint")
-		return "", "", err
-	}
-
-	// Parse the output for FW version and PSID
-	scanner := bufio.NewScanner(strings.NewReader(string(output)))
-	var firmwareVersion, PSID string
-
-	for scanner.Scan() {
-		line := strings.ToLower(scanner.Text())
-
-		if strings.HasPrefix(line, consts.FirmwareVersionPrefix) {
-			firmwareVersion = strings.TrimSpace(strings.TrimPrefix(line, consts.FirmwareVersionPrefix))
-		}
-		if strings.HasPrefix(line, consts.PSIDPrefix) {
-			PSID = strings.TrimSpace(strings.TrimPrefix(line, consts.PSIDPrefix))
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		log.Log.Error(err, "GetFirmwareVersionAndPSIDFromFWBinary(): Error reading flint output")
-		return "", "", err
-	}
-
-	if firmwareVersion == "" || PSID == "" {
-		return "", "", fmt.Errorf("GetFirmwareVersionAndPSIDFromFWBinary(): firmware version (%v) or PSID (%v) is empty", firmwareVersion, PSID)
-	}
-
-	log.Log.V(2).Info("Firmware version and PSID found in .bin file", "version", firmwareVersion, "psid", PSID, "path", firmwareBinaryPath)
-
-	return firmwareVersion, PSID, nil
-}
-
-// GetFWVersionsFromBFB retrieves the FW versions from the BFB file
-func (u *utils) GetFWVersionsFromBFB(bfbPath string) (map[string]string, error) {
-	log.Log.V(2).Info("FirmwareUtils.GetFWVersionsFromBFB()", "bfbPath", bfbPath)
-	dir := filepath.Dir(bfbPath)
-
-	// Extract JSON file containing component details and versions
-	log.Log.V(2).Info("Extracting info-v0 file from BFB", "bfbPath", bfbPath)
-	cmd := u.execInterface.Command("/usr/sbin/mlx-mkbfb", "-x", "-n", "info-v0", bfbPath)
-	cmd.SetDir(dir)
-	output, err := cmd.CombinedOutput()
-	log.Log.V(2).Info("GetFWVersionsFromBFB(): mlx-mkbfb command output", "output", string(output))
-	if err != nil {
-		log.Log.Error(err, "GetFWVersionsFromBFB(): Failed to run mlx-mkbfb")
-		return nil, err
-	}
-
-	infoFile := filepath.Join(dir, "dump-info-v0")
-	if _, err := os.Stat(infoFile); os.IsNotExist(err) {
-		log.Log.Error(err, "GetFWVersionsFromBFB(): failed to extract info-v0 file from BFB", "bfbPath", bfbPath)
-	}
-
-	versions := make(map[string]string)
-
-	bfVersions := []struct {
-		name     string
-		deviceID string
-	}{
-		{name: "BF2_NIC_FW", deviceID: consts.BlueField2DeviceID},
-		{name: "BF3_NIC_FW", deviceID: consts.BlueField3DeviceID},
-		{name: "BF4_NIC_FW", deviceID: consts.BlueField4DeviceID},
-	}
-
-	log.Log.V(2).Info("Extracting versions from info-v0 file", "bfbPath", bfbPath)
-	for _, bfv := range bfVersions {
-		cmd = u.execInterface.Command("/bin/sh", "-c", `awk '/"Name": "`+bfv.name+`"/ {getline; print $2}' `+infoFile+` | tr -d '",'`)
-		output, err := cmd.CombinedOutput()
-		log.Log.V(2).Info("GetFWVersionsFromBFB(): awk command output", "name", bfv.name, "output", string(output))
-		if err != nil {
-			log.Log.V(2).Info("GetFWVersionsFromBFB(): Failed to extract version, skipping", "name", bfv.name, "error", err)
-			continue
-		}
-
-		version := strings.TrimSpace(string(output))
-		if version == "" {
-			log.Log.V(2).Info("GetFWVersionsFromBFB(): Version is empty or not found, skipping", "name", bfv.name)
-			continue
-		}
-		versions[bfv.deviceID] = version
-	}
-
-	if len(versions) == 0 {
-		return nil, fmt.Errorf("GetFWVersionsFromBFB(): no firmware versions found in BFB file")
-	}
-
-	return versions, nil
-}
-
-// VerifyImageBootable verifies if the image file is valid and bootable
-func (u utils) VerifyImageBootable(firmwareBinaryPath string) error {
-	log.Log.V(2).Info("FirmwareUtils.VerifyImageBootable()", "firmwareBinaryPath", firmwareBinaryPath)
-	cmd := u.execInterface.Command("flint", "-i", firmwareBinaryPath, "v")
-	output, err := cmd.CombinedOutput()
-	log.Log.V(2).Info("VerifyImageBootable(): command output", "output", string(output))
-	if err != nil {
-		log.Log.Error(err, "VerifyImageBootable(): flint check failed")
-		return err
-	}
-
-	return nil
+func (u *utils) GetFWVersionsFromBFB(path string) (map[string]string, error) {
+	return u.inspector.InspectBFB(context.Background(), path)
 }
 
 // CleanupDirectory deletes any file inside a root directory except for allowedSet. Empty directories are cleaned up as well at the end
@@ -424,40 +250,6 @@ func (u *utils) removeEmptyDirs(dir string) error {
 	return nil
 }
 
-// BurnNicFirmware burns the requested firmware on the requested device
-// Operation can be long, require context to be able to terminate by timeout
-func (u *utils) BurnNicFirmware(ctx context.Context, pciAddress, fwPath string) error {
-	log.Log.V(2).Info("FirmwareUtils.BurnNicFirmware()", "pciAddress", pciAddress, "fwPath", fwPath)
-
-	cmd := u.execInterface.CommandContext(ctx, "flint", "--device", pciAddress, "--image", fwPath, "--yes", "burn")
-	output, err := cmd.CombinedOutput()
-	log.Log.V(2).Info("BurnNicFirmware(): command output", "output", string(output))
-	if err != nil {
-		log.Log.Error(err, "BurnNicFirmware(): Failed to run flint")
-		return err
-	}
-	return nil
-}
-
-// ResetNicFirmware resets NIC's firmware
-// Operation can be long, requires context to be able to terminate by timeout
-func (u *utils) ResetNicFirmware(ctx context.Context, pciAddress string) error {
-	log.Log.V(2).Info("FirmwareUtils.ResetNicFirmware()", "pciAddress", pciAddress)
-
-	args := []string{"--device", pciAddress, "reset", "--yes"}
-	if os.Getenv(consts.SKIP_VM_CHECK) == consts.LabelValueTrue {
-		args = append(args, "--skip_vm_check")
-	}
-	cmd := u.execInterface.CommandContext(ctx, "mlxfwreset", args...)
-	output, err := cmd.CombinedOutput()
-	log.Log.V(2).Info("ResetNicFirmware(): command output", "output", string(output))
-	if err != nil {
-		log.Log.Error(err, "ResetNicFirmware(): Failed to run mlxfwreset")
-		return err
-	}
-	return nil
-}
-
 // GetDocaSpcXCCVersion retrieves the version from the DOCA SPC-X PCC file
 func (u *utils) GetDocaSpcXCCVersion(docaSpcXCCPath string) (string, error) {
 	log.Log.V(2).Info("FirmwareUtils.GetDocaSpcXCCVersion()", "docaSpcXCCPath", docaSpcXCCPath)
@@ -499,38 +291,8 @@ func (u *utils) GetInstalledDebPackageVersion(packageName string) string {
 	return installedVersion
 }
 
-// EnsureDeviceBoundToMlx5Core verifies that the given PCI device is bound to mlx5_core,
-// and binds it if it is currently unbound. Returns an error if the device is bound to a
-// different driver or if the bind write fails.
-//
-// Workaround for a DMS bug where "os install" / "os activate" unconditionally unbinds every
-// PCI function of the device, which fails with ENODEV if a function is already unbound.
-func (u *utils) EnsureDeviceBoundToMlx5Core(pciAddress string) error {
-	log.Log.V(2).Info("FirmwareUtils.EnsureDeviceBoundToMlx5Core()", "pciAddress", pciAddress)
-
-	driverLink := filepath.Join(pciDevicesSysfsPath, pciAddress, "driver")
-	target, err := os.Readlink(driverLink)
-	switch {
-	case err == nil:
-		currentDriver := filepath.Base(target)
-		if currentDriver == consts.Mlx5CoreDriverName {
-			return nil
-		}
-		return fmt.Errorf("PCI device %s is bound to driver %q, expected %q",
-			pciAddress, currentDriver, consts.Mlx5CoreDriverName)
-	case errors.Is(err, os.ErrNotExist):
-		log.Log.Info("PCI device is unbound, binding to mlx5_core before FW install", "pciAddress", pciAddress)
-		if err := os.WriteFile(mlx5CoreBindPath, []byte(pciAddress), 0200); err != nil {
-			return fmt.Errorf("failed to bind PCI device %s to mlx5_core: %w", pciAddress, err)
-		}
-		return nil
-	default:
-		return fmt.Errorf("failed to read driver link for PCI device %s: %w", pciAddress, err)
-	}
-}
-
-func newFirmwareUtils() FirmwareUtils {
-	return &utils{execInterface: execUtils.New()}
+func newFirmwareUtils(inspector imageInspector) FirmwareUtils {
+	return &utils{execInterface: execUtils.New(), inspector: inspector}
 }
 
 // copyFile copies a file from src to dst.

@@ -19,9 +19,7 @@ package main
 import (
 	"context"
 	"flag"
-	"maps"
 	"os"
-	"slices"
 	"time"
 
 	maintenanceoperator "github.com/Mellanox/maintenance-operator/api/v1alpha1"
@@ -39,12 +37,12 @@ import (
 	dmsv1 "github.com/Mellanox/dms-lib/api/v1alpha1"
 	dmsconfiguration "github.com/Mellanox/dms-lib/pkg/configuration"
 	"github.com/Mellanox/dms-lib/pkg/device"
+	libfirmware "github.com/Mellanox/dms-lib/pkg/firmware"
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/internal/controller"
 	"github.com/Mellanox/nic-configuration-operator/pkg/configuration"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	"github.com/Mellanox/nic-configuration-operator/pkg/devicediscovery"
-	"github.com/Mellanox/nic-configuration-operator/pkg/dms"
 	"github.com/Mellanox/nic-configuration-operator/pkg/firmware"
 	"github.com/Mellanox/nic-configuration-operator/pkg/helper"
 	"github.com/Mellanox/nic-configuration-operator/pkg/host"
@@ -131,33 +129,22 @@ func main() {
 
 	deviceDiscovery := devicediscovery.NewDeviceDiscovery(nodeName)
 
-	// Initialize DMS server
-	dmsServer := dms.NewDMSServer()
-
-	// Start DMS server for all discovered devices
-	devices, err := deviceDiscovery.DiscoverNicDevices()
+	firmwareBackend, err := libfirmware.NewManager(libfirmware.Options{})
 	if err != nil {
-		log.Log.Error(err, "failed to discover NIC devices")
+		log.Log.Error(err, "initialize firmware library")
 		os.Exit(1)
 	}
-
-	if err := dmsServer.StartDMSServer(slices.Collect(maps.Values(devices))); err != nil {
-		log.Log.Error(err, "failed to start DMS server")
-		os.Exit(1)
-	}
-
-	// Ensure DMS server is stopped when the program exits
-	defer func() {
-		if err := dmsServer.StopDMSServer(); err != nil {
-			log.Log.Error(err, "failed to stop DMS server")
-		}
-	}()
 
 	spectrumXConfigManager := spectrumx.NewSpectrumXConfigManager()
+	planConfiguration, err := dmsconfiguration.NewManager(dmsconfiguration.Options{})
+	if err != nil {
+		log.Log.Error(err, "initialize DMS configuration library")
+		os.Exit(1)
+	}
 	configurationManager := configuration.NewConfigurationManager(
-		eventRecorder, dmsServer, nvConfigUtils)
+		nvConfigUtils, planConfiguration, firmwareBackend)
 	maintenanceManager := maintenance.New(mgr.GetClient(), hostUtils, nodeName, namespace)
-	firmwareManager := firmware.NewFirmwareManager(mgr.GetClient(), dmsServer, namespace)
+	firmwareManager := firmware.NewFirmwareManager(mgr.GetClient(), firmwareBackend, namespace)
 
 	if err := initNicFwMap(namespace); err != nil {
 		log.Log.Error(err, "unable to init NicFwMap")
@@ -173,11 +160,6 @@ func main() {
 
 	udevManager := udev.NewUdevManager()
 
-	planConfiguration, err := dmsconfiguration.NewManager(dmsconfiguration.Options{})
-	if err != nil {
-		log.Log.Error(err, "initialize DMS configuration library")
-		os.Exit(1)
-	}
 	nicDeviceReconciler := controller.NicDeviceReconciler{
 		Client:            mgr.GetClient(),
 		APIReader:         mgr.GetAPIReader(),

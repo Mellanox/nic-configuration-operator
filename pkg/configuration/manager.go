@@ -21,12 +21,14 @@ import (
 	"sort"
 	"strconv"
 
-	"k8s.io/client-go/tools/record"
+	dmsconfiguration "github.com/Mellanox/dms-lib/pkg/configuration"
+	dmsdevice "github.com/Mellanox/dms-lib/pkg/device"
+	dmsfirmware "github.com/Mellanox/dms-lib/pkg/firmware"
+
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
-	"github.com/Mellanox/nic-configuration-operator/pkg/dms"
 	"github.com/Mellanox/nic-configuration-operator/pkg/nvconfig"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 )
@@ -56,7 +58,18 @@ type ConfigurationManager interface {
 	ResetNicFirmware(ctx context.Context, device *v1alpha1.NicDevice) error
 }
 
+type runtimeManager interface {
+	ApplyRuntimeConfiguration(context.Context, dmsconfiguration.RuntimeRequest) (dmsconfiguration.Result, error)
+}
+type firmwareResetter interface {
+	Reset(context.Context, dmsdevice.Device, dmsfirmware.ResetOptions) error
+}
+
 type configurationManager struct {
+	runtime  runtimeManager
+	firmware firmwareResetter
+	discover func(context.Context) (dmsdevice.Inventory, error)
+
 	configurationUtils ConfigurationUtils
 	configValidation   configValidation
 	nvConfigUtils      nvconfig.NVConfigUtils
@@ -378,168 +391,6 @@ func (h configurationManager) applyResetToDefault(device *v1alpha1.NicDevice, po
 	return &types.ConfigurationApplyResult{Status: types.ApplyStatusSuccess, RebootRequired: true}, nil
 }
 
-// ApplyRuntimeConfiguration calculates device's missing runtime spec configuration and applies it to the device on the host
-// returns *RuntimeConfigurationApplyResult - result of the apply operation
-// returns error - there were errors while applying runtime configuration
-func (h configurationManager) ApplyRuntimeConfiguration(ctx context.Context, device *v1alpha1.NicDevice) (*types.RuntimeConfigurationApplyResult, error) {
-	logger := log.FromContext(ctx)
-	logger.Info("configurationManager.ApplyRuntimeConfiguration", "device", device.Name)
-
-	if device.Spec.Configuration == nil || device.Spec.Configuration.Template == nil {
-		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusNothingToDo}, nil
-	}
-	applied, err := h.configValidation.RuntimeConfigApplied(device)
-	if err != nil {
-		logger.Error(err, "failed to validate generic runtime configuration", "device", device.Name)
-		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
-	}
-	if applied {
-		logger.V(2).Info("runtime configuration is already applied", "device", device.Name)
-		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusNothingToDo}, nil
-	}
-	logger.Info("applying generic runtime configuration", "device", device.Name)
-	if err := h.applyGenericRuntimeConfiguration(device); err != nil {
-		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
-	}
-
-	return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusSuccess}, nil
-}
-
-func (h configurationManager) applyGenericRuntimeConfiguration(device *v1alpha1.NicDevice) error {
-	desired := h.configValidation.CalculateDesiredRuntimeConfig(device)
-	ports := device.Status.Ports
-
-	if desired.MaxReadRequestSize != 0 {
-		for _, port := range ports {
-			if err := h.configurationUtils.SetMaxReadRequestSize(port.PCI, desired.MaxReadRequestSize); err != nil {
-				log.Log.Error(err, "failed to apply maxReadRequestSize", "device", device)
-				return err
-			}
-		}
-	}
-
-	// Apply QoS settings (trust, PFC, ToS) via DMS
-	if desired.Qos != nil && (desired.Qos.Trust != "" || desired.Qos.PFC != "" || desired.Qos.ToS != 0) {
-		if err := h.configurationUtils.SetQoSSettings(device, desired.Qos); err != nil {
-			log.Log.Error(err, "failed to apply QoS settings", "device", device)
-			return err
-		}
-	}
-
-	// Apply per-port runtime settings
-	for _, port := range ports {
-		if port.NetworkInterface == "" {
-			log.Log.V(2).Info("skipping runtime config apply for port with empty NetworkInterface", "device", device.Name, "port", port.PCI)
-			continue
-		}
-		if err := h.applyPortRuntimeConfig(port.NetworkInterface, device, desired); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// applyPortRuntimeConfig applies per-port runtime settings (RoCE mode, QoS extended, runtime perf)
-func (h configurationManager) applyPortRuntimeConfig(iface string, device *v1alpha1.NicDevice, desired types.DesiredRuntimeConfig) error {
-	if desired.RoceMode != 0 {
-		if err := h.configurationUtils.SetRoceMode(iface, desired.RoceMode); err != nil {
-			log.Log.Error(err, "failed to apply roceMode", "device", device, "interface", iface)
-			return err
-		}
-	}
-
-	if desired.Qos != nil {
-		if err := h.applyPortExtendedQoS(iface, device, desired.Qos); err != nil {
-			return err
-		}
-	}
-
-	if desired.RuntimePerf != nil && desired.RuntimePerf.Enabled {
-		if err := h.applyPortRuntimePerf(iface, device, desired.RuntimePerf); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// applyPortExtendedQoS applies per-port extended QoS settings (CableLen, ECN, PauseFrames)
-func (h configurationManager) applyPortExtendedQoS(iface string, device *v1alpha1.NicDevice, qos *v1alpha1.QosSpec) error {
-	if qos.CableLen != 0 {
-		if err := h.configurationUtils.SetCableLen(iface, qos.CableLen); err != nil {
-			log.Log.Error(err, "failed to apply cableLen", "device", device, "interface", iface)
-			return err
-		}
-	}
-
-	if qos.ECN != nil {
-		if err := h.configurationUtils.SetECNEnabled(iface, qos.ECN.Priority, qos.ECN.Enabled, qos.ECN.Enabled); err != nil {
-			log.Log.Error(err, "failed to apply ECN", "device", device, "interface", iface)
-			return err
-		}
-	}
-
-	if qos.PauseFrames != nil {
-		if err := h.configurationUtils.SetPauseFrames(iface, qos.PauseFrames.Enabled); err != nil {
-			log.Log.Error(err, "failed to apply pauseFrames", "device", device, "interface", iface)
-			return err
-		}
-	}
-
-	return nil
-}
-
-// applyPortRuntimePerf applies per-port runtime performance settings (ring size, channels, LRO)
-func (h configurationManager) applyPortRuntimePerf(iface string, device *v1alpha1.NicDevice, perf *v1alpha1.RuntimePerformanceOptimizedSpec) error {
-	if perf.RxRingSize != 0 || perf.TxRingSize != 0 {
-		if err := h.configurationUtils.SetRingSize(iface, perf.RxRingSize, perf.TxRingSize); err != nil {
-			log.Log.Error(err, "failed to apply ringSize", "device", device, "interface", iface)
-			return err
-		}
-	}
-
-	if perf.CombinedChannels != 0 {
-		// Check if the driver exposes combined channels before attempting to set
-		current, err := h.configurationUtils.GetCombinedChannels(iface)
-		if err != nil {
-			log.Log.Error(err, "failed to get combinedChannels", "device", device, "interface", iface)
-			return err
-		}
-		if current != 0 {
-			if err = h.configurationUtils.SetCombinedChannels(iface, perf.CombinedChannels); err != nil {
-				log.Log.Error(err, "failed to apply combinedChannels", "device", device, "interface", iface)
-				return err
-			}
-		} else {
-			log.Log.V(2).Info("skipping combinedChannels apply, driver does not expose combined channels", "device", device, "interface", iface)
-		}
-	}
-
-	if perf.LRO != nil {
-		if err := h.configurationUtils.SetLRO(iface, *perf.LRO); err != nil {
-			log.Log.Error(err, "failed to apply LRO", "device", device, "interface", iface)
-			return err
-		}
-	}
-
-	return nil
-}
-
-// ResetNicFirmware resets NIC's firmware
-// Operation can be long, required context to be able to terminate by timeout
-// IB devices need to communicate with other nodes for confirmation
-// return err - there were errors while resetting NIC firmware
-func (h configurationManager) ResetNicFirmware(ctx context.Context, device *v1alpha1.NicDevice) error {
-	log.Log.Info("configurationManager.ResetNicFirmware", "device", device.Name)
-	err := h.configurationUtils.ResetNicFirmware(ctx, device.Status.Ports[0].PCI)
-	if err != nil {
-		log.Log.Error(err, "Failed to reset NIC firmware", "device", device.Name)
-		return err
-	}
-
-	return nil
-}
-
 // hasNetworkBaySpec reports whether the device has a Network Bay template configured AND was
 // detected as part of a Network Bay card. Both are required to resolve its system configuration
 // profile. ResetToDefault takes precedence over profile management.
@@ -629,13 +480,15 @@ func getRawNvConfigParams(device *v1alpha1.NicDevice) map[string]string {
 	return params
 }
 
-func NewConfigurationManager(eventRecorder record.EventRecorder, dmsManager dms.DMSManager, nvConfigUtils nvconfig.NVConfigUtils) ConfigurationManager {
-	utils := newConfigurationUtils(dmsManager)
+func NewConfigurationManager(nvConfigUtils nvconfig.NVConfigUtils, runtime dmsconfiguration.Manager, firmware dmsfirmware.Manager) ConfigurationManager {
+	utils := newConfigurationUtils()
 	systemConfParams, _ := nvConfigUtils.(nvconfig.SystemConfParamsProvider)
 	return configurationManager{
-		configurationUtils: utils,
-		configValidation:   newConfigValidation(utils),
-		nvConfigUtils:      nvConfigUtils,
-		systemConfParams:   systemConfParams,
+		configurationUtils: utils, configValidation: newConfigValidation(utils),
+		nvConfigUtils: nvConfigUtils, systemConfParams: systemConfParams,
+		runtime: runtime, firmware: firmware,
+		discover: func(ctx context.Context) (dmsdevice.Inventory, error) {
+			return dmsdevice.Discover(ctx, dmsdevice.Options{})
+		},
 	}
 }

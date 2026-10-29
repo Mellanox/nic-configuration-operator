@@ -29,9 +29,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"github.com/Mellanox/dms-lib/pkg/device"
+	libfirmware "github.com/Mellanox/dms-lib/pkg/firmware"
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
-	"github.com/Mellanox/nic-configuration-operator/pkg/dms"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 	utilsPkg "github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
@@ -48,7 +49,8 @@ type FirmwareManager interface {
 	ValidateRequestedFirmwareSource(ctx context.Context, device *v1alpha1.NicDevice) (string, error)
 
 	// InstallFirmware will update the device's FW to the requested version
-	// returns bool - reboot required (when fw reset fails or is skipped)
+	// returns bool - reboot required when an attempted firmware reset fails.
+	// SkipReset leaves activation to the caller and retains the historical false result.
 	// returns error - there were errors while updating firmware
 	InstallFirmware(ctx context.Context, device *v1alpha1.NicDevice, options *types.FirmwareInstallOptions) (bool, error)
 
@@ -59,12 +61,23 @@ type FirmwareManager interface {
 	GetFirmwareVersionsFromDevice(device *v1alpha1.NicDevice) (string, string, error)
 }
 
+// firmwareDevice copies only observed identity and PF endpoints; the library owns
+// firmware targeting and BlueField multi-PF preparation.
+func firmwareDevice(nic *v1alpha1.NicDevice) (device.Device, error) {
+	if nic == nil || len(nic.Status.Ports) == 0 {
+		return device.Device{}, errors.New("device has no ports")
+	}
+	observed := device.Device{ID: utilsPkg.PCIDeviceAddress(nic.Status.Ports[0].PCI), Type: nic.Status.Type, PSID: nic.Status.PSID}
+	for _, port := range nic.Status.Ports {
+		observed.Ports = append(observed.Ports, device.Port{PCI: port.PCI})
+	}
+	return observed, nil
+}
+
 type firmwareManager struct {
 	client client.Client
 
-	dmsManager dms.DMSManager
-
-	utils FirmwareUtils
+	backend libfirmware.Manager
 
 	cacheRootDir string
 	namespace    string
@@ -124,27 +137,25 @@ func (f firmwareManager) ValidateRequestedFirmwareSource(ctx context.Context, de
 }
 
 // InstallFirmware will update the device's FW to the requested version
-// returns bool - reboot required (when fw reset fails or is skipped)
+// returns bool - reboot required when an attempted firmware reset fails.
+// SkipReset leaves activation to the caller and retains the historical false result.
 // returns error - there were errors while updating firmware
 func (f firmwareManager) InstallFirmware(ctx context.Context, device *v1alpha1.NicDevice, options *types.FirmwareInstallOptions) (bool, error) {
-	log.Log.Info("FirmwareManager.InstallFirmware()", "device", device.Name, "options", options)
-
-	if len(device.Status.Ports) == 0 {
-		return false, errors.New("device has no ports")
+	observed, err := firmwareDevice(device)
+	if err != nil {
+		return false, err
 	}
+	log.Log.Info("FirmwareManager.InstallFirmware()", "device", device.Name, "options", options)
 
 	if options == nil {
 		return false, errors.New("options must not be nil")
 	}
 
-	pci := device.Status.Ports[0].PCI
 	version := options.Version
-	var err error
 
-	// In library mode with no version specified, extract version (and PSID for ConnectX) from the firmware file
-	var psidFromFile string
+	// Resolve an omitted version before comparing against already burned firmware.
 	if version == "" && options.FwFilePath != "" {
-		version, psidFromFile, err = f.getVersionFromFirmwareFile(device, options.FwFilePath)
+		version, err = f.getVersionFromFirmwareFile(ctx, device, options.FwFilePath)
 		if err != nil {
 			return false, fmt.Errorf("failed to determine firmware version from file: %w", err)
 		}
@@ -152,7 +163,8 @@ func (f firmwareManager) InstallFirmware(ctx context.Context, device *v1alpha1.N
 
 	// Check current firmware versions before proceeding with burn (idempotency)
 	if version != "" {
-		burnedVersion, _, err := f.utils.GetFirmwareVersionsFromDevice(pci)
+		versions, err := f.backend.QueryVersions(ctx, observed)
+		burnedVersion := versions.Burned
 		if err != nil {
 			log.Log.V(2).Info("Could not retrieve current firmware version, proceeding with burn", "device", device.Name, "error", err.Error())
 		} else if burnedVersion == version {
@@ -171,18 +183,12 @@ func (f firmwareManager) InstallFirmware(ctx context.Context, device *v1alpha1.N
 		}
 	}
 
-	// Install firmware using the resolved path
-	if utilsPkg.IsBlueFieldDevice(device.Status.Type) {
-		err = f.installBlueFieldFirmware(ctx, device, version, fwFilePath)
-	} else {
-		err = f.installConnectXFirmware(ctx, device, version, pci, fwFilePath, psidFromFile)
-	}
-	if err != nil {
+	if err := f.backend.Install(ctx, observed, libfirmware.InstallOptions{Path: fwFilePath, Version: version}); err != nil {
 		return false, err
 	}
 
 	if !options.SkipReset {
-		err = f.utils.ResetNicFirmware(ctx, pci)
+		err = f.backend.Reset(ctx, observed, libfirmware.ResetOptions{SkipVMCheck: os.Getenv(consts.SKIP_VM_CHECK) == consts.LabelValueTrue})
 		if err != nil {
 			log.Log.Error(err, "failed to reset NIC firmware after install, reboot required", "device", device.Name)
 			return true, nil
@@ -286,92 +292,25 @@ func (f firmwareManager) resolveFirmwareBinaryFilePathFromCache(cacheDir string,
 	return copiedFilePath, nil
 }
 
-// getVersionFromFirmwareFile extracts the firmware version (and PSID for ConnectX) from a firmware file.
-// For ConnectX .bin files: uses flint to read version and PSID.
-// For BlueField .bfb files: uses mlx-mkbfb to extract version map, then looks up device type (PSID returned empty).
-func (f firmwareManager) getVersionFromFirmwareFile(device *v1alpha1.NicDevice, fwFilePath string) (string, string, error) {
+// getVersionFromFirmwareFile selects the requested device version from image metadata.
+func (f firmwareManager) getVersionFromFirmwareFile(ctx context.Context, device *v1alpha1.NicDevice, fwFilePath string) (string, error) {
 	if utilsPkg.IsBlueFieldDevice(device.Status.Type) {
-		versions, err := f.utils.GetFWVersionsFromBFB(fwFilePath)
+		versions, err := f.backend.InspectBFB(ctx, fwFilePath)
 		if err != nil {
-			return "", "", err
+			return "", err
 		}
 		version, found := versions[device.Status.Type]
 		if !found {
-			return "", "", fmt.Errorf("BFB file does not contain firmware for device type %s", device.Status.Type)
+			return "", fmt.Errorf("BFB file does not contain firmware for device type %s", device.Status.Type)
 		}
-		return version, "", nil
+		return version, nil
 	}
 
-	version, psid, err := f.utils.GetFirmwareVersionAndPSIDFromFWBinary(fwFilePath)
+	info, err := f.backend.InspectBinary(ctx, fwFilePath)
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
-	return version, psid, nil
-}
-
-// installBlueFieldFirmware installs firmware on a BlueField device via DMS
-func (f firmwareManager) installBlueFieldFirmware(ctx context.Context, device *v1alpha1.NicDevice, version string, fwFilePath string) error {
-	dmsClient, err := dms.GetDMSClientForDevice(f.dmsManager, device)
-	if err != nil {
-		log.Log.Error(err, "failed to get DMS client", "device", device.Name)
-		return err
-	}
-
-	// Workaround for a DMS bug: `os install` / `os activate` unconditionally unbinds every
-	// PCI function of the device, which fails with ENODEV if a function is already unbound
-	// (e.g. manually unbound by an operator). Rebind any managed PF that is currently unbound
-	// so the DMS unbind step finds each function in the expected state.
-	for _, port := range device.Status.Ports {
-		if err := f.utils.EnsureDeviceBoundToMlx5Core(port.PCI); err != nil {
-			log.Log.Error(err, "failed to ensure PCI function is bound to mlx5_core before BFB install",
-				"device", device.Name, "pci", port.PCI)
-			return err
-		}
-	}
-
-	err = dmsClient.InstallBFB(ctx, version, fwFilePath)
-	if err != nil {
-		log.Log.Error(err, "failed to install BFB", "device", device.Name)
-		return err
-	}
-
-	return nil
-}
-
-// installConnectXFirmware validates and burns firmware for a ConnectX NIC.
-// knownPSID is set when the PSID was already extracted from the file (library mode) to avoid a redundant flint call.
-func (f firmwareManager) installConnectXFirmware(ctx context.Context, device *v1alpha1.NicDevice, version string, pci string, fwFilePath string, knownPSID string) error {
-	if knownPSID != "" {
-		// Library mode: PSID already extracted during version detection
-		if knownPSID != device.Status.PSID {
-			return fmt.Errorf("firmware file PSID %s does not match device PSID %s", knownPSID, device.Status.PSID)
-		}
-	} else {
-		// Operator mode: validate file contents against requested version and device PSID
-		versionInFile, psidInFile, err := f.utils.GetFirmwareVersionAndPSIDFromFWBinary(fwFilePath)
-		if err != nil {
-			log.Log.Error(err, "couldn't get FW version and PSID from FW binary file", "path", fwFilePath)
-			return err
-		}
-		if versionInFile != version || psidInFile != device.Status.PSID {
-			return fmt.Errorf("found FW binary file doesn't match expected version or PSID. Requested %s, %s, found %s, %s", version, device.Status.PSID, versionInFile, psidInFile)
-		}
-	}
-
-	err := f.utils.VerifyImageBootable(fwFilePath)
-	if err != nil {
-		log.Log.Error(err, "fw image file is not bootable", "path", fwFilePath)
-		return err
-	}
-
-	log.Log.Info("Starting firmware image burning. The process might take a long time", "path", fwFilePath, "pci", pci)
-	err = f.utils.BurnNicFirmware(ctx, pci, fwFilePath)
-	if err != nil {
-		log.Log.Error(err, "failed to burn FW on device", "path", fwFilePath, "pci", pci)
-		return err
-	}
-
-	return nil
+	return info.Version, nil
 }
 
 // GetFirmwareVersionsFromDevice retrieves the burned and running FW versions from the device
@@ -379,10 +318,14 @@ func (f firmwareManager) installConnectXFirmware(ctx context.Context, device *v1
 // returns string - running FW version
 // returns error - there were errors while retrieving the firmware versions
 func (f firmwareManager) GetFirmwareVersionsFromDevice(device *v1alpha1.NicDevice) (string, string, error) {
-	log.Log.Info("FirmwareManager.GetFirmwareVersionsFromDevice()", "device", device.Name)
-	return f.utils.GetFirmwareVersionsFromDevice(device.Status.Ports[0].PCI)
+	observed, err := firmwareDevice(device)
+	if err != nil {
+		return "", "", err
+	}
+	versions, err := f.backend.QueryVersions(context.Background(), observed)
+	return versions.Burned, versions.Running, err
 }
 
-func NewFirmwareManager(client client.Client, dmsManager dms.DMSManager, namespace string) FirmwareManager {
-	return &firmwareManager{client: client, dmsManager: dmsManager, cacheRootDir: consts.NicFirmwareStorage, namespace: namespace, tmpDir: consts.TempDir, utils: newFirmwareUtils()}
+func NewFirmwareManager(client client.Client, backend libfirmware.Manager, namespace string) FirmwareManager {
+	return &firmwareManager{client: client, backend: backend, cacheRootDir: consts.NicFirmwareStorage, namespace: namespace, tmpDir: consts.TempDir}
 }
