@@ -118,38 +118,6 @@ type GpuDirectOptimizedSpec struct {
 	Env string `json:"env"`
 }
 
-// SpectrumXOptimizedSpec enables Spectrum-X specific optimizations
-// +kubebuilder:validation:XValidation:rule="!has(self.multiplaneMode) || !has(self.numberOfPlanes) || self.multiplaneMode != 'none' || self.numberOfPlanes == 1",message="when MultiplaneMode is none, numberOfPlanes must be 1"
-// +kubebuilder:validation:XValidation:rule="!has(self.multiplaneMode) || !has(self.numberOfPlanes) || self.multiplaneMode == 'none' || self.numberOfPlanes != 1",message="when MultiplaneMode is not none, numberOfPlanes must not be 1"
-// +kubebuilder:validation:XValidation:rule="!self.enabled || has(self.platformType)",message="platformType is required when Spectrum-X optimization is enabled"
-type SpectrumXOptimizedSpec struct {
-	// Optimize Spectrum X
-	Enabled bool `json:"enabled"`
-	// Version of the Spectrum-X architecture passed to the doSPCX planner.
-	// +required
-	Version string `json:"version"`
-	// Platform type used by the doSPCX planner to select a recipe from the supplied profile.
-	// +optional
-	PlatformType string `json:"platformType,omitempty"`
-	// Overlay mode to be configured
-	// Can be "l3" or "none"
-	// +kubebuilder:validation:Enum=l3;none
-	// +kubebuilder:default:=none
-	// +optional
-	Overlay string `json:"overlay,omitempty"`
-	// Multiplane mode to be configured
-	// Can be "none", "swplb", or "hwplb"
-	// +kubebuilder:validation:Enum=none;swplb;hwplb
-	// +kubebuilder:default:=none
-	// +optional
-	MultiplaneMode string `json:"multiplaneMode,omitempty"`
-	// Number of planes to be configured
-	// +kubebuilder:validation:Enum=1;2;4;8
-	// +kubebuilder:default:=1
-	// +optional
-	NumberOfPlanes int `json:"numberOfPlanes,omitempty"`
-}
-
 type NvConfigParam struct {
 	// Name of the arbitrary nvconfig parameter
 	// +kubebuilder:validation:MaxLength=64
@@ -171,8 +139,6 @@ type NetworkBaySpec struct {
 }
 
 // ConfigurationTemplateSpec is a set of configurations for the NICs
-// +kubebuilder:validation:XValidation:rule="!(has(self.spectrumXOptimized) && self.spectrumXOptimized.enabled) || ((!has(self.linkType) || self.linkType == 'Ethernet') && self.numVfs == 1)",message="spectrumXOptimized can be enabled only when linkType=='Ethernet' (or unset for Network Bay) and numVfs==1"
-// +kubebuilder:validation:XValidation:rule="!(has(self.spectrumXOptimized) && self.spectrumXOptimized.enabled) || !(has(self.roceOptimized) && self.roceOptimized.enabled)",message="spectrumXOptimized includes RoCE optimizations, so separate roceOptimized section must not be enabled"
 // +kubebuilder:validation:XValidation:rule="has(self.networkBay) || has(self.linkType)",message="linkType is required unless networkBay is configured"
 // +kubebuilder:validation:XValidation:rule="!has(self.networkBay) || !has(self.linkType)",message="linkType must not be set when networkBay is configured (the Network Bay link type is governed by the system configuration)"
 // +kubebuilder:validation:XValidation:rule="!has(self.rawNvConfig) || self.rawNvConfig.all(p, !p.name.matches('.*[[][0-9]+[.][.][0-9]+[]].*'))",message="rawNvConfig parameter names must not use index-range syntax like NAME[0..3]; list each index explicitly (NAME[0], NAME[1], ...)"
@@ -193,9 +159,6 @@ type ConfigurationTemplateSpec struct {
 	GpuDirectOptimized *GpuDirectOptimizedSpec `json:"gpuDirectOptimized,omitempty"`
 	// Runtime NIC performance tuning (ring buffers, channels, LRO) applied via ethtool
 	RuntimePerformanceOptimized *RuntimePerformanceOptimizedSpec `json:"runtimePerformanceOptimized,omitempty"`
-	// Spectrum-X optimization settings. Works only with linkType==Ethernet && numVfs==1.
-	// Temporarily cannot be combined with rawNvConfig or networkBay.
-	SpectrumXOptimized *SpectrumXOptimizedSpec `json:"spectrumXOptimized,omitempty"`
 	// NetworkBay configures a ConnectX-9 Network Bay card from a per-ASIC mlxconfig system profile. Allowed only for ConnectX-9 (nicType 1025).
 	// +optional
 	NetworkBay *NetworkBaySpec `json:"networkBay,omitempty"`
@@ -209,12 +172,24 @@ type ConfigurationTemplateSpec struct {
 	Force bool `json:"force,omitempty"`
 }
 
+// DMSPlanReference identifies shared plan parameters and their host bindings.
+type DMSPlanReference struct {
+	// Namespace containing the DMSPlanParams and its referenced blueprint ConfigMap.
+	// +kubebuilder:validation:MinLength=1
+	Namespace string `json:"namespace"`
+	// Name of the DMSPlanParams object.
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+}
+
 // NicConfigurationTemplateSpec defines the desired state of NicConfigurationTemplate
-// +kubebuilder:validation:XValidation:rule="!(has(self.template.spectrumXOptimized) && self.template.spectrumXOptimized.enabled) || (self.nicSelector.nicType == '1021' || self.nicSelector.nicType == '1023' || self.nicSelector.nicType == '1025' || self.nicSelector.nicType == 'a2dc')",message="spectrumXOptimized can be enabled only for ConnectX-7, ConnectX-8, ConnectX-9 or BlueField-3 SuperNICs"
-// +kubebuilder:validation:XValidation:rule="!has(self.template.spectrumXOptimized) || !has(self.template.spectrumXOptimized.multiplaneMode) || self.nicSelector.nicType != '1021' || self.template.spectrumXOptimized.multiplaneMode == 'none'",message="ConnectX-7 (NicType 1021) supports only single-plane Spectrum-X (multiplaneMode none)"
-// +kubebuilder:validation:XValidation:rule="!has(self.template.spectrumXOptimized) || !has(self.template.spectrumXOptimized.multiplaneMode) || self.template.spectrumXOptimized.multiplaneMode != 'hwplb' || self.nicSelector.nicType == '1023' || self.nicSelector.nicType == '1025'",message="hwplb MultiplaneMode can only be enabled for ConnectX-8 (NicType 1023) or ConnectX-9 (NicType 1025)"
-// +kubebuilder:validation:XValidation:rule="!has(self.template.networkBay) || self.nicSelector.nicType == '1025'",message="networkBay can only be configured for ConnectX-9 (NicType 1025)"
+// +kubebuilder:validation:XValidation:rule="!has(self.template) || (!has(self.template.networkBay) || self.nicSelector.nicType == '1025')",message="networkBay can only be configured for ConnectX-9 (NicType 1025)"
+// +kubebuilder:validation:XValidation:rule="!has(self.planRef) || !self.resetToDefault",message="planRef cannot be combined with resetToDefault"
+// +kubebuilder:validation:XValidation:rule="has(self.template) || has(self.planRef) || self.resetToDefault",message="template, planRef or resetToDefault is required"
 type NicConfigurationTemplateSpec struct {
+	// PlanRef selects the shared DMS plan. Template fields become explicit overrides.
+	// +optional
+	PlanRef *DMSPlanReference `json:"planRef,omitempty"`
 	// NodeSelector contains labels required on the node. When empty, the template will be applied to matching devices on all nodes.
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
 	// NIC selector configuration
@@ -232,7 +207,7 @@ type NicConfigurationTemplateSpec struct {
 	// +kubebuilder:default:=false
 	ResetToDefault bool `json:"resetToDefault,omitempty"`
 	// Configuration template to be applied to matching devices
-	Template *ConfigurationTemplateSpec `json:"template"`
+	Template *ConfigurationTemplateSpec `json:"template,omitempty"`
 }
 
 // NicTemplateStatus defines the observed state of NicConfigurationTemplate and NicFirmwareTemplate

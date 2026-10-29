@@ -20,7 +20,11 @@ import (
 )
 
 // NicDeviceConfigurationSpec contains desired configuration of the NIC
+// +kubebuilder:validation:XValidation:rule="!has(self.planRef) || !has(self.resetToDefault) || !self.resetToDefault",message="planRef cannot be combined with resetToDefault"
 type NicDeviceConfigurationSpec struct {
+	// PlanRef is copied unchanged from the matching configuration template.
+	// +optional
+	PlanRef *DMSPlanReference `json:"planRef,omitempty"`
 	// ResetToDefault specifies whether node agent needs to perform a reset flow.
 	// The following operations will be performed:
 	// * Nvconfig reset of all non-volatile configurations

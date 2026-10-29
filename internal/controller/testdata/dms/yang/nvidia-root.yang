@@ -1,0 +1,30 @@
+// Copyright 2026 NVIDIA CORPORATION & AFFILIATES
+module nvidia-root {
+  yang-version 1.1;
+  namespace "urn:dms-lib:test:root";
+  prefix nv;
+  container nvidia {
+    container pci {
+      leaf max-vfs { type uint32; }
+      leaf max-vfs-pending { type uint32; config false; }
+      leaf-list lanes { type uint8; }
+    }
+    container caps {
+      config false;
+      leaf supported { type boolean; }
+    }
+    container cc {
+      list priorities {
+        key "protocol priority";
+        leaf protocol { type enumeration { enum rp; enum np; } }
+        leaf priority { type uint8; }
+        leaf enabled { type boolean; }
+      }
+      list slot {
+        key "id";
+        leaf id { type uint8; }
+        leaf enabled { type boolean; }
+      }
+    }
+  }
+}

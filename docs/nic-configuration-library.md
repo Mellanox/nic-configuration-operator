@@ -37,8 +37,7 @@ rebootRequired, err := fwMgr.InstallFirmware(ctx, device, &types.FirmwareInstall
 
 // 3. Apply NV configuration
 nvUtils := nvconfig.NewNVConfigUtils()
-spectrumXMgr := spectrumx.NewSpectrumXConfigManager()
-cfgMgr := configuration.NewConfigurationManager(nil, dmsSrv, nvUtils, spectrumXMgr)
+cfgMgr := configuration.NewConfigurationManager(nil, dmsSrv, nvUtils)
 result, err := cfgMgr.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
 ```
 
@@ -153,79 +152,18 @@ func NewConfigurationManager(
     eventRecorder record.EventRecorder,
     dmsManager dms.DMSManager,
     nvConfigUtils nvconfig.NVConfigUtils,
-    spectrumXConfigManager spectrumx.SpectrumXManager,
 ) ConfigurationManager
 ```
 
-#### NV Configuration Flow
+#### Configuration execution
 
-1. **Spectrum-X plan precondition** — before per-device validation, the controller generates or reuses one node-scoped `prepare` plan. Spectrum-X devices require a matching cached plan; validation and apply fail closed when it is missing
-2. **Native query and validation** — query current NV config via `nvConfigUtils.QueryNvConfig()` and validate the template-derived native parameter map with `rawNvConfig` merged last. These native values take precedence over doSPCX typed intent
-3. **Network Bay profile resolution** — run `show_system_conf`, select the named profile and detected ASIC, and expand range assignments such as `MODULE_SPLIT_M0[4..15]=FF` into concrete keys. Before merging template and `rawNvConfig` overrides, remove profile defaults owned by the prepared doSPCX breakout and post-breakout operations. Direct ownership comes from DMS current/pending `_nvconfig` metadata and must agree across PCI functions; lane ownership comes from each typed operation's module and listed lane indices. The resulting precedence is system profile < doSPCX < template < `rawNvConfig`
-4. **Native diff** — compare the complete native map against every target, normalizing symbolic, decimal, `0x` hexadecimal, and bare hexadecimal values; skip hidden/unsupported params and preserve the existing `with-default` and `force` behavior
-5. **doSPCX query and barrier** — query each plan leaf and its `-pending` leaf separately through DMS on every discovered PCI function, using `pci/<BDF>?port=1` because split functions expose their NVConfig as port 1. Use the returned `_nvconfig` metadata to associate each concrete XPath with its native parameter. For an overridden leaf, compare native current/next-boot values with the effective native value; validate all other leaves against typed intent. Validate breakout first; post-breakout becomes active only after its effective configuration matches both current and pending state on every function
-6. **Combined NVConfig batch** — send template-derived native parameters and doSPCX typed operations in one `/nvidia/nvconfig/apply` action per discovered PCI function, with `ports: [1]` for its local port. Normal apply sends the active phase; `Force` sends breakout plus post-breakout immediately, and post-breakout `WithDefault` resends both phases
-7. **Optional reset** — `mlxfwreset` unless `ConfigurationOptions.SkipReset=true`
+The daemon delegates plan-backed and ordinary execution to dms-lib, translating
+ordinary template intent into explicit NV/runtime overrides. NCO retains its
+maintenance, firmware activation, status and CC process lifecycle.
 
-Native override validation requires a DMS build containing DOCA changes 1508833
-and 1521729. `QueryXPathsResult.NVConfig` contains the concrete leaf XPath to
-native parameter mapping, separate from `Values`; current and `-pending` paths
-retain their own keys. Both mappings must be present and refer to the same native
-parameter, including link type and indexed breakout planes. Missing or
-inconsistent direct mappings produce an error before apply, even when `Force`
-is enabled.
-Composite breakout `lanes` have no direct mapping. Supported native
-`MODULE_SPLIT_M<module>[lane]` assignments are validated against native current
-and next-boot values; their indices are excluded from the desired, current, and
-pending typed lane lists before comparing the remaining membership. Unsupported
-native assignments do not suppress typed validation. Breakout lane GETs are
-replaced by native array reads to avoid DMS sibling-query failures. Lane writes
-are compiled to native assignments within the same combined DMS apply action.
-Other modules are unaffected.
-This supports Network Bay defaults and explicit lane overrides without DMS changes.
-RoCE NVConfig leaves under `/nvidia/roce` use native current/next-boot validation
-and local ownership mappings to avoid legacy DMS GET reading unsupported, unrequested
-siblings such as `MULTIPATH_DSCP`. Only requested parameters are checked; a missing
-requested value remains an error. Fresh complete native snapshots are reused; other
-callers query the requested parameters. Explicit native overrides retain precedence.
-RoCE writes remain typed operations in the same combined DMS apply action.
-With `Force`, profile and explicit-override port parameters are expanded before
-profile filtering, so expansion cannot restore a default shadowed by doSPCX.
-Inferred sibling-port overrides do not replace explicit profile values; an
-explicit override for that sibling still takes precedence.
-
-The public base `NVConfigUtils` interface is unchanged. Implementations used
-with combined native and typed intent must also provide the optional method:
-
-```go
-ValidateNvConfigXPathsWithOverrides(
-    ctx context.Context,
-    ports []v1alpha1.NicDevicePortSpec,
-    operations []dmscli.XPathOperation,
-    nativeParams map[string]string,
-    configs map[string]types.NvConfigQuery,
-) (updateNeeded, rebootNeeded bool, err error)
-```
-
-`configs` contains fresh native state keyed by PCI address. `QueryNvConfig`
-marks unfiltered results with `AllParameters=true`; those snapshots can be reused
-for complete lane membership checks. Filtered and manually assembled snapshots
-leave this flag false, so the utility refreshes the required module arrays and
-preserves unrelated native override state without mutating caller maps. The
-standard utility implements this method. Secondary-function verification refreshes
-native state after apply before checking overrides. Hidden native parameters remain reported
-as unsupported and do not suppress typed validation when omitted from apply.
-
-**`ConfigurationOptions`:**
-- `SkipReset` — skip `mlxfwreset` after applying NV config
-- `WithDefault` — request `--with_default` through the combined DMS NVConfig action
-- `Force` — request `--force` through the DMS NVConfig action (lets mlxconfig accept a batch it would otherwise refuse due to implicit parameter dependencies). When `NUM_OF_PF` and a `_P1` value are present, force mode copies that value to missing higher ports up to the requested PF count before applying; explicit per-port values are preserved
-
-#### Runtime Configuration Flow
-
-1. **Spectrum-X plan precondition** — Spectrum-X devices require a matching cached `configure` plan before runtime validation or application
-2. **PCI MaxReadRequest** — applied via sysfs
-3. **QoS settings** — trust mode and PFC applied via `DMSClient.SetQoSSettings()`
+The compatibility ConfigurationManager keeps ordinary Force, WithDefault,
+NetworkBay and reset behavior. It no longer compiles or executes Spectrum-X
+plans. Library consumers should use dms-lib for generic plan configuration.
 
 #### ResetToDefault Behavior
 
@@ -461,178 +399,27 @@ GETs, successful leaves are merged into `Values`; SET results retain both the
 `successes` and `failures` maps. Both operations retain `status`, `error_msg`,
 and `error_code` while also returning the command error.
 
-Blueprint planning uses this command shape:
-
-```text
-dms-cli --json /nvidia/blueprints/plan profile=<profile> name=<name> \
-  stage=<prepare|configure> target-map-file=file:<path> \
-  params=deployment_mode=host-k8s,planes=<count>
-```
-
-For Blueprints planning, the wrapper sets the DMS `BP_STATE_DIR` variable only
-on the `dms-cli` child process.
-All JSON-based `dms-cli` wrappers capture stdout and stderr separately because
-stdout is the protocol while DMS diagnostics are written to stderr. Successful calls log the
-exact command, result status, and plan size without repeating the embedded plan;
-failure output is bounded before logging or adding it to a returned error.
-`SpectrumXConfigManager` creates its command executor internally. The executable
-DMS Blueprints action tree remains part of the daemon image. Authored doSPCX
-data is supplied separately through a labeled ConfigMap and installed at the
-DMS planner's native data location,
-`/opt/mellanox/doca/services/dms/doSpcx/data`. Existing process environment
-entries are preserved, and an inherited `BP_STATE_DIR` entry is replaced.
-
-`pkg/dmscli` is the low-level command wrapper. `pkg/spectrumx.PlanManager` is the
-plan lifecycle abstraction included by `SpectrumXManager`; it owns
-target-map construction, generation, cache validation, persistence, and
-retrieval.
-
-`PreparePlan` writes a schema-v1 target map and both semantic planner documents
-below `${BLUEPRINTS_STATE_DIR:-/var/lib/blueprints}`. It combines their
-persistent and runtime operations into one cached `Plan`; preparation does not
-execute any generated operation. Each pre-breakout target contains a
-deterministic ID, function-zero BDF, hexadecimal device ID, `ew` role, and rail.
-Target-map rails are assigned by sorting the participating function-zero PCI
-BDFs. Both stages receive the same pre-breakout map; the configure stage resolves
-post-breakout devices from the active hardware inventory. NCO maps `none` to the
-`single-plane` profile, `swplb` to `SPX_NetPlugin`, and `hwplb` to
-`SPX_Multiplane`. The NicDevice reconciler prepares the complete group plan once
-before the existing concurrent per-device NV and runtime apply sequence.
-`interfaceNameTemplate` is not an input to doSPCX planning.
-
-Each plan directory also contains `metadata.json`, a flat document with only the
-inputs used for that stage, the installed doSPCX data archive digest, and the
-target-map digest. A later `PreparePlan` call reuses the saved plan when the
-metadata exactly matches the current inputs, the
-target-map file still has the recorded digest, and the plan passes the same
-structural and execution-policy compilation as a newly generated plan. Missing, malformed, or changed
-cache artifacts cause normal regeneration through `dms-cli`. Individual
-Spectrum-X apply calls use `GetPreparedPlan` to require matching inputs and
-device membership before touching hardware.
+The daemon compiles plans through dms-lib. The independent low-level dms-cli
+Blueprint wrapper remains available, but NCO no longer owns the duplicate
+planner pipeline, tarball installer or plan cache.
 
 ---
 
-### pkg/spectrumx/ — Spectrum-X Configuration
+### pkg/spectrumx/ — CC Process Lifecycle
 
-The `pkg/spectrumx` package exposes the combined Spectrum-X manager. All doSPCX-specific
-data installation, target-map construction, planner invocation, plan parsing, persistence,
-and caching live in `pkg/spectrumx/dospcx`. The top-level manager delegates the planning API
-to that subpackage so existing consumers keep importing `pkg/spectrumx`.
-
-Sources: `pkg/spectrumx/spectrumx.go`, `pkg/spectrumx/plan.go`,
-`pkg/spectrumx/dospcx/data.go`, `pkg/spectrumx/dospcx/planner.go`,
-`pkg/spectrumx/dospcx/parser.go`
-
-#### PlanManager Interface
-
-```go
-type Plan struct {
-    Breakout      []dmscli.XPathOperation
-    PostBreakout  []dmscli.XPathOperation
-    RuntimeConfig []OperationGroup
-}
-
-type OperationGroup struct {
-    Name       string
-	Scope      string
-    Operations []dmscli.XPathOperation
-}
-
-type PlanManager interface {
-    PreparePlan(ctx context.Context, devices []*v1alpha1.NicDevice) error
-    GetPreparedPlan(device *v1alpha1.NicDevice) (*Plan, error)
-}
-```
-
-Blueprint data installation is a separate capability embedded by
-`SpectrumXManager`:
-
-```go
-type BlueprintsDataManager interface {
-    InstallBlueprintsData(archive []byte) error
-    RemoveBlueprintsData() error
-}
-```
-
-`InstallBlueprintsData` accepts the decoded `dospcx-data.tar.gz/v1` archive,
-validates and stages its `data/` tree, and activates it under the DMS
-installation directory. It rejects paths outside `data/`, non-regular archive
-entries, oversized payloads, and incomplete layouts. Activation retains the
-previous valid tree when an update fails. The installed archive digest is part
-of plan metadata, so changing or removing the bundle invalidates cached plans.
-The controller accepts exactly one labeled doSPCX data bundle cluster-wide.
-Manager-installed data is deactivated while multiple bundles conflict and is
-removed when the active ConfigMap is deleted. Data already present in the daemon
-image is not removed when no ConfigMap bundle was installed.
-
-`PreparePlan` generates or reuses both semantic stages for the supplied
-Spectrum-X device group and publishes one complete cached plan only after both
-are valid. It is a no-op when none of the supplied devices enable Spectrum-X. It
-parses the host-k8s `plan.semantic.groups` surface, resolves every `operation_ref`
-through `plan.operations`, and combines the persistent and runtime operations in
-memory. Persisted stage documents are validated and compiled once after process
-startup; later `PreparePlan` calls reuse memory while the inputs match.
-`GetPreparedPlan` does not access the filesystem or invoke `dms-cli`; it rejects
-the request unless both cached stages and target-map membership match the
-supplied device.
-
-Compilation retains operation target filters in an immutable internal cache.
-`GetPreparedPlan` selects operations for the requesting NIC using its validated
-pre-breakout target-map entry and returns independent operation values. It
-supports `target_filter.hca_type` and `target_filter.nic_index_in_rail`; both
-constraints must match. An absent NIC-index filter is unrestricted, while an
-explicit empty list selects no NIC. A constrained VR operation requires an
-explicit NIC index in the target map; non-VR single-NIC rails default to index
-zero. Unsupported selectors, including `planes`, and malformed filters fail
-explicitly rather than broadening the operation's scope.
-
-Prepare-stage `breakout` and `post-breakout`
-groups become ordered XPath operation slices. Configure-stage `link-runtime`,
-`cc`, and `link-event` groups become ordered `OperationGroup` values. Each group
-preserves its scope and the order of `semantic.groups[].operation_refs`, including
-repeated writes. Each runtime XPath operation preserves its effective `scope` and
-`target_class`. Operations with `scope=per_vf` or `target_class=per_eswitch` are
-excluded from the host-Kubernetes runtime plan. Per-port runtime targeting and
-construction of validation queries belong to the configuration manager when it
-consumes this per-NIC plan. Runtime apply preserves the authored batch order. Validation ignores values
-shadowed by later batches across all runtime groups on the same target, while keeping different scope and
-target-class pairs in separate DMS commands.
-
-Public operations may omit `kind` (`set` is the DMS default). Bare-metal steps,
-services, and artifacts are outside this contract. Configure groups `eswitch`
-and `vf-lifecycle` are omitted; unknown groups fail closed. The Spectrum-X
-manager provides plan and data lifecycle methods, owns the DOCA SPC-X CC
-processes, and creates its command executor internally:
+Generic planning and configuration live in dms-lib. This package retains only
+NCO's existing CC process startup, liveness checks and termination notifications.
+The tarball installer, plan cache and duplicate doSPCX compiler are removed.
 
 ```go
 type SpectrumXManager interface {
-    PlanManager
-    BlueprintsDataManager
     RunDocaSpcXCC(port v1alpha1.NicDevicePortSpec) error
     IsDocaSpcXCCRunning(rdma string) bool
     GetCCTerminationChannel() <-chan string
 }
-```
 
-**Constructor:**
-```go
 func NewSpectrumXConfigManager() SpectrumXManager
 ```
-
-The configuration manager consumes the prepared plan. It validates each runtime
-group through `dms-cli`, applies generic runtime settings first, then applies
-doSPCX groups in authored order and verifies convergence. The `cc` group starts
-DOCA SPC-X CC before its XPath operations. A runtime group is partitioned into
-ordered batches by the effective `(scope, target_class)` pair; operations with
-different pairs are never sent in the same `dms-cli` command. `pf_netdev_all`
-targets every PF, while `pf_rdma_scope` targets only eligible RDMA-owning PFs.
-Target resolution is centralized in `resolveTargets`; `per_rdma_bond` selects
-one representative PCI function for each non-empty RDMA interface and ignores
-secondary PFs that do not own an RDMA interface. The executor also skips
-`per_vf` and `per_eswitch` operations defensively. Target, operation, and
-whole-group exclusions are logged at debug level with the effective scope,
-target class, and reason. The legacy Spectrum-X YAML profile loader and its
-alternate reconciliation path are not supported.
 
 #### CC Process Lifecycle
 
@@ -966,7 +753,6 @@ type ConfigurationTemplateSpec struct {
     PciPerformanceOptimized *PciPerformanceOptimizedSpec
     RoceOptimized           *RoceOptimizedSpec
     GpuDirectOptimized      *GpuDirectOptimizedSpec
-    SpectrumXOptimized      *SpectrumXOptimizedSpec
     RawNvConfig             []NvConfigParam              // Arbitrary NV config params
 }
 ```
@@ -981,18 +767,14 @@ type QosSpec struct {
 }
 ```
 
-### SpectrumXOptimizedSpec
+### DMSPlanReference
 
-```go
-type SpectrumXOptimizedSpec struct {
-    Enabled        bool
-    Version        string // "RA1.3", "RA2.0", "RA2.1", "RA2.2"
-    PlatformType   string // Platform identifier defined by the supplied Blueprints profile
-    Overlay        string // "l3" or "none"
-    MultiplaneMode string // "none", "swplb", or "hwplb"
-    NumberOfPlanes int    // 1, 2, or 4
-}
-```
+Spectrum-X configuration uses `NicConfigurationTemplate.spec.planRef` and
+`NicDevice.spec.configuration.planRef`, both containing required `namespace` and
+`name` strings identifying DMSPlanParams. Ordinary template fields become explicit
+overrides. The obsolete SpectrumXOptimizedSpec and NCO planner APIs are removed;
+external consumers must migrate to dms-lib.
+See [DMS plan configuration](dms-plan-configuration.md).
 
 ### FirmwareTemplateSpec
 
@@ -1022,7 +804,7 @@ logs and returned errors. Output is not duplicated in error-level logs.
 
 ### Batch Operations
 
-- **NVConfig apply**: the non-Spectrum-X path keeps one sorted raw batch per PCI target. The Spectrum-X path sends one combined template-native/typed batch per PCI function with local port 1 in `ports`; DMS executes one `mlxconfig` operation per function
+- **NVConfig apply**: the compatibility path keeps one sorted raw batch per PCI target. Plan-backed execution and ordinary intent delegated by the daemon use dms-lib.
 - **DMS**: `GetParameters()` batches `--path` entries per concrete interface (with a separate global batch), and `SetParameters()` sends all `--update` entries in a single `dmsc set` command with `--timeout 5m`
 - **IgnoreError**: per-parameter flag; in batch mode, errors are suppressed only if ALL params have `IgnoreError=true`
 

@@ -43,6 +43,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
+	dmsconfiguration "github.com/Mellanox/dms-lib/pkg/configuration"
 	"github.com/Mellanox/dms-lib/pkg/device"
 	v1alpha1 "github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/configuration"
@@ -64,18 +65,22 @@ var shortRequeueTime = 5 * time.Second
 // NicDeviceReconciler reconciles a NicDevice object
 type NicDeviceReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme              *runtime.Scheme
+	APIReader           client.Reader
+	PlanConfiguration   dmsconfiguration.Manager
+	DiscoverPlanDevices func(context.Context) (device.Inventory, error)
 
 	NodeName      string
 	NamespaceName string
 
-	FirmwareManager      firmware.FirmwareManager
-	ConfigurationManager configuration.ConfigurationManager
-	HostUtils            host.HostUtils
-	MaintenanceManager   maintenance.MaintenanceManager
-	SpectrumXManager     spectrumx.SpectrumXManager
-	UdevManager          udev.UdevManager
-	ReadInterfaceNames   func(context.Context, string) (device.InterfaceNames, error)
+	FirmwareManager           firmware.FirmwareManager
+	ConfigurationManager      configuration.ConfigurationManager
+	CheckRuntimePrerequisites func(*v1alpha1.NicDevice) error
+	HostUtils                 host.HostUtils
+	MaintenanceManager        maintenance.MaintenanceManager
+	SpectrumXManager          spectrumx.SpectrumXManager
+	UdevManager               udev.UdevManager
+	ReadInterfaceNames        func(context.Context, string) (device.InterfaceNames, error)
 
 	EventRecorder record.EventRecorder
 }
@@ -195,18 +200,23 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	log.Log.Info("firmware is ready for all devices, proceeding with NIC configuration")
 
-	// Prepare the node-scoped doSPCX plan. Configure may be deferred until
-	// the prepare NVConfig changes have taken effect.
-	planDevices, err := r.prepareSpectrumXPlan(ctx, configStatuses)
+	return r.reconcileConfiguration(ctx, configStatuses)
+}
+
+func (r *NicDeviceReconciler) reconcileConfiguration(ctx context.Context, configStatuses nicDeviceConfigurationStatuses) (ctrl.Result, error) {
+	legacyStatuses, planGroups, err := r.preparePlanConfigurations(ctx, configStatuses)
 	if err != nil {
-		planErr := fmt.Errorf("prepare doSPCX configuration plan: %w", err)
-		statusErr := r.updateSpectrumXPlanFailureStatus(
-			ctx, planDevices, consts.SpecValidationFailed, planErr)
-		return ctrl.Result{}, errors.Join(planErr, statusErr)
+		var statusErrors []error
+		for _, status := range configStatuses {
+			if status.device.Spec.Configuration != nil {
+				statusErrors = append(statusErrors, r.updateConfigInProgressStatusCondition(ctx, status.device, consts.SpecValidationFailed, metav1.ConditionFalse, err.Error()))
+			}
+		}
+		return ctrl.Result{}, errors.Join(append(statusErrors, err)...)
 	}
 
 	// If FW is ready for all devices, proceed with NIC configuration.
-	err = runInParallel(ctx, configStatuses, r.handleConfigurationSpecValidation)
+	err = errors.Join(runInParallel(ctx, legacyStatuses, r.handleConfigurationSpecValidation), r.validatePlanNV(ctx, planGroups))
 	if err != nil {
 		log.Log.Error(err, "failed to validate device's spec")
 		return ctrl.Result{}, err
@@ -226,9 +236,16 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 		log.Log.Info("maintenance allowed, applying nv config")
 
-		err = runInParallel(ctx, configStatuses, r.applyNvConfig)
+		err = runInParallel(ctx, legacyStatuses, r.applyNvConfig)
 		if err != nil {
 			return ctrl.Result{}, err
+		}
+		reset, err := r.applyPlanNV(ctx, planGroups)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if reset && !configStatuses.rebootRequired() {
+			return ctrl.Result{RequeueAfter: shortRequeueTime}, nil
 		}
 	}
 
@@ -241,17 +258,12 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{RequeueAfter: longRequeueTime}, nil
 	}
 
-	// Require configure before runtime handling, including its spec-change reboot.
-	// A missing configure target must not trigger another reboot once NVConfig is ready.
-	if planErr := r.validateSpectrumXConfigurePlans(planDevices); planErr != nil {
-		planErr = fmt.Errorf("doSPCX configure plan is not ready: %w", planErr)
-		statusErr := r.updateSpectrumXPlanFailureStatus(
-			ctx, planDevices, consts.SpecValidationFailed, planErr)
-		return ctrl.Result{}, errors.Join(planErr, statusErr)
+	// Preserve configure-before-runtime ordering, including the existing spec-change reboot.
+	if err := r.validatePlanConfigureReady(ctx, planGroups); err != nil {
+		return ctrl.Result{}, err
 	}
-
 	log.Log.Info("applying runtime config")
-	err = runInParallel(ctx, configStatuses, r.applyRuntimeConfig)
+	err = errors.Join(runInParallel(ctx, legacyStatuses, r.applyRuntimeConfig), r.applyPlanRuntime(ctx, planGroups))
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -515,64 +527,6 @@ func runInParallel(ctx context.Context, statuses nicDeviceConfigurationStatuses,
 	return nil
 }
 
-func (r *NicDeviceReconciler) prepareSpectrumXPlan(
-	ctx context.Context,
-	statuses nicDeviceConfigurationStatuses,
-) ([]*v1alpha1.NicDevice, error) {
-	devices := spectrumXDevicesForPlan(statuses)
-	if len(devices) == 0 {
-		return nil, nil
-	}
-	return devices, r.SpectrumXManager.PreparePlan(ctx, devices)
-}
-
-func (r *NicDeviceReconciler) validateSpectrumXConfigurePlans(devices []*v1alpha1.NicDevice) error {
-	for _, device := range devices {
-		plan, err := r.SpectrumXManager.GetPreparedPlan(device)
-		if err != nil {
-			return err
-		}
-		if plan == nil {
-			return fmt.Errorf("prepared plan is missing for device %q", device.Name)
-		}
-		if plan.ConfigureError != nil {
-			return plan.ConfigureError
-		}
-	}
-	return nil
-}
-
-func spectrumXDevicesForPlan(statuses nicDeviceConfigurationStatuses) []*v1alpha1.NicDevice {
-	devices := make([]*v1alpha1.NicDevice, 0, len(statuses))
-	for _, status := range statuses {
-		device := status.device
-		if device != nil && device.Spec.Configuration != nil &&
-			device.Spec.Configuration.Template != nil &&
-			device.Spec.Configuration.Template.SpectrumXOptimized != nil &&
-			device.Spec.Configuration.Template.SpectrumXOptimized.Enabled {
-			devices = append(devices, device)
-		}
-	}
-	return devices
-}
-
-func (r *NicDeviceReconciler) updateSpectrumXPlanFailureStatus(
-	ctx context.Context,
-	devices []*v1alpha1.NicDevice,
-	reason string,
-	planErr error,
-) error {
-	var updateErrors []error
-	for _, device := range devices {
-		if err := r.updateConfigInProgressStatusCondition(
-			ctx, device, reason, metav1.ConditionFalse, planErr.Error()); err != nil {
-			updateErrors = append(updateErrors, fmt.Errorf(
-				"update doSPCX plan failure status for device %q: %w", device.Name, err))
-		}
-	}
-	return errors.Join(updateErrors...)
-}
-
 // applyRuntimeConfig applies device's runtime spec
 // if update is successful, applies status condition UpdateSuccessful, otherwise RuntimeConfigUpdateFailed
 // if rebootRequired, sets status condition PendingReboot
@@ -583,31 +537,16 @@ func (r *NicDeviceReconciler) applyRuntimeConfig(ctx context.Context, status *ni
 		return nil
 	}
 
-	lastAppliedState, found := status.device.Annotations[consts.LastAppliedStateAnnotation]
-	if found {
-		specJson, err := json.Marshal(status.device.Spec)
-		if err != nil {
-			return err
-		}
-
-		if string(specJson) != lastAppliedState {
-			log.Log.V(2).Info("last applied state differs, reboot required", "device", status.device.Name)
-			status.rebootRequired = true
-
-			err := r.updateConfigInProgressStatusCondition(ctx, status.device, consts.PendingRebootReason, metav1.ConditionTrue, "")
-			if err != nil {
-				updateErr := r.updateConfigInProgressStatusCondition(ctx, status.device, consts.RuntimeConfigUpdateFailedReason, metav1.ConditionFalse, err.Error())
-				if updateErr != nil {
-					log.Log.Error(err, "failed to update device status condition", "device", status.device.Name)
-				}
-				return err
-			}
-
-			return nil
-		}
+	reboot, err := r.runtimeSpecReboot(ctx, status)
+	if err != nil || reboot {
+		return err
 	}
 
-	_, err := r.ConfigurationManager.ApplyRuntimeConfiguration(ctx, status.device)
+	_, err = r.ConfigurationManager.ApplyRuntimeConfiguration(ctx, status.device)
+	return r.recordRuntimeResult(ctx, status, err)
+}
+
+func (r *NicDeviceReconciler) recordRuntimeResult(ctx context.Context, status *nicDeviceConfigurationStatus, err error) error {
 	if err != nil {
 		updateErr := r.updateConfigInProgressStatusCondition(ctx, status.device, consts.RuntimeConfigUpdateFailedReason, metav1.ConditionFalse, err.Error())
 		if updateErr != nil {
@@ -642,6 +581,35 @@ func (r *NicDeviceReconciler) applyRuntimeConfig(ctx context.Context, status *ni
 	}
 
 	return nil
+}
+
+// runtimeSpecReboot preserves the existing runtime spec-change activation policy.
+func (r *NicDeviceReconciler) runtimeSpecReboot(ctx context.Context, status *nicDeviceConfigurationStatus) (bool, error) {
+	lastAppliedState, found := status.device.Annotations[consts.LastAppliedStateAnnotation]
+	if found {
+		specJson, err := json.Marshal(status.device.Spec)
+		if err != nil {
+			return false, err
+		}
+
+		if string(specJson) != lastAppliedState {
+			log.Log.V(2).Info("last applied state differs, reboot required", "device", status.device.Name)
+			status.rebootRequired = true
+
+			err := r.updateConfigInProgressStatusCondition(ctx, status.device, consts.PendingRebootReason, metav1.ConditionTrue, "")
+			if err != nil {
+				updateErr := r.updateConfigInProgressStatusCondition(ctx, status.device, consts.RuntimeConfigUpdateFailedReason, metav1.ConditionFalse, err.Error())
+				if updateErr != nil {
+					log.Log.Error(err, "failed to update device status condition", "device", status.device.Name)
+				}
+				return false, err
+			}
+
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 // handleReboot schedules maintenance and reboots the node if maintenance is allowed
@@ -748,6 +716,10 @@ func (r *NicDeviceReconciler) handleConfigurationSpecValidation(ctx context.Cont
 	}
 
 	nvConfigUpdateRequired, rebootRequired, unsupportedNvParams, err := r.ConfigurationManager.ValidateDeviceNvSpec(ctx, status.device)
+	return r.recordNVValidation(ctx, status, nvConfigUpdateRequired, rebootRequired, unsupportedNvParams, err)
+}
+
+func (r *NicDeviceReconciler) recordNVValidation(ctx context.Context, status *nicDeviceConfigurationStatus, nvConfigUpdateRequired, rebootRequired bool, unsupportedNvParams []string, err error) error {
 	if err != nil {
 		log.Log.Error(err, "failed to validate spec for device", "device", status.device.Name)
 		if types.IsIncorrectSpecError(err) {

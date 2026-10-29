@@ -190,3 +190,9 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - dms.nvidia.com
+  resources:
+  - dmsplanparams
+  verbs:
+  - get

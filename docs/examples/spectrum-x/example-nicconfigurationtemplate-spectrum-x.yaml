@@ -14,7 +14,23 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-# Change this template first as it only provides an example of configuration
+# Supply a structured spcx-blueprint ConfigMap with data["blueprint.yaml"] in
+# this namespace, and run Spectrum-X Operator to resolve the host bindings.
+# Profile/platform and hardware/software PLB recipe must match that blueprint.
+apiVersion: dms.nvidia.com/v1alpha1
+kind: DMSPlanParams
+metadata:
+  name: spectrum-x
+  namespace: nvidia-network-operator
+spec:
+  nodeSelector:
+    feature.node.kubernetes.io/network-sriov.capable: "true"
+  blueprintRef: spcx-blueprint
+  profile: single-plane
+  platformType: gb200
+  planes: 1
+  overlay: none
+---
 apiVersion: configuration.net.nvidia.com/v1alpha1
 kind: NicConfigurationTemplate
 metadata:
@@ -22,16 +38,9 @@ metadata:
   namespace: nvidia-network-operator
 spec:
   nodeSelector:
-      feature.node.kubernetes.io/network-sriov.capable: "true"
+    feature.node.kubernetes.io/network-sriov.capable: "true"
   nicSelector:
-      nicType: a2dc # BlueField-3 SuperNIC. Can also be "1021" for ConnectX-7 (single-plane only), "1023" for ConnectX-8, or "1025" for ConnectX-9.
-      # partNumbers:
-      #   - "MCX713106AEHEA_QP1"
-  template:
-      numVfs: 1
-      linkType: Ethernet
-      spectrumXOptimized:
-          enabled: true
-          version: "RA2.0" # For Reference Architecture v1.3, use "RA1.3" value for this field.
-          platformType: "gb200"
-          overlay: "none" # For L3 overlay, use "l3" value for this field.
+    nicType: "a2dc"
+  planRef:
+    namespace: nvidia-network-operator
+    name: spectrum-x

@@ -662,18 +662,6 @@ var _ = Describe("ConfigValidationImpl", func() {
 			Expect(nvParams).To(BeEmpty())
 		})
 
-		It("keeps doSPCX plan operations out of the native parameter map", func() {
-			device := newDevice()
-			device.Spec.Configuration.Template.SpectrumXOptimized = &v1alpha1.SpectrumXOptimizedSpec{Enabled: true}
-
-			nvParams, err := validator.ConstructNvParamMapFromTemplate(device, types.NewNvConfigQuery())
-			Expect(err).NotTo(HaveOccurred())
-			Expect(nvParams).To(Equal(map[string]string{
-				consts.SriovEnabledParam:  consts.NvParamFalse,
-				consts.SriovNumOfVfsParam: "0",
-			}))
-		})
-
 		It("lets rawNvConfig win over a template param (raw > template)", func() {
 			device := newDevice()
 			device.Spec.Configuration.Template.NumVfs = 4 // template sets SRIOV_EN=true, NUM_OF_VFS=4

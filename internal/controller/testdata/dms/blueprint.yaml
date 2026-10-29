@@ -1,0 +1,66 @@
+# Copyright 2026 NVIDIA CORPORATION & AFFILIATES
+formatVersion: dospcx/v1
+family: test
+entryProfile: sample
+familyConfig: {schema_version: 1, family: test}
+profiles:
+  sample.yaml:
+    name: sample
+    family: test
+    deployable: true
+    stages:
+      prepare: [prepare]
+      configure: [runtime]
+    defaults: {planes: 1}
+features:
+  common: {}
+  family:
+    prepare.yaml:
+      name: prepare
+      stage: prepare
+      phase: nvconfig
+      execution_group: breakout
+      per_nic: true
+      required_params:
+        deployment_mode: {type: enum, allowed: [host-k8s], required: true}
+        value: {type: int, default: 8}
+      steps:
+      - type: knob
+        path: /nvidia/pci
+        values: {max-vfs: '@params.value'}
+    runtime.yaml:
+      name: runtime
+      stage: configure
+      phase: boot
+      execution_group: link-runtime
+      per_nic: true
+      required_params:
+        deployment_mode: {type: enum, allowed: [host-k8s], required: true}
+        value: {type: int, default: 8}
+      steps:
+      - type: knob
+        path: /nvidia/cc/slot/[0]
+        values: {enabled: true}
+executionGroups:
+  schema_version: 1
+  groups:
+    breakout: {stage: prepare, order: 10, scope: per_device, device_view: pre_breakout, requires_reboot: true}
+    post-breakout: {stage: prepare, order: 20, scope: per_device, device_view: post_breakout, requires_reboot: true}
+    link-runtime: {stage: configure, order: 10, scope: per_device, fanout_order: per_step_barrier}
+phaseConfig: {phases: {}}
+formulas: {}
+hcaTypes: {hca_types: {'0x1023': ConnectX-8}}
+platformTypes: {platform_types: [test]}
+targetMaps:
+  test.yaml:
+    schema_version: 1
+    platform_type: test
+    pre_breakout:
+      targets:
+      - {id: rail0, bdf: '0000:03:00.0', device_id: '0x1023', role: ew, rail: 0}
+      - {id: rail1, bdf: '0000:04:00.0', device_id: '0x1023', role: ew, rail: 1}
+    post_breakout:
+      targets:
+      - {id: rail0, bdf: '0000:03:00.0', device_id: '0x1023', role: ew, rail: 0, plane: 0}
+      - {id: rail1, bdf: '0000:04:00.0', device_id: '0x1023', role: ew, rail: 1, plane: 0}
+templates: {}

@@ -74,14 +74,24 @@ func applyDefaultNvConfigValueIfExists(
 // rawNvConfig. doSPCX operations remain typed XPaths and are handled separately.
 func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 	device *v1alpha1.NicDevice, query types.NvConfigQuery) (map[string]string, error) {
-	template := device.Spec.Configuration.Template
+	desired, err := templateNVParameters(device.Name, device.Spec.Configuration.Template, device.Status.Ports, query, v.utils.GetLinkType, true)
+	if err != nil {
+		return desired, err
+	}
+	return v.mergeOverrideLayers(device, desired)
+}
+
+// templateNVParameters is NCO's template policy; native reads and plan ownership
+// are supplied by the caller. Omitted optimizations reset only on the legacy path.
+func templateNVParameters(name string, template *v1alpha1.ConfigurationTemplateSpec, ports []v1alpha1.NicDevicePortSpec,
+	query types.NvConfigQuery, linkType func(string) string, restoreOmitted bool) (map[string]string, error) {
 	if template == nil {
 		// No template: nothing to translate and no rawNvConfig to merge.
 		return map[string]string{}, nil
 	}
 
 	desiredParameters := map[string]string{}
-	portCount := len(device.Status.Ports)
+	portCount := len(ports)
 
 	desiredParameters[consts.SriovEnabledParam] = consts.NvParamFalse
 	desiredParameters[consts.SriovNumOfVfsParam] = "0"
@@ -108,15 +118,15 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 				}
 			}
 		} else {
-			desiredLinkType := string(device.Spec.Configuration.Template.LinkType)
+			desiredLinkType := string(template.LinkType)
 
-			for _, port := range device.Status.Ports {
-				if port.NetworkInterface != "" && v.utils.GetLinkType(port.NetworkInterface) != desiredLinkType {
+			for _, port := range ports {
+				if port.NetworkInterface != "" && linkType(port.NetworkInterface) != desiredLinkType {
 					err := types.IncorrectSpecError(
 						fmt.Sprintf(
 							"device does not support link type change, wrong link type provided in the template, should be: %s",
-							v.utils.GetLinkType(port.NetworkInterface)))
-					log.Log.Error(err, "incorrect spec", "device", device.Name)
+							linkType(port.NetworkInterface)))
+					log.Log.Error(err, "incorrect spec", "device", name)
 					return desiredParameters, err
 				}
 			}
@@ -127,7 +137,7 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 		if template.LinkType == consts.Infiniband {
 			err := types.IncorrectSpecError(
 				"RoceOptimized settings can only be used with link type Ethernet")
-			log.Log.Error(err, "incorrect spec", "device", device.Name)
+			log.Log.Error(err, "incorrect spec", "device", name)
 			return desiredParameters, err
 		}
 
@@ -140,7 +150,7 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 		}
 
 		// qos settings are applied as runtime configuration
-	} else {
+	} else if restoreOmitted || template.RoceOptimized != nil {
 		for portIdx := 1; portIdx <= portCount; portIdx++ {
 			applyDefaultNvConfigValueIfExists(consts.PortParam(consts.RoceCcPrioMaskParamBase, portIdx), desiredParameters, query)
 			applyDefaultNvConfigValueIfExists(consts.PortParam(consts.CnpDscpParamBase, portIdx), desiredParameters, query)
@@ -151,7 +161,7 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 	if template.GpuDirectOptimized != nil && template.GpuDirectOptimized.Enabled {
 		if template.GpuDirectOptimized.Env != consts.EnvBaremetal {
 			err := types.IncorrectSpecError("GpuDirectOptimized supports only Baremetal env")
-			log.Log.Error(err, "incorrect spec", "device", device.Name)
+			log.Log.Error(err, "incorrect spec", "device", name)
 			return desiredParameters, err
 		}
 
@@ -159,13 +169,13 @@ func (v *configValidationImpl) ConstructNvParamMapFromTemplate(
 		if template.PciPerformanceOptimized == nil || !template.PciPerformanceOptimized.Enabled {
 			err := types.IncorrectSpecError(
 				"GpuDirectOptimized should only be enabled together with PciPerformanceOptimized")
-			log.Log.Error(err, "incorrect spec", "device", device.Name)
+			log.Log.Error(err, "incorrect spec", "device", name)
 			return desiredParameters, err
 		}
-	} else {
+	} else if restoreOmitted || template.GpuDirectOptimized != nil {
 		applyDefaultNvConfigValueIfExists(consts.AtsEnabledParam, desiredParameters, query)
 	}
-	return v.mergeOverrideLayers(device, desiredParameters)
+	return desiredParameters, nil
 }
 
 // mergeOverrideLayers combines template-derived params with rawNvConfig. Raw values are merged last
@@ -405,8 +415,14 @@ func (v *configValidationImpl) validatePortCarrierState(device *v1alpha1.NicDevi
 
 // CalculateDesiredRuntimeConfig returns desired values for runtime config
 func (v *configValidationImpl) CalculateDesiredRuntimeConfig(device *v1alpha1.NicDevice) types.DesiredRuntimeConfig {
+	return templateRuntimeConfig(device.Spec.Configuration.Template)
+}
+
+func templateRuntimeConfig(template *v1alpha1.ConfigurationTemplateSpec) types.DesiredRuntimeConfig {
 	result := types.DesiredRuntimeConfig{}
-	template := device.Spec.Configuration.Template
+	if template == nil {
+		return result
+	}
 
 	if template.PciPerformanceOptimized != nil && template.PciPerformanceOptimized.Enabled {
 		if template.PciPerformanceOptimized.MaxReadRequest != 0 {
