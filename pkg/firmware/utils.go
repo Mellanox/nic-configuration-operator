@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 )
 
 type FirmwareUtils interface {
@@ -86,7 +87,7 @@ type utils struct {
 
 // DownloadFile downloads the file under url and places it locally under destPath
 func (u *utils) DownloadFile(url, destPath string) error {
-	log.Log.V(2).Info("FirmwareUtils.DownloadFile()", "url", url, "destPath", destPath)
+	log.Log.V(ncolog.DebugLevel).Info("FirmwareUtils.DownloadFile()", "url", url, "destPath", destPath)
 
 	resp, err := http.Get(url)
 	if err != nil {
@@ -124,7 +125,7 @@ func (u *utils) DownloadFile(url, destPath string) error {
 // UnzipFiles extract files from the zip archive to destDir
 // Returns a list of extracted files, error if occurred
 func (u *utils) UnzipFiles(zipPath, destDir string) ([]string, error) {
-	log.Log.V(2).Info("FirmwareUtils.UnzipFiles()", "zipPath", zipPath, "destDir", destDir)
+	log.Log.V(ncolog.DebugLevel).Info("FirmwareUtils.UnzipFiles()", "zipPath", zipPath, "destDir", destDir)
 
 	extractedFiles := []string{}
 
@@ -189,11 +190,11 @@ func extractFile(zf *zip.File, destPath string) error {
 // returns string - running FW version
 // returns error - there were errors while retrieving the firmware versions
 func (u *utils) GetFirmwareVersionsFromDevice(pciAddress string) (string, string, error) {
-	log.Log.V(2).Info("FirmwareUtils.GetFirmwareVersionsFromDevice()", "pciAddress", pciAddress)
+	log.Log.V(ncolog.DebugLevel).Info("FirmwareUtils.GetFirmwareVersionsFromDevice()", "pciAddress", pciAddress)
 
 	cmd := u.execInterface.Command("mlxfwmanager", "-d", pciAddress)
 	output, err := cmd.CombinedOutput()
-	log.Log.V(2).Info("GetFirmwareVersionsFromDevice(): command output", "output", string(output))
+	log.Log.V(ncolog.DebugLevel).Info("GetFirmwareVersionsFromDevice(): command output", "output", string(output))
 	if err != nil {
 		log.Log.Error(err, "GetFirmwareVersionsFromDevice(): Failed to run mlxfwmanager")
 		return "", "", err
@@ -238,10 +239,10 @@ func (u *utils) GetFirmwareVersionsFromDevice(pciAddress string) (string, string
 
 // GetFirmwareVersionAndPSIDFromFWBinary retrieves the version and PSID from the firmware binary
 func (u *utils) GetFirmwareVersionAndPSIDFromFWBinary(firmwareBinaryPath string) (string, string, error) {
-	log.Log.V(2).Info("FirmwareUtils.GetFirmwareVersionAndPSIDFromFWBinary()", "firmwareBinaryPath", firmwareBinaryPath)
+	log.Log.V(ncolog.DebugLevel).Info("FirmwareUtils.GetFirmwareVersionAndPSIDFromFWBinary()", "firmwareBinaryPath", firmwareBinaryPath)
 	cmd := u.execInterface.Command("flint", "-i", firmwareBinaryPath, "q")
 	output, err := cmd.CombinedOutput()
-	log.Log.V(2).Info("GetFirmwareVersionAndPSIDFromFWBinary(): command output", "output", string(output))
+	log.Log.V(ncolog.DebugLevel).Info("GetFirmwareVersionAndPSIDFromFWBinary(): command output", "output", string(output))
 	if err != nil {
 		log.Log.Error(err, "GetFirmwareVersionAndPSIDFromFWBinary(): Failed to run flint")
 		return "", "", err
@@ -271,22 +272,22 @@ func (u *utils) GetFirmwareVersionAndPSIDFromFWBinary(firmwareBinaryPath string)
 		return "", "", fmt.Errorf("GetFirmwareVersionAndPSIDFromFWBinary(): firmware version (%v) or PSID (%v) is empty", firmwareVersion, PSID)
 	}
 
-	log.Log.V(2).Info("Firmware version and PSID found in .bin file", "version", firmwareVersion, "psid", PSID, "path", firmwareBinaryPath)
+	log.Log.V(ncolog.DebugLevel).Info("Firmware version and PSID found in .bin file", "version", firmwareVersion, "psid", PSID, "path", firmwareBinaryPath)
 
 	return firmwareVersion, PSID, nil
 }
 
 // GetFWVersionsFromBFB retrieves the FW versions from the BFB file
 func (u *utils) GetFWVersionsFromBFB(bfbPath string) (map[string]string, error) {
-	log.Log.V(2).Info("FirmwareUtils.GetFWVersionsFromBFB()", "bfbPath", bfbPath)
+	log.Log.V(ncolog.DebugLevel).Info("FirmwareUtils.GetFWVersionsFromBFB()", "bfbPath", bfbPath)
 	dir := filepath.Dir(bfbPath)
 
 	// Extract JSON file containing component details and versions
-	log.Log.V(2).Info("Extracting info-v0 file from BFB", "bfbPath", bfbPath)
+	log.Log.V(ncolog.DebugLevel).Info("Extracting info-v0 file from BFB", "bfbPath", bfbPath)
 	cmd := u.execInterface.Command("/usr/sbin/mlx-mkbfb", "-x", "-n", "info-v0", bfbPath)
 	cmd.SetDir(dir)
 	output, err := cmd.CombinedOutput()
-	log.Log.V(2).Info("GetFWVersionsFromBFB(): mlx-mkbfb command output", "output", string(output))
+	log.Log.V(ncolog.DebugLevel).Info("GetFWVersionsFromBFB(): mlx-mkbfb command output", "output", string(output))
 	if err != nil {
 		log.Log.Error(err, "GetFWVersionsFromBFB(): Failed to run mlx-mkbfb")
 		return nil, err
@@ -308,19 +309,19 @@ func (u *utils) GetFWVersionsFromBFB(bfbPath string) (map[string]string, error) 
 		{name: "BF4_NIC_FW", deviceID: consts.BlueField4DeviceID},
 	}
 
-	log.Log.V(2).Info("Extracting versions from info-v0 file", "bfbPath", bfbPath)
+	log.Log.V(ncolog.DebugLevel).Info("Extracting versions from info-v0 file", "bfbPath", bfbPath)
 	for _, bfv := range bfVersions {
 		cmd = u.execInterface.Command("/bin/sh", "-c", `awk '/"Name": "`+bfv.name+`"/ {getline; print $2}' `+infoFile+` | tr -d '",'`)
 		output, err := cmd.CombinedOutput()
-		log.Log.V(2).Info("GetFWVersionsFromBFB(): awk command output", "name", bfv.name, "output", string(output))
+		log.Log.V(ncolog.DebugLevel).Info("GetFWVersionsFromBFB(): awk command output", "name", bfv.name, "output", string(output))
 		if err != nil {
-			log.Log.V(2).Info("GetFWVersionsFromBFB(): Failed to extract version, skipping", "name", bfv.name, "error", err)
+			log.Log.V(ncolog.DebugLevel).Info("GetFWVersionsFromBFB(): Failed to extract version, skipping", "name", bfv.name, "error", err)
 			continue
 		}
 
 		version := strings.TrimSpace(string(output))
 		if version == "" {
-			log.Log.V(2).Info("GetFWVersionsFromBFB(): Version is empty or not found, skipping", "name", bfv.name)
+			log.Log.V(ncolog.DebugLevel).Info("GetFWVersionsFromBFB(): Version is empty or not found, skipping", "name", bfv.name)
 			continue
 		}
 		versions[bfv.deviceID] = version
@@ -335,10 +336,10 @@ func (u *utils) GetFWVersionsFromBFB(bfbPath string) (map[string]string, error) 
 
 // VerifyImageBootable verifies if the image file is valid and bootable
 func (u utils) VerifyImageBootable(firmwareBinaryPath string) error {
-	log.Log.V(2).Info("FirmwareUtils.VerifyImageBootable()", "firmwareBinaryPath", firmwareBinaryPath)
+	log.Log.V(ncolog.DebugLevel).Info("FirmwareUtils.VerifyImageBootable()", "firmwareBinaryPath", firmwareBinaryPath)
 	cmd := u.execInterface.Command("flint", "-i", firmwareBinaryPath, "v")
 	output, err := cmd.CombinedOutput()
-	log.Log.V(2).Info("VerifyImageBootable(): command output", "output", string(output))
+	log.Log.V(ncolog.DebugLevel).Info("VerifyImageBootable(): command output", "output", string(output))
 	if err != nil {
 		log.Log.Error(err, "VerifyImageBootable(): flint check failed")
 		return err
@@ -349,7 +350,7 @@ func (u utils) VerifyImageBootable(firmwareBinaryPath string) error {
 
 // CleanupDirectory deletes any file inside a root directory except for allowedSet. Empty directories are cleaned up as well at the end
 func (u *utils) CleanupDirectory(root string, allowedSet map[string]struct{}) error {
-	log.Log.V(2).Info("FirmwareUtils.CleanupDirectory()", "root", root, "allowedSet", allowedSet)
+	log.Log.V(ncolog.DebugLevel).Info("FirmwareUtils.CleanupDirectory()", "root", root, "allowedSet", allowedSet)
 	log.Log.Info("Cleaning up cache directory", "cacheDir", root)
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
@@ -370,7 +371,7 @@ func (u *utils) CleanupDirectory(root string, allowedSet map[string]struct{}) er
 			if err := os.Remove(abs); err != nil {
 				return fmt.Errorf("failed to remove %q: %w", abs, err)
 			}
-			log.Log.V(2).Info("deleted unaccounted file from cache dir", "path", abs, "cacheDir", root)
+			log.Log.V(ncolog.DebugLevel).Info("deleted unaccounted file from cache dir", "path", abs, "cacheDir", root)
 		}
 		return nil
 	})
@@ -418,7 +419,7 @@ func (u *utils) removeEmptyDirs(dir string) error {
 		if err := os.Remove(dir); err != nil {
 			return fmt.Errorf("failed to remove empty directory %q: %w", dir, err)
 		}
-		log.Log.V(2).Info("deleted empty directory", "dir", dir)
+		log.Log.V(ncolog.DebugLevel).Info("deleted empty directory", "dir", dir)
 	}
 
 	return nil
@@ -427,11 +428,11 @@ func (u *utils) removeEmptyDirs(dir string) error {
 // BurnNicFirmware burns the requested firmware on the requested device
 // Operation can be long, require context to be able to terminate by timeout
 func (u *utils) BurnNicFirmware(ctx context.Context, pciAddress, fwPath string) error {
-	log.Log.V(2).Info("FirmwareUtils.BurnNicFirmware()", "pciAddress", pciAddress, "fwPath", fwPath)
+	log.Log.V(ncolog.DebugLevel).Info("FirmwareUtils.BurnNicFirmware()", "pciAddress", pciAddress, "fwPath", fwPath)
 
 	cmd := u.execInterface.CommandContext(ctx, "flint", "--device", pciAddress, "--image", fwPath, "--yes", "burn")
 	output, err := cmd.CombinedOutput()
-	log.Log.V(2).Info("BurnNicFirmware(): command output", "output", string(output))
+	log.Log.V(ncolog.DebugLevel).Info("BurnNicFirmware(): command output", "output", string(output))
 	if err != nil {
 		log.Log.Error(err, "BurnNicFirmware(): Failed to run flint")
 		return err
@@ -442,7 +443,7 @@ func (u *utils) BurnNicFirmware(ctx context.Context, pciAddress, fwPath string) 
 // ResetNicFirmware resets NIC's firmware
 // Operation can be long, requires context to be able to terminate by timeout
 func (u *utils) ResetNicFirmware(ctx context.Context, pciAddress string) error {
-	log.Log.V(2).Info("FirmwareUtils.ResetNicFirmware()", "pciAddress", pciAddress)
+	log.Log.V(ncolog.DebugLevel).Info("FirmwareUtils.ResetNicFirmware()", "pciAddress", pciAddress)
 
 	args := []string{"--device", pciAddress, "reset", "--yes"}
 	if os.Getenv(consts.SKIP_VM_CHECK) == consts.LabelValueTrue {
@@ -450,7 +451,7 @@ func (u *utils) ResetNicFirmware(ctx context.Context, pciAddress string) error {
 	}
 	cmd := u.execInterface.CommandContext(ctx, "mlxfwreset", args...)
 	output, err := cmd.CombinedOutput()
-	log.Log.V(2).Info("ResetNicFirmware(): command output", "output", string(output))
+	log.Log.V(ncolog.DebugLevel).Info("ResetNicFirmware(): command output", "output", string(output))
 	if err != nil {
 		log.Log.Error(err, "ResetNicFirmware(): Failed to run mlxfwreset")
 		return err
@@ -460,10 +461,10 @@ func (u *utils) ResetNicFirmware(ctx context.Context, pciAddress string) error {
 
 // GetDocaSpcXCCVersion retrieves the version from the DOCA SPC-X PCC file
 func (u *utils) GetDocaSpcXCCVersion(docaSpcXCCPath string) (string, error) {
-	log.Log.V(2).Info("FirmwareUtils.GetDocaSpcXCCVersion()", "docaSpcXCCPath", docaSpcXCCPath)
+	log.Log.V(ncolog.DebugLevel).Info("FirmwareUtils.GetDocaSpcXCCVersion()", "docaSpcXCCPath", docaSpcXCCPath)
 	cmd := u.execInterface.Command("dpkg-deb", "-f", docaSpcXCCPath, "Version")
 	output, err := cmd.CombinedOutput()
-	log.Log.V(2).Info("GetDocaSpcXCCVersion(): command output", "output", string(output))
+	log.Log.V(ncolog.DebugLevel).Info("GetDocaSpcXCCVersion(): command output", "output", string(output))
 	if err != nil {
 		log.Log.Error(err, "GetDocaSpcXCCVersion(): Failed to get version from DOCA SPC-X PCC deb package")
 		return "", err
@@ -473,10 +474,10 @@ func (u *utils) GetDocaSpcXCCVersion(docaSpcXCCPath string) (string, error) {
 
 // InstallDebPackage installs the .deb package
 func (u *utils) InstallDebPackage(debPath string) error {
-	log.Log.V(2).Info("FirmwareUtils.InstallDebPackage()", "debPath", debPath)
+	log.Log.V(ncolog.DebugLevel).Info("FirmwareUtils.InstallDebPackage()", "debPath", debPath)
 	cmd := u.execInterface.Command("dpkg", "-i", debPath)
 	output, err := cmd.CombinedOutput()
-	log.Log.V(2).Info("InstallDebPackage(): command output", "output", string(output))
+	log.Log.V(ncolog.DebugLevel).Info("InstallDebPackage(): command output", "output", string(output))
 	if err != nil {
 		log.Log.Error(err, "InstallDebPackage(): Failed to install deb package")
 	}
@@ -486,16 +487,16 @@ func (u *utils) InstallDebPackage(debPath string) error {
 // GetInstalledDebPackageVersion retrieves the version from the installed .deb package
 // Return empty string if the package is not installed
 func (u *utils) GetInstalledDebPackageVersion(packageName string) string {
-	log.Log.V(2).Info("FirmwareUtils.GetInstalledDebPackageVersion()", "packageName", packageName)
+	log.Log.V(ncolog.DebugLevel).Info("FirmwareUtils.GetInstalledDebPackageVersion()", "packageName", packageName)
 	cmd := u.execInterface.Command("dpkg-query", "-W", "-f='${Version}\n'", packageName)
 	output, err := cmd.CombinedOutput()
-	log.Log.V(2).Info("GetInstalledDebPackageVersion(): command output", "package", packageName, "output", string(output))
+	log.Log.V(ncolog.DebugLevel).Info("GetInstalledDebPackageVersion(): command output", "package", packageName, "output", string(output))
 	if err != nil {
 		log.Log.Info("GetInstalledDebPackageVersion(): Failed to get installed version of package", "package", packageName, "error", err)
 		return ""
 	}
 	installedVersion := strings.Trim(string(output), "'\"\n")
-	log.Log.V(2).Info("GetInstalledDebPackageVersion(): Installed version of package", "package", packageName, "version", installedVersion)
+	log.Log.V(ncolog.DebugLevel).Info("GetInstalledDebPackageVersion(): Installed version of package", "package", packageName, "version", installedVersion)
 	return installedVersion
 }
 
@@ -506,7 +507,7 @@ func (u *utils) GetInstalledDebPackageVersion(packageName string) string {
 // Workaround for a DMS bug where "os install" / "os activate" unconditionally unbinds every
 // PCI function of the device, which fails with ENODEV if a function is already unbound.
 func (u *utils) EnsureDeviceBoundToMlx5Core(pciAddress string) error {
-	log.Log.V(2).Info("FirmwareUtils.EnsureDeviceBoundToMlx5Core()", "pciAddress", pciAddress)
+	log.Log.V(ncolog.DebugLevel).Info("FirmwareUtils.EnsureDeviceBoundToMlx5Core()", "pciAddress", pciAddress)
 
 	driverLink := filepath.Join(pciDevicesSysfsPath, pciAddress, "driver")
 	target, err := os.Readlink(driverLink)

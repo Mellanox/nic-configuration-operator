@@ -30,6 +30,7 @@ import (
 	"github.com/go-logr/logr"
 	execUtils "k8s.io/utils/exec"
 
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
 
@@ -179,7 +180,7 @@ func logDMSCLIOutput(ctx context.Context, command []string, target string, outpu
 		"stdout", boundedCommandOutput(output.Stdout),
 	}
 	fields = appendCommandStderr(fields, output.Stderr, commandErr)
-	logr.FromContextOrDiscard(ctx).V(2).Info("command output", fields...)
+	logr.FromContextOrDiscard(ctx).V(ncolog.DebugLevel).Info("command output", fields...)
 }
 
 func xpathQueryArgs(target string, queries []XPathQuery) []string {
