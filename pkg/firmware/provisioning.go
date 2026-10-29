@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/json"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	libfirmware "github.com/Mellanox/dms-lib/pkg/firmware"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 )
 
@@ -650,6 +651,6 @@ func readSingleFileMetadataFromFile(path string) (singleFileMetadata, error) {
 	return metadata, nil
 }
 
-func NewFirmwareProvisioner() FirmwareProvisioner {
-	return firmwareProvisioner{cacheRootDir: consts.NicFirmwareStorage, utils: newFirmwareUtils()}
+func NewFirmwareProvisioner(backend libfirmware.Manager) FirmwareProvisioner {
+	return firmwareProvisioner{cacheRootDir: consts.NicFirmwareStorage, utils: newFirmwareUtils(backend)}
 }

@@ -114,7 +114,7 @@ func (r *NicDeviceReconciler) preparePlanConfigurations(ctx context.Context, sta
 			return nil, nil, err
 		}
 		if compiled == nil {
-			preserveUnboundPFPolicy(ports, observed)
+			configuration.PreserveUnboundPFPolicy(ports, observed)
 		}
 		group.members[observed.ID] = status
 		group.nv.Devices = append(group.nv.Devices, observed)
@@ -196,25 +196,6 @@ func validatePlanGroupRequirements(groups []*planConfigurationGroup) error {
 		}
 	}
 	return nil
-}
-
-// preserveUnboundPFPolicy retains the ordinary-template baseline: a PF without
-// a netdev does not receive per-port RoCE, extended QoS or performance settings.
-// PCI MRRS and basic QoS remain requested. Compiled plan intent never uses this.
-func preserveUnboundPFPolicy(ports []dmsconfiguration.PortRuntimeConfig, observed device.Device) {
-	for i := range ports {
-		if observed.Ports[i].Netdev != "" {
-			continue
-		}
-		ports[i].RoCEMode = nil
-		ports[i].CableLengthMeters = nil
-		ports[i].ECN = nil
-		ports[i].Pause = nil
-		ports[i].RXRingSize = nil
-		ports[i].TXRingSize = nil
-		ports[i].CombinedChannels = nil
-		ports[i].LRO = nil
-	}
 }
 
 // validateConfigurationRequirements recognizes ownership already established by

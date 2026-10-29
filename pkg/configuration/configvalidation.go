@@ -29,9 +29,8 @@ import (
 
 type configValidation interface {
 	// ConstructNvParamMapFromTemplate builds the full set of desired nvconfig parameters for a device by
-	// combining the spec template params and rawNvConfig (raw wins on key collisions). doSPCX plan
-	// operations are validated separately and applied together with template-derived native parameters.
-	// rawNvConfig and Network Bay are temporarily rejected when doSPCX is enabled.
+	// combining template parameters and rawNvConfig (raw wins on key collisions).
+	// The library owns composition with compiled plan intent.
 	ConstructNvParamMapFromTemplate(
 		device *v1alpha1.NicDevice, nvConfigQuery types.NvConfigQuery) (map[string]string, error)
 	// ValidateResetToDefault checks if device's nv config has been reset to default in current and next boots
@@ -39,10 +38,6 @@ type configValidation interface {
 	// returns bool - reboot required
 	// returns error - if an error occurred during validation
 	ValidateResetToDefault(nvConfig types.NvConfigQuery) (bool, bool, error)
-	// RuntimeConfigApplied checks if desired runtime config is applied
-	RuntimeConfigApplied(device *v1alpha1.NicDevice) (bool, error)
-	// CalculateDesiredRuntimeConfig returns desired values for runtime config
-	CalculateDesiredRuntimeConfig(device *v1alpha1.NicDevice) types.DesiredRuntimeConfig
 }
 
 type configValidationImpl struct {
@@ -215,180 +210,6 @@ func (v *configValidationImpl) ValidateResetToDefault(nvConfig types.NvConfigQue
 	return true, true, nil
 }
 
-// validatePortExtendedQoS validates per-port extended QoS settings (CableLen, ECN, PauseFrames)
-func (v *configValidationImpl) validatePortExtendedQoS(iface, deviceName string, qos *v1alpha1.QosSpec) (bool, error) {
-	if qos.CableLen != 0 {
-		actual, err := v.utils.GetCableLen(iface)
-		if err != nil {
-			log.Log.Error(err, "can't validate cableLen", "device", deviceName)
-			return false, err
-		}
-		if actual != qos.CableLen {
-			return false, nil
-		}
-	}
-
-	if qos.ECN != nil {
-		rp, np, err := v.utils.GetECNEnabled(iface, qos.ECN.Priority)
-		if err != nil {
-			log.Log.Error(err, "can't validate ECN", "device", deviceName)
-			return false, err
-		}
-		if rp != qos.ECN.Enabled || np != qos.ECN.Enabled {
-			return false, nil
-		}
-	}
-
-	if qos.PauseFrames != nil {
-		rx, tx, err := v.utils.GetPauseFrames(iface)
-		if err != nil {
-			log.Log.Error(err, "can't validate pauseFrames", "device", deviceName)
-			return false, err
-		}
-		if rx != qos.PauseFrames.Enabled || tx != qos.PauseFrames.Enabled {
-			return false, nil
-		}
-	}
-
-	return true, nil
-}
-
-// validatePortRuntimePerf validates per-port runtime performance settings (ring size, channels, LRO)
-func (v *configValidationImpl) validatePortRuntimePerf(iface, deviceName string, perf *v1alpha1.RuntimePerformanceOptimizedSpec) (bool, error) {
-	if perf.RxRingSize != 0 || perf.TxRingSize != 0 {
-		rx, tx, err := v.utils.GetRingSize(iface)
-		if err != nil {
-			log.Log.Error(err, "can't validate ringSize", "device", deviceName)
-			return false, err
-		}
-		if (perf.RxRingSize != 0 && rx != perf.RxRingSize) ||
-			(perf.TxRingSize != 0 && tx != perf.TxRingSize) {
-			return false, nil
-		}
-	}
-
-	if perf.CombinedChannels != 0 {
-		actual, err := v.utils.GetCombinedChannels(iface)
-		if err != nil {
-			log.Log.Error(err, "can't validate combinedChannels", "device", deviceName)
-			return false, err
-		}
-		// actual == 0 means the driver doesn't expose combined channels; skip validation
-		if actual != 0 && actual != perf.CombinedChannels {
-			return false, nil
-		}
-	}
-
-	if perf.LRO != nil {
-		actual, err := v.utils.GetLRO(iface)
-		if err != nil {
-			log.Log.Error(err, "can't validate LRO", "device", deviceName)
-			return false, err
-		}
-		if actual != *perf.LRO {
-			return false, nil
-		}
-	}
-
-	return true, nil
-}
-
-// validateDMSQoS validates QoS settings (trust, PFC, ToS) via DMS for all ports
-func (v *configValidationImpl) validateDMSQoS(device *v1alpha1.NicDevice, qos *v1alpha1.QosSpec) (bool, error) {
-	for _, port := range device.Status.Ports {
-		if port.NetworkInterface == "" {
-			err := fmt.Errorf("cannot validate QoS settings for device port %s, network interface is missing", port.PCI)
-			log.Log.Error(err, "cannot validate QoS settings", "device", device.Name, "port", port.PCI)
-			return false, err
-		}
-		actualSpec, err := v.utils.GetQoSSettings(device, port.NetworkInterface)
-		if err != nil {
-			log.Log.Error(err, "cannot validate QoS settings", "device", device.Name, "port", port.PCI)
-			return false, err
-		}
-		if actualSpec.Trust != qos.Trust || actualSpec.PFC != qos.PFC || actualSpec.ToS != qos.ToS {
-			return false, nil
-		}
-	}
-	return true, nil
-}
-
-// RuntimeConfigApplied checks if desired runtime config is applied
-func (v *configValidationImpl) RuntimeConfigApplied(device *v1alpha1.NicDevice) (bool, error) {
-	ports := device.Status.Ports
-	desired := v.CalculateDesiredRuntimeConfig(device)
-
-	if err := v.validatePortCarrierState(device); err != nil {
-		return false, err
-	}
-
-	if desired.MaxReadRequestSize != 0 {
-		for _, port := range ports {
-			actualMaxReadReqSize, err := v.utils.GetMaxReadRequestSize(port.PCI)
-			if err != nil {
-				log.Log.Error(err, "can't validate maxReadReqSize", "device", device.Name)
-				return false, err
-			}
-			if actualMaxReadReqSize != desired.MaxReadRequestSize {
-				return false, nil
-			}
-		}
-	}
-
-	// Validate QoS settings (trust, PFC, ToS) via DMS.
-	// Note: DMS only manages Trust/PFC/ToS. Extended QoS fields (CableLen, ECN, PauseFrames)
-	// are validated separately in the per-port loop below via direct ethtool/sysfs queries.
-	if desired.Qos != nil && (desired.Qos.Trust != "" || desired.Qos.PFC != "" || desired.Qos.ToS != 0) {
-		applied, err := v.validateDMSQoS(device, desired.Qos)
-		if err != nil || !applied {
-			return applied, err
-		}
-	}
-
-	// Validate per-port runtime settings
-	validatedAnyPort := false
-	for _, port := range ports {
-		if port.NetworkInterface == "" {
-			log.Log.V(2).Info("skipping runtime config validation for port with empty NetworkInterface", "device", device.Name, "port", port.PCI)
-			continue
-		}
-		validatedAnyPort = true
-		iface := port.NetworkInterface
-
-		if desired.RoceMode != 0 {
-			actual, err := v.utils.GetRoceMode(iface)
-			if err != nil {
-				log.Log.Error(err, "can't validate roceMode", "device", device.Name)
-				return false, err
-			}
-			if actual != desired.RoceMode {
-				return false, nil
-			}
-		}
-
-		if desired.Qos != nil {
-			applied, err := v.validatePortExtendedQoS(iface, device.Name, desired.Qos)
-			if err != nil || !applied {
-				return applied, err
-			}
-		}
-
-		if desired.RuntimePerf != nil && desired.RuntimePerf.Enabled {
-			applied, err := v.validatePortRuntimePerf(iface, device.Name, desired.RuntimePerf)
-			if err != nil || !applied {
-				return applied, err
-			}
-		}
-	}
-
-	// If extended settings are requested but no port could be validated, treat as not applied
-	if !validatedAnyPort && (desired.RoceMode != 0 || desired.Qos != nil || desired.RuntimePerf != nil) {
-		return false, nil
-	}
-
-	return true, nil
-}
-
 func (v *configValidationImpl) validatePortCarrierState(device *v1alpha1.NicDevice) error {
 	checkedPort := false
 	for _, port := range device.Status.Ports {
@@ -411,11 +232,6 @@ func (v *configValidationImpl) validatePortCarrierState(device *v1alpha1.NicDevi
 		return fmt.Errorf("all network interfaces have NO-CARRIER")
 	}
 	return nil
-}
-
-// CalculateDesiredRuntimeConfig returns desired values for runtime config
-func (v *configValidationImpl) CalculateDesiredRuntimeConfig(device *v1alpha1.NicDevice) types.DesiredRuntimeConfig {
-	return templateRuntimeConfig(device.Spec.Configuration.Template)
 }
 
 func templateRuntimeConfig(template *v1alpha1.ConfigurationTemplateSpec) types.DesiredRuntimeConfig {

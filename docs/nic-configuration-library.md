@@ -9,7 +9,8 @@ import (
     "github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
     "github.com/Mellanox/nic-configuration-operator/pkg/firmware"
     "github.com/Mellanox/nic-configuration-operator/pkg/configuration"
-    "github.com/Mellanox/nic-configuration-operator/pkg/dms"
+    libfirmware "github.com/Mellanox/dms-lib/pkg/firmware"
+    libconfiguration "github.com/Mellanox/dms-lib/pkg/configuration"
     "github.com/Mellanox/nic-configuration-operator/pkg/nvconfig"
     "github.com/Mellanox/nic-configuration-operator/pkg/spectrumx"
     "github.com/Mellanox/nic-configuration-operator/pkg/types"
@@ -21,35 +22,24 @@ import (
 
 ## Quick Start
 
-### With local DMS server (operator mode)
+Firmware and runtime operations use local dms-lib backends. NCO no longer starts
+`dmsd` or exposes `pkg/dms` clients for remote servers.
 
 ```go
-// 1. Start local DMS server for devices
-dmsSrv := dms.NewDMSServer()
-err := dmsSrv.StartDMSServer(devices)
-defer dmsSrv.StopDMSServer()
+fwBackend, err := libfirmware.NewManager(libfirmware.Options{})
+if err != nil { return err }
+runtimeBackend, err := libconfiguration.NewManager(libconfiguration.Options{})
+if err != nil { return err }
 
-// 2. Install firmware (library mode — direct file path)
-fwMgr := firmware.NewFirmwareManager(nil, dmsSrv, "")
+fwMgr := firmware.NewFirmwareManager(nil, fwBackend, "")
 rebootRequired, err := fwMgr.InstallFirmware(ctx, device, &types.FirmwareInstallOptions{
     FwFilePath: "/path/to/fw.bin",
 })
+// Handle err and rebootRequired according to the application's maintenance policy.
 
-// 3. Apply NV configuration
 nvUtils := nvconfig.NewNVConfigUtils()
-cfgMgr := configuration.NewConfigurationManager(nil, dmsSrv, nvUtils)
+cfgMgr := configuration.NewConfigurationManager(nvUtils, runtimeBackend, fwBackend)
 result, err := cfgMgr.ApplyNVConfiguration(ctx, device, &types.ConfigurationOptions{})
-```
-
-### With external DMS server (library mode)
-
-```go
-// Connect to an already-running DMS server with TLS auth
-dmsMgr := dms.NewExternalDMSManager(devices, "remotehost:9339",
-    []string{"--tls-ca", "/path/ca.pem", "--tls-cert", "/path/cert.pem", "--tls-key", "/path/key.pem"})
-
-// Use dmsMgr with any consumer — firmware, configuration, spectrumx
-fwMgr := firmware.NewFirmwareManager(nil, dmsMgr, "")
 ```
 
 ---
@@ -70,7 +60,7 @@ type FirmwareManager interface {
     ValidateRequestedFirmwareSource(ctx context.Context, device *v1alpha1.NicDevice) (string, error)
 
     // InstallFirmware updates device firmware to requested version
-    // returns bool: reboot required (when fw reset fails or SkipReset=true)
+    // returns bool: reboot required after a failed reset; SkipReset retains false
     // returns error: firmware install errors
     InstallFirmware(ctx context.Context, device *v1alpha1.NicDevice, options *types.FirmwareInstallOptions) (bool, error)
 
@@ -82,21 +72,21 @@ type FirmwareManager interface {
 
 **Constructor:**
 ```go
-func NewFirmwareManager(client client.Client, dmsManager dms.DMSManager, namespace string) FirmwareManager
+func NewFirmwareManager(client client.Client, backend libfirmware.Manager, namespace string) FirmwareManager
 ```
 - `client`: K8s client for operator mode (can be `nil` in library mode when using `FwFilePath`)
-- `dmsManager`: required for BlueField BFB installs via `DMSClient.InstallBFB()`
+- `backend`: shared library firmware inspection, install and reset implementation
 - `namespace`: K8s namespace for firmware source lookup (operator mode only)
 
 #### InstallFirmware Flow (Dual-Mode)
 
 1. **Version extraction** — if `options.Version == ""` and `options.FwFilePath != ""`, version is extracted from the firmware file using `flint` (ConnectX) or `mlx-mkbfb` (BlueField)
-2. **Idempotency check** — queries current burned version; skips install if already matching
+2. **Idempotency check** — queries current burned version before resolving a cache path; skips install and reset if already matching. A query error retains the existing behavior of proceeding to install.
 3. **Path resolution**:
    - **Library mode** (`FwFilePath` set): uses path directly
    - **Operator mode** (`FwFilePath` empty): resolves from K8s cache via `device.Spec.Firmware.NicFirmwareSourceRef`
-4. **Install**: BlueField → DMS `InstallBFB()`; ConnectX → validate version/PSID + verify bootable + `BurnNicFirmware()`
-5. **Reset**: `mlxfwreset` unless `SkipReset=true`. On reset failure → `(true, nil)` (reboot required, no error)
+4. **Install**: delegates the resolved local artifact and observed ASIC/PFs to dms-lib. The library owns image verification, ConnectX burning and BlueField installation.
+5. **Reset**: delegates to dms-lib unless `SkipReset=true`. Firmware-wrapper reset passes `SKIP_VM_CHECK`; configuration reset retains its separate default. On reset failure → `(true, nil)`. Skipping reset retains the historical `(false, nil)` result and leaves activation to the caller.
 
 #### FirmwareUtils Interface
 
@@ -106,20 +96,22 @@ Source: `pkg/firmware/utils.go`
 type FirmwareUtils interface {
     DownloadFile(url, destPath string) error
     UnzipFiles(zipPath, destDir string) ([]string, error)
-    GetFirmwareVersionsFromDevice(pciAddress string) (burned string, running string, err error)
     GetFirmwareVersionAndPSIDFromFWBinary(firmwareBinaryPath string) (version string, psid string, err error)
     GetFWVersionsFromBFB(bfbPath string) (map[string]string, error)
     GetDocaSpcXCCVersion(docaSpcXCCPath string) (string, error)
-    VerifyImageBootable(firmwareBinaryPath string) error
     CleanupDirectory(root string, allowedSet map[string]struct{}) error
-    BurnNicFirmware(ctx context.Context, pciAddress, fwPath string) error
-    ResetNicFirmware(ctx context.Context, pciAddress string) error
     InstallDebPackage(debPath string) error
     GetInstalledDebPackageVersion(packageName string) string
 }
 ```
 
-Note: `FirmwareUtils` is unexported via `newFirmwareUtils()` — created internally by `NewFirmwareManager`.
+The utility implementation is private. BIN/BFB metadata methods delegate to dms-lib; download, archive/cache operations and CC package handling remain in NCO.
+
+```go
+func NewFirmwareProvisioner(backend libfirmware.Manager) FirmwareProvisioner
+```
+
+The provisioner retains URL-to-file metadata, cache validation and cleanup, version/PSID organization, and BFB/CC package source handling. Kubernetes source readiness and maintenance remain consumer policy.
 
 ---
 
@@ -132,8 +124,8 @@ Source: `pkg/configuration/manager.go`
 ```go
 type ConfigurationManager interface {
     // ValidateDeviceNvSpec validates device's NV spec against host configuration
-    // returns: nv config update required, reboot required, error
-    ValidateDeviceNvSpec(ctx context.Context, device *v1alpha1.NicDevice) (bool, bool, error)
+    // returns: update required, reboot required, unsupported parameters, error
+    ValidateDeviceNvSpec(ctx context.Context, device *v1alpha1.NicDevice) (bool, bool, []string, error)
 
     // ApplyNVConfiguration calculates and applies missing NV spec configuration
     ApplyNVConfiguration(ctx context.Context, device *v1alpha1.NicDevice, options *types.ConfigurationOptions) (*types.ConfigurationApplyResult, error)
@@ -149,9 +141,9 @@ type ConfigurationManager interface {
 **Constructor:**
 ```go
 func NewConfigurationManager(
-    eventRecorder record.EventRecorder,
-    dmsManager dms.DMSManager,
     nvConfigUtils nvconfig.NVConfigUtils,
+    runtimeBackend libconfiguration.Manager,
+    firmwareBackend libfirmware.Manager,
 ) ConfigurationManager
 ```
 
@@ -163,7 +155,7 @@ maintenance, firmware activation, status and CC process lifecycle.
 
 The compatibility ConfigurationManager keeps ordinary Force, WithDefault,
 NetworkBay and reset behavior. It no longer compiles or executes Spectrum-X
-plans. Library consumers should use dms-lib for generic plan configuration.
+plans. Its runtime method now delegates to dms-lib using observed endpoint relationships; no separate DMS QoS engine remains. Library consumers should use dms-lib directly for generic plan configuration.
 
 #### ResetToDefault Behavior
 
@@ -171,115 +163,6 @@ plans. Library consumers should use dms-lib for generic plan configuration.
 2. Re-enable `ADVANCED_PCI_SETTINGS=1`
 3. Preserve BlueField operation mode (`INTERNAL_CPU_OFFLOAD_ENGINE`) after reset
 4. Requires reboot after reset
-
----
-
-### pkg/dms/ — Device Management Service
-
-Source: `pkg/dms/dms.go`, `pkg/dms/client.go`
-
-#### DMSManager Interface
-
-Provides per-device DMS client lookup. This is the interface used by all consuming packages (firmware, configuration, spectrumx).
-
-```go
-type DMSManager interface {
-    // GetDMSClientByPCIAddress returns the DMS client for a device identified by its
-    // PCI device address (Domain:Bus:Device, function stripped). This is unique
-    // per physical NIC even on systems where cards share a flashed serial number
-    // (e.g. HGX B300). Derive the key from device.Status.Ports[0].PCI via
-    // pkg/utils.PCIDeviceAddress.
-    GetDMSClientByPCIAddress(pciDeviceAddr string) (DMSClient, error)
-}
-```
-
-#### DMSServer Interface
-
-Extends DMSManager with server lifecycle management. Used only by the daemon entry point.
-
-```go
-type DMSServer interface {
-    DMSManager
-    // StartDMSServer starts a single DMS server for all given NIC devices
-    StartDMSServer(devices []v1alpha1.NicDevice) error
-    // StopDMSServer stops the running DMS server (SIGTERM)
-    StopDMSServer() error
-    // IsRunning returns whether the DMS server process is alive
-    IsRunning() bool
-}
-```
-
-**Constructors:**
-```go
-// NewDMSServer creates a local DMS server manager (starts/stops dmsd process)
-// Clients are created with authParams: ["--insecure"]
-func NewDMSServer() DMSServer
-
-// NewExternalDMSManager connects to an already-running external DMS server
-// authParams: authentication/security flags for dmsc (e.g. ["--insecure"],
-// ["--tls-ca", "/ca.pem", "--tls-cert", "/cert.pem", "--tls-key", "/key.pem"],
-// ["-u", "user", "-p", "pass"])
-func NewExternalDMSManager(devices []v1alpha1.NicDevice, address string, authParams []string) DMSManager
-```
-
-#### DMSClient Interface
-
-```go
-type DMSClient interface {
-    // GetQoSSettings returns current QoS settings (trust mode, PFC, ToS)
-    GetQoSSettings(interfaceName string) (*v1alpha1.QosSpec, error)
-    // SetQoSSettings sets QoS on all ports of the device
-    SetQoSSettings(spec *v1alpha1.QosSpec) error
-    // GetParameters returns current values for given DMS paths
-    GetParameters(params []types.ConfigurationParameter) (map[string]string, error)
-    // SetParameters batches all updates into single dmsc command
-    SetParameters(params []types.ConfigurationParameter) error
-    // InstallBFB installs BFB firmware on BlueField device
-    InstallBFB(ctx context.Context, version string, bfbPath string) error
-}
-```
-
-#### Architecture
-
-A single `dmsd` server process manages all NIC devices. Started with comma-separated PCI addresses via `--target_pci`. Port discovery starts from 9339, incrementing on conflict.
-
-Per-device `dmsClient` instances hold configurable `authParams` (e.g. `["--insecure"]` for local server, TLS/credential flags for external server) and use `--target <pci>` to address individual NICs:
-```
-dmsc -a <address> <authParams...> --target 0000:08:00.0 get --path /path
-dmsc -a <address> <authParams...> --target 0000:08:00.0 set --update "path:::type:::value"
-```
-
-**Supported authentication flags** (passed via `authParams`):
-- `--insecure` — disable TLS (default for local server)
-- `-u <user> -p <pass>` — username/password authentication
-- `--tls-ca <path>` — server CA certificate
-- `--tls-cert <path>` — client TLS certificate
-- `--tls-key <path>` — client TLS private key
-- `--skip-verify` — skip server certificate verification
-
-#### Batch GetParameters
-
-`GetParameters` expands interface and priority parameters, then groups the resulting paths by concrete interface. Each interface is queried with one `dmsc get` command containing multiple `--path` flags; paths without an interface filter use a separate global batch. Parameters marked `hwplbFirstPortOnly` are added only to the first interface batch.
-
-The response parser matches each returned `Path` to its request, reads the value through DMS's selector-free `values` key, and stores it under the request's original parameter path. This removes generated interface and priority selectors while preserving configured selectors such as `slot[id=0]` and `param[id=11]`. Values returned for the same parameter within a batch or across interface batches must match.
-
-#### Batch SetParameters
-
-`SetParameters` collects all update entries via `collectSetUpdates()` (expanding interface/port/priority combinations into individual `path:::type:::value` strings using `formatSetUpdate()`), then passes them to a single `dmsc set` command with multiple `--update` flags and `--timeout 5m`:
-
-```
-dmsc -a localhost:9339 --insecure --target 0000:08:00.0 set --timeout 5m \
-  --update "/interfaces/interface[name=p0]/nvidia/qos/config/trust-mode:::string:::dscp" \
-  --update "/interfaces/interface[name=p0]/nvidia/cc/config/priority[id=0]/np_enabled:::bool:::1" \
-  --update "/interfaces/interface[name=p0]/nvidia/cc/config/priority[id=1]/np_enabled:::bool:::1"
-```
-
-**Parameter expansion rules:**
-- Path contains `interface` → expanded per device port (with `[name=<iface>]` filter)
-- Path contains `priority` → additionally expanded for IDs 0–7 (with `[id=<n>]` filter)
-- Otherwise → single update entry with unfiltered path
-
-**IgnoreError semantics:** if the batch command fails and ALL params have `IgnoreError=true`, the error is suppressed.
 
 ---
 
@@ -581,40 +464,6 @@ type VPD struct {
 }
 ```
 
-#### ConfigurationParameter
-
-Used by the legacy DMS client API.
-
-```go
-type ConfigurationParameter struct {
-    Name               string           // Human-readable name
-    MlxConfig          string           // mlxconfig parameter name (e.g., "LINK_TYPE_P1")
-    Value              string           // DMS set value or expected mlxreg get value
-    ValueType          string           // DMS value type: "string", "bool", "int"
-    DMSPath            string           // DMS path (e.g., "/interfaces/interface/nvidia/qos/config/trust-mode")
-    MlxReg             *MlxRegParameter // Optional mlxreg runtime parameter
-    AlternativeValue   string           // Alternative value representation accepted during checks
-    DeviceId           string           // Device ID filter (e.g., "1021", "1023", "a2dc")
-    Breakout           int              // Plane count filter (1, 2, 4)
-    Multiplane         string           // Multiplane mode filter (none, swplb, hwplb)
-    IgnoreError        bool             // Suppress errors for this parameter in batch operations
-    HwplbFirstPortOnly bool             // Limit DMS interface expansion to the first port in hwplb
-}
-
-type MlxRegParameter struct {
-    Register  string        // mlxreg register name, e.g., "ROCE_ACCL"
-    Field     string        // Field read by mlxreg --get and compared with Value
-    SetFields []MlxRegField // Fields rendered into mlxreg --set NAME=VALUE,...
-}
-
-type MlxRegField struct {
-    Name  string
-    Value string
-}
-```
-
-A parameter with `MlxConfig` set is applied via `nvconfig.SetNvConfigParametersBatch()`.
-
 #### Error Helpers
 
 ```go
@@ -805,12 +654,10 @@ logs and returned errors. Output is not duplicated in error-level logs.
 ### Batch Operations
 
 - **NVConfig apply**: the compatibility path keeps one sorted raw batch per PCI target. Plan-backed execution and ordinary intent delegated by the daemon use dms-lib.
-- **DMS**: `GetParameters()` batches `--path` entries per concrete interface (with a separate global batch), and `SetParameters()` sends all `--update` entries in a single `dmsc set` command with `--timeout 5m`
-- **IgnoreError**: per-parameter flag; in batch mode, errors are suppressed only if ALL params have `IgnoreError=true`
 
 ### Channel-Based Notifications
 
-K8s-free packages (`pkg/spectrumx/`, `pkg/dms/`) communicate with controllers via plain Go channels. The controller bridges these to Kubernetes watch events using `source.Channel`.
+The CC process manager (`pkg/spectrumx/`) communicates with controllers via plain Go channels. The controller bridges these to Kubernetes watch events using `source.Channel`.
 
 ---
 
@@ -819,13 +666,8 @@ K8s-free packages (`pkg/spectrumx/`, `pkg/dms/`) communicate with controllers vi
 | Commit | Summary | Library Impact |
 |---|---|---|
 | `6dc1e5b` — Expose pkg/ as a reusable Go library | Renamed APIs (`BurnNicFirmware` → `InstallFirmware`, etc.), added option/result types, dual-mode firmware install, `SetNvConfigParametersBatch`, `ResetNicFirmware` | New public API surface; breaking changes from old method names |
-| `a819489` — Refactor DMS to single daemon | Single `dmsd` process for all devices, `dmsClient` with `--target`, `IsRunning()` on manager | `DMSManager.StartDMSServer` replaces `StartDMSInstances`; `DMSClient.IsRunning()` removed |
 | `852ced3` — Fix CX8 reboot blocked by mlxfwreset | Treat `mlxfwreset` failure as non-fatal in controller | No library API change; behavioral fix for CX8 SuperNIC devices |
-| `3bf35c5` — Batch SetParameters | `collectSetUpdates` + single `dmsc set` with multiple `--update` flags + `--timeout 5m` | `SetParameters` now executes one command instead of N; `formatSetUpdate` shared helper |
 
-Runtime sections are validated concurrently. A mismatch or read error cancels the
-other sections and joins their workers before configuration writes begin. A required
-CC process that is absent or still starting makes validation return false immediately;
-process startup remains in the apply phase. Custom implementations of
-`SpectrumXManager` must implement `IsDocaSpcXCCRunning` without starting a process.
-DMS CLI command-output logs include elapsed command execution time as `duration_ms`.
+The CC process manager reports whether a tracked process is running without starting
+it during observation. Process startup remains in the apply phase. Custom
+implementations of `SpectrumXManager` must keep that distinction.

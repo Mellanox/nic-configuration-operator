@@ -3,7 +3,7 @@ module github.com/Mellanox/nic-configuration-operator
 go 1.26.0
 
 require (
-	github.com/Mellanox/dms-lib v0.0.0-20261029094238-9db732a9f4ce
+	github.com/Mellanox/dms-lib v0.0.0-20261029115835-0b6d7aa1d8e4
 	github.com/Mellanox/dms-lib/api v0.0.0-20261029094238-9db732a9f4ce
 	github.com/Mellanox/maintenance-operator/api v0.4.0
 	github.com/go-logr/logr v1.4.4
