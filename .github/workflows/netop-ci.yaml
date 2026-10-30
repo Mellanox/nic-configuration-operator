@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - network-operator-*
+      # doca-installer requires the internal DOCA repository; GitLab builds these tags.
+      - '!network-operator-v26.10.*'
+      - '!network-operator-26.10.*'
     branches:
       - main
 

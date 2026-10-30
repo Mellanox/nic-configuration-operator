@@ -74,6 +74,9 @@ variables:  # additional variables are defined at the gitlab group scope
   DOCKER_REGISTRY: nvcr.io/nvstaging/mellanox
   OPERATOR_IMAGE_NAME: nic-configuration-operator-stig-fips
   DAEMON_IMAGE_NAME: nic-configuration-operator-daemon-stig-fips
+  REGULAR_OPERATOR_IMAGE_NAME: nic-configuration-operator
+  REGULAR_DAEMON_IMAGE_NAME: nic-configuration-operator-daemon
+  BASE_IMAGE_DOCA_FULL_RT_HOST: nvcr.io/nvstaging/doca/doca:full-rt-3.6.0-ubuntu24.04-host-dev
   # Pin the DOCA series per release branch; the resolver selects the last_stable
   # internal build of its latest patch.
   DOCA_SERIES: "3.6"
@@ -95,9 +98,8 @@ resolve-doca-host:
     reports:
       dotenv: doca.env
 
-# Common job template for building STIG images
-.build-stig-image:
-  stage: build
+# Reuse the existing Docker-in-Docker job images for native builds.
+.docker-job:
   tags:
     - os/linux
     - type/docker
@@ -109,6 +111,83 @@ resolve-doca-host:
   image: docker:24
   variables:
     DOCKER_TLS_CERTDIR: /certs
+
+.native-architectures:
+  parallel:
+    matrix:
+      - TARGETARCH: amd64
+        RUNNER_OS: os/linux
+      - TARGETARCH: arm64
+        RUNNER_OS: os/linux-arm
+  tags:
+    - $RUNNER_OS
+    - type/docker
+
+.regular-image-job:
+  extends: .docker-job
+  before_script:
+    - ': "${NVCR_USERNAME:?NVCR_USERNAME is required}"'
+    - ': "${NVCR_TOKEN:?NVCR_TOKEN is required}"'
+    - printf '%s' "$NVCR_TOKEN" | docker login "$DOCKER_REGISTRY" -u "$NVCR_USERNAME" --password-stdin
+    # Keep regular and STIG tags separate.
+    - REGULAR_DOCKER_TAG=${CI_COMMIT_TAG:-$(git rev-parse --short HEAD)}
+
+.build-regular-image:
+  extends: [.regular-image-job, .native-architectures]
+  stage: build
+  script:
+    - |
+      docker buildx build --load \
+        --platform "linux/$TARGETARCH" \
+        --build-arg GOPROXY="$GOPROXY" \
+        --build-arg BASE_IMAGE_DOCA_FULL_RT_HOST="$BASE_IMAGE_DOCA_FULL_RT_HOST" \
+        --file "$REGULAR_DOCKERFILE" \
+        --tag "$DOCKER_REGISTRY/$REGULAR_IMAGE_NAME:$REGULAR_DOCKER_TAG-$TARGETARCH" \
+        .
+    - docker push "$DOCKER_REGISTRY/$REGULAR_IMAGE_NAME:$REGULAR_DOCKER_TAG-$TARGETARCH"
+
+build-operator-image:
+  extends: .build-regular-image
+  variables:
+    REGULAR_DOCKERFILE: Dockerfile
+    REGULAR_IMAGE_NAME: $REGULAR_OPERATOR_IMAGE_NAME
+
+build-daemon-image:
+  extends: .build-regular-image
+  variables:
+    REGULAR_DOCKERFILE: Dockerfile.nic-configuration-daemon
+    REGULAR_IMAGE_NAME: $REGULAR_DAEMON_IMAGE_NAME
+
+.publish-regular-image:
+  extends: .regular-image-job
+  stage: build
+  script:
+    - |
+      docker buildx imagetools create \
+        --tag "$DOCKER_REGISTRY/$REGULAR_IMAGE_NAME:$REGULAR_DOCKER_TAG" \
+        "$DOCKER_REGISTRY/$REGULAR_IMAGE_NAME:$REGULAR_DOCKER_TAG-amd64" \
+        "$DOCKER_REGISTRY/$REGULAR_IMAGE_NAME:$REGULAR_DOCKER_TAG-arm64"
+
+publish-operator-image:
+  extends: .publish-regular-image
+  needs:
+    - job: build-operator-image
+      artifacts: false
+  variables:
+    REGULAR_IMAGE_NAME: $REGULAR_OPERATOR_IMAGE_NAME
+
+publish-daemon-image:
+  extends: .publish-regular-image
+  needs:
+    - job: build-daemon-image
+      artifacts: false
+  variables:
+    REGULAR_IMAGE_NAME: $REGULAR_DAEMON_IMAGE_NAME
+
+# Common job template for building STIG images
+.build-stig-image:
+  extends: .docker-job
+  stage: build
   before_script:
     # validate variables (including gitlab group scoped variables)
     - |
