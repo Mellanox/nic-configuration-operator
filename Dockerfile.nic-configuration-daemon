@@ -27,7 +27,7 @@ COPY ./ ./
 # by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
 RUN --mount=type=cache,target=/go/pkg/mod/ GO_GCFLAGS=${GCFLAGS} make build-daemon
 
-FROM ${BASE_IMAGE_DOCA_FULL_RT_HOST:-nvcr.io/nvstaging/doca/doca:full-rt-3.5.0-host-dev}
+FROM ${BASE_IMAGE_DOCA_FULL_RT_HOST:-nvcr.io/nvstaging/doca/doca:full-rt-3.6.0-ubuntu24.04-host-dev}
 
 ARG TARGETARCH
 
@@ -40,8 +40,15 @@ RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
     sed -i 's/^#\s*deb-src/deb-src/' /etc/apt/sources.list; \
     fi
 
-# Drop NVIDIA-internal apt sources baked into staging DOCA base images so the
-# build works from public CI (GitHub Actions). rshim then resolves from Ubuntu.
+# DMS needs doca-installer for BF3 BFB updates; rshim >= 2.9.1 no longer
+# includes bfb-install. Install it from the DOCA repository on internal runners
+# before dropping that repository for the remaining Ubuntu packages.
+RUN apt-get update -qq \
+      -o Dir::Etc::sourcelist=sources.list.d/doca.list \
+      -o Dir::Etc::sourceparts=/dev/null && \
+    apt-get install -y --no-install-recommends doca-installer mft
+
+# Prevent the DOCA repository from overriding the Ubuntu packages below.
 RUN grep -rlE 'doca-repo-prod\.nvidia\.com' /etc/apt/ 2>/dev/null | xargs -r rm -f
 
 RUN apt-get update -y
