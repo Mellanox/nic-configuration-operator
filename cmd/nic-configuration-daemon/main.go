@@ -19,13 +19,16 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"maps"
+	"math"
 	"os"
 	"slices"
 	"time"
 
 	maintenanceoperator "github.com/Mellanox/maintenance-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/selection"
@@ -37,6 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
@@ -46,6 +50,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/pkg/devicediscovery"
 	"github.com/Mellanox/nic-configuration-operator/pkg/dms"
 	"github.com/Mellanox/nic-configuration-operator/pkg/firmware"
+	"github.com/Mellanox/nic-configuration-operator/pkg/firmwareimage"
 	"github.com/Mellanox/nic-configuration-operator/pkg/helper"
 	"github.com/Mellanox/nic-configuration-operator/pkg/host"
 	"github.com/Mellanox/nic-configuration-operator/pkg/maintenance"
@@ -170,7 +175,32 @@ func main() {
 	configurationManager := configuration.NewConfigurationManager(
 		eventRecorder, dmsServer, nvConfigUtils, spectrumXConfigManager)
 	maintenanceManager := maintenance.New(mgr.GetClient(), hostUtils, nodeName, namespace)
-	firmwareManager := firmware.NewFirmwareManager(mgr.GetClient(), dmsServer, namespace)
+	imageTransport, err := firmwareimage.NewTransport(firmwareimage.TransportOptions{
+		AuthDir: os.Getenv("FIRMWARE_IMAGE_AUTH_DIR"),
+	})
+	if err != nil {
+		log.Log.Error(err, "invalid firmware image transport configuration")
+		os.Exit(1)
+	}
+	imageRoot := os.Getenv("FIRMWARE_IMAGE_CACHE_DIR")
+	if imageRoot == "" {
+		imageRoot = firmwareimage.RootDir
+	}
+	imageOptions, err := firmwareImageStoreOptions(os.Getenv("FIRMWARE_IMAGE_CACHE_SIZE"))
+	if err != nil {
+		log.Log.Error(err, "invalid firmware image cache size")
+		os.Exit(1)
+	}
+	imageStore, err := firmwareimage.NewStore(imageRoot, imageTransport.Fetch, imageOptions)
+	if err != nil {
+		log.Log.Error(err, "unable to initialize firmware image cache")
+		os.Exit(1)
+	}
+	if err := mgr.Add(manager.RunnableFunc(imageStore.Run)); err != nil {
+		log.Log.Error(err, "unable to add firmware image acquisition runnable")
+		os.Exit(1)
+	}
+	firmwareManager := firmware.NewFirmwareManagerWithImages(mgr.GetClient(), dmsServer, namespace, imageStore)
 
 	if err := initNicFwMap(namespace); err != nil {
 		log.Log.Error(err, "unable to init NicFwMap")
@@ -194,6 +224,7 @@ func main() {
 		ConfigurationManager: configurationManager,
 		MaintenanceManager:   maintenanceManager,
 		FirmwareManager:      firmwareManager,
+		FirmwareImages:       imageStore,
 		EventRecorder:        eventRecorder,
 		SpectrumXManager:     spectrumXConfigManager,
 		HostUtils:            hostUtils,
@@ -267,4 +298,21 @@ func initNicFwMap(namespace string) error {
 	}
 
 	return nil
+}
+
+// firmwareImageStoreOptions keeps the process budget consistent with the rendered
+// emptyDir limit. Quantity.Value follows Kubernetes' rounding to whole bytes.
+func firmwareImageStoreOptions(size string) (firmwareimage.StoreOptions, error) {
+	options := firmwareimage.DefaultStoreOptions()
+	if size == "" {
+		return options, nil
+	}
+	quantity, err := resource.ParseQuantity(size)
+	if err != nil || quantity.Cmp(*resource.NewQuantity(2<<30, resource.BinarySI)) < 0 ||
+		quantity.Cmp(*resource.NewQuantity(math.MaxInt64, resource.BinarySI)) > 0 {
+		return options, fmt.Errorf("firmware image cache size must be a Kubernetes quantity from 2Gi through %d bytes",
+			int64(math.MaxInt64))
+	}
+	options.MaxCacheBytes = quantity.Value()
+	return options, nil
 }

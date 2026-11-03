@@ -18,6 +18,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -103,21 +104,11 @@ func (t *nicFirmwareTemplate) getStatus() *v1alpha1.NicTemplateStatus {
 func (t *nicFirmwareTemplate) applyToDevice(device *v1alpha1.NicDevice) bool {
 	log.Log.V(2).Info(fmt.Sprintf("Applying template %s to device %s", t.template.Name, device.Name))
 
-	updateSpec := false
-
-	if device.Spec.Firmware == nil {
-		updateSpec = true
-		device.Spec.Firmware = &v1alpha1.FirmwareTemplateSpec{}
+	if reflect.DeepEqual(device.Spec.Firmware, t.template.Spec.Template) {
+		return false
 	}
-
-	if device.Spec.Firmware.NicFirmwareSourceRef != t.template.Spec.Template.NicFirmwareSourceRef ||
-		device.Spec.Firmware.UpdatePolicy != t.template.Spec.Template.UpdatePolicy {
-		updateSpec = true
-		device.Spec.Firmware.NicFirmwareSourceRef = t.template.Spec.Template.NicFirmwareSourceRef
-		device.Spec.Firmware.UpdatePolicy = t.template.Spec.Template.UpdatePolicy
-	}
-
-	return updateSpec
+	device.Spec.Firmware = t.template.Spec.Template.DeepCopy()
+	return true
 }
 
 func (t *nicFirmwareTemplate) updateStatus(ctx context.Context, client client.Client) error {

@@ -32,6 +32,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	"github.com/Mellanox/nic-configuration-operator/pkg/dms"
+	"github.com/Mellanox/nic-configuration-operator/pkg/firmwareimage"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 	utilsPkg "github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
@@ -59,6 +60,13 @@ type FirmwareManager interface {
 	GetFirmwareVersionsFromDevice(device *v1alpha1.NicDevice) (string, string, error)
 }
 
+// ImageResolver supplies verified immutable firmware files. The release function
+// keeps the returned pathname alive until all firmware tools have finished using it.
+// Acquisition must return immediately when an image is not yet available.
+type ImageResolver interface {
+	Acquire(reference string) (path string, release func(), err error)
+}
+
 type firmwareManager struct {
 	client client.Client
 
@@ -69,6 +77,7 @@ type firmwareManager struct {
 	cacheRootDir string
 	namespace    string
 	tmpDir       string
+	images       ImageResolver
 }
 
 // ValidateRequestedFirmwareSource will validate the NicFirmwareSource object, requested for NicDevice
@@ -79,10 +88,20 @@ type firmwareManager struct {
 // Source exists but not ready / failed
 // Source exists and ready but doesn't contain an image for this device's PSID
 func (f firmwareManager) ValidateRequestedFirmwareSource(ctx context.Context, device *v1alpha1.NicDevice) (string, error) {
+	if device == nil {
+		return "", errors.New("device must not be nil")
+	}
 	log.Log.Info("FirmwareManager.ValidateRequestedFirmwareSource()", "device", device.Name)
 
 	if device.Spec.Firmware == nil {
 		return "", errors.New("device's firmware spec is empty")
+	}
+	if len(device.Spec.Firmware.FirmwareImages) > 0 {
+		version, _, release, err := f.resolveFirmwareImage(device)
+		if release != nil {
+			release()
+		}
+		return version, err
 	}
 
 	fwSourceName := device.Spec.Firmware.NicFirmwareSourceRef
@@ -127,6 +146,9 @@ func (f firmwareManager) ValidateRequestedFirmwareSource(ctx context.Context, de
 // returns bool - reboot required (when fw reset fails or is skipped)
 // returns error - there were errors while updating firmware
 func (f firmwareManager) InstallFirmware(ctx context.Context, device *v1alpha1.NicDevice, options *types.FirmwareInstallOptions) (bool, error) {
+	if device == nil {
+		return false, errors.New("device must not be nil")
+	}
 	log.Log.Info("FirmwareManager.InstallFirmware()", "device", device.Name, "options", options)
 
 	if len(device.Status.Ports) == 0 {
@@ -140,6 +162,20 @@ func (f firmwareManager) InstallFirmware(ctx context.Context, device *v1alpha1.N
 	pci := device.Status.Ports[0].PCI
 	version := options.Version
 	var err error
+	fwFilePath := options.FwFilePath
+	if fwFilePath == "" && device.Spec.Firmware != nil && len(device.Spec.Firmware.FirmwareImages) > 0 {
+		var imageVersion string
+		var release func()
+		imageVersion, fwFilePath, release, err = f.resolveFirmwareImage(device)
+		if err != nil {
+			return false, err
+		}
+		defer release()
+		if version != "" && version != imageVersion {
+			return false, fmt.Errorf("firmware image version %s does not match requested version %s", imageVersion, version)
+		}
+		version = imageVersion
+	}
 
 	// In library mode with no version specified, extract version (and PSID for ConnectX) from the firmware file
 	var psidFromFile string
@@ -163,7 +199,6 @@ func (f firmwareManager) InstallFirmware(ctx context.Context, device *v1alpha1.N
 	}
 
 	// Resolve firmware file path from cache if not provided directly
-	fwFilePath := options.FwFilePath
 	if fwFilePath == "" {
 		fwFilePath, err = f.resolveFirmwareFilePath(device, version)
 		if err != nil {
@@ -190,6 +225,68 @@ func (f firmwareManager) InstallFirmware(ctx context.Context, device *v1alpha1.N
 	}
 
 	return false, nil
+}
+
+// resolveFirmwareImage validates the complete inventory before selecting by actual
+// PSID. The selected file remains pinned through every metadata, verify and burn call.
+func (f firmwareManager) resolveFirmwareImage(device *v1alpha1.NicDevice) (version, filePath string, release func(), err error) {
+	if device.Spec.Firmware.NicFirmwareSourceRef != "" {
+		return "", "", nil, errors.New("firmwareImages and nicFirmwareSourceRef are mutually exclusive")
+	}
+	if utilsPkg.IsBlueFieldDevice(device.Status.Type) {
+		return "", "", nil, errors.New("firmwareImages supports ConnectX binaries only; use nicFirmwareSourceRef for BlueField BFB updates")
+	}
+	if f.images == nil {
+		return "", "", nil, errors.New("firmware image acquisition is not configured")
+	}
+	defer func() {
+		if err != nil && release != nil {
+			release()
+			release = nil
+		}
+	}()
+	seenPSIDs := make(map[string]string)
+	for _, image := range device.Spec.Firmware.FirmwareImages {
+		if _, err = firmwareimage.ImageKey(image); err != nil {
+			return "", "", release, err
+		}
+		var candidate string
+		var unpin func()
+		candidate, unpin, err = f.images.Acquire(image)
+		if err != nil {
+			if errors.Is(err, firmwareimage.ErrPending) {
+				err = types.FirmwareSourceNotReadyError(image, "waiting for image acquisition")
+			}
+			return "", "", release, err
+		}
+		var candidateVersion, psid string
+		candidateVersion, psid, err = f.utils.GetFirmwareVersionAndPSIDFromFWBinary(candidate)
+		if err != nil {
+			unpin()
+			return "", "", release, fmt.Errorf("read firmware image %s metadata: %w", image, err)
+		}
+		if candidateVersion == "" || psid == "" {
+			unpin()
+			return "", "", release, fmt.Errorf("firmware image %s has an empty version or PSID", image)
+		}
+		if previous, found := seenPSIDs[strings.ToLower(psid)]; found {
+			unpin()
+			return "", "", release, fmt.Errorf("firmware images %s and %s contain the same PSID %s", previous, image, psid)
+		}
+		seenPSIDs[strings.ToLower(psid)] = image
+		if strings.EqualFold(psid, device.Status.PSID) {
+			version, filePath, release = candidateVersion, candidate, unpin
+		} else {
+			unpin()
+		}
+	}
+	if filePath == "" {
+		return "", "", release, fmt.Errorf("firmware images have no binary for device PSID %s", device.Status.PSID)
+	}
+	if err = f.utils.VerifyImageBootable(filePath); err != nil {
+		return "", "", release, fmt.Errorf("verify firmware image for PSID %s: %w", device.Status.PSID, err)
+	}
+	return version, filePath, release, nil
 }
 
 // resolveFirmwareFilePath resolves the firmware file path from the K8s cache.
@@ -343,7 +440,7 @@ func (f firmwareManager) installBlueFieldFirmware(ctx context.Context, device *v
 func (f firmwareManager) installConnectXFirmware(ctx context.Context, device *v1alpha1.NicDevice, version string, pci string, fwFilePath string, knownPSID string) error {
 	if knownPSID != "" {
 		// Library mode: PSID already extracted during version detection
-		if knownPSID != device.Status.PSID {
+		if !strings.EqualFold(knownPSID, device.Status.PSID) {
 			return fmt.Errorf("firmware file PSID %s does not match device PSID %s", knownPSID, device.Status.PSID)
 		}
 	} else {
@@ -353,7 +450,7 @@ func (f firmwareManager) installConnectXFirmware(ctx context.Context, device *v1
 			log.Log.Error(err, "couldn't get FW version and PSID from FW binary file", "path", fwFilePath)
 			return err
 		}
-		if versionInFile != version || psidInFile != device.Status.PSID {
+		if versionInFile != version || !strings.EqualFold(psidInFile, device.Status.PSID) {
 			return fmt.Errorf("found FW binary file doesn't match expected version or PSID. Requested %s, %s, found %s, %s", version, device.Status.PSID, versionInFile, psidInFile)
 		}
 	}
@@ -384,5 +481,11 @@ func (f firmwareManager) GetFirmwareVersionsFromDevice(device *v1alpha1.NicDevic
 }
 
 func NewFirmwareManager(client client.Client, dmsManager dms.DMSManager, namespace string) FirmwareManager {
-	return &firmwareManager{client: client, dmsManager: dmsManager, cacheRootDir: consts.NicFirmwareStorage, namespace: namespace, tmpDir: consts.TempDir, utils: newFirmwareUtils()}
+	return NewFirmwareManagerWithImages(client, dmsManager, namespace, nil)
+}
+
+// NewFirmwareManagerWithImages enables OCI sources using an explicitly owned
+// resolver. It does not start downloads or change direct-file/legacy source behavior.
+func NewFirmwareManagerWithImages(client client.Client, dmsManager dms.DMSManager, namespace string, images ImageResolver) FirmwareManager {
+	return &firmwareManager{client: client, dmsManager: dmsManager, cacheRootDir: consts.NicFirmwareStorage, namespace: namespace, tmpDir: consts.TempDir, images: images, utils: newFirmwareUtils()}
 }

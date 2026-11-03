@@ -78,11 +78,24 @@ logLevel: info
 # -- image pull secrets for both the operator and the config daemon
 imagePullSecrets: []
 
+# -- Total OCI firmware cache and acquisition staging budget. Kubernetes quantity, minimum 2Gi.
+# Node and Pod ephemeral-storage limits must accommodate the selected size.
+firmwareImageCacheSize: "4Gi"
+
+# -- Registry credential Secret names exposed read-only to the daemon's firmware resolver.
+# Component imagePullSecrets are not reused automatically. Supports .dockerconfigjson and .dockercfg.
+firmwareImagePullSecrets: []
+
+# -- Optional ConfigMap with ca-bundle.crt for daemon firmware registry TLS requests.
+# certConfig:
+#   name: registry-trust
+certConfig: {}
+
 # -- settings to enable the NIC Firmware Storage
 nicFirmwareStorage:
   # -- create a new pvc or use an existing one
   create: true
-  # -- name of the PVC to mount as NIC Firmware storage. If set to empty string, the NIC FW upgrade feature will be disabled.
+  # -- name of the PVC to mount as NIC Firmware storage. Set to an empty string for OCI firmware delivery without persistent storage.
   pvcName: nic-fw-storage-pvc
   # -- storage class name to be used to store NIC FW binaries during NIC FW upgrade. If not provided, the cluster-default storage class will be used
   storageClassName: ""
