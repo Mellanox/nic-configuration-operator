@@ -119,7 +119,7 @@ ECNSpec specifies Explicit Congestion Notification settings
 
 (*Appears on:*[NicDeviceSpec](#NicDeviceSpec), [NicFirmwareTemplateSpec](#NicFirmwareTemplateSpec))
 
-FirmwareTemplateSpec specifies a FW update policy for a given FW source ref
+FirmwareTemplateSpec specifies a firmware source and update policy. Exactly one of `nicFirmwareSourceRef` or nonempty `firmwareImages` is required.
 
 <table>
 <colgroup>
@@ -137,6 +137,11 @@ FirmwareTemplateSpec specifies a FW update policy for a given FW source ref
 <td><code>nicFirmwareSourceRef</code><br />
 <em>string</em></td>
 <td><p>NicFirmwareSourceRef refers to existing NicFirmwareSource CR on where to get the FW from</p></td>
+</tr>
+<tr>
+<td><code>firmwareImages</code><br />
+<em>[]string</em></td>
+<td><p>Optional set of 1–32 digest-pinned OCI references, each carrying one ConnectX binary at <code>/firmware/firmware.bin</code>. Readable model, PSID and version tags may precede the digest. Actual PSID and version are read from the binary. BlueField BFB updates continue to use <code>nicFirmwareSourceRef</code>. See <a href="firmware-images.md">firmware container delivery</a>.</p></td>
 </tr>
 <tr>
 <td><code>updatePolicy</code><br />

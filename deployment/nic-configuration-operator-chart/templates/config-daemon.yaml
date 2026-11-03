@@ -1,3 +1,20 @@
+{{- range .Values.configDaemon.env }}
+{{- if has .name (list "FIRMWARE_IMAGE_CACHE_DIR" "FIRMWARE_IMAGE_AUTH_DIR" "FIRMWARE_IMAGE_CA_FILE" "FIRMWARE_IMAGE_CACHE_SIZE") }}
+{{- fail (printf "configDaemon.env name %s is managed by the chart" .name) }}
+{{- end }}
+{{- end }}
+{{- $firmwareSecrets := .Values.firmwareImagePullSecrets | default list }}
+{{- if gt (len $firmwareSecrets) 32 }}
+{{- fail "firmwareImagePullSecrets must contain at most 32 names" }}
+{{- end }}
+{{- if ne (len $firmwareSecrets) (len (uniq $firmwareSecrets)) }}
+{{- fail "firmwareImagePullSecrets must not contain duplicate names" }}
+{{- end }}
+{{- range $firmwareSecrets }}
+{{- if or (gt (len .) 253) (not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$" .)) }}
+{{- fail (printf "firmwareImagePullSecrets contains invalid Secret name %q" .) }}
+{{- end }}
+{{- end }}
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -43,6 +60,18 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            - name: FIRMWARE_IMAGE_CACHE_DIR
+              value: /nic-firmware-images
+            - name: FIRMWARE_IMAGE_CACHE_SIZE
+              value: {{ .Values.firmwareImageCacheSize | quote }}
+            {{- if $firmwareSecrets }}
+            - name: FIRMWARE_IMAGE_AUTH_DIR
+              value: /var/run/nic-firmware-auth
+            {{- end }}
+            {{- if .Values.certConfig }}
+            - name: FIRMWARE_IMAGE_CA_FILE
+              value: /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
+            {{- end }}
             {{- if .Values.configDaemon.env }}
             {{- toYaml .Values.configDaemon.env | nindent 12 }}
             {{- end }}
@@ -51,6 +80,18 @@ spec:
               value: {{ .Values.logLevel }}
             {{- end}}
           volumeMounts:
+            - name: firmware-images
+              mountPath: /nic-firmware-images
+            {{- range $index, $secret := $firmwareSecrets }}
+            - name: firmware-auth-{{ $index }}
+              mountPath: {{ printf "/var/run/nic-firmware-auth/%s" $secret | quote }}
+              readOnly: true
+            {{- end }}
+            {{- if .Values.certConfig }}
+            - name: trusted-ca
+              mountPath: /etc/pki/ca-trust/extracted/pem
+              readOnly: true
+            {{- end }}
             - name: sys
               mountPath: /sys
               readOnly: false
@@ -68,6 +109,24 @@ spec:
               readOnly: true
             {{- end }}
       volumes:
+        - name: firmware-images
+          emptyDir:
+            sizeLimit: {{ .Values.firmwareImageCacheSize | quote }}
+        {{- range $index, $secret := $firmwareSecrets }}
+        - name: firmware-auth-{{ $index }}
+          secret:
+            secretName: {{ $secret | quote }}
+            optional: true
+        {{- end }}
+        {{- if .Values.certConfig }}
+        - name: trusted-ca
+          configMap:
+            name: {{ .Values.certConfig.name | quote }}
+            optional: true
+            items:
+              - key: ca-bundle.crt
+                path: tls-ca-bundle.pem
+        {{- end }}
         - name: sys
           hostPath:
             path: /sys

@@ -40,6 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
@@ -48,6 +49,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	"github.com/Mellanox/nic-configuration-operator/pkg/devicediscovery"
 	"github.com/Mellanox/nic-configuration-operator/pkg/firmware"
+	"github.com/Mellanox/nic-configuration-operator/pkg/firmwareimage"
 	"github.com/Mellanox/nic-configuration-operator/pkg/host"
 	"github.com/Mellanox/nic-configuration-operator/pkg/maintenance"
 	"github.com/Mellanox/nic-configuration-operator/pkg/spectrumx"
@@ -70,6 +72,7 @@ type NicDeviceReconciler struct {
 	NamespaceName string
 
 	FirmwareManager      firmware.FirmwareManager
+	FirmwareImages       *firmwareimage.Store
 	ConfigurationManager configuration.ConfigurationManager
 	HostUtils            host.HostUtils
 	MaintenanceManager   maintenance.MaintenanceManager
@@ -100,9 +103,9 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return reconcile.Result{}, nil
 	}
 
-	configStatuses, err := r.getDevices(ctx)
+	configStatuses, err := r.prepareDeviceInventory(ctx)
 	if err != nil {
-		log.Log.Error(err, "failed to get devices to reconcile")
+		log.Log.Error(err, "failed to prepare devices to reconcile")
 		return ctrl.Result{}, err
 	}
 
@@ -396,6 +399,25 @@ func (r *NicDeviceReconciler) reconcileInterfaceNameTemplates(ctx context.Contex
 	}
 
 	return nil
+}
+
+// prepareDeviceInventory uses the same node-local device snapshot for acquisition
+// demand and the subsequent hardware pass. Acquisition itself stays asynchronous.
+func (r *NicDeviceReconciler) prepareDeviceInventory(ctx context.Context) (nicDeviceConfigurationStatuses, error) {
+	statuses, err := r.getDevices(ctx)
+	if err != nil || r.FirmwareImages == nil {
+		return statuses, err
+	}
+	var references []string
+	for _, status := range statuses {
+		if status.device.Spec.Firmware != nil {
+			references = append(references, status.device.Spec.Firmware.FirmwareImages...)
+		}
+	}
+	if err := r.FirmwareImages.SetDesired(references); err != nil {
+		return nil, fmt.Errorf("set desired firmware images: %w", err)
+	}
+	return statuses, nil
 }
 
 // getDevices lists all the NicDevice objects from this node and filters those with non-empty specs,
@@ -1071,6 +1093,30 @@ func (r *NicDeviceReconciler) SetupWithManager(mgr ctrl.Manager, watchForMainten
 				qHandler(q)
 			},
 		}))
+
+	if r.FirmwareImages != nil {
+		imageEvents := make(chan event.TypedGenericEvent[*v1alpha1.NicDevice], 1)
+		if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+			for {
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-r.FirmwareImages.Changes():
+					select {
+					case imageEvents <- event.TypedGenericEvent[*v1alpha1.NicDevice]{}:
+					default:
+					}
+				}
+			}
+		})); err != nil {
+			return err
+		}
+		controller.WatchesRawSource(source.Channel(imageEvents, handler.TypedFuncs[*v1alpha1.NicDevice, reconcile.Request]{
+			GenericFunc: func(_ context.Context, _ event.TypedGenericEvent[*v1alpha1.NicDevice], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+				qHandler(q)
+			},
+		}))
+	}
 
 	if watchForMaintenance {
 		controller.Watches(&maintenanceoperator.NodeMaintenance{}, maintenance.GetMaintenanceRequestEventHandler(r.NodeName, qHandler))

@@ -328,9 +328,53 @@ status:
     a2d6: 25.21.0 # BF2 NIC FW
 ```
 
+### OCI firmware images without a PVC
+
+See [firmware image delivery](docs/firmware-images.md) for the image format, authentication,
+cache lifecycle, and library integration contract.
+
+A firmware template can select digest-pinned `firmwareImages` instead of `nicFirmwareSourceRef`.
+Each supported image contains one ConnectX binary at `/firmware/firmware.bin`; the daemon
+reads its actual PSID and version before validation or installation. Existing template
+node/NIC selectors select the devices, and `updatePolicy: Validate` never flashes firmware.
+Image changes are resolved in the running daemon without Pod replacement or admission webhooks.
+Existing `NicFirmwareSource` downloads and BlueField BFB workflows remain available.
+
+For a standalone Helm installation without shared firmware storage:
+
+```yaml
+nicFirmwareStorage:
+  create: false
+  pvcName: ""
+firmwareImagePullSecrets:
+  - firmware-registry-readonly
+certConfig:
+  name: registry-trust
+```
+
+The credential list and CA reference are optional for public registries. Credential Secrets
+must be in the release namespace and contain `.dockerconfigjson` or `.dockercfg`.
+They are explicitly exposed through optional read-only directory mounts in the daemon;
+component `imagePullSecrets` are never reused implicitly. A missing credential does not
+block daemon startup and is reported for the affected firmware source. The CA ConfigMap
+contains `ca-bundle.crt`. Existing `configDaemon.env` proxy settings apply to registry requests.
+Credential and CA files can rotate without Pod replacement. Do not override the managed
+`FIRMWARE_IMAGE_CACHE_DIR`, `FIRMWARE_IMAGE_CACHE_SIZE`, `FIRMWARE_IMAGE_AUTH_DIR`, or
+`FIRMWARE_IMAGE_CA_FILE` environment variables.
+
+The daemon uses an `emptyDir` for firmware cache and staging data; no PVC is required.
+`firmwareImageCacheSize` controls both budgets, defaults to `4Gi`, and must be at least `2Gi`.
+Keep node and Pod ephemeral-storage limits large enough for that size. Large inventories
+need room for their desired payloads plus acquisition staging.
+Registry requests begin only for images selected by device policies. Use explicit mirrored
+registry references in air-gapped environments. Kubelet-only credentials, runtime mirror
+configuration, signature policies, and preloaded runtime image caches are not inherited.
+Changing the daemon image, mounted Secret names, or deployment settings still performs the
+ordinary DaemonSet rollout; wait for firmware operations to finish before those changes.
+
 ### NICFirmwareTemplate
 
-The NICFirmwareTemplate CRD is used to request FW validation or update from a referenced NICFirmwareSource for a subset of devices.
+The NICFirmwareTemplate CRD requests firmware validation or updates from a NicFirmwareSource or an OCI image inventory for selected devices.
 
 NIC Configuration Operator will select NIC devices in the cluster that match the template's selectors and apply the configuration spec to them.
 
