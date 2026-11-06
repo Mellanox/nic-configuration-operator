@@ -66,6 +66,15 @@ func main() {
 	flag.Parse()
 	ncolog.InitLog()
 
+	logLevel := os.Getenv("LOG_LEVEL")
+	if logLevel != "" {
+		err := ncolog.SetLogLevel(logLevel)
+		if err != nil {
+			log.Log.Error(err, "failed to set log level")
+			os.Exit(1)
+		}
+	}
+
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(maintenanceoperator.AddToScheme(scheme))
 	utilruntime.Must(v1alpha1.AddToScheme(scheme))
@@ -125,15 +134,6 @@ func main() {
 	if err != nil {
 		log.Log.Error(err, "unable to create manager")
 		os.Exit(1)
-	}
-
-	logLevel := os.Getenv("LOG_LEVEL")
-	if logLevel != "" {
-		err = ncolog.SetLogLevel(logLevel)
-		if err != nil {
-			log.Log.Error(err, "failed to set log level")
-			os.Exit(1)
-		}
 	}
 
 	//nolint:staticcheck // Callers use record.EventRecorder. GetEventRecorder returns the newer events API.

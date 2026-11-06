@@ -32,6 +32,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	"github.com/Mellanox/nic-configuration-operator/pkg/dms"
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 )
 
 var (
@@ -137,7 +138,7 @@ func (h *configurationUtils) GetPCILinkSpeed(pciAddr string) (int, error) {
 	log.Log.Info("ConfigurationUtils.GetPCILinkSpeed()", "pciAddr", pciAddr)
 	cmd := h.execInterface.Command("lspci", "-vv", "-s", pciAddr)
 	output, err := cmd.CombinedOutput()
-	log.Log.V(2).Info("GetPCILinkSpeed(): command output", "output", string(output))
+	log.Log.V(ncolog.DebugLevel).Info("GetPCILinkSpeed(): command output", "output", string(output))
 	if err != nil {
 		log.Log.Error(err, "GetPCILinkSpeed(): Failed to run lspci")
 		return -1, err
@@ -178,7 +179,7 @@ func (h *configurationUtils) GetMaxReadRequestSize(pciAddr string) (int, error) 
 	log.Log.Info("ConfigurationUtils.GetMaxReadRequestSize()", "pciAddr", pciAddr)
 	cmd := h.execInterface.Command("lspci", "-vv", "-s", pciAddr)
 	output, err := cmd.CombinedOutput()
-	log.Log.V(2).Info("GetMaxReadRequestSize(): command output", "output", string(output))
+	log.Log.V(ncolog.DebugLevel).Info("GetMaxReadRequestSize(): command output", "output", string(output))
 	if err != nil && len(output) == 0 {
 		log.Log.Error(err, "GetMaxReadRequestSize(): Failed to run lspci")
 		return -1, err
@@ -241,7 +242,7 @@ func (h *configurationUtils) ResetNicFirmware(ctx context.Context, pciAddr strin
 
 	cmd := h.execInterface.CommandContext(ctx, "mlxfwreset", "--device", pciAddr, "reset", "--yes")
 	output, err := cmd.CombinedOutput()
-	log.Log.V(2).Info("ResetNicFirmware(): command output", "output", string(output))
+	log.Log.V(ncolog.DebugLevel).Info("ResetNicFirmware(): command output", "output", string(output))
 	if err != nil {
 		log.Log.Error(err, "ResetNicFirmware(): Failed to run mlxfwreset")
 		return err
@@ -273,7 +274,7 @@ func (h *configurationUtils) SetMaxReadRequestSize(pciAddr string, maxReadReques
 
 	cmd := h.execInterface.Command("setpci", "-s", pciAddr, fmt.Sprintf("CAP_EXP+08.w=%d000:F000", valueToApply))
 	output, err := cmd.CombinedOutput()
-	log.Log.V(2).Info("SetMaxReadRequestSize(): command output", "output", string(output))
+	log.Log.V(ncolog.DebugLevel).Info("SetMaxReadRequestSize(): command output", "output", string(output))
 	if err != nil {
 		log.Log.Error(err, "SetMaxReadRequestSize(): Failed to run setpci")
 		return err
@@ -303,7 +304,7 @@ func (h *configurationUtils) SetQoSSettings(device *v1alpha1.NicDevice, spec *v1
 
 // GetRoceMode returns the current RoCE mode (1 or 2)
 func (h *configurationUtils) GetRoceMode(interfaceName string) (int, error) {
-	log.Log.V(2).Info("ConfigurationUtils.GetRoceMode()", "interface", interfaceName)
+	log.Log.V(ncolog.DebugLevel).Info("ConfigurationUtils.GetRoceMode()", "interface", interfaceName)
 	cmd := h.execInterface.Command("cma_roce_mode", "-d", interfaceName)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -337,7 +338,7 @@ func (h *configurationUtils) SetRoceMode(interfaceName string, mode int) error {
 
 // GetCableLen returns the configured cable length
 func (h *configurationUtils) GetCableLen(interfaceName string) (int, error) {
-	log.Log.V(2).Info("ConfigurationUtils.GetCableLen()", "interface", interfaceName)
+	log.Log.V(ncolog.DebugLevel).Info("ConfigurationUtils.GetCableLen()", "interface", interfaceName)
 	cmd := h.execInterface.Command("mlnx_qos", "-i", interfaceName)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -375,7 +376,7 @@ func ecnSysfsPath(interfaceName, direction string, priority int) string {
 
 // GetECNEnabled returns whether ECN is enabled for roce_rp and roce_np on a given priority
 func (h *configurationUtils) GetECNEnabled(interfaceName string, priority int) (bool, bool, error) {
-	log.Log.V(2).Info("ConfigurationUtils.GetECNEnabled()", "interface", interfaceName, "priority", priority)
+	log.Log.V(ncolog.DebugLevel).Info("ConfigurationUtils.GetECNEnabled()", "interface", interfaceName, "priority", priority)
 
 	readECN := func(direction string) (bool, error) {
 		cmd := h.execInterface.Command("cat", ecnSysfsPath(interfaceName, direction, priority))
@@ -422,7 +423,7 @@ func (h *configurationUtils) SetECNEnabled(interfaceName string, priority int, r
 
 // GetPauseFrames returns whether global pause frames are enabled for RX and TX.
 func (h *configurationUtils) GetPauseFrames(interfaceName string) (bool, bool, error) {
-	log.Log.V(2).Info("ConfigurationUtils.GetPauseFrames()", "interface", interfaceName)
+	log.Log.V(ncolog.DebugLevel).Info("ConfigurationUtils.GetPauseFrames()", "interface", interfaceName)
 	cmd := h.execInterface.Command("ethtool", "-a", interfaceName)
 	output, err := cmd.CombinedOutput()
 	if err != nil && len(output) == 0 {
@@ -462,14 +463,14 @@ func (h *configurationUtils) SetPauseFrames(interfaceName string, enabled bool) 
 	}
 	if err != nil {
 		// ethtool -A may exit non-zero when autoneg is unsupported but rx/tx are applied successfully
-		log.Log.V(2).Info("SetPauseFrames(): ethtool -A returned non-zero exit but produced output, continuing", "interface", interfaceName, "output", string(output))
+		log.Log.V(ncolog.DebugLevel).Info("SetPauseFrames(): ethtool -A returned non-zero exit but produced output, continuing", "interface", interfaceName, "output", string(output))
 	}
 	return nil
 }
 
 // GetRingSize returns the current rx and tx ring buffer sizes
 func (h *configurationUtils) GetRingSize(interfaceName string) (int, int, error) {
-	log.Log.V(2).Info("ConfigurationUtils.GetRingSize()", "interface", interfaceName)
+	log.Log.V(ncolog.DebugLevel).Info("ConfigurationUtils.GetRingSize()", "interface", interfaceName)
 	cmd := h.execInterface.Command("ethtool", "-g", interfaceName)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -542,12 +543,12 @@ func (h *configurationUtils) SetRingSize(interfaceName string, rx int, tx int) e
 
 // GetCombinedChannels returns the current number of combined channels
 func (h *configurationUtils) GetCombinedChannels(interfaceName string) (int, error) {
-	log.Log.V(2).Info("ConfigurationUtils.GetCombinedChannels()", "interface", interfaceName)
+	log.Log.V(ncolog.DebugLevel).Info("ConfigurationUtils.GetCombinedChannels()", "interface", interfaceName)
 	cmd := h.execInterface.Command("ethtool", "-l", interfaceName)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// ethtool -l may fail (with or without error output) on drivers that don't support channel config
-		log.Log.V(2).Info("GetCombinedChannels(): ethtool -l failed, driver may not support it", "interface", interfaceName, "err", err, "output", string(output))
+		log.Log.V(ncolog.DebugLevel).Info("GetCombinedChannels(): ethtool -l failed, driver may not support it", "interface", interfaceName, "err", err, "output", string(output))
 		return 0, nil
 	}
 	// Parse "Current hardware settings" section
@@ -570,11 +571,11 @@ func (h *configurationUtils) GetCombinedChannels(interfaceName string) (int, err
 	}
 	if !inCurrent {
 		// Treat unexpected output format the same as tool failure — driver may not support it
-		log.Log.V(2).Info("GetCombinedChannels(): current hardware settings not found in ethtool -l output, driver may not support it", "interface", interfaceName, "output", string(output))
+		log.Log.V(ncolog.DebugLevel).Info("GetCombinedChannels(): current hardware settings not found in ethtool -l output, driver may not support it", "interface", interfaceName, "output", string(output))
 		return 0, nil
 	}
 	// Combined channels may not be exposed by all drivers; return 0 to let the caller decide
-	log.Log.V(2).Info("GetCombinedChannels(): combined channels not found in ethtool output, driver may not support it", "interface", interfaceName, "output", string(output))
+	log.Log.V(ncolog.DebugLevel).Info("GetCombinedChannels(): combined channels not found in ethtool output, driver may not support it", "interface", interfaceName, "output", string(output))
 	return 0, nil
 }
 
@@ -592,7 +593,7 @@ func (h *configurationUtils) SetCombinedChannels(interfaceName string, channels 
 
 // GetLRO returns whether Large Receive Offload is enabled
 func (h *configurationUtils) GetLRO(interfaceName string) (bool, error) {
-	log.Log.V(2).Info("ConfigurationUtils.GetLRO()", "interface", interfaceName)
+	log.Log.V(ncolog.DebugLevel).Info("ConfigurationUtils.GetLRO()", "interface", interfaceName)
 	cmd := h.execInterface.Command("ethtool", "-k", interfaceName)
 	output, err := cmd.CombinedOutput()
 	if err != nil {

@@ -30,6 +30,7 @@ import (
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 )
 
 type clearDeviceSpecFunc = func(device *v1alpha1.NicDevice)
@@ -56,7 +57,7 @@ func matchDevicesToTemplates(ctx context.Context, client client.Client, recorder
 		log.Log.Error(err, "Failed to list NicDevices")
 		return err
 	}
-	log.Log.V(2).Info("Listed devices", "count", len(deviceList.Items))
+	log.Log.V(ncolog.DebugLevel).Info("Listed devices", "count", len(deviceList.Items))
 
 	nodeList := &v1.NodeList{}
 	err = client.List(ctx, nodeList)
@@ -64,7 +65,7 @@ func matchDevicesToTemplates(ctx context.Context, client client.Client, recorder
 		log.Log.Error(err, "Failed to list cluster nodes")
 		return err
 	}
-	log.Log.V(2).Info("Listed nodes", "count", len(nodeList.Items))
+	log.Log.V(ncolog.DebugLevel).Info("Listed nodes", "count", len(nodeList.Items))
 
 	nodeMap := map[string]*v1.Node{}
 	for _, node := range nodeList.Items {
@@ -100,7 +101,7 @@ func matchDevicesToTemplates(ctx context.Context, client client.Client, recorder
 		}
 
 		if len(matchingTemplates) == 0 {
-			log.Log.V(2).Info("Device doesn't match any configuration template, resetting the spec", "device", device.Name)
+			log.Log.V(ncolog.DebugLevel).Info("Device doesn't match any configuration template, resetting the spec", "device", device.Name)
 
 			clearDeviceSpec(&device)
 

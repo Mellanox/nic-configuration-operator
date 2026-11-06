@@ -29,6 +29,7 @@ import (
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
@@ -191,7 +192,7 @@ func getPathRequestBatchKey(filterRules map[string]string) string {
 
 func (i *dmsClient) RunGetPathCommand(path string, filterRules map[string]string) (string, error) {
 	device := i.deviceSnapshot()
-	log.Log.V(2).Info("dmsClient.RunGetPathCommand()", "path", path, "filterRules", filterRules, "device", device.SerialNumber)
+	log.Log.V(ncolog.DebugLevel).Info("dmsClient.RunGetPathCommand()", "path", path, "filterRules", filterRules, "device", device.SerialNumber)
 
 	request := newGetPathRequest(path, filterRules)
 	values, err := i.RunGetPathCommands(getPathRequestBatch{key: getPathRequestBatchKey(filterRules), requests: []getPathRequest{request}})
@@ -203,7 +204,7 @@ func (i *dmsClient) RunGetPathCommand(path string, filterRules map[string]string
 	if !ok {
 		return "", fmt.Errorf("value not found for path %s", request.paramPath)
 	}
-	log.Log.V(2).Info("RunGetPathCommand successful", "device", device.SerialNumber, "path", path, "value", value)
+	log.Log.V(ncolog.DebugLevel).Info("RunGetPathCommand successful", "device", device.SerialNumber, "path", path, "value", value)
 	return value, nil
 }
 
@@ -215,29 +216,29 @@ func (i *dmsClient) RunGetPathCommands(batch getPathRequestBatch) (map[string]st
 	}
 
 	batchKey := batch.key
-	log.Log.V(2).Info("dmsClient.RunGetPathCommands()", "requestCount", len(requests), "batchKey", batchKey, "device", device.SerialNumber)
+	log.Log.V(ncolog.DebugLevel).Info("dmsClient.RunGetPathCommands()", "requestCount", len(requests), "batchKey", batchKey, "device", device.SerialNumber)
 
 	args := append([]string{dmsClientPath, "-a", i.bindAddress}, i.authParams...)
 	args = append(args, "--target", i.targetPCI, "--timeout", dmsClientTimeout, "get")
 	for _, request := range requests {
 		args = append(args, "--path", request.queryPath)
 	}
-	log.Log.V(2).Info("dmsClient.RunGetPathCommands()", "batchKey", batchKey, "args", strings.Join(args, " "))
+	log.Log.V(ncolog.DebugLevel).Info("dmsClient.RunGetPathCommands()", "batchKey", batchKey, "args", strings.Join(args, " "))
 
 	command := i.execInterface.Command(args[0], args[1:]...)
 
-	log.Log.V(2).Info("Executing command", "device", device.SerialNumber, "command", strings.Join(args, " "))
+	log.Log.V(ncolog.DebugLevel).Info("Executing command", "device", device.SerialNumber, "command", strings.Join(args, " "))
 	output, err := command.CombinedOutput()
-	log.Log.V(2).Info("dmsClient.RunGetPathCommands() raw DMS output", "device", device.SerialNumber, "batchKey", batchKey, "output", string(output))
+	log.Log.V(ncolog.DebugLevel).Info("dmsClient.RunGetPathCommands() raw DMS output", "device", device.SerialNumber, "batchKey", batchKey, "output", string(output))
 	if err != nil {
-		log.Log.V(2).Error(err, "Command execution failed", "device", device.SerialNumber)
+		log.Log.V(ncolog.DebugLevel).Error(err, "Command execution failed", "device", device.SerialNumber)
 		return nil, fmt.Errorf("failed to run get path command: %v, output: %s", err, string(output))
 	}
-	log.Log.V(2).Info("Command execution successful", "device", device.SerialNumber, "outputSize", len(output))
+	log.Log.V(ncolog.DebugLevel).Info("Command execution successful", "device", device.SerialNumber, "outputSize", len(output))
 
 	values, err := parseGetPathCommandOutput(output, requests)
 	if err != nil {
-		log.Log.V(2).Error(err, "Failed to parse get path command output", "device", device.SerialNumber)
+		log.Log.V(ncolog.DebugLevel).Error(err, "Failed to parse get path command output", "device", device.SerialNumber)
 		return nil, err
 	}
 
@@ -250,7 +251,7 @@ func parseGetPathCommandOutput(output []byte, requests []getPathRequest) (map[st
 		return nil, fmt.Errorf("failed to unmarshal command output: %v", err)
 	}
 
-	log.Log.V(2).Info("parseGetPathCommandOutput()", "json result", result)
+	log.Log.V(ncolog.DebugLevel).Info("parseGetPathCommandOutput()", "json result", result)
 
 	var updates []dmsGetUpdate
 	for _, item := range result {
@@ -317,21 +318,21 @@ func formatSetUpdate(path, value, valueType string, filterRules map[string]strin
 
 func (i *dmsClient) RunSetPathCommand(path, value, valueType string, filterRules map[string]string) error {
 	device := i.deviceSnapshot()
-	log.Log.V(2).Info("dmsClient.RunSetPathCommand()", "path", path, "value", value, "valueType", valueType, "device", device.SerialNumber)
+	log.Log.V(ncolog.DebugLevel).Info("dmsClient.RunSetPathCommand()", "path", path, "value", value, "valueType", valueType, "device", device.SerialNumber)
 
 	args := append([]string{dmsClientPath, "-a", i.bindAddress}, i.authParams...)
 	args = append(args, "--target", i.targetPCI, "--timeout", dmsClientTimeout, "set", "--update", formatSetUpdate(path, value, valueType, filterRules))
-	log.Log.V(2).Info("dmsClient.RunSetPathCommand()", "args", strings.Join(args, " "))
+	log.Log.V(ncolog.DebugLevel).Info("dmsClient.RunSetPathCommand()", "args", strings.Join(args, " "))
 
 	command := i.execInterface.Command(args[0], args[1:]...)
 
-	log.Log.V(2).Info("Executing command", "device", device.SerialNumber, "command", strings.Join(args, " "))
+	log.Log.V(ncolog.DebugLevel).Info("Executing command", "device", device.SerialNumber, "command", strings.Join(args, " "))
 	output, err := command.Output()
 	if err != nil {
-		log.Log.V(2).Error(err, "Command execution failed", "device", device.SerialNumber, "path", path, "output", string(output))
+		log.Log.V(ncolog.DebugLevel).Error(err, "Command execution failed", "device", device.SerialNumber, "path", path, "output", string(output))
 		return fmt.Errorf("failed to set path %s: %v, output: %s", path, err, string(output))
 	}
-	log.Log.V(2).Info("RunSetPathCommand successful", "device", device.SerialNumber, "path", path)
+	log.Log.V(ncolog.DebugLevel).Info("RunSetPathCommand successful", "device", device.SerialNumber, "path", path)
 
 	return nil
 }
@@ -339,43 +340,43 @@ func (i *dmsClient) RunSetPathCommand(path, value, valueType string, filterRules
 // GetQoSSettings returns the current QoS settings (trust mode and PFC configuration)
 func (i *dmsClient) GetQoSSettings(interfaceName string) (*v1alpha1.QosSpec, error) {
 	device := i.deviceSnapshot()
-	log.Log.V(2).Info("dmsClient.GetQoSSettings()", "interfaceName", interfaceName, "device", device.SerialNumber)
+	log.Log.V(ncolog.DebugLevel).Info("dmsClient.GetQoSSettings()", "interfaceName", interfaceName, "device", device.SerialNumber)
 
-	log.Log.V(2).Info("Getting trust mode", "device", device.SerialNumber, "interface", interfaceName)
+	log.Log.V(ncolog.DebugLevel).Info("Getting trust mode", "device", device.SerialNumber, "interface", interfaceName)
 	trust, err := i.RunGetPathCommand(QoSTrustModePath, interfaceNameFilter(interfaceName))
 	if err != nil {
-		log.Log.V(2).Error(err, "Failed to get trust mode", "device", device.SerialNumber, "interface", interfaceName)
+		log.Log.V(ncolog.DebugLevel).Error(err, "Failed to get trust mode", "device", device.SerialNumber, "interface", interfaceName)
 		return nil, fmt.Errorf("failed to get trust mode: %v", err)
 	}
-	log.Log.V(2).Info("Trust mode retrieved", "device", device.SerialNumber, "trust", trust)
+	log.Log.V(ncolog.DebugLevel).Info("Trust mode retrieved", "device", device.SerialNumber, "trust", trust)
 
-	log.Log.V(2).Info("Getting PFC configuration", "device", device.SerialNumber, "interface", interfaceName)
+	log.Log.V(ncolog.DebugLevel).Info("Getting PFC configuration", "device", device.SerialNumber, "interface", interfaceName)
 	pfc, err := i.RunGetPathCommand(QoSPFCPath, interfaceNameFilter(interfaceName))
 	if err != nil {
-		log.Log.V(2).Error(err, "Failed to get PFC configuration", "device", device.SerialNumber, "interface", interfaceName)
+		log.Log.V(ncolog.DebugLevel).Error(err, "Failed to get PFC configuration", "device", device.SerialNumber, "interface", interfaceName)
 		return nil, fmt.Errorf("failed to get PFC configuration: %v", err)
 	}
-	log.Log.V(2).Info("PFC configuration retrieved", "device", device.SerialNumber, "pfc", pfc)
+	log.Log.V(ncolog.DebugLevel).Info("PFC configuration retrieved", "device", device.SerialNumber, "pfc", pfc)
 
-	log.Log.V(2).Info("QoS settings for interface", "interfaceName", interfaceName, "trust", trust, "pfc", pfc)
+	log.Log.V(ncolog.DebugLevel).Info("QoS settings for interface", "interfaceName", interfaceName, "trust", trust, "pfc", pfc)
 
 	// PFC settings are comma-separated values, e.g. "0,0,0,1,0,0,0,0". DMS returns a digit-only string, e.g. "00001000".
 	// So, we need to convert the string to a comma-separated value.
 	pfcFormatted := strings.Join(strings.Split(pfc, ""), ",")
-	log.Log.V(2).Info("Formatted PFC configuration", "device", device.SerialNumber, "original", pfc, "formatted", pfcFormatted)
+	log.Log.V(ncolog.DebugLevel).Info("Formatted PFC configuration", "device", device.SerialNumber, "original", pfc, "formatted", pfcFormatted)
 
-	log.Log.V(2).Info("Getting ToS configuration", "device", device.SerialNumber, "interface", interfaceName)
+	log.Log.V(ncolog.DebugLevel).Info("Getting ToS configuration", "device", device.SerialNumber, "interface", interfaceName)
 	tos, err := i.RunGetPathCommand(ToSPath, interfaceNameFilter(interfaceName))
 	if err != nil {
-		log.Log.V(2).Error(err, "Failed to get ToS configuration", "device", device.SerialNumber, "interface", interfaceName)
+		log.Log.V(ncolog.DebugLevel).Error(err, "Failed to get ToS configuration", "device", device.SerialNumber, "interface", interfaceName)
 		return nil, fmt.Errorf("failed to get ToS configuration: %v", err)
 	}
 	tosFormatted, err := strconv.Atoi(tos)
 	if err != nil {
-		log.Log.V(2).Error(err, "Failed to convert ToS to int", "device", device.SerialNumber, "interface", interfaceName)
+		log.Log.V(ncolog.DebugLevel).Error(err, "Failed to convert ToS to int", "device", device.SerialNumber, "interface", interfaceName)
 		return nil, fmt.Errorf("failed to convert ToS to int: %v", err)
 	}
-	log.Log.V(2).Info("ToS configuration retrieved", "device", device.SerialNumber, "tos", tosFormatted)
+	log.Log.V(ncolog.DebugLevel).Info("ToS configuration retrieved", "device", device.SerialNumber, "tos", tosFormatted)
 
 	return &v1alpha1.QosSpec{
 		Trust: trust,
@@ -387,7 +388,7 @@ func (i *dmsClient) GetQoSSettings(interfaceName string) (*v1alpha1.QosSpec, err
 // SetQoSSettings sets the QoS settings for the device (trust and PFC configuration). Settings are applied to all ports of the device.
 func (i *dmsClient) SetQoSSettings(spec *v1alpha1.QosSpec) error {
 	device := i.deviceSnapshot()
-	log.Log.V(2).Info("dmsClient.SetQoSSettings()", "spec", spec, "device", device.SerialNumber)
+	log.Log.V(ncolog.DebugLevel).Info("dmsClient.SetQoSSettings()", "spec", spec, "device", device.SerialNumber)
 
 	trust := ""
 	switch spec.Trust {
@@ -396,54 +397,54 @@ func (i *dmsClient) SetQoSSettings(spec *v1alpha1.QosSpec) error {
 	case consts.TrustModePfc:
 		trust = "pfc"
 	default:
-		log.Log.V(2).Info("Invalid trust mode", "device", device.SerialNumber, "trust", trust)
+		log.Log.V(ncolog.DebugLevel).Info("Invalid trust mode", "device", device.SerialNumber, "trust", trust)
 		return fmt.Errorf("invalid trust mode: %s", trust)
 	}
-	log.Log.V(2).Info("Normalized trust mode", "device", device.SerialNumber, "trust", trust)
+	log.Log.V(ncolog.DebugLevel).Info("Normalized trust mode", "device", device.SerialNumber, "trust", trust)
 
 	// PFC settings are comma-separated values, e.g. "0,0,0,1,0,0,0,0". DMS requires a digit-only string, e.g. "00001000"
 	pfcFormatted := strings.ReplaceAll(spec.PFC, ",", "")
-	log.Log.V(2).Info("Formatted PFC configuration", "device", device.SerialNumber, "original", spec.PFC, "formatted", pfcFormatted)
+	log.Log.V(ncolog.DebugLevel).Info("Formatted PFC configuration", "device", device.SerialNumber, "original", spec.PFC, "formatted", pfcFormatted)
 
 	portCount := len(device.Ports)
-	log.Log.V(2).Info("Setting QoS settings on all ports", "device", device.SerialNumber, "portCount", portCount)
+	log.Log.V(ncolog.DebugLevel).Info("Setting QoS settings on all ports", "device", device.SerialNumber, "portCount", portCount)
 
 	for idx, port := range device.Ports {
-		log.Log.V(2).Info("Setting trust mode", "device", device.SerialNumber, "port", idx+1, "interface", port.NetworkInterface)
+		log.Log.V(ncolog.DebugLevel).Info("Setting trust mode", "device", device.SerialNumber, "port", idx+1, "interface", port.NetworkInterface)
 		err := i.RunSetPathCommand(QoSTrustModePath, trust, ValueTypeString, interfaceNameFilter(port.NetworkInterface))
 		if err != nil {
-			log.Log.V(2).Error(err, "Failed to set trust mode", "device", device.SerialNumber, "interface", port.NetworkInterface)
+			log.Log.V(ncolog.DebugLevel).Error(err, "Failed to set trust mode", "device", device.SerialNumber, "interface", port.NetworkInterface)
 			return fmt.Errorf("failed to set trust mode: %v", err)
 		}
-		log.Log.V(2).Info("Trust mode set successfully", "device", device.SerialNumber, "interface", port.NetworkInterface)
+		log.Log.V(ncolog.DebugLevel).Info("Trust mode set successfully", "device", device.SerialNumber, "interface", port.NetworkInterface)
 
-		log.Log.V(2).Info("Setting PFC configuration", "device", device.SerialNumber, "port", idx+1, "interface", port.NetworkInterface)
+		log.Log.V(ncolog.DebugLevel).Info("Setting PFC configuration", "device", device.SerialNumber, "port", idx+1, "interface", port.NetworkInterface)
 		err = i.RunSetPathCommand(QoSPFCPath, pfcFormatted, ValueTypeString, interfaceNameFilter(port.NetworkInterface))
 		if err != nil {
-			log.Log.V(2).Error(err, "Failed to set PFC configuration", "device", device.SerialNumber, "interface", port.NetworkInterface)
+			log.Log.V(ncolog.DebugLevel).Error(err, "Failed to set PFC configuration", "device", device.SerialNumber, "interface", port.NetworkInterface)
 			return fmt.Errorf("failed to set PFC configuration: %v", err)
 		}
-		log.Log.V(2).Info("PFC configuration set successfully", "device", device.SerialNumber, "interface", port.NetworkInterface)
+		log.Log.V(ncolog.DebugLevel).Info("PFC configuration set successfully", "device", device.SerialNumber, "interface", port.NetworkInterface)
 
 		if spec.ToS != 0 {
-			log.Log.V(2).Info("Setting ToS configuration", "device", device.SerialNumber, "port", idx+1, "interface", port.NetworkInterface)
+			log.Log.V(ncolog.DebugLevel).Info("Setting ToS configuration", "device", device.SerialNumber, "port", idx+1, "interface", port.NetworkInterface)
 			err = i.RunSetPathCommand(ToSPath, fmt.Sprintf("%d", spec.ToS), ValueTypeInt, interfaceNameFilter(port.NetworkInterface))
 			if err != nil {
-				log.Log.V(2).Error(err, "Failed to set ToS configuration", "device", device.SerialNumber, "interface", port.NetworkInterface)
+				log.Log.V(ncolog.DebugLevel).Error(err, "Failed to set ToS configuration", "device", device.SerialNumber, "interface", port.NetworkInterface)
 				return fmt.Errorf("failed to set ToS configuration: %v", err)
 			}
-			log.Log.V(2).Info("ToS configuration set successfully", "device", device.SerialNumber, "interface", port.NetworkInterface)
+			log.Log.V(ncolog.DebugLevel).Info("ToS configuration set successfully", "device", device.SerialNumber, "interface", port.NetworkInterface)
 		}
 	}
 
-	log.Log.V(2).Info("QoS settings applied to all ports", "device", device.SerialNumber, "portCount", portCount)
+	log.Log.V(ncolog.DebugLevel).Info("QoS settings applied to all ports", "device", device.SerialNumber, "portCount", portCount)
 	return nil
 }
 
 // InstallBFB installs the BFB file with the new firmware version on a BlueField device
 func (i *dmsClient) InstallBFB(ctx context.Context, version string, bfbPath string) error {
 	device := i.deviceSnapshot()
-	log.Log.V(2).Info("dmsClient.InstallBFB()", "version", version, "bfbPath", bfbPath, "device", device.SerialNumber)
+	log.Log.V(ncolog.DebugLevel).Info("dmsClient.InstallBFB()", "version", version, "bfbPath", bfbPath, "device", device.SerialNumber)
 
 	if !utils.IsBlueFieldDevice(device.Type) {
 		err := fmt.Errorf("cannot install BFB file on non-BlueField device")
@@ -453,7 +454,7 @@ func (i *dmsClient) InstallBFB(ctx context.Context, version string, bfbPath stri
 
 	args := append([]string{dmsClientPath, "-a", i.bindAddress}, i.authParams...)
 	args = append(args, "--target", i.targetPCI, "os", "install", "--version", version, "--pkg", bfbPath)
-	log.Log.V(2).Info("dmsClient.InstallBFB() install command", "args", strings.Join(args, " "))
+	log.Log.V(ncolog.DebugLevel).Info("dmsClient.InstallBFB() install command", "args", strings.Join(args, " "))
 
 	command := i.execInterface.CommandContext(ctx, args[0], args[1:]...)
 	output, err := utils.RunCommand(command)
@@ -462,11 +463,11 @@ func (i *dmsClient) InstallBFB(ctx context.Context, version string, bfbPath stri
 		return err
 	}
 
-	log.Log.V(2).Info("BFB installed successfully", "device", device.SerialNumber, "version", version, "output", string(output))
+	log.Log.V(ncolog.DebugLevel).Info("BFB installed successfully", "device", device.SerialNumber, "version", version, "output", string(output))
 
 	args = append([]string{dmsClientPath, "-a", i.bindAddress}, i.authParams...)
 	args = append(args, "--target", i.targetPCI, "os", "activate", "--version", version)
-	log.Log.V(2).Info("dmsClient.InstallBFB() activate command", "args", strings.Join(args, " "))
+	log.Log.V(ncolog.DebugLevel).Info("dmsClient.InstallBFB() activate command", "args", strings.Join(args, " "))
 
 	command = i.execInterface.CommandContext(ctx, args[0], args[1:]...)
 	output, err = utils.RunCommand(command)
@@ -475,14 +476,14 @@ func (i *dmsClient) InstallBFB(ctx context.Context, version string, bfbPath stri
 		return err
 	}
 
-	log.Log.V(2).Info("BFB activated successfully", "device", device.SerialNumber, "version", version, "output", string(output))
+	log.Log.V(ncolog.DebugLevel).Info("BFB activated successfully", "device", device.SerialNumber, "version", version, "output", string(output))
 
 	return nil
 }
 
 func (i *dmsClient) GetParameters(params []types.ConfigurationParameter) (map[string]string, error) {
 	device := i.deviceSnapshot()
-	log.Log.V(2).Info("dmsClient.GetParameters()", "params", params, "device", device.SerialNumber)
+	log.Log.V(ncolog.DebugLevel).Info("dmsClient.GetParameters()", "params", params, "device", device.SerialNumber)
 
 	values := make(map[string]string)
 	paramByPath := make(map[string]types.ConfigurationParameter, len(params))
@@ -494,7 +495,7 @@ func (i *dmsClient) GetParameters(params []types.ConfigurationParameter) (map[st
 	for _, batch := range batches {
 		requestValues, err := i.RunGetPathCommands(batch)
 		if err != nil {
-			log.Log.V(2).Error(err, "Failed to get parameters", "device", device.SerialNumber, "batchKey", batch.key)
+			log.Log.V(ncolog.DebugLevel).Error(err, "Failed to get parameters", "device", device.SerialNumber, "batchKey", batch.key)
 			if types.IsValuesDoNotMatchError(err) {
 				return nil, err
 			}
@@ -509,7 +510,7 @@ func (i *dmsClient) GetParameters(params []types.ConfigurationParameter) (map[st
 			value, found := values[path]
 			if found && result != value {
 				err := types.ValuesDoNotMatchError(param, result)
-				log.Log.V(2).Error(err, "Failed to get parameter", "device", device.SerialNumber, "param", param)
+				log.Log.V(ncolog.DebugLevel).Error(err, "Failed to get parameter", "device", device.SerialNumber, "param", param)
 				return nil, err
 			}
 			values[path] = result
@@ -595,26 +596,26 @@ func (i *dmsClient) collectSetUpdates(device v1alpha1.NicDeviceStatus, params []
 
 func (i *dmsClient) SetParameters(params []types.ConfigurationParameter) error {
 	device := i.deviceSnapshot()
-	log.Log.V(2).Info("dmsClient.SetParameters()", "params", params, "device", device.SerialNumber)
+	log.Log.V(ncolog.DebugLevel).Info("dmsClient.SetParameters()", "params", params, "device", device.SerialNumber)
 
 	updates := i.collectSetUpdates(device, params)
 	if len(updates) == 0 {
-		log.Log.V(2).Info("No updates to set", "device", device.SerialNumber)
+		log.Log.V(ncolog.DebugLevel).Info("No updates to set", "device", device.SerialNumber)
 		return nil
 	}
 
-	log.Log.V(2).Info("Collected set updates", "device", device.SerialNumber, "updateCount", len(updates))
+	log.Log.V(ncolog.DebugLevel).Info("Collected set updates", "device", device.SerialNumber, "updateCount", len(updates))
 
 	args := append([]string{dmsClientPath, "-a", i.bindAddress}, i.authParams...)
 	args = append(args, "--target", i.targetPCI, "--timeout", dmsClientTimeout, "set")
 	for _, update := range updates {
 		args = append(args, "--update", update)
 	}
-	log.Log.V(2).Info("dmsClient.SetParameters() batch command", "args", strings.Join(args, " "))
+	log.Log.V(ncolog.DebugLevel).Info("dmsClient.SetParameters() batch command", "args", strings.Join(args, " "))
 
 	command := i.execInterface.Command(args[0], args[1:]...)
 	output, err := command.CombinedOutput()
-	log.Log.V(2).Info("dmsClient.SetParameters() batch output", "device", device.SerialNumber, "output", string(output))
+	log.Log.V(ncolog.DebugLevel).Info("dmsClient.SetParameters() batch output", "device", device.SerialNumber, "output", string(output))
 	if err != nil {
 		allIgnore := true
 		for _, param := range params {
@@ -624,13 +625,13 @@ func (i *dmsClient) SetParameters(params []types.ConfigurationParameter) error {
 			}
 		}
 		if allIgnore {
-			log.Log.V(2).Info("All parameters have IgnoreError set, ignoring batch error", "device", device.SerialNumber, "err", err)
+			log.Log.V(ncolog.DebugLevel).Info("All parameters have IgnoreError set, ignoring batch error", "device", device.SerialNumber, "err", err)
 			return nil
 		}
-		log.Log.V(2).Error(err, "Batch set command failed", "device", device.SerialNumber, "output", string(output))
+		log.Log.V(ncolog.DebugLevel).Error(err, "Batch set command failed", "device", device.SerialNumber, "output", string(output))
 		return fmt.Errorf("failed to set parameters: %v, output: %s", err, string(output))
 	}
 
-	log.Log.V(2).Info("SetParameters batch command successful", "device", device.SerialNumber)
+	log.Log.V(ncolog.DebugLevel).Info("SetParameters batch command successful", "device", device.SerialNumber)
 	return nil
 }

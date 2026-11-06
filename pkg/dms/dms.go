@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
 
@@ -90,7 +91,7 @@ type dmsServer struct {
 
 // NewDMSServer creates a new instance of DMSServer that manages a local DMS server process
 func NewDMSServer() DMSServer {
-	log.Log.V(2).Info("Creating new DMS Server")
+	log.Log.V(ncolog.DebugLevel).Info("Creating new DMS Server")
 	return &dmsServer{
 		clients:       make(map[string]*dmsClient),
 		serverPort:    basePort,
@@ -109,7 +110,7 @@ type externalDMSManager struct {
 // authParams: authentication/security flags passed to dmsc (e.g. []string{"--insecure"} or
 // []string{"--tls-ca", "/path/ca.pem", "--tls-cert", "/path/cert.pem", "--tls-key", "/path/key.pem"})
 func NewExternalDMSManager(devices []v1alpha1.NicDevice, address string, authParams []string) DMSManager {
-	log.Log.V(2).Info("Creating new External DMS Manager", "address", address, "deviceCount", len(devices))
+	log.Log.V(ncolog.DebugLevel).Info("Creating new External DMS Manager", "address", address, "deviceCount", len(devices))
 	clients := make(map[string]*dmsClient)
 	for _, device := range devices {
 		if len(device.Status.Ports) == 0 {
@@ -130,13 +131,13 @@ func NewExternalDMSManager(devices []v1alpha1.NicDevice, address string, authPar
 
 // GetDMSClientByPCIAddress returns the DMS client for a device identified by its PCI device address.
 func (m *externalDMSManager) GetDMSClientByPCIAddress(pciDeviceAddr string) (DMSClient, error) {
-	log.Log.V(2).Info("GetDMSClientByPCIAddress", "pciDeviceAddr", pciDeviceAddr)
+	log.Log.V(ncolog.DebugLevel).Info("GetDMSClientByPCIAddress", "pciDeviceAddr", pciDeviceAddr)
 	client, ok := m.clients[pciDeviceAddr]
 	if !ok {
-		log.Log.V(2).Info("No DMS client found", "pciDeviceAddr", pciDeviceAddr)
+		log.Log.V(ncolog.DebugLevel).Info("No DMS client found", "pciDeviceAddr", pciDeviceAddr)
 		return nil, fmt.Errorf("no DMS client found for device with PCI address %s", pciDeviceAddr)
 	}
-	log.Log.V(2).Info("Found DMS client", "pciDeviceAddr", pciDeviceAddr)
+	log.Log.V(ncolog.DebugLevel).Info("Found DMS client", "pciDeviceAddr", pciDeviceAddr)
 	return client, nil
 }
 
@@ -148,18 +149,18 @@ func (m *dmsServer) isDMSDRunning() bool {
 		// pgrep returns exit code 1 when no processes found - this is expected
 		return false
 	}
-	log.Log.V(2).Info("Found existing dmsd process", "pids", strings.TrimSpace(string(output)))
+	log.Log.V(ncolog.DebugLevel).Info("Found existing dmsd process", "pids", strings.TrimSpace(string(output)))
 	return true
 }
 
 // StartDMSServer starts a single DMS server for all given NIC devices
 func (m *dmsServer) StartDMSServer(devices []v1alpha1.NicDevice) error {
-	log.Log.V(2).Info("StartDMSServer", "deviceCount", len(devices))
+	log.Log.V(ncolog.DebugLevel).Info("StartDMSServer", "deviceCount", len(devices))
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
 	if m.running.Load() {
-		log.Log.V(2).Info("DMS server already running")
+		log.Log.V(ncolog.DebugLevel).Info("DMS server already running")
 		return nil
 	}
 
@@ -168,22 +169,22 @@ func (m *dmsServer) StartDMSServer(devices []v1alpha1.NicDevice) error {
 	}
 
 	if len(devices) == 0 {
-		log.Log.V(2).Info("No devices to start DMS server for")
+		log.Log.V(ncolog.DebugLevel).Info("No devices to start DMS server for")
 		return nil
 	}
 
 	// Find available port
 	bindAddress := ""
-	log.Log.V(2).Info("Finding available port", "port", m.serverPort)
+	log.Log.V(ncolog.DebugLevel).Info("Finding available port", "port", m.serverPort)
 	for {
 		bindAddress = fmt.Sprintf("localhost:%d", m.serverPort)
 		m.serverPort++
 
 		if !isPortInUse(bindAddress) {
-			log.Log.V(2).Info("Found available port", "address", bindAddress)
+			log.Log.V(ncolog.DebugLevel).Info("Found available port", "address", bindAddress)
 			break
 		}
-		log.Log.V(2).Info("Port in use, trying next", "port", m.serverPort)
+		log.Log.V(ncolog.DebugLevel).Info("Port in use, trying next", "port", m.serverPort)
 	}
 
 	// Create shared images directory
@@ -204,7 +205,7 @@ func (m *dmsServer) StartDMSServer(devices []v1alpha1.NicDevice) error {
 	}
 	targetPCI := strings.Join(pciAddresses, ",")
 
-	log.Log.V(2).Info("Starting DMS server", "path", dmsServerPath, "bindAddress", bindAddress, "targetPCI", targetPCI)
+	log.Log.V(ncolog.DebugLevel).Info("Starting DMS server", "path", dmsServerPath, "bindAddress", bindAddress, "targetPCI", targetPCI)
 	cmd := m.execInterface.Command(dmsServerPath,
 		"-bind_address", bindAddress,
 		"-target_pci", targetPCI,
@@ -222,11 +223,11 @@ func (m *dmsServer) StartDMSServer(devices []v1alpha1.NicDevice) error {
 			m.cmdErr = err
 			m.errMutex.Unlock()
 		}
-		log.Log.V(2).Info("DMS server output", "bind_address", bindAddress, "output", string(output))
+		log.Log.V(ncolog.DebugLevel).Info("DMS server output", "bind_address", bindAddress, "output", string(output))
 		m.running.Store(false)
 	}()
 
-	log.Log.V(2).Info("Waiting for DMS server to start")
+	log.Log.V(ncolog.DebugLevel).Info("Waiting for DMS server to start")
 	time.Sleep(3 * time.Second)
 
 	if !m.running.Load() {
@@ -262,12 +263,12 @@ func (m *dmsServer) StartDMSServer(devices []v1alpha1.NicDevice) error {
 
 // StopDMSServer sends SIGTERM to the running DMS server
 func (m *dmsServer) StopDMSServer() error {
-	log.Log.V(2).Info("StopDMSServer")
+	log.Log.V(ncolog.DebugLevel).Info("StopDMSServer")
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
 	if !m.running.Load() {
-		log.Log.V(2).Info("DMS server not running, nothing to stop")
+		log.Log.V(ncolog.DebugLevel).Info("DMS server not running, nothing to stop")
 		return nil
 	}
 
@@ -286,7 +287,7 @@ func (m *dmsServer) IsRunning() bool {
 
 // GetDMSClientByPCIAddress returns the DMS client for a device identified by its PCI device address.
 func (m *dmsServer) GetDMSClientByPCIAddress(pciDeviceAddr string) (DMSClient, error) {
-	log.Log.V(2).Info("GetDMSClientByPCIAddress", "pciDeviceAddr", pciDeviceAddr)
+	log.Log.V(ncolog.DebugLevel).Info("GetDMSClientByPCIAddress", "pciDeviceAddr", pciDeviceAddr)
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 
@@ -296,23 +297,23 @@ func (m *dmsServer) GetDMSClientByPCIAddress(pciDeviceAddr string) (DMSClient, e
 
 	client, ok := m.clients[pciDeviceAddr]
 	if !ok {
-		log.Log.V(2).Info("No DMS client found", "pciDeviceAddr", pciDeviceAddr)
+		log.Log.V(ncolog.DebugLevel).Info("No DMS client found", "pciDeviceAddr", pciDeviceAddr)
 		return nil, fmt.Errorf("no DMS client found for device with PCI address %s", pciDeviceAddr)
 	}
 
-	log.Log.V(2).Info("Found DMS client", "pciDeviceAddr", pciDeviceAddr)
+	log.Log.V(ncolog.DebugLevel).Info("Found DMS client", "pciDeviceAddr", pciDeviceAddr)
 	return client, nil
 }
 
 // isPortInUse checks if a port is already in use
 func isPortInUse(addr string) bool {
-	log.Log.V(2).Info("Checking if port is in use", "addr", addr)
+	log.Log.V(ncolog.DebugLevel).Info("Checking if port is in use", "addr", addr)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Log.V(2).Info("Port is in not available", "addr", addr, "err", err)
+		log.Log.V(ncolog.DebugLevel).Info("Port is in not available", "addr", addr, "err", err)
 		return true
 	}
 	_ = ln.Close()
-	log.Log.V(2).Info("Port is available", "addr", addr)
+	log.Log.V(ncolog.DebugLevel).Info("Port is available", "addr", addr)
 	return false
 }

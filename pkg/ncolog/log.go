@@ -17,7 +17,6 @@ package ncolog
 
 import (
 	"flag"
-	"fmt"
 
 	zzap "go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -25,8 +24,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
+// logr uses positive verbosity for debug, whereas Zap uses negative levels.
+// Keep this adaptation at the logging boundary; thresholds use native Zap levels.
 const (
-	DebugLevel = 2
+	DebugLevel = 1
 	InfoLevel  = 0
 )
 
@@ -77,37 +78,17 @@ func InitLog() {
 	log.SetLogger(zap.New(zap.UseFlagOptions(Options)))
 }
 
-// SetLogLevel provides conversion from the operators LogLevel value ({0,1,2} where 2 is the most verbose) and sets
-// the current logging level accordingly.
+// SetLogLevel sets the native Zap threshold. Empty means info, as in zapcore.ParseLevel.
 func SetLogLevel(level string) error {
-	operatorLevel, err := parseLevel(level)
+	newLevel, err := zapcore.ParseLevel(level)
 	if err != nil {
 		return err
 	}
-	newLevel := operatorToZapLevel(operatorLevel)
-	currLevel := Options.Level.(zzap.AtomicLevel).Level()
+	atomicLevel := Options.Level.(zzap.AtomicLevel)
+	currLevel := atomicLevel.Level()
 	if newLevel != currLevel {
-		log.Log.Info("Set log verbose level", "new-level", operatorLevel, "current-level", zapToOperatorLevel(currLevel))
-		Options.Level.(zzap.AtomicLevel).SetLevel(newLevel)
+		atomicLevel.SetLevel(newLevel)
+		log.Log.Info("Set log level", "new-level", newLevel.String(), "current-level", currLevel.String())
 	}
-
 	return nil
-}
-
-func parseLevel(level string) (int, error) {
-	switch level {
-	case "debug", "DEBUG":
-		return DebugLevel, nil
-	case "info", "INFO", "": // make the zero value useful
-		return InfoLevel, nil
-	}
-	return 0, fmt.Errorf("unsupported log level: %s", level)
-}
-
-func zapToOperatorLevel(zapLevel zapcore.Level) int {
-	return int(zapLevel) * -1
-}
-
-func operatorToZapLevel(operatorLevel int) zapcore.Level {
-	return zapcore.Level(operatorLevel * -1)
 }

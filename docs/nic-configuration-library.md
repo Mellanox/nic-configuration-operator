@@ -19,6 +19,19 @@ import (
 
 ---
 
+## Logging
+
+Library logging continues to use controller-runtime's logr logger, including
+caller-supplied logr loggers in the DMS CLI helpers. Configure your existing
+logger as before, or use `ncolog.InitLog()` and `ncolog.SetLogLevel("debug")`
+for the operator's Zap configuration. `SetLogLevel` accepts native Zap level
+names, including `warn` and `error`.
+
+`ncolog.DebugLevel` is logr verbosity 1 (Zap debug), replacing the previous
+verbosity 2. Use `logger.V(ncolog.DebugLevel).Info(...)` for debug messages;
+external call sites using a literal `V(2)` must migrate to the named constant
+to remain visible with the native debug threshold. `InfoLevel` remains 0.
+
 ## Quick Start
 
 ### With local DMS server (operator mode)

@@ -37,6 +37,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/pkg/devicediscovery"
 	"github.com/Mellanox/nic-configuration-operator/pkg/helper"
 	"github.com/Mellanox/nic-configuration-operator/pkg/host"
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
 
@@ -87,7 +88,7 @@ func setInitialsConditionsForDevice(device *v1alpha1.NicDevice) {
 
 func setFwConfigConditionsForDevice(device *v1alpha1.NicDevice, recommendedFirmware string) bool {
 	currentFirmware := device.Status.FirmwareVersion
-	log.Log.V(2).Info("setFwConfigConditionsForDevice()", "recommendedFirmware", recommendedFirmware, "currentFirmware", currentFirmware)
+	log.Log.V(ncolog.DebugLevel).Info("setFwConfigConditionsForDevice()", "recommendedFirmware", recommendedFirmware, "currentFirmware", currentFirmware)
 	var condition metav1.Condition
 	switch recommendedFirmware {
 	case currentFirmware:
@@ -145,7 +146,7 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 		return err
 	}
 
-	log.Log.V(2).Info("listed devices", "devices", list.Items)
+	log.Log.V(ncolog.DebugLevel).Info("listed devices", "devices", list.Items)
 
 	node := &v1.Node{}
 	err = d.Get(ctx, types.NamespacedName{Name: d.nodeName}, node)
@@ -156,7 +157,7 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 
 	for _, nicDeviceCR := range list.Items {
 		if len(nicDeviceCR.Status.Ports) == 0 {
-			log.Log.V(2).Info("NicDevice CR has no ports, skipping reconciliation", "device", nicDeviceCR.Name)
+			log.Log.V(ncolog.DebugLevel).Info("NicDevice CR has no ports, skipping reconciliation", "device", nicDeviceCR.Name)
 			continue
 		}
 		pciKey := utils.PCIDeviceAddress(nicDeviceCR.Status.Ports[0].PCI)
@@ -167,7 +168,7 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 				log.Log.Info("device discovery was incomplete, preserving existing NicDevice CR", "device", nicDeviceCR.Name, "pciKey", pciKey, "error", incompleteErr)
 				continue
 			}
-			log.Log.V(2).Info("device doesn't exist on the node anymore, deleting", "device", nicDeviceCR.Name)
+			log.Log.V(ncolog.DebugLevel).Info("device doesn't exist on the node anymore, deleting", "device", nicDeviceCR.Name)
 			// Need to delete this CR, it doesn't represent the observedDevice on host anymore
 			err = d.Delete(ctx, &nicDeviceCR)
 			if err != nil {
@@ -180,7 +181,7 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 		observedDeviceStatus := observedDevice.Status
 
 		if changed := d.updateFwCondition(&nicDeviceCR); changed {
-			log.Log.V(2).Info("FirmwareConfigMatch condition changed, updating device", "nicDeviceCR", nicDeviceCR)
+			log.Log.V(ncolog.DebugLevel).Info("FirmwareConfigMatch condition changed, updating device", "nicDeviceCR", nicDeviceCR)
 			err = d.Client.Status().Update(ctx, &nicDeviceCR)
 			if err != nil {
 				log.Log.Error(err, "failed to update FirmwareConfigMatchCondition", "device", nicDeviceCR.Name)
@@ -192,7 +193,7 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 		observedDeviceStatus.Conditions = nicDeviceCR.Status.Conditions
 
 		if !reflect.DeepEqual(nicDeviceCR.Status, observedDeviceStatus) {
-			log.Log.V(2).Info("device status changed, updating", "device", nicDeviceCR.Name, "crStatus", nicDeviceCR.Status, "observedStatus", observedDeviceStatus)
+			log.Log.V(ncolog.DebugLevel).Info("device status changed, updating", "device", nicDeviceCR.Name, "crStatus", nicDeviceCR.Status, "observedStatus", observedDeviceStatus)
 			// Status of the device changes, need to update the CR
 			nicDeviceCR.Status = observedDeviceStatus
 
@@ -241,7 +242,7 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 		setInitialsConditionsForDevice(device)
 
 		d.updateFwCondition(device)
-		log.Log.V(2).Info("updated device", "device", device)
+		log.Log.V(ncolog.DebugLevel).Info("updated device", "device", device)
 		err = d.Client.Status().Update(ctx, device)
 		if err != nil {
 			log.Log.Error(err, "failed to update FirmwareConfigMatchCondition", "device", device.Name)
