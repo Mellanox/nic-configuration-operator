@@ -4,6 +4,10 @@ The `pkg/` packages of the NIC Configuration Operator serve as a reusable Go lib
 
 **Go module:** `github.com/Mellanox/nic-configuration-operator`
 
+This GitLab API validation branch has explicit unsupported hardware adapters.
+The examples describe the consumer API; they do not establish functioning hardware
+execution in this revision. See the [migration boundary](dms-library-integration.md#gitlab-api-validation-branch).
+
 ```go
 import (
     "github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
@@ -28,7 +32,7 @@ Firmware and runtime operations use local dms-lib backends. NCO no longer starts
 ```go
 fwBackend, err := libfirmware.NewManager(libfirmware.Options{})
 if err != nil { return err }
-runtimeBackend, err := libconfiguration.NewManager(libconfiguration.Options{})
+runtimeBackend, err := libconfiguration.NewNCOManager(libconfiguration.Options{})
 if err != nil { return err }
 
 fwMgr := firmware.NewFirmwareManager(nil, fwBackend, "")
@@ -142,7 +146,7 @@ type ConfigurationManager interface {
 ```go
 func NewConfigurationManager(
     nvConfigUtils nvconfig.NVConfigUtils,
-    runtimeBackend libconfiguration.Manager,
+    runtimeBackend libconfiguration.NCOManager,
     firmwareBackend libfirmware.Manager,
 ) ConfigurationManager
 ```

@@ -67,7 +67,7 @@ type NicDeviceReconciler struct {
 	client.Client
 	Scheme              *runtime.Scheme
 	APIReader           client.Reader
-	PlanConfiguration   dmsconfiguration.Manager
+	PlanConfiguration   dmsconfiguration.NCOManager
 	DiscoverPlanDevices func(context.Context) (device.Inventory, error)
 
 	NodeName      string

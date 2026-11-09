@@ -221,6 +221,10 @@ spec:
                       type: string
                     inventory_stage:
                       type: string
+                    naming:
+                      description: Naming retains the upstream target naming mode
+                        (empty means by rail).
+                      type: string
                     nodeUID:
                       description: |-
                         UID is a type that holds unique ID values, including UUIDs.  Because we
@@ -270,6 +274,13 @@ spec:
                               plane:
                                 format: int32
                                 type: integer
+                              port:
+                                description: Port is the explicit one-based physical
+                                  port, independent of PCI function.
+                                format: int32
+                                maximum: 255
+                                minimum: 1
+                                type: integer
                               rail:
                                 format: int32
                                 type: integer
@@ -317,6 +328,13 @@ spec:
                                 type: string
                               plane:
                                 format: int32
+                                type: integer
+                              port:
+                                description: Port is the explicit one-based physical
+                                  port, independent of PCI function.
+                                format: int32
+                                maximum: 255
+                                minimum: 1
                                 type: integer
                               rail:
                                 format: int32

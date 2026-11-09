@@ -480,7 +480,7 @@ func getRawNvConfigParams(device *v1alpha1.NicDevice) map[string]string {
 	return params
 }
 
-func NewConfigurationManager(nvConfigUtils nvconfig.NVConfigUtils, runtime dmsconfiguration.Manager, firmware dmsfirmware.Manager) ConfigurationManager {
+func NewConfigurationManager(nvConfigUtils nvconfig.NVConfigUtils, runtime dmsconfiguration.NCOManager, firmware dmsfirmware.Manager) ConfigurationManager {
 	utils := newConfigurationUtils()
 	systemConfParams, _ := nvConfigUtils.(nvconfig.SystemConfParamsProvider)
 	return configurationManager{

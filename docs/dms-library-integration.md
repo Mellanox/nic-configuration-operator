@@ -1,5 +1,32 @@
 # DMS library discovery and interface naming
 
+## GitLab API validation branch
+
+This branch consumes the published GitLab library through versioned Go module
+replacements for the existing `github.com/Mellanox/dms-lib` and `/api` imports.
+The root, API and preserved `doSpcx` planner use revision `954b6bd3f5aa`.
+Builds need authorized GitLab dependency access. Docker builds accept credentials
+only through the BuildKit `netrc` secret mounted at `/root/.netrc`.
+
+`hack/build-dms-planner.sh` derives the planner version from the root library
+replacement, downloads that version's `doSpcx` module and builds its unchanged
+`./planner` entry point. The daemon image installs it at
+`/usr/local/libexec/dms-blueprints-lib/planner`; the library does not fall back to
+the planner installed by DOCA. For local Linux tests, build the same executable
+at that path before running the existing test commands.
+
+NCO selects `configuration.NCOManager` / `NewNCOManager` for its request-based
+runtime API. This GitLab revision intentionally supplies unsupported hardware
+adapters: discovery reports incomplete/unsupported inventory; configuration,
+firmware and naming application cannot configure hardware; plan requirements and
+runtime group-port projection are unsupported. These errors must remain visible.
+Existing feature assertions are retained and their failures must be reported;
+successful compilation or planner packaging does not establish hardware parity.
+Do not replace the production daemon to qualify these unavailable capabilities.
+
+The following describes the existing integration contract whose feature tests
+remain unchanged during this API migration.
+
 `pkg/devicediscovery` now delegates hardware discovery to `dms-lib/pkg/device`
 and converts its inventory into the existing NCO records. `pkg/udev` delegates
 name validation, rule rendering, files and udev activation to `dms-lib/pkg/naming`.

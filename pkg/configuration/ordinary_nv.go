@@ -32,7 +32,7 @@ type ordinaryNVPort struct {
 // ValidateOrdinaryNV preserves NCO's per-PF unsupported-parameter policy for
 // ordinary raw intent. Plan, NetworkBay and default-reset requests must retain
 // their complete library scope and cannot use this adapter.
-func ValidateOrdinaryNV(ctx context.Context, manager dmsconfiguration.Manager, request dmsconfiguration.NVConfigRequest, options dmsconfiguration.NVConfigOptions) (dmsconfiguration.Validation, error) {
+func ValidateOrdinaryNV(ctx context.Context, manager dmsconfiguration.NCOManager, request dmsconfiguration.NVConfigRequest, options dmsconfiguration.NVConfigOptions) (dmsconfiguration.Validation, error) {
 	_, validation, err := prepareOrdinaryNV(ctx, manager, request, options)
 	return validation, err
 }
@@ -40,7 +40,7 @@ func ValidateOrdinaryNV(ctx context.Context, manager dmsconfiguration.Manager, r
 // ApplyOrdinaryNV validates every PF before any write, filters unsupported raw
 // parameters only on the PF that rejected them, then delegates application and
 // readback to the library. Force does not enable this filtering.
-func ApplyOrdinaryNV(ctx context.Context, manager dmsconfiguration.Manager, request dmsconfiguration.NVConfigRequest, options dmsconfiguration.NVConfigOptions) (dmsconfiguration.Result, error) {
+func ApplyOrdinaryNV(ctx context.Context, manager dmsconfiguration.NCOManager, request dmsconfiguration.NVConfigRequest, options dmsconfiguration.NVConfigOptions) (dmsconfiguration.Result, error) {
 	ports, validation, err := prepareOrdinaryNV(ctx, manager, request, options)
 	if len(validation.Devices) == 0 {
 		return dmsconfiguration.Result{}, err
@@ -102,7 +102,7 @@ func ApplyOrdinaryNV(ctx context.Context, manager dmsconfiguration.Manager, requ
 	return result, err
 }
 
-func prepareOrdinaryNV(ctx context.Context, manager dmsconfiguration.Manager, request dmsconfiguration.NVConfigRequest, options dmsconfiguration.NVConfigOptions) ([]ordinaryNVPort, dmsconfiguration.Validation, error) {
+func prepareOrdinaryNV(ctx context.Context, manager dmsconfiguration.NCOManager, request dmsconfiguration.NVConfigRequest, options dmsconfiguration.NVConfigOptions) ([]ordinaryNVPort, dmsconfiguration.Validation, error) {
 	if ctx == nil || manager == nil || len(request.Devices) == 0 || request.Plan != nil || request.NetworkBay != nil || options.WithDefault {
 		return nil, dmsconfiguration.Validation{}, fmt.Errorf("ordinary NV adapter requires context, manager, devices and raw-only intent without default reset")
 	}
@@ -186,7 +186,7 @@ func validateOrdinaryDevices(request dmsconfiguration.NVConfigRequest) error {
 	return nil
 }
 
-func validateOrdinaryPF(ctx context.Context, manager dmsconfiguration.Manager, request dmsconfiguration.NVConfigRequest, options dmsconfiguration.NVConfigOptions) (dmsconfiguration.DeviceValidation, error) {
+func validateOrdinaryPF(ctx context.Context, manager dmsconfiguration.NCOManager, request dmsconfiguration.NVConfigRequest, options dmsconfiguration.NVConfigOptions) (dmsconfiguration.DeviceValidation, error) {
 	validation, err := manager.ValidateNVConfiguration(ctx, request, options)
 	if len(validation.Devices) != 1 || validation.Devices[0].DeviceID != request.Devices[0].ID {
 		return dmsconfiguration.DeviceValidation{}, errors.Join(err, fmt.Errorf("unexpected library validation for device %s", request.Devices[0].ID))

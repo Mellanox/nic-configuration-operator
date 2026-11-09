@@ -33,7 +33,7 @@ COPY go.sum go.sum
 # and so that source changes don't invalidate our downloaded layer
 RUN --mount=type=cache,target=/go/pkg/mod/ \
     --mount=type=secret,id=netrc,target=/root/.netrc \
-    GOPRIVATE=github.com/Mellanox/dms-lib go mod download
+    GOPRIVATE=github.com/Mellanox/dms-lib,gitlab-master.nvidia.com go mod download
 
 # Copy the go source
 COPY ./ ./

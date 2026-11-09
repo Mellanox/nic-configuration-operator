@@ -136,7 +136,7 @@ func main() {
 	}
 
 	spectrumXConfigManager := spectrumx.NewSpectrumXConfigManager()
-	planConfiguration, err := dmsconfiguration.NewManager(dmsconfiguration.Options{})
+	planConfiguration, err := dmsconfiguration.NewNCOManager(dmsconfiguration.Options{})
 	if err != nil {
 		log.Log.Error(err, "initialize DMS configuration library")
 		os.Exit(1)

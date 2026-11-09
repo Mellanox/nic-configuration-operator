@@ -13,6 +13,10 @@ NVIDIA NIC Configuration Operator uses the [Maintenance Operator](https://github
 
 ## Deployment
 
+This GitLab API validation branch uses explicit unsupported hardware adapters.
+See [the migration boundary and build instructions](docs/dms-library-integration.md#gitlab-api-validation-branch)
+before building or testing it; it does not provide production hardware parity.
+
 ### Prerequisites
 
 * Kubernetes cluster
