@@ -47,3 +47,19 @@ of this final controller revision. No interface rename, NIC configuration, reset
 service startup or full daemon-image deployment was performed. The daemon image's
 existing DOCA version is unchanged; its compatibility is not established by the
 host's DOCA 3.6 results.
+
+## CLI planner validation
+
+Plan-controller tests compile their authored blueprint through an installed
+compatible `dms-cli` and planner. The controller YANG fixture includes the
+`/nvidia/blueprints/plan` action. Run the full controller/envtest suite in the
+Linux DOCA environment that provides those tools; a Go-only container cannot
+exercise this integration. The ordinary build and the remaining unit suites do
+not require host NIC hardware.
+
+The validation dependency combines NCO's existing library feature stack with the
+reviewed CLI planner revision. It preserves the existing consumer APIs and keeps
+service lifecycle ownership in the operators. The public CLI does not expose
+implicit generated rename artifacts; its validation composite documents that
+projection limit. Image qualification and live hardware qualification are
+separate from these local test results.

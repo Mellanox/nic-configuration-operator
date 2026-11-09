@@ -1,0 +1,26 @@
+// Copyright 2026 NVIDIA CORPORATION & AFFILIATES
+module nvidia-blueprints {
+  yang-version 1.1;
+  namespace "urn:dms-lib:test:blueprints";
+  prefix bp;
+  import nvidia-root { prefix nv; }
+  augment "/nv:nvidia" {
+    container blueprints {
+      action plan {
+        input {
+          leaf family { type string; }
+          leaf profile { type string; }
+          leaf stage { type string; }
+          leaf name { type string; }
+          leaf target-map-file { type string; }
+          leaf-list params { type string; }
+        }
+        output {
+          leaf status { type string; }
+          leaf plan-json { type string; }
+          leaf error { type string; }
+        }
+      }
+    }
+  }
+}
