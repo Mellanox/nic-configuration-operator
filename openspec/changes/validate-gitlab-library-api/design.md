@@ -1,32 +1,21 @@
-## Context
-The preserved upstream planner and the established Go API are published in one
-GitLab revision. Hardware capabilities unavailable upstream are explicit stubs.
-NCO's existing request-based runtime signatures use `NCOManager`, while upstream
-`Manager` keeps its original signatures.
+# Design
 
-## Goals / Non-Goals
-Build NCO and its planner from published immutable source, preserve existing
-consumer assertions and expose missing capability errors. Do not restore hardware
-implementations, alter preserved doSpcx sources, skip feature assertions, or add
-production daemon flags.
+Keep existing library imports with exact versioned GitLab replacements. Go does
+not inherit dependency replacements, so the consumer also pins the canonical
+`nvidia.com/doca/dms/doSpcx` module to the library's published source revision.
+The core planner is linked into the operator. No runtime planner executable or
+build-dms-planner helper is needed. Existing DMS commands still use dms-cli.
 
-## Decisions
-Keep established GitHub import paths with real versioned GitLab replacements.
-Derive the doSpcx module version from the root replacement, download it through
-Go's module tooling and build `./planner` with `-mod=readonly`. Package the binary
-at the library's fixed executable path in the daemon image. The manager does not
-compile plans and does not need this additional binary. Private downloads use a
-BuildKit secret; credentials are never copied or passed as build arguments.
+NCO uses the established configuration.Manager/NewManager API; no separate
+NCOManager interface is introduced. Discovery, configuration, naming and firmware
+remain the existing library implementations. Reconciliation behavior is not
+expanded. Unknown service contracts and unavailable host-k8s payloads remain
+explicit errors; Xplane generation is excluded from hardware validation.
 
-## Risks / Trade-offs
-Existing feature suites can fail because discovery, hardware application and
-plan requirement projection are unsupported. Preserve those assertions and retain
-full failures, distinguishing them from introduced compile or packaging errors.
-Image construction is not hardware qualification. Carmel validation must remain
-isolated from the production daemon and report unsupported capabilities explicitly.
+Authenticated private GitLab access is required. Clean-container anonymous
+repository and module retrieval fails; public CI needs supported credentials or
+an authorized access change. This change does not alter project visibility.
 
-## Migration Plan
-Run Linux/amd64 build, existing unit/controller/envtest and race suites, pinned
-lint and generation checks. Review the exact diff before committing or publishing
-a PR. Build immutable manager/daemon images with the pinned DOCA base and retain
-module, planner, architecture and digest identities.
+Validate build, existing tests, race tests, lint and generation separately from
+image publication and hardware qualification. Previous subprocess/stub-based
+image results do not qualify this version.

@@ -1,19 +1,20 @@
 ## ADDED Requirements
 
-### Requirement: Reproduce published upstream source
-NCO SHALL resolve the library root, API and preserved doSpcx planner from the same
-published GitLab revision using versioned module dependencies without sibling paths.
+### Requirement: Published shared Go dependency
+The operator SHALL use exact published GitLab library, API and doSPCX module
+versions without a sibling checkout or separately packaged planner executable.
 
-#### Scenario: Build an image in an isolated context
-- **WHEN** the canonical Dockerfile builds with authorized private-module access
-- **THEN** the planner is downloaded at the root replacement version and installed at the library's fixed executable path
-- **AND** credentials are supplied only through an ephemeral BuildKit secret
+#### Scenario: Build an operator image
+- **WHEN** the builder resolves the pinned modules with authorized GitLab access
+- **THEN** the existing operator imports compile against the library API
+- **AND** the shared Go planner is linked into the operator binary
+- **AND** no planner executable is installed in the runtime image
 
-### Requirement: Select the NCO request interface explicitly
-NCO SHALL use NCOManager for its established request-based runtime methods while
-retaining the existing feature assertions and consumer policy.
+### Requirement: Preserve reconciliation behavior
+The dependency migration SHALL retain existing controller semantics and SHALL
+report unsupported service payloads honestly without inventing configuration.
 
-#### Scenario: An upstream hardware capability is unavailable
-- **WHEN** discovery or a hardware configuration adapter reports unsupported
-- **THEN** validation retains that failure and does not report successful hardware qualification
-- **AND** existing feature assertions are neither rewritten nor skipped
+#### Scenario: Resolve host planning intent
+- **WHEN** the operator uses DMSPlanParams and a structured blueprint
+- **THEN** it calls the established library planning API in process
+- **AND** no new rollout coordination or service lifecycle behavior is introduced

@@ -15,7 +15,7 @@ import (
 )
 
 type ordinaryNVManager struct {
-	dmsconfiguration.NCOManager
+	dmsconfiguration.Manager
 	validate func(dmsconfiguration.NVConfigRequest) (dmsconfiguration.Validation, error)
 	apply    func(dmsconfiguration.NVConfigRequest) (dmsconfiguration.Result, error)
 }
@@ -155,7 +155,7 @@ var _ = Describe("ordinary per-PF NV policy", func() {
 		Expect(result.Devices[0].Status).To(Equal(dmsconfiguration.Blocked))
 	})
 	It("cannot delegate empty raw intent to the real library", func() {
-		manager, err := dmsconfiguration.NewNCOManager(dmsconfiguration.Options{})
+		manager, err := dmsconfiguration.NewManager(dmsconfiguration.Options{})
 		Expect(err).NotTo(HaveOccurred())
 		request.Overrides = nil
 		_, err = manager.ValidateNVConfiguration(context.Background(), request, dmsconfiguration.NVConfigOptions{})

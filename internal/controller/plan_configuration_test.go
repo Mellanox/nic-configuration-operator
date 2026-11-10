@@ -34,7 +34,7 @@ import (
 )
 
 type planManagerStub struct {
-	dmsconfiguration.NCOManager
+	dmsconfiguration.Manager
 	defaults     func(device.Port) (map[string]string, error)
 	validateNV   func(dmsconfiguration.NVConfigRequest, dmsconfiguration.NVConfigOptions) (dmsconfiguration.Validation, error)
 	applyNV      func(dmsconfiguration.NVConfigRequest, dmsconfiguration.NVConfigOptions) (dmsconfiguration.Result, error)

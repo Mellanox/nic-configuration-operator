@@ -29,12 +29,6 @@ COPY ./ ./
 # by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
 RUN --mount=type=cache,target=/go/pkg/mod/ GO_GCFLAGS=${GCFLAGS} make build-daemon
 
-# Package the planner from the same published GitLab revision as dms-lib.
-RUN --mount=type=cache,target=/go/pkg/mod/ \
-    --mount=type=secret,id=netrc,target=/root/.netrc \
-    GOPRIVATE=github.com/Mellanox/dms-lib,gitlab-master.nvidia.com \
-    sh hack/build-dms-planner.sh /workspace/build/dms-planner
-
 FROM ${BASE_IMAGE_DOCA_FULL_RT_HOST:-nvcr.io/nvstaging/doca/doca:full-rt-3.5.0-host-dev}
 
 ARG TARGETARCH
@@ -61,7 +55,6 @@ COPY scripts/dms/ /tmp/nco-dms-workaround/
 RUN bash /tmp/nco-dms-workaround/patch-netdev-resolver.sh && rm -rf /tmp/nco-dms-workaround
 
 WORKDIR /
-COPY --from=builder /workspace/build/dms-planner /usr/local/libexec/dms-blueprints-lib/planner
 COPY --from=builder /workspace/build/nic-configuration-daemon .
 
 # Copy the entrypoint script
