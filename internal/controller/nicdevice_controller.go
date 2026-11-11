@@ -582,12 +582,12 @@ func (r *NicDeviceReconciler) applyRuntimeConfig(ctx context.Context, status *ni
 
 	lastAppliedState, found := status.device.Annotations[consts.LastAppliedStateAnnotation]
 	if found {
-		specJson, err := json.Marshal(status.device.Spec)
+		changed, err := configurationChangedSinceLastApplied(lastAppliedState, status.device.Spec.Configuration)
 		if err != nil {
 			return err
 		}
 
-		if string(specJson) != lastAppliedState {
+		if changed {
 			log.Log.V(2).Info("last applied state differs, reboot required", "device", status.device.Name)
 			status.rebootRequired = true
 
@@ -639,6 +639,29 @@ func (r *NicDeviceReconciler) applyRuntimeConfig(ctx context.Context, status *ni
 	}
 
 	return nil
+}
+
+// configurationChangedSinceLastApplied returns true if the configuration spec differs from the one recorded
+// in the last applied state annotation. The annotation holds the whole device spec, but only its configuration
+// section describes the runtime configuration that a reboot is needed to reset. Changes to the firmware and
+// interface name template sections are ignored.
+func configurationChangedSinceLastApplied(lastAppliedState string, configuration *v1alpha1.NicDeviceConfigurationSpec) (bool, error) {
+	lastAppliedSpec := v1alpha1.NicDeviceSpec{}
+	if err := json.Unmarshal([]byte(lastAppliedState), &lastAppliedSpec); err != nil {
+		// The recorded state can't be compared to the spec, treat it as changed
+		return true, nil
+	}
+
+	lastAppliedConfiguration, err := json.Marshal(lastAppliedSpec.Configuration)
+	if err != nil {
+		return false, err
+	}
+	currentConfiguration, err := json.Marshal(configuration)
+	if err != nil {
+		return false, err
+	}
+
+	return string(lastAppliedConfiguration) != string(currentConfiguration), nil
 }
 
 // handleReboot schedules maintenance and reboots the node if maintenance is allowed
