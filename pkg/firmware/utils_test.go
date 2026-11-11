@@ -76,6 +76,21 @@ var _ = Describe("utils", func() {
 			err := testedUtils.DownloadFile("http://invalid domain", destPath)
 			Expect(err).To(HaveOccurred())
 		})
+
+		It("should fail and not create the file if the server responds with an error status", func() {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, "404 page not found", http.StatusNotFound)
+			}))
+			defer server.Close()
+
+			destPath := filepath.Join(tmpDir, "missing.bfb")
+
+			err := testedUtils.DownloadFile(server.URL+"/missing.bfb", destPath)
+			Expect(err).To(MatchError(ContainSubstring("404 Not Found")))
+
+			_, statErr := os.Stat(destPath)
+			Expect(os.IsNotExist(statErr)).To(BeTrue())
+		})
 	})
 
 	Describe("UnzipFiles", func() {

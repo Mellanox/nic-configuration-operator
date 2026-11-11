@@ -18,6 +18,8 @@ package firmware
 import (
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path"
 	"path/filepath"
@@ -568,6 +570,41 @@ var _ = Describe("FirmwareProvisioner", func() {
 					_, err := fwProv.DownloadBFB(cacheName, wrongUrl)
 					Expect(err).To(HaveOccurred())
 					Expect(err.Error()).To(ContainSubstring("downloaded file does not have requested extension"))
+				})
+			})
+
+			Context("when the server responds with an error status", func() {
+				It("should return an error and download the file again once the server recovers", func() {
+					available := false
+					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						if !available {
+							http.Error(w, "503 service unavailable", http.StatusServiceUnavailable)
+							return
+						}
+						_, _ = w.Write([]byte("bfb content"))
+					}))
+					defer server.Close()
+
+					// Use the real DownloadFile implementation against the test server
+					fwProv = firmwareProvisioner{cacheRootDir: tmpDir, utils: newTestFirmwareUtils()}
+					url := server.URL + "/" + testBFBFileName
+
+					_, err := fwProv.DownloadBFB(cacheName, url)
+					Expect(err).To(MatchError(ContainSubstring("503 Service Unavailable")))
+
+					needsDownload, err := fwProv.VerifyCachedBFB(cacheName, url)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(needsDownload).To(BeTrue())
+
+					available = true
+
+					fileName, err := fwProv.DownloadBFB(cacheName, url)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(fileName).To(Equal(testBFBFileName))
+
+					data, err := os.ReadFile(path.Join(bfbCacheDir, testBFBFileName))
+					Expect(err).NotTo(HaveOccurred())
+					Expect(string(data)).To(Equal("bfb content"))
 				})
 			})
 
