@@ -17,10 +17,12 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"maps"
 	"os"
 	"slices"
+	"time"
 
 	maintenanceoperator "github.com/Mellanox/maintenance-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -30,6 +32,7 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -56,6 +59,8 @@ var (
 	scheme = runtime.NewScheme()
 )
 
+const nicDeviceSelectorProbeTimeout = 30 * time.Second
+
 func main() {
 	ncolog.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -75,24 +80,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme: scheme,
-		// Setting bind address to 0 disables the health probe / metrics server
-		HealthProbeBindAddress: "0",
-		Metrics:                metricsserver.Options{BindAddress: "0"},
-		Cache: cache.Options{
-			ByObject: map[client.Object]cache.ByObject{
-				&corev1.ConfigMap{}: {
-					Label: labels.NewSelector().Add(*dospcxDataReq),
-				},
-			},
-		},
-	})
-	if err != nil {
-		log.Log.Error(err, "unable to create manager")
-		os.Exit(1)
-	}
-
 	// Get the pod name and namespace from the environment variables
 	nodeName := os.Getenv("NODE_NAME")
 	if nodeName == "" {
@@ -103,6 +90,40 @@ func main() {
 	namespace := os.Getenv("NAMESPACE")
 	if namespace == "" {
 		log.Log.Error(err, "NAMESPACE env var required but not set")
+		os.Exit(1)
+	}
+
+	ctx := ctrl.SetupSignalHandler()
+	restConfig := ctrl.GetConfigOrDie()
+
+	scopeNicDevices, err := probeNicDeviceNodeSelector(ctx, restConfig, namespace, nodeName)
+	if err != nil {
+		log.Log.Error(err, "failed to probe NicDevice status.node field selector support")
+		os.Exit(1)
+	}
+	if !scopeNicDevices {
+		log.Log.Info("API server rejected a status.node field selector on NicDevices, "+
+			"caching every NicDevice in the cluster. "+
+			"Install the current NicDevice CRD, which declares .status.node as a selectable field, "+
+			"to keep daemon memory independent of cluster size", "node", nodeName)
+	}
+
+	byObject := map[client.Object]cache.ByObject{
+		&corev1.ConfigMap{}: {
+			Label: labels.NewSelector().Add(*dospcxDataReq),
+		},
+	}
+	controller.AddNodeScopedCacheObjects(byObject, nodeName, scopeNicDevices)
+
+	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
+		Scheme: scheme,
+		// Setting bind address to 0 disables the health probe / metrics server
+		HealthProbeBindAddress: "0",
+		Metrics:                metricsserver.Options{BindAddress: "0"},
+		Cache:                  cache.Options{ByObject: byObject},
+	})
+	if err != nil {
+		log.Log.Error(err, "unable to create manager")
 		os.Exit(1)
 	}
 
@@ -157,7 +178,7 @@ func main() {
 	}
 
 	deviceDiscoveryController := controller.NewDeviceDiscoveryController(
-		mgr.GetClient(), deviceDiscovery, hostUtils, nodeName, namespace)
+		mgr.GetClient(), mgr.GetAPIReader(), deviceDiscovery, hostUtils, nodeName, namespace)
 	if err = mgr.Add(deviceDiscoveryController); err != nil {
 		log.Log.Error(err, "unable to add device discovery runnable")
 		os.Exit(1)
@@ -206,8 +227,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	ctx := ctrl.SetupSignalHandler()
-
 	// Set the nic configuration wait label on the node to true until desired configuration is confirmed to be applied
 	err = maintenanceManager.SetNodeWaitLabel(ctx, consts.LabelValueTrue)
 	if err != nil {
@@ -227,6 +246,18 @@ func main() {
 		log.Log.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+func probeNicDeviceNodeSelector(
+	ctx context.Context, restConfig *rest.Config, namespace, nodeName string) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, nicDeviceSelectorProbeTimeout)
+	defer cancel()
+
+	probeClient, err := client.New(restConfig, client.Options{Scheme: scheme})
+	if err != nil {
+		return false, err
+	}
+	return controller.NicDeviceNodeSelectorSupported(ctx, probeClient, namespace, nodeName)
 }
 
 func initNicFwMap(namespace string) error {

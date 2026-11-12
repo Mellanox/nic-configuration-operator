@@ -585,7 +585,7 @@ NicDeviceStatus defines the observed state of NicDevice
 <tr>
 <td><code>node</code><br />
 <em>string</em></td>
-<td><p>Node where the device is located</p></td>
+<td><p>Node where the device is located. Selectable with a status.node field selector.</p></td>
 </tr>
 <tr>
 <td><code>type</code><br />

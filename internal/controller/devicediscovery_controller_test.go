@@ -63,7 +63,7 @@ var _ = Describe("DeviceDiscoveryController", func() {
 		deviceDiscovery = &deviceDiscoveryMocks.DeviceDiscovery{}
 		hostUtils = &hostMocks.HostUtils{}
 
-		deviceRegistry = NewDeviceDiscoveryController(k8sClient, deviceDiscovery, hostUtils, nodeName, namespaceName)
+		deviceRegistry = NewDeviceDiscoveryController(k8sClient, mgr.GetAPIReader(), deviceDiscovery, hostUtils, nodeName, namespaceName)
 		Expect(mgr.Add(deviceRegistry)).To(Succeed())
 	})
 

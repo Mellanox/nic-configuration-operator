@@ -46,6 +46,9 @@ var deviceDiscoveryReconcileTime = time.Minute * 5
 // deletes CRs for absent devices, updates the CR when device's status has changed.
 type DeviceDiscoveryController struct {
 	client.Client
+	// apiReader reads NicDevices that the node-scoped cache cannot see because their
+	// status.node is not set yet.
+	apiReader client.Reader
 
 	deviceDiscovery devicediscovery.DeviceDiscovery
 	hostUtils       host.HostUtils
@@ -223,7 +226,7 @@ func (d *DeviceDiscoveryController) reconcile(ctx context.Context) error {
 		if apierrors.IsAlreadyExists(err) {
 			// Device already exists but was not matched by PCI address, which means the status was not applied properly
 			// on a previous reconcile. Re-fetch so the status update below runs against the live object.
-			err = d.Get(ctx, types.NamespacedName{Name: device.Name, Namespace: device.Namespace}, device)
+			err = d.apiReader.Get(ctx, types.NamespacedName{Name: device.Name, Namespace: device.Namespace}, device)
 			if err != nil {
 				log.Log.Error(err, "failed to get existing NicDevice obj", "device", device)
 				continue
@@ -295,9 +298,10 @@ OUTER:
 }
 
 // NewDeviceDiscoveryController creates a new instance of DeviceDiscoveryController with the specified parameters.
-func NewDeviceDiscoveryController(client client.Client, deviceDiscovery devicediscovery.DeviceDiscovery, hostUtils host.HostUtils, node string, namespace string) *DeviceDiscoveryController {
+func NewDeviceDiscoveryController(client client.Client, apiReader client.Reader, deviceDiscovery devicediscovery.DeviceDiscovery, hostUtils host.HostUtils, node string, namespace string) *DeviceDiscoveryController {
 	return &DeviceDiscoveryController{
 		Client:          client,
+		apiReader:       apiReader,
 		deviceDiscovery: deviceDiscovery,
 		hostUtils:       hostUtils,
 		nodeName:        node,
