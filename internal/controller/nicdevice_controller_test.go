@@ -501,6 +501,107 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.AssertCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
 			maintenanceManager.AssertExpectations(GinkgoT())
 		})
+		DescribeTable("Should not reboot the node if the spec changes outside of the configuration section",
+			func(changeSpec func(spec *v1alpha1.NicDeviceSpec)) {
+				fwVersion := "22.44.11"
+				firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return(fwVersion, nil)
+				firmwareManager.On("GetFirmwareVersionsFromDevice", mock.Anything).Return(fwVersion, fwVersion, nil)
+				configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil, nil)
+				configurationManager.On("ApplyRuntimeConfiguration", mock.Anything, mock.Anything).Return(&types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusSuccess}, nil)
+				maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
+				maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
+				maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
+				rebooted := make(chan struct{}, 1)
+				maintenanceManager.On("Reboot").Run(func(mock.Arguments) {
+					select {
+					case rebooted <- struct{}{}:
+					default:
+					}
+				}).Return(nil)
+
+				createDevice(false, nil)
+
+				updateSuccessful := testutils.MatchCondition(metav1.Condition{
+					Type:   consts.ConfigUpdateInProgressCondition,
+					Status: metav1.ConditionFalse,
+					Reason: consts.UpdateSuccessfulReason,
+				})
+				Eventually(getDeviceConditions, timeout).Should(updateSuccessful)
+
+				device := &v1alpha1.NicDevice{}
+				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
+				appliedSpec, err := json.Marshal(device.Spec)
+				Expect(err).NotTo(HaveOccurred())
+				Eventually(getLastAppliedStateAnnotation, timeout).Should(Equal(string(appliedSpec)))
+
+				var changedSpec []byte
+				Eventually(func() error {
+					if err := k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device); err != nil {
+						return err
+					}
+					changeSpec(&device.Spec)
+					changedSpec, err = json.Marshal(device.Spec)
+					if err != nil {
+						return err
+					}
+					return k8sClient.Update(ctx, device)
+				}, timeout).Should(Succeed())
+				Expect(string(changedSpec)).NotTo(Equal(string(appliedSpec)))
+
+				Consistently(rebooted, 2*time.Second).ShouldNot(Receive(), "a node reboot was requested")
+
+				// The runtime configuration is applied again and the new spec is recorded
+				Eventually(getLastAppliedStateAnnotation, timeout).Should(Equal(string(changedSpec)))
+				Expect(getDeviceConditions()).To(updateSuccessful)
+				maintenanceManager.AssertNotCalled(GinkgoT(), "Reboot")
+			},
+			Entry("firmware spec is added", func(spec *v1alpha1.NicDeviceSpec) {
+				spec.Firmware = &v1alpha1.FirmwareTemplateSpec{
+					NicFirmwareSourceRef: "some-fw-source-ref",
+					UpdatePolicy:         consts.FirmwareUpdatePolicyValidate,
+				}
+			}),
+			Entry("interface name template spec is added", func(spec *v1alpha1.NicDeviceSpec) {
+				spec.InterfaceNameTemplate = &v1alpha1.NicDeviceInterfaceNameSpec{
+					PlaneIndices:    []int{0},
+					NetDevicePrefix: "net%nic_id%",
+				}
+			}),
+		)
+		It("Should request a reboot if the configuration section changes after it was applied", func() {
+			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil, nil)
+			configurationManager.On("ApplyRuntimeConfiguration", mock.Anything, mock.Anything).Return(&types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusSuccess}, nil)
+			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
+			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
+			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
+			rebooted := make(chan struct{}, 1)
+			maintenanceManager.On("Reboot").Run(func(mock.Arguments) {
+				select {
+				case rebooted <- struct{}{}:
+				default:
+				}
+			}).Return(nil)
+
+			createDevice(false, nil)
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
+				Type:   consts.ConfigUpdateInProgressCondition,
+				Status: metav1.ConditionFalse,
+				Reason: consts.UpdateSuccessfulReason,
+			}))
+			Eventually(lastAppliedStateAnnotationExists, timeout).Should(BeTrue())
+
+			device := &v1alpha1.NicDevice{}
+			Eventually(func() error {
+				if err := k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device); err != nil {
+					return err
+				}
+				device.Spec.Configuration.Template.PciPerformanceOptimized.MaxReadRequest = 2048
+				return k8sClient.Update(ctx, device)
+			}, timeout).Should(Succeed())
+
+			Eventually(rebooted, timeout).Should(Receive())
+			Eventually(lastAppliedStateAnnotationExists, timeout).Should(BeFalse())
+		})
 		//nolint:errcheck
 		It("Should reset FW after nv config update if feature gate FW_RESET_AFTER_CONFIG_UPDATE is enabled", func() {
 			os.Setenv(consts.FEATURE_GATE_FW_RESET_AFTER_CONFIG_UPDATE, consts.LabelValueTrue)
