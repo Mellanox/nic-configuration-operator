@@ -32,6 +32,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	"github.com/Mellanox/nic-configuration-operator/pkg/dms"
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 	utilsPkg "github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
@@ -154,7 +155,7 @@ func (f firmwareManager) InstallFirmware(ctx context.Context, device *v1alpha1.N
 	if version != "" {
 		burnedVersion, _, err := f.utils.GetFirmwareVersionsFromDevice(pci)
 		if err != nil {
-			log.Log.V(2).Info("Could not retrieve current firmware version, proceeding with burn", "device", device.Name, "error", err.Error())
+			log.Log.V(ncolog.DebugLevel).Info("Could not retrieve current firmware version, proceeding with burn", "device", device.Name, "error", err.Error())
 		} else if burnedVersion == version {
 			log.Log.Info("Burned firmware version already matches requested version, skipping burn", "device", device.Name, "version", version)
 			return false, nil
@@ -213,12 +214,12 @@ func (f firmwareManager) resolveFirmwareFilePath(device *v1alpha1.NicDevice, ver
 // resolveBFBFilePathFromCache finds a .bfb file in the cache directory
 func (f firmwareManager) resolveBFBFilePathFromCache(cacheDir string, version string) (string, error) {
 	bfbFolderPath := filepath.Join(cacheDir, consts.BFBFolder)
-	log.Log.V(2).Info("Searching for BFB file in the cache", "bfbFolderPath", bfbFolderPath)
+	log.Log.V(ncolog.DebugLevel).Info("Searching for BFB file in the cache", "bfbFolderPath", bfbFolderPath)
 
 	var bfbPath string
 	err := filepath.WalkDir(bfbFolderPath, func(path string, d os.DirEntry, err error) error {
 		if err == nil && strings.EqualFold(filepath.Ext(d.Name()), ".bfb") {
-			log.Log.V(2).Info("Found BFB file", "path", path)
+			log.Log.V(ncolog.DebugLevel).Info("Found BFB file", "path", path)
 			bfbPath = path
 			return filepath.SkipAll
 		}
@@ -238,7 +239,7 @@ func (f firmwareManager) resolveBFBFilePathFromCache(cacheDir string, version st
 
 // resolveFirmwareBinaryFilePathFromCache finds a .bin file in the cache directory and copies it to tmpDir
 func (f firmwareManager) resolveFirmwareBinaryFilePathFromCache(cacheDir string, version string, devicePSID string) (string, error) {
-	log.Log.V(2).Info("Searching for FW binary in the cache", "cacheDir", cacheDir, "PSID", devicePSID)
+	log.Log.V(ncolog.DebugLevel).Info("Searching for FW binary in the cache", "cacheDir", cacheDir, "PSID", devicePSID)
 
 	fwFolderPath := filepath.Join(cacheDir, consts.NicFirmwareBinariesFolder, version, devicePSID)
 
@@ -249,7 +250,7 @@ func (f firmwareManager) resolveFirmwareBinaryFilePathFromCache(cacheDir string,
 		}
 
 		if strings.EqualFold(filepath.Ext(d.Name()), consts.NicFirmwareBinaryFileExtension) {
-			log.Log.V(2).Info("Found FW binary file", "path", path)
+			log.Log.V(ncolog.DebugLevel).Info("Found FW binary file", "path", path)
 			if fwPath != "" {
 				return fmt.Errorf("found second FW binary file for the %s version and %s PSID: %s", version, devicePSID, path)
 			}
@@ -275,7 +276,7 @@ func (f firmwareManager) resolveFirmwareBinaryFilePathFromCache(cacheDir string,
 		return "", err
 	}
 
-	log.Log.V(2).Info("copying fw binary file to a local folder", "path", fwPath)
+	log.Log.V(ncolog.DebugLevel).Info("copying fw binary file to a local folder", "path", fwPath)
 	copiedFilePath := path.Join(f.tmpDir, filepath.Base(fwPath))
 	err = copyFile(fwPath, copiedFilePath)
 	if err != nil {

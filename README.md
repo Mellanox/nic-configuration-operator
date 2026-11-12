@@ -21,6 +21,18 @@ NVIDIA NIC Configuration Operator uses the [Maintenance Operator](https://github
 
 NVIDIA NIC Configuration Operator can be deployed as part of the [NIC Cluster Policy CRD](https://github.com/Mellanox/network-operator?tab=readme-ov-file#nicclusterpolicy-spec).
 
+### Logging
+
+Set Helm `logLevel` (or `LOG_LEVEL` for either binary) to a native Zap level:
+`debug`, `info` (default), `warn`, `error`, `dpanic`, `panic`, or `fatal`.
+Level names are case-insensitive. For example, `--set logLevel=error` suppresses
+informational and debug messages. Invalid names fail startup.
+
+Debug messages use Zap's debug threshold, including when selected through
+`--zap-log-level=debug`. `LOG_LEVEL`, when set, overrides that flag.
+Controller-runtime and library callers continue to use the logr interface;
+code uses `ncolog.DebugLevel` for debug verbosity instead of numeric levels.
+
 ## CRDs
 
 ### NICConfigurationTemplate

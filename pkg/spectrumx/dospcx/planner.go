@@ -38,6 +38,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	"github.com/Mellanox/nic-configuration-operator/pkg/dmscli"
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 )
 
 const (
@@ -263,18 +264,18 @@ func (m *Manager) prepareStagePlan(
 	metadataPath := filepath.Join(filepath.Dir(planPath), "metadata.json")
 	metadata := newPlanMetadata(m, config, stage, stateDir, targetMapPath, params, targetMapDigest)
 	if cached != nil && cached.plan != nil && reflect.DeepEqual(cached.metadata[stage], metadata) {
-		log.FromContext(ctx).V(2).Info("reusing in-memory doSPCX plan",
+		log.FromContext(ctx).V(ncolog.DebugLevel).Info("reusing in-memory doSPCX plan",
 			"node", config.nodeName, "stage", stage)
 		return &preparedStagePlan{
 			metadata: metadata, targetMap: cached.targetMap, plan: planForStage(cached.plan, stage),
 		}, nil
 	}
 	if saved, reason := loadSavedPlan(planPath, metadataPath, targetMapPath, metadata, config); saved != nil {
-		log.FromContext(ctx).V(2).Info("reusing saved doSPCX plan",
+		log.FromContext(ctx).V(ncolog.DebugLevel).Info("reusing saved doSPCX plan",
 			"node", config.nodeName, "stage", stage, "plan", planPath, "metadata", metadataPath)
 		return saved, nil
 	} else {
-		log.FromContext(ctx).V(2).Info("saved doSPCX plan cannot be reused",
+		log.FromContext(ctx).V(ncolog.DebugLevel).Info("saved doSPCX plan cannot be reused",
 			"node", config.nodeName, "stage", stage, "reason", reason)
 	}
 

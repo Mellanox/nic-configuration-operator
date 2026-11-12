@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"flag"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -26,6 +27,7 @@ import (
 	zzap "go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
@@ -74,5 +76,97 @@ var _ = Describe("controller logging context", func() {
 		Expect(output.All()[0].ContextMap()).To(Equal(map[string]any{
 			"error": "register not supported", "name": "ethgpu0", "namespace": "test",
 		}))
+	})
+})
+
+var _ = Describe("native Zap log levels", func() {
+	BeforeEach(func() {
+		original := Options.Level
+		Options.Level = zzap.NewAtomicLevelAt(zapcore.InfoLevel)
+		DeferCleanup(func() { Options.Level = original })
+	})
+
+	DescribeTable("parses native level names",
+		func(name string, expected zapcore.Level) {
+			Expect(SetLogLevel(name)).To(Succeed())
+			Expect(Options.Level.(zzap.AtomicLevel).Level()).To(Equal(expected))
+		},
+		Entry("empty defaults to info", "", zapcore.InfoLevel),
+		Entry("debug", "debug", zapcore.DebugLevel),
+		Entry("uppercase debug", "DEBUG", zapcore.DebugLevel),
+		Entry("mixed case info", "Info", zapcore.InfoLevel),
+		Entry("warn", "warn", zapcore.WarnLevel),
+		Entry("error", "error", zapcore.ErrorLevel),
+		Entry("dpanic", "dpanic", zapcore.DPanicLevel),
+		Entry("panic", "panic", zapcore.PanicLevel),
+		Entry("fatal", "fatal", zapcore.FatalLevel),
+	)
+
+	DescribeTable("rejects invalid levels without changing the threshold", func(name string) {
+		Expect(SetLogLevel("error")).To(Succeed())
+		Expect(SetLogLevel(name)).NotTo(Succeed())
+		Expect(Options.Level.(zzap.AtomicLevel).Level()).To(Equal(zapcore.ErrorLevel))
+	}, Entry("unknown", "trace"), Entry("numeric", "2"))
+
+	It("changes filtering for an existing logger, including verbosity-qualified errors", func() {
+		core, output := observer.New(Options.Level)
+		logger := zap.New(zap.UseFlagOptions(Options), zap.RawZapOpts(zzap.WrapCore(func(zapcore.Core) zapcore.Core {
+			return core
+		})))
+		emit := func() {
+			logger.V(DebugLevel).Info("debug")
+			logger.Info("info")
+			logger.V(DebugLevel).Error(errors.New("failed"), "error")
+		}
+		for _, tc := range []struct {
+			level    string
+			messages []string
+		}{
+			{level: "info", messages: []string{"info", "error"}},
+			{level: "debug", messages: []string{"debug", "info", "error"}},
+			{level: "warn", messages: []string{"error"}},
+			{level: "error", messages: []string{"error"}},
+			{level: "info", messages: []string{"info", "error"}},
+		} {
+			Expect(SetLogLevel(tc.level)).To(Succeed())
+			emit()
+			entries := output.TakeAll()
+			messages := make([]string, 0, len(entries))
+			for _, entry := range entries {
+				messages = append(messages, entry.Message)
+				if entry.Message == "debug" {
+					Expect(entry.Level).To(Equal(zapcore.DebugLevel))
+				}
+			}
+			Expect(messages).To(Equal(tc.messages))
+		}
+	})
+
+	It("filters the threshold-change announcement using the new level", func() {
+		core, output := observer.New(Options.Level)
+		originalLogger := log.Log
+		log.Log = zap.New(zap.UseFlagOptions(Options), zap.RawZapOpts(zzap.WrapCore(func(zapcore.Core) zapcore.Core {
+			return core
+		})))
+		DeferCleanup(func() { log.Log = originalLogger })
+
+		Expect(SetLogLevel("error")).To(Succeed())
+		Expect(output.All()).To(BeEmpty())
+		Expect(SetLogLevel("debug")).To(Succeed())
+		Expect(output.All()).To(HaveLen(1))
+		Expect(output.All()[0].ContextMap()).To(Equal(map[string]any{
+			"new-level": "debug", "current-level": "error",
+		}))
+	})
+
+	It("enables named debug call sites with the Zap flag and allows an environment override", func() {
+		flags := flag.NewFlagSet("logging-test", flag.ContinueOnError)
+		BindFlags(flags)
+		Expect(flags.Parse([]string{"--zap-log-level=debug"})).To(Succeed())
+		logger := zap.New(zap.UseFlagOptions(Options))
+		Expect(logger.V(DebugLevel).Enabled()).To(BeTrue())
+		Expect(SetLogLevel("error")).To(Succeed())
+		Expect(logger.Enabled()).To(BeFalse())
+		Expect(logger.V(DebugLevel).Enabled()).To(BeFalse())
 	})
 })

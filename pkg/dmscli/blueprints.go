@@ -28,6 +28,7 @@ import (
 	"github.com/go-logr/logr"
 	execUtils "k8s.io/utils/exec"
 
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
 
@@ -175,7 +176,7 @@ func logBlueprintPlanResult(
 		fields = append(fields, "stdout", boundedCommandOutput(output.Stdout))
 	}
 	fields = appendCommandStderr(fields, output.Stderr, commandErr)
-	logr.FromContextOrDiscard(ctx).V(2).Info("command output", fields...)
+	logr.FromContextOrDiscard(ctx).V(ncolog.DebugLevel).Info("command output", fields...)
 }
 
 func validateBlueprintPlanRequest(request BlueprintPlanRequest) error {

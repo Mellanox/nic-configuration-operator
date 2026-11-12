@@ -25,6 +25,7 @@ import (
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 	"github.com/Mellanox/nic-configuration-operator/pkg/nvconfig"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
@@ -86,12 +87,12 @@ func (d *deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, e
 			continue
 		}
 		if devClass != consts.NetClass {
-			log.Log.V(2).Info("Device is not a network device, skipping", "address", device)
+			log.Log.V(ncolog.DebugLevel).Info("Device is not a network device, skipping", "address", device)
 			continue
 		}
 
 		if d.utils.IsSriovVF(device.Address) {
-			log.Log.V(2).Info("Device is an SRIOV VF, skipping", "address", device.Address)
+			log.Log.V(ncolog.DebugLevel).Info("Device is an SRIOV VF, skipping", "address", device.Address)
 			continue
 		}
 
@@ -205,7 +206,7 @@ func (d *deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, e
 		}
 	}
 
-	log.Log.V(2).Info("Found devices", "devices", devices)
+	log.Log.V(ncolog.DebugLevel).Info("Found devices", "devices", devices)
 
 	return devices, nil
 }

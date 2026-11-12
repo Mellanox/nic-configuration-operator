@@ -23,6 +23,7 @@ import (
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/dmscli"
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 	"github.com/Mellanox/nic-configuration-operator/pkg/spectrumx"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 )
@@ -131,7 +132,7 @@ func (h configurationManager) spectrumXNVConfigPhase(
 		return "", false, false, err
 	}
 	validate := func(phase string, operations []dmscli.XPathOperation) (string, bool, bool, error) {
-		log.FromContext(ctx).V(2).Info("validating doSPCX NVConfig phase",
+		log.FromContext(ctx).V(ncolog.DebugLevel).Info("validating doSPCX NVConfig phase",
 			"device", device.Name,
 			"phase", phase,
 			"operations", len(operations),
@@ -168,7 +169,7 @@ func (h configurationManager) verifySpectrumXNVConfigStaged(
 	}
 	ports := device.Status.Ports
 	logger := log.FromContext(ctx)
-	logger.V(2).Info("verifying doSPCX NVConfig pending state on all PCI functions",
+	logger.V(ncolog.DebugLevel).Info("verifying doSPCX NVConfig pending state on all PCI functions",
 		"device", device.Name,
 		"functions", len(ports),
 		"nativeParameters", len(desiredParams),

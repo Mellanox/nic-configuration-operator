@@ -32,6 +32,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	"github.com/Mellanox/nic-configuration-operator/pkg/firmware"
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 )
 
 // NicFirmwareSourceReconciler reconciles a NicDevice object
@@ -48,7 +49,7 @@ func (r *NicFirmwareSourceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	instance := &v1alpha1.NicFirmwareSource{}
 	err := r.Get(ctx, req.NamespacedName, instance)
 
-	log.Log.V(2).Info("reconciling NicFirmwareSource object", "name", instance.Name)
+	log.Log.V(ncolog.DebugLevel).Info("reconciling NicFirmwareSource object", "name", instance.Name)
 
 	if err != nil {
 		if errors.IsNotFound(err) {

@@ -14,7 +14,7 @@ A Helm chart for NIC Configuration Operator
 | configDaemon.nodeSelector | object | `{}` | node selector for the config daemon |
 | configDaemon.resources | object | `{"limits":{"cpu":"500m","memory":"128Mi"},"requests":{"cpu":"10m","memory":"64Mi"}}` | resources and limits for the config daemon |
 | imagePullSecrets | list | `[]` | image pull secrets for both the operator and the config daemon |
-| logLevel | string | `"info"` | log level configuration (debug|info) |
+| logLevel | string | `"info"` | log level configuration (debug, info, warn, error, dpanic, panic, fatal) |
 | nicFirmwareStorage | object | `{"availableStorageSize":"1Gi","create":true,"pvcName":"nic-fw-storage-pvc","storageClassName":""}` | settings to enable the NIC Firmware Storage |
 | nicFirmwareStorage.availableStorageSize | string | `"1Gi"` | storage size for the NIC Configuration Operator to request. 1Gi is the default value when not provided |
 | nicFirmwareStorage.create | bool | `true` | create a new pvc or use an existing one |

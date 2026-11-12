@@ -30,6 +30,7 @@ import (
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/dmscli"
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
@@ -80,7 +81,7 @@ type nvConfigUtils struct {
 
 func resolveDevice(port v1alpha1.NicDevicePortSpec) string {
 	if port.FwctlDevice != "" {
-		log.Log.V(2).Info("using fwctl device for mlxconfig", "pciAddr", port.PCI, "fwctlDevice", port.FwctlDevice)
+		log.Log.V(ncolog.DebugLevel).Info("using fwctl device for mlxconfig", "pciAddr", port.PCI, "fwctlDevice", port.FwctlDevice)
 		return port.FwctlDevice
 	}
 	return port.PCI
@@ -288,7 +289,7 @@ func (h *nvConfigUtils) setNvConfigParametersBatchWithXPaths(
 		"typedOperationCount", len(operations),
 		"withDefault", withDefault,
 		"force", force)
-	logger.V(2).Info("DMS NVConfig apply payload",
+	logger.V(ncolog.DebugLevel).Info("DMS NVConfig apply payload",
 		"target", target,
 		"nativeParameters", params,
 		"typedOperations", operations)
@@ -305,7 +306,7 @@ func (h *nvConfigUtils) setNvConfigParametersBatchWithXPaths(
 		logger.Error(err, "DMS NVConfig apply failed", "target", target)
 		return types.ApplyStatusFailed, err
 	}
-	logger.V(2).Info("DMS NVConfig apply succeeded",
+	logger.V(ncolog.DebugLevel).Info("DMS NVConfig apply succeeded",
 		"target", target,
 		"primaryTarget", result.PrimaryTarget,
 		"compiledCount", result.CompiledCount,
@@ -350,14 +351,14 @@ func (h *nvConfigUtils) ValidateNvConfigXPathsWithOverrides(
 	}
 	queries := xpathQueries(direct)
 	queryBatches := xpathQueryBatches(queries)
-	logger.V(2).Info("validating doSPCX NVConfig on all device ports",
+	logger.V(ncolog.DebugLevel).Info("validating doSPCX NVConfig on all device ports",
 		"ports", len(ports),
 		"operations", len(operations),
 		"queryPaths", len(queries),
 		"batchesPerPort", len(queryBatches))
 	for _, port := range ports {
 		target := "pci/" + port.PCI + "?port=1"
-		logger.V(2).Info("querying doSPCX NVConfig state for device port",
+		logger.V(ncolog.DebugLevel).Info("querying doSPCX NVConfig state for device port",
 			"pciAddr", port.PCI,
 			"target", target,
 			"batches", len(queryBatches))
@@ -385,13 +386,13 @@ func (h *nvConfigUtils) ValidateNvConfigXPathsWithOverrides(
 		portRebootNeeded = portRebootNeeded || roceReboot
 		updateNeeded = updateNeeded || portUpdateNeeded
 		rebootNeeded = rebootNeeded || portRebootNeeded
-		logger.V(2).Info("doSPCX NVConfig validation complete for device port",
+		logger.V(ncolog.DebugLevel).Info("doSPCX NVConfig validation complete for device port",
 			"pciAddr", port.PCI,
 			"target", target,
 			"configUpdateNeeded", portUpdateNeeded,
 			"rebootNeeded", portRebootNeeded)
 	}
-	logger.V(2).Info("doSPCX NVConfig validation complete for all device ports",
+	logger.V(ncolog.DebugLevel).Info("doSPCX NVConfig validation complete for all device ports",
 		"ports", len(ports),
 		"configUpdateNeeded", updateNeeded,
 		"rebootNeeded", rebootNeeded)
@@ -449,7 +450,7 @@ func queryNVConfigXPaths(ctx context.Context, executor execUtils.Interface, targ
 ) (*dmscli.QueryXPathsResult, error) {
 	result := &dmscli.QueryXPathsResult{Status: "ok", Values: map[string]map[string]any{}, NVConfig: map[string]string{}}
 	for index, batch := range batches {
-		logr.FromContextOrDiscard(ctx).V(2).Info("querying doSPCX NVConfig batch",
+		logr.FromContextOrDiscard(ctx).V(ncolog.DebugLevel).Info("querying doSPCX NVConfig batch",
 			"target", target, "batch", index+1, "totalBatches", len(batches), "paths", len(batch))
 		part, err := dmscli.QueryXPaths(ctx, executor, target, batch)
 		if err != nil {
@@ -581,7 +582,7 @@ func (h *nvConfigUtils) SetSystemConf(ctx context.Context, port v1alpha1.NicDevi
 	args = append(args, "set_system_conf", systemConfToken(conf, asic))
 
 	output, err := h.execInterface.CommandContext(ctx, "mlxconfig", args...).CombinedOutput()
-	log.Log.V(2).Info("command output", "command", "mlxconfig set_system_conf", "pciAddr", port.PCI, "targetDevice", targetDevice, "output", string(output))
+	log.Log.V(ncolog.DebugLevel).Info("command output", "command", "mlxconfig set_system_conf", "pciAddr", port.PCI, "targetDevice", targetDevice, "output", string(output))
 	if err != nil {
 		log.Log.Error(err, "SetSystemConf(): Failed to run mlxconfig", "pciAddr", port.PCI, "targetDevice", targetDevice)
 		return err
@@ -597,7 +598,7 @@ func (h *nvConfigUtils) ValidateSystemConf(ctx context.Context, port v1alpha1.Ni
 
 	args := []string{"-d", targetDevice, "-y", "validate_system_conf", systemConfToken(conf, asic)}
 	output, err := h.execInterface.CommandContext(ctx, "mlxconfig", args...).CombinedOutput()
-	log.Log.V(2).Info("command output", "command", "mlxconfig validate_system_conf", "pciAddr", port.PCI, "targetDevice", targetDevice, "output", string(output))
+	log.Log.V(ncolog.DebugLevel).Info("command output", "command", "mlxconfig validate_system_conf", "pciAddr", port.PCI, "targetDevice", targetDevice, "output", string(output))
 
 	// mlxconfig validate_system_conf exits non-zero (e.g. 3) when the device configuration does
 	// NOT match the system conf — that is a valid result, not a command failure. Treat the parsed
