@@ -65,7 +65,7 @@ RUN set -eu; \
         printf '%s  /debs/doca-dms.deb\n' "${checksum}" | sha256sum -c -; \
     fi
 
-FROM ${BASE_IMAGE_DOCA_FULL_RT_HOST:-nvcr.io/nvstaging/doca/doca:full-rt-3.6.0-ubuntu24.04-host-dev}
+FROM ${BASE_IMAGE_DOCA_FULL_RT_HOST:-nvcr.io/nvstaging/doca/doca:full-rt-3.5.0-host-dev}
 
 ARG TARGETARCH
 

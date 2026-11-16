@@ -141,7 +141,7 @@ resolve-doca-host:
   stage: build
   script:
     - |
-      docker buildx build --pull --load \
+      docker buildx build --load \
         --platform "linux/$TARGETARCH" \
         --build-arg GOPROXY="$GOPROXY" \
         --build-arg BASE_IMAGE_DOCA_FULL_RT_HOST="$BASE_IMAGE_DOCA_FULL_RT_HOST" \
