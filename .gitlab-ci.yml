@@ -80,6 +80,10 @@ variables:  # additional variables are defined at the gitlab group scope
   # Pin the DOCA series per release branch; the resolver selects the last_stable
   # internal build of its latest patch.
   DOCA_SERIES: "3.6"
+  DOCA_DMS_VERSION: "3.6.1002-1.nco20261116"
+  DOCA_DMS_SHA256_AMD64: 426ac72865d37b1cd3a6064e594bdea479a58203665bf2b7ce66157f3d52e7bd
+  DOCA_DMS_SHA256_ARM64: 6fe7f1e8a51c102fc11012cff1e3089cae5acf213e10700a8dc2259cfdcaed68
+  DOCA_DMS_SHA256_RHEL_AMD64: 2b0c32b4c2c482441614dec20fd9d5612b1fd1bcbcac6ed1494ca203a29a743e
   GOV_READY_POLICY_FILE_PATH: pulse-scan-policies/prodsec_approved_govready_release_policy.json
   CVE_UPDATES_RHEL: "openssl openssl-libs python3 python3-libs python3-urllib3 glib2 util-linux libnghttp2 vim-minimal libarchive libcurl-minimal curl-minimal sqlite-libs libxml2 gzip unbound-libs expat python3-idna attr libattr dbus-broker coreutils-single"
 
@@ -137,13 +141,20 @@ resolve-doca-host:
   stage: build
   script:
     - |
-      docker buildx build --load \
+      docker buildx build --pull --load \
         --platform "linux/$TARGETARCH" \
         --build-arg GOPROXY="$GOPROXY" \
         --build-arg BASE_IMAGE_DOCA_FULL_RT_HOST="$BASE_IMAGE_DOCA_FULL_RT_HOST" \
+        --build-arg DOCA_DMS_URL="${DOCA_DMS_URL_26_10:?DOCA_DMS_URL_26_10 is required}" \
+        --build-arg DOCA_DMS_SHA256_AMD64="$DOCA_DMS_SHA256_AMD64" \
+        --build-arg DOCA_DMS_SHA256_ARM64="$DOCA_DMS_SHA256_ARM64" \
         --file "$REGULAR_DOCKERFILE" \
         --tag "$DOCKER_REGISTRY/$REGULAR_IMAGE_NAME:$REGULAR_DOCKER_TAG-$TARGETARCH" \
         .
+    - |
+      installed=$(docker run --rm --platform "linux/$TARGETARCH" --user 0 --entrypoint dpkg-query \
+        "$DOCKER_REGISTRY/$REGULAR_IMAGE_NAME:$REGULAR_DOCKER_TAG-$TARGETARCH" -W -f='${Version}' doca-dms)
+      test "$installed" = "$DOCA_DMS_VERSION"
     - docker push "$DOCKER_REGISTRY/$REGULAR_IMAGE_NAME:$REGULAR_DOCKER_TAG-$TARGETARCH"
 
 build-operator-image:
@@ -213,7 +224,7 @@ publish-daemon-image:
         value=$(eval "echo \$$var")
         echo "Validating variable $var..."
         if [ -n "$value" ]; then
-          echo "$var=$value"
+          echo "$var is set"
         else
           echo "ERROR: $var is empty or not set in GitLab repository settings!" >&2
           exit 1
@@ -287,10 +298,17 @@ build-daemon-stig-image-ubuntu:
         --build-arg GOPROXY=$GOPROXY \
         --build-arg UBUNTU_STIG_BASE_IMAGE=$UBUNTU_STIG_BASE_IMAGE \
         --build-arg DOCA_HOST_URL="$DOCA_HOST_UBUNTU_URL" \
+        --build-arg DOCA_DMS_URL="${DOCA_DMS_URL_26_10:?DOCA_DMS_URL_26_10 is required}" \
+        --build-arg DOCA_DMS_SHA256_AMD64="$DOCA_DMS_SHA256_AMD64" \
+        --build-arg DOCA_DMS_SHA256_ARM64="$DOCA_DMS_SHA256_ARM64" \
         --file      Dockerfile.daemon.stig-ubuntu \
         --tag       $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG-ubuntu \
         .
     # push
+    - |
+      installed=$(docker run --rm --user 0 --entrypoint dpkg-query \
+        "$DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG-ubuntu" -W -f='${Version}' doca-dms)
+      test "$installed" = "$DOCA_DMS_VERSION"
     - docker push $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG-ubuntu
     - echo "DAEMON_IMAGE_UBUNTU=$DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG-ubuntu" | tee -a build.env
   artifacts:
@@ -333,10 +351,16 @@ build-daemon-stig-image-rhel:
         --build-arg RHEL_STIG_BASE_IMAGE=$RHEL_STIG_BASE_IMAGE \
         --build-arg DOCA_HOST_URL="$DOCA_HOST_RHEL_URL" \
         --build-arg CVE_UPDATES_RHEL="$CVE_UPDATES_RHEL" \
+        --build-arg DOCA_DMS_URL="${DOCA_DMS_RPM_URL_26_10:?DOCA_DMS_RPM_URL_26_10 is required}" \
+        --build-arg DOCA_DMS_SHA256_AMD64="$DOCA_DMS_SHA256_RHEL_AMD64" \
         --file      Dockerfile.daemon.stig-rhel \
         --tag       $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG-rhel \
         .
     # push
+    - |
+      installed=$(docker run --rm --user 0 --entrypoint rpm \
+        "$DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG-rhel" -q --qf '%{VERSION}-%{RELEASE}' doca-dms)
+      test "$installed" = "$DOCA_DMS_VERSION.el9"
     - docker push $DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG-rhel
     - echo "DAEMON_IMAGE_RHEL=$DOCKER_REGISTRY/$DAEMON_IMAGE_NAME:$DOCKER_TAG-rhel" | tee -a build.env
   artifacts:

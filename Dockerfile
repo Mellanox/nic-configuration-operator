@@ -44,7 +44,28 @@ COPY ./ ./
 #RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/maintenance-manager/main.go
 RUN --mount=type=cache,target=/go/pkg/mod/ GO_GCFLAGS=${GCFLAGS} make build-manager
 
-FROM ${BASE_IMAGE_DOCA_FULL_RT_HOST:-nvcr.io/nvstaging/doca/doca:full-rt-3.5.0-host-dev}
+# Download the custom DMS package using the existing Go builder image.
+FROM --platform=${BUILDPLATFORM} golang:1.27 AS doca-dms
+ARG TARGETARCH
+# {arch} is replaced by amd/arm. An empty URL keeps the base image's DMS.
+ARG DOCA_DMS_URL=""
+ARG DOCA_DMS_SHA256_AMD64=""
+ARG DOCA_DMS_SHA256_ARM64=""
+RUN set -eu; \
+    mkdir /debs; \
+    if [ -n "${DOCA_DMS_URL}" ]; then \
+        case "${TARGETARCH}" in \
+            amd64) checksum="${DOCA_DMS_SHA256_AMD64}" ;; \
+            arm64) checksum="${DOCA_DMS_SHA256_ARM64}" ;; \
+            *) echo "Unsupported DMS package architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+        esac; \
+        : "${checksum:?Set the DMS SHA256 for the target architecture}"; \
+        url=$(printf '%s' "${DOCA_DMS_URL}" | sed "s|{arch}|${TARGETARCH%64}|g"); \
+        curl -fsSL --retry 3 "${url}" -o /debs/doca-dms.deb; \
+        printf '%s  /debs/doca-dms.deb\n' "${checksum}" | sha256sum -c -; \
+    fi
+
+FROM ${BASE_IMAGE_DOCA_FULL_RT_HOST:-nvcr.io/nvstaging/doca/doca:full-rt-3.6.0-ubuntu24.04-host-dev}
 
 ARG TARGETARCH
 
@@ -60,6 +81,11 @@ RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
 RUN apt-get update -y
 RUN apt-get install -y --no-install-recommends ${PACKAGES}
 RUN apt-get source ${PACKAGES}
+
+RUN --mount=type=bind,from=doca-dms,source=/debs,target=/tmp/doca-dms \
+    if [ -f /tmp/doca-dms/doca-dms.deb ]; then \
+        dpkg -i /tmp/doca-dms/doca-dms.deb; \
+    fi
 
 WORKDIR /
 COPY --from=builder /workspace/build/manager .
