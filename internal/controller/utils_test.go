@@ -95,3 +95,27 @@ func countCalls(calls []mock.Call, method string) int {
 	}
 	return count
 }
+
+// silentT satisfies mock.TestingT without failing the spec, so that mock assertions can be polled.
+type silentT struct{}
+
+func (silentT) Logf(string, ...interface{})   {}
+func (silentT) Errorf(string, ...interface{}) {}
+func (silentT) FailNow()                      {}
+
+// mockCalled returns a function reporting whether the method was called on the mock with the given arguments.
+// The reconciler runs asynchronously, so a call that follows a status update
+// may not have happened yet when the test observes that update; poll with Eventually.
+func mockCalled(m *mock.Mock, method string, args ...interface{}) func() bool {
+	return func() bool {
+		return m.AssertCalled(silentT{}, method, args...)
+	}
+}
+
+// expectationsMet returns a function reporting whether all the expectations set on the mock were met.
+// Poll it with Eventually for the same reason as mockCalled.
+func expectationsMet(m *mock.Mock) func() bool {
+	return func() bool {
+		return m.AssertExpectations(silentT{})
+	}
+}

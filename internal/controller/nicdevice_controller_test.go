@@ -498,8 +498,9 @@ var _ = Describe("NicDeviceReconciler", func() {
 			// Should dump the last applied state to annotations
 			Eventually(getLastAppliedStateAnnotation).Should(Equal(string(spec)))
 
-			maintenanceManager.AssertCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
-			maintenanceManager.AssertExpectations(GinkgoT())
+			// Maintenance is released after the status update, so it may not have happened yet
+			Eventually(mockCalled(&maintenanceManager.Mock, "ReleaseMaintenance", mock.Anything), timeout).Should(BeTrue())
+			Eventually(expectationsMet(&maintenanceManager.Mock), timeout).Should(BeTrue())
 		})
 		//nolint:errcheck
 		It("Should reset FW after nv config update if feature gate FW_RESET_AFTER_CONFIG_UPDATE is enabled", func() {
@@ -527,7 +528,9 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Reason: consts.PendingRebootReason,
 			}))
 
-			configurationManager.AssertCalled(GinkgoT(), "ResetNicFirmware", mock.Anything, mock.Anything)
+			// The controller sets the PendingReboot condition before resetting the firmware,
+			// so the reset may not have happened yet when the condition becomes visible.
+			Eventually(mockCalled(&configurationManager.Mock, "ResetNicFirmware", mock.Anything, mock.Anything), timeout).Should(BeTrue())
 		})
 		It("Should NOT reset FW after nv config update if feature gate FW_RESET_AFTER_CONFIG_UPDATE is NOT enabled", func() {
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(true, true, nil, nil)
@@ -718,7 +721,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			Eventually(lastAppliedStateAnnotationExists).Should(BeFalse())
 
 			configurationManager.AssertNotCalled(GinkgoT(), "ApplyRuntimeConfiguration", mock.Anything, mock.Anything)
-			maintenanceManager.AssertExpectations(GinkgoT())
+			Eventually(expectationsMet(&maintenanceManager.Mock), timeout).Should(BeTrue())
 		})
 		It("Should not release maintenance if runtime config failed to apply", func() {
 			errorText := "runtime config update failed"
@@ -739,8 +742,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 			configurationManager.AssertNotCalled(GinkgoT(), "ApplyNVConfiguration", mock.Anything, mock.Anything, mock.Anything)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "Reboot")
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
-			configurationManager.AssertExpectations(GinkgoT())
-			maintenanceManager.AssertExpectations(GinkgoT())
+			Eventually(expectationsMet(&configurationManager.Mock), timeout).Should(BeTrue())
+			Eventually(expectationsMet(&maintenanceManager.Mock), timeout).Should(BeTrue())
 		})
 		It("Should reflect a NO-CARRIER runtime config error in status and not release maintenance", func() {
 			errorText := "network interface interface1 for device port 0000:03:00.1 has NO-CARRIER"
@@ -761,8 +764,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 			configurationManager.AssertNotCalled(GinkgoT(), "ApplyNVConfiguration", mock.Anything, mock.Anything, mock.Anything)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "Reboot")
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
-			configurationManager.AssertExpectations(GinkgoT())
-			maintenanceManager.AssertExpectations(GinkgoT())
+			Eventually(expectationsMet(&configurationManager.Mock), timeout).Should(BeTrue())
+			Eventually(expectationsMet(&maintenanceManager.Mock), timeout).Should(BeTrue())
 		})
 		It("Should request maintenance if runtime config needs to be reset", func() {
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil, nil)
@@ -788,8 +791,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 
 			configurationManager.AssertNotCalled(GinkgoT(), "ApplyNVConfiguration", mock.Anything, mock.Anything, mock.Anything)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
-			configurationManager.AssertExpectations(GinkgoT())
-			maintenanceManager.AssertExpectations(GinkgoT())
+			Eventually(expectationsMet(&configurationManager.Mock), timeout).Should(BeTrue())
+			Eventually(expectationsMet(&maintenanceManager.Mock), timeout).Should(BeTrue())
 		})
 		It("Should not request another reboot if nv config failed to apply after the first one", func() {
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, true, nil, nil)
@@ -815,8 +818,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 			configurationManager.AssertNotCalled(GinkgoT(), "ApplyNVConfiguration", mock.Anything, mock.Anything, mock.Anything)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "Reboot")
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
-			configurationManager.AssertExpectations(GinkgoT())
-			maintenanceManager.AssertExpectations(GinkgoT())
+			Eventually(expectationsMet(&configurationManager.Mock), timeout).Should(BeTrue())
+			Eventually(expectationsMet(&maintenanceManager.Mock), timeout).Should(BeTrue())
 		})
 
 		It("Should not fail on an not applied nv config when reboot hasn't happened yet", func() {
@@ -840,8 +843,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 			configurationManager.AssertNotCalled(GinkgoT(), "ApplyRuntimeConfiguration", mock.Anything, mock.Anything)
 			configurationManager.AssertNotCalled(GinkgoT(), "ApplyNVConfiguration", mock.Anything, mock.Anything, mock.Anything)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
-			configurationManager.AssertExpectations(GinkgoT())
-			maintenanceManager.AssertExpectations(GinkgoT())
+			Eventually(expectationsMet(&configurationManager.Mock), timeout).Should(BeTrue())
+			Eventually(expectationsMet(&maintenanceManager.Mock), timeout).Should(BeTrue())
 		})
 	})
 	Describe("reconcile multiple devices without firmware specs", func() {
@@ -903,7 +906,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			}))
 
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ScheduleMaintenance", mock.Anything)
-			maintenanceManager.AssertExpectations(GinkgoT())
+			Eventually(expectationsMet(&maintenanceManager.Mock), timeout).Should(BeTrue())
 		})
 
 		It("Should not apply runtime spec for device if spec validation failed for other device", func() {
@@ -926,7 +929,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			}).ShouldNot(testutils.MatchCondition(metav1.Condition{Type: consts.ConfigUpdateInProgressCondition})) // No operation are performed on this device, no reason to change status
 
 			configurationManager.AssertNotCalled(GinkgoT(), "ApplyRuntimeConfiguration", mock.Anything, mock.Anything)
-			maintenanceManager.AssertExpectations(GinkgoT())
+			Eventually(expectationsMet(&maintenanceManager.Mock), timeout).Should(BeTrue())
 		})
 
 		It("Should not apply runtime spec for device if nv spec apply needed for other device", func() {
@@ -952,7 +955,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			}).ShouldNot(testutils.MatchCondition(metav1.Condition{Type: consts.ConfigUpdateInProgressCondition})) // No operation are performed on this device, no reason to change status
 
 			configurationManager.AssertNotCalled(GinkgoT(), "ApplyRuntimeConfiguration", mock.Anything, mock.Anything)
-			maintenanceManager.AssertExpectations(GinkgoT())
+			Eventually(expectationsMet(&maintenanceManager.Mock), timeout).Should(BeTrue())
 		})
 	})
 
@@ -1007,7 +1010,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 
 			Consistently(getDeviceConditions, time.Second).ShouldNot(testutils.MatchCondition(metav1.Condition{Type: consts.FirmwareUpdateInProgressCondition, Status: metav1.ConditionTrue}))
 
-			maintenanceManager.AssertExpectations(GinkgoT())
+			Eventually(expectationsMet(&maintenanceManager.Mock), timeout).Should(BeTrue())
 		})
 
 		It("Should fail validation if firmware source failed", func() {
@@ -1026,7 +1029,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 
 			Consistently(getDeviceConditions, time.Second).ShouldNot(testutils.MatchCondition(metav1.Condition{Type: consts.FirmwareUpdateInProgressCondition, Status: metav1.ConditionTrue}))
 
-			maintenanceManager.AssertExpectations(GinkgoT())
+			Eventually(expectationsMet(&maintenanceManager.Mock), timeout).Should(BeTrue())
 		})
 
 		It("Should set successful status if fw update is not required", func() {
@@ -1048,7 +1051,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 
 			Consistently(getDeviceConditions, time.Second).ShouldNot(testutils.MatchCondition(metav1.Condition{Type: consts.FirmwareUpdateInProgressCondition, Status: metav1.ConditionTrue}))
 
-			maintenanceManager.AssertExpectations(GinkgoT())
+			Eventually(expectationsMet(&maintenanceManager.Mock), timeout).Should(BeTrue())
 		})
 
 		It("Should update the firmware version in the status if it is different from the last observed", func() {
@@ -1075,7 +1078,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Expect(k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device)).To(Succeed())
 				return device.Status.FirmwareVersion
 			}).Should(Equal(newFwVersion))
-			maintenanceManager.AssertExpectations(GinkgoT())
+			Eventually(expectationsMet(&maintenanceManager.Mock), timeout).Should(BeTrue())
 		})
 
 		It("Should not start firmware update if maintenance is not allowed", func() {
@@ -1108,8 +1111,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Message: consts.PendingOwnFirmwareUpdateMessage,
 			}))
 
-			firmwareManager.AssertExpectations(GinkgoT())
-			maintenanceManager.AssertExpectations(GinkgoT())
+			Eventually(expectationsMet(&firmwareManager.Mock), timeout).Should(BeTrue())
+			Eventually(expectationsMet(&maintenanceManager.Mock), timeout).Should(BeTrue())
 		})
 
 		It("Should set the version mismatch status if policy is set to validate", func() {
@@ -1142,8 +1145,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Message: consts.PendingOwnFirmwareUpdateMessage,
 			}))
 
-			firmwareManager.AssertExpectations(GinkgoT())
-			maintenanceManager.AssertExpectations(GinkgoT())
+			Eventually(expectationsMet(&firmwareManager.Mock), timeout).Should(BeTrue())
+			Eventually(expectationsMet(&maintenanceManager.Mock), timeout).Should(BeTrue())
 		})
 
 		It("Should set the error status if fw update has failed", func() {
@@ -1166,6 +1169,13 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Message: err.Error(),
 			}))
 
+			// The conditions are updated separately, wait for this one to be set before checking it is kept
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
+				Type:    consts.ConfigUpdateInProgressCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  consts.PendingFirmwareUpdateReason,
+				Message: consts.PendingOwnFirmwareUpdateMessage,
+			}))
 			Consistently(getDeviceConditions, time.Second).Should(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.ConfigUpdateInProgressCondition,
 				Status:  metav1.ConditionFalse,
@@ -1173,8 +1183,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Message: consts.PendingOwnFirmwareUpdateMessage,
 			}))
 
-			firmwareManager.AssertExpectations(GinkgoT())
-			maintenanceManager.AssertExpectations(GinkgoT())
+			Eventually(expectationsMet(&firmwareManager.Mock), timeout).Should(BeTrue())
+			Eventually(expectationsMet(&maintenanceManager.Mock), timeout).Should(BeTrue())
 		})
 
 		It("Should set the success status after fw update", func() {
@@ -1374,12 +1384,12 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Message: consts.PendingOtherFirmwareUpdateMessage,
 			}))
 
-			firmwareManager.AssertExpectations(GinkgoT())
+			Eventually(expectationsMet(&firmwareManager.Mock), timeout).Should(BeTrue())
 			firmwareManager.AssertNotCalled(GinkgoT(), "InstallFirmware", mock.Anything, matchSecondDevice, mock.Anything)
-			configurationManager.AssertExpectations(GinkgoT())
+			Eventually(expectationsMet(&configurationManager.Mock), timeout).Should(BeTrue())
 			configurationManager.AssertNotCalled(GinkgoT(), "ValidateDeviceNvSpec", mock.Anything, mock.Anything)
 			configurationManager.AssertNotCalled(GinkgoT(), "ApplyRuntimeConfiguration", mock.Anything, mock.Anything)
-			maintenanceManager.AssertExpectations(GinkgoT())
+			Eventually(expectationsMet(&maintenanceManager.Mock), timeout).Should(BeTrue())
 		})
 
 		It("Should stop configuration update on one device if firmware update failed for another one", func() {
@@ -1442,8 +1452,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Message: consts.PendingOwnFirmwareUpdateMessage,
 			}))
 
-			firmwareManager.AssertExpectations(GinkgoT())
-			configurationManager.AssertExpectations(GinkgoT())
+			Eventually(expectationsMet(&firmwareManager.Mock), timeout).Should(BeTrue())
+			Eventually(expectationsMet(&configurationManager.Mock), timeout).Should(BeTrue())
 			configurationManager.AssertNotCalled(GinkgoT(), "ValidateDeviceNvSpec", mock.Anything, mock.Anything)
 			configurationManager.AssertNotCalled(GinkgoT(), "ApplyRuntimeConfiguration", mock.Anything, mock.Anything)
 			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
@@ -1497,9 +1507,9 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Message: "",
 			}))
 
-			firmwareManager.AssertExpectations(GinkgoT())
-			configurationManager.AssertExpectations(GinkgoT())
-			maintenanceManager.AssertExpectations(GinkgoT())
+			Eventually(expectationsMet(&firmwareManager.Mock), timeout).Should(BeTrue())
+			Eventually(expectationsMet(&configurationManager.Mock), timeout).Should(BeTrue())
+			Eventually(expectationsMet(&maintenanceManager.Mock), timeout).Should(BeTrue())
 		})
 	})
 
