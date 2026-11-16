@@ -45,7 +45,7 @@ COPY ./ ./
 RUN --mount=type=cache,target=/go/pkg/mod/ GO_GCFLAGS=${GCFLAGS} make build-manager
 
 # Download the custom DMS package using the existing Go builder image.
-FROM --platform=${BUILDPLATFORM} golang:1.27 AS doca-dms
+FROM --platform=${BUILDPLATFORM} ${BASE_IMAGE_GO_BUILDER} AS doca-dms
 ARG TARGETARCH
 # {arch} is replaced by amd/arm. An empty URL keeps the base image's DMS.
 ARG DOCA_DMS_URL=""
