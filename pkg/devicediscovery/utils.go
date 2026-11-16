@@ -19,6 +19,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -29,6 +30,7 @@ import (
 	"github.com/Mellanox/rdmamap"
 	"github.com/jaypipes/ghw"
 	"github.com/jaypipes/ghw/pkg/pci"
+	"github.com/vishvananda/netlink"
 	execUtils "k8s.io/utils/exec"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -60,6 +62,9 @@ type DeviceDiscoveryUtils interface {
 
 	// GetInterfaceName returns a network interface name for the given PCI address
 	GetInterfaceName(pciAddr string) string
+
+	// GetLinkState returns the carrier state (up, no-carrier, down) of the network interface
+	GetLinkState(interfaceName string) string
 
 	// GetFwctlDevice returns a fwctl character device path for the given PCI address.
 	// Missing or unreadable sysfs state is logged and treated as no fwctl device.
@@ -217,6 +222,29 @@ func (d *deviceDiscoveryUtils) GetInterfaceName(pciAddr string) string {
 	}
 	log.Log.Info("Interface name", "pciAddr", pciAddr, "name", names[0])
 	return names[0]
+}
+
+// GetLinkState returns the carrier state (up, no-carrier, down) of the network interface
+func (d *deviceDiscoveryUtils) GetLinkState(interfaceName string) string {
+	if interfaceName == "" {
+		return ""
+	}
+
+	link, err := netlink.LinkByName(interfaceName)
+	if err != nil {
+		log.Log.Error(err, "GetLinkState(): failed to get link state", "interface", interfaceName)
+		return ""
+	}
+
+	flags := link.Attrs().Flags
+	switch {
+	case flags&net.FlagUp == 0:
+		return consts.LinkStateDown
+	case flags&net.FlagRunning == 0:
+		return consts.LinkStateNoCarrier
+	default:
+		return consts.LinkStateUp
+	}
 }
 
 // GetFwctlDevice returns a fwctl character device path for the given PCI address.
