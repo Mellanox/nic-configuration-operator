@@ -543,14 +543,19 @@ func spectrumXDevicesForPlan(statuses nicDeviceConfigurationStatuses) []*v1alpha
 	devices := make([]*v1alpha1.NicDevice, 0, len(statuses))
 	for _, status := range statuses {
 		device := status.device
-		if device != nil && device.Spec.Configuration != nil &&
-			device.Spec.Configuration.Template != nil &&
-			device.Spec.Configuration.Template.SpectrumXOptimized != nil &&
-			device.Spec.Configuration.Template.SpectrumXOptimized.Enabled {
+		if device != nil && spectrumXOptimizationEnabled(device.Spec) {
 			devices = append(devices, device)
 		}
 	}
 	return devices
+}
+
+// spectrumXOptimizationEnabled reports whether the configuration template requests Spectrum-X optimization
+func spectrumXOptimizationEnabled(spec v1alpha1.NicDeviceSpec) bool {
+	return spec.Configuration != nil &&
+		spec.Configuration.Template != nil &&
+		spec.Configuration.Template.SpectrumXOptimized != nil &&
+		spec.Configuration.Template.SpectrumXOptimized.Enabled
 }
 
 func (r *NicDeviceReconciler) updateSpectrumXPlanFailureStatus(
@@ -582,7 +587,7 @@ func (r *NicDeviceReconciler) applyRuntimeConfig(ctx context.Context, status *ni
 
 	lastAppliedState, found := status.device.Annotations[consts.LastAppliedStateAnnotation]
 	if found {
-		changed, err := configurationChangedSinceLastApplied(lastAppliedState, status.device.Spec.Configuration)
+		changed, err := runtimeSpecChangedSinceLastApplied(lastAppliedState, status.device.Spec)
 		if err != nil {
 			return err
 		}
@@ -641,27 +646,42 @@ func (r *NicDeviceReconciler) applyRuntimeConfig(ctx context.Context, status *ni
 	return nil
 }
 
-// configurationChangedSinceLastApplied returns true if the configuration spec differs from the one recorded
-// in the last applied state annotation. The annotation holds the whole device spec, but only its configuration
-// section describes the runtime configuration that a reboot is needed to reset. Changes to the firmware and
-// interface name template sections are ignored.
-func configurationChangedSinceLastApplied(lastAppliedState string, configuration *v1alpha1.NicDeviceConfigurationSpec) (bool, error) {
+// runtimeSpecChangedSinceLastApplied returns true if the parts of the spec that the runtime configuration depends on
+// differ from the ones recorded in the last applied state annotation. The annotation holds the whole device spec.
+// The configuration section describes the runtime configuration that a reboot is needed to reset. Changes to the
+// firmware section are ignored. Changes to the interface name template section are ignored unless Spectrum-X
+// optimization is enabled: the DOCA SPC-X CC processes are tracked by RDMA device name, so a running process
+// would not follow a rename of its RDMA device.
+func runtimeSpecChangedSinceLastApplied(lastAppliedState string, spec v1alpha1.NicDeviceSpec) (bool, error) {
 	lastAppliedSpec := v1alpha1.NicDeviceSpec{}
 	if err := json.Unmarshal([]byte(lastAppliedState), &lastAppliedSpec); err != nil {
 		// The recorded state can't be compared to the spec, treat it as changed
 		return true, nil
 	}
 
-	lastAppliedConfiguration, err := json.Marshal(lastAppliedSpec.Configuration)
+	changed, err := jsonDiffers(lastAppliedSpec.Configuration, spec.Configuration)
+	if err != nil || changed {
+		return changed, err
+	}
+
+	if spectrumXOptimizationEnabled(spec) {
+		return jsonDiffers(lastAppliedSpec.InterfaceNameTemplate, spec.InterfaceNameTemplate)
+	}
+
+	return false, nil
+}
+
+func jsonDiffers(a, b any) (bool, error) {
+	aJson, err := json.Marshal(a)
 	if err != nil {
 		return false, err
 	}
-	currentConfiguration, err := json.Marshal(configuration)
+	bJson, err := json.Marshal(b)
 	if err != nil {
 		return false, err
 	}
 
-	return string(lastAppliedConfiguration) != string(currentConfiguration), nil
+	return string(aJson) != string(bJson), nil
 }
 
 // handleReboot schedules maintenance and reboots the node if maintenance is allowed

@@ -502,7 +502,11 @@ var _ = Describe("NicDeviceReconciler", func() {
 			maintenanceManager.AssertExpectations(GinkgoT())
 		})
 		DescribeTable("Should not reboot the node if the spec changes outside of the configuration section",
-			func(changeSpec func(spec *v1alpha1.NicDeviceSpec)) {
+			func(spectrumXEnabled bool, changeSpec func(spec *v1alpha1.NicDeviceSpec)) {
+				if spectrumXEnabled {
+					spectrumXManager.On("PreparePlan", mock.Anything, mock.Anything).Return(nil)
+					spectrumXManager.On("GetPreparedPlan", mock.Anything).Return(&spectrumx.Plan{}, nil)
+				}
 				fwVersion := "22.44.11"
 				firmwareManager.On("ValidateRequestedFirmwareSource", mock.Anything, mock.Anything).Return(fwVersion, nil)
 				firmwareManager.On("GetFirmwareVersionsFromDevice", mock.Anything).Return(fwVersion, fwVersion, nil)
@@ -519,7 +523,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 					}
 				}).Return(nil)
 
-				createDevice(false, nil)
+				createDevice(false, nil, spectrumXEnabled)
 
 				updateSuccessful := testutils.MatchCondition(metav1.Condition{
 					Type:   consts.ConfigUpdateInProgressCondition,
@@ -555,19 +559,87 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Expect(getDeviceConditions()).To(updateSuccessful)
 				maintenanceManager.AssertNotCalled(GinkgoT(), "Reboot")
 			},
-			Entry("firmware spec is added", func(spec *v1alpha1.NicDeviceSpec) {
+			Entry("firmware spec is added", false, func(spec *v1alpha1.NicDeviceSpec) {
 				spec.Firmware = &v1alpha1.FirmwareTemplateSpec{
 					NicFirmwareSourceRef: "some-fw-source-ref",
 					UpdatePolicy:         consts.FirmwareUpdatePolicyValidate,
 				}
 			}),
-			Entry("interface name template spec is added", func(spec *v1alpha1.NicDeviceSpec) {
+			Entry("firmware spec is added to a Spectrum-X device", true, func(spec *v1alpha1.NicDeviceSpec) {
+				spec.Firmware = &v1alpha1.FirmwareTemplateSpec{
+					NicFirmwareSourceRef: "some-fw-source-ref",
+					UpdatePolicy:         consts.FirmwareUpdatePolicyValidate,
+				}
+			}),
+			Entry("interface name template spec is added", false, func(spec *v1alpha1.NicDeviceSpec) {
 				spec.InterfaceNameTemplate = &v1alpha1.NicDeviceInterfaceNameSpec{
 					PlaneIndices:    []int{0},
 					NetDevicePrefix: "net%nic_id%",
 				}
 			}),
 		)
+		It("Should request a reboot if the RDMA device prefix of a Spectrum-X device changes after it was applied", func() {
+			// The DOCA SPC-X CC processes are tracked by RDMA device name, a running process would not follow the rename
+			spectrumXManager.On("PreparePlan", mock.Anything, mock.Anything).Return(nil)
+			spectrumXManager.On("GetPreparedPlan", mock.Anything).Return(&spectrumx.Plan{}, nil)
+			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil, nil)
+			configurationManager.On("ApplyRuntimeConfiguration", mock.Anything, mock.Anything).Return(&types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusSuccess}, nil)
+			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
+			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
+			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
+			rebooted := make(chan struct{}, 1)
+			maintenanceManager.On("Reboot").Run(func(mock.Arguments) {
+				select {
+				case rebooted <- struct{}{}:
+				default:
+				}
+			}).Return(nil)
+
+			device := &v1alpha1.NicDevice{
+				ObjectMeta: metav1.ObjectMeta{Name: deviceName, Namespace: namespaceName},
+				Spec: v1alpha1.NicDeviceSpec{
+					Configuration: &v1alpha1.NicDeviceConfigurationSpec{
+						Template: &v1alpha1.ConfigurationTemplateSpec{
+							NumVfs:   1,
+							LinkType: consts.Ethernet,
+							SpectrumXOptimized: &v1alpha1.SpectrumXOptimizedSpec{
+								Enabled:      true,
+								PlatformType: "gb300",
+							},
+						},
+					},
+					InterfaceNameTemplate: &v1alpha1.NicDeviceInterfaceNameSpec{
+						PlaneIndices:     []int{0},
+						NetDevicePrefix:  "net%nic_id%",
+						RdmaDevicePrefix: "rdma_a%nic_id%",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, device)).To(Succeed())
+			device.Status = v1alpha1.NicDeviceStatus{
+				Node:  nodeName,
+				Ports: []v1alpha1.NicDevicePortSpec{{PCI: "0000:3b:00.0"}},
+			}
+			Expect(k8sClient.Status().Update(ctx, device)).To(Succeed())
+
+			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
+				Type:   consts.ConfigUpdateInProgressCondition,
+				Status: metav1.ConditionFalse,
+				Reason: consts.UpdateSuccessfulReason,
+			}))
+			Eventually(lastAppliedStateAnnotationExists, timeout).Should(BeTrue())
+
+			Eventually(func() error {
+				if err := k8sClient.Get(ctx, k8sTypes.NamespacedName{Name: deviceName, Namespace: namespaceName}, device); err != nil {
+					return err
+				}
+				device.Spec.InterfaceNameTemplate.RdmaDevicePrefix = "rdma_b%nic_id%"
+				return k8sClient.Update(ctx, device)
+			}, timeout).Should(Succeed())
+
+			Eventually(rebooted, timeout).Should(Receive())
+			Eventually(lastAppliedStateAnnotationExists, timeout).Should(BeFalse())
+		})
 		It("Should request a reboot if the configuration section changes after it was applied", func() {
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil, nil)
 			configurationManager.On("ApplyRuntimeConfiguration", mock.Anything, mock.Anything).Return(&types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusSuccess}, nil)
