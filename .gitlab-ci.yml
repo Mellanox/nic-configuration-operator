@@ -81,9 +81,9 @@ variables:  # additional variables are defined at the gitlab group scope
   # internal build of its latest patch.
   DOCA_SERIES: "3.6"
   DOCA_DMS_VERSION: "3.6.1002-1.nco20261116"
-  DOCA_DMS_SHA256_AMD64: 426ac72865d37b1cd3a6064e594bdea479a58203665bf2b7ce66157f3d52e7bd
-  DOCA_DMS_SHA256_ARM64: 6fe7f1e8a51c102fc11012cff1e3089cae5acf213e10700a8dc2259cfdcaed68
-  DOCA_DMS_SHA256_RHEL_AMD64: 2b0c32b4c2c482441614dec20fd9d5612b1fd1bcbcac6ed1494ca203a29a743e
+  DOCA_DMS_SHA256_AMD64: 0b59155d7ed5eb8a9da8877b204391b7265f94e9be02b72b3abef9a40a8da416
+  DOCA_DMS_SHA256_ARM64: 8b9561a14a0df201ddf7747fc1f7fa9f06fb17cadd3c411c6a2c5b8298227dd9
+  DOCA_DMS_SHA256_RHEL_AMD64: b88ff0d0736d5dcc5d07605d27a3a6c1ef22e949426a332f40f95d736c9cf5aa
   GOV_READY_POLICY_FILE_PATH: pulse-scan-policies/prodsec_approved_govready_release_policy.json
   CVE_UPDATES_RHEL: "openssl openssl-libs python3 python3-libs python3-urllib3 glib2 util-linux libnghttp2 vim-minimal libarchive libcurl-minimal curl-minimal sqlite-libs libxml2 gzip unbound-libs expat python3-idna attr libattr dbus-broker coreutils-single"
 
