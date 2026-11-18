@@ -369,6 +369,17 @@ The name of the device combines the node name, device type and its PCI device ad
 `ConfigUpdateInProgress` status condition can be used for tracking the state of the FW configuration update on a specific device. If an error occurs during FW configuration update, it will be reflected in this field.
 Before validating runtime configuration, the configuration daemon checks every discovered network interface for carrier. Runtime validation fails only when all interfaces on the NIC report `NO-CARRIER`, and the failure is reflected in `ConfigUpdateInProgress` with reason `RuntimeConfigUpdateFailed` until at least one interface has carrier. This allows available planes to be configured while other planes are disconnected.
 
+Native NVConfig queries through `/dev/fwctl` read two separate snapshots, including
+expanded array parameters. If default, current, or next-boot values or parameter names
+differ, the query fails and configuration reconciliation retries through its existing
+error path. It does not initiate maintenance or apply configuration from that failed
+query, and any existing maintenance remains held. PCI-address queries still use one
+snapshot. This check detects inconsistent reads, including those reported during
+concurrent devlink discovery; two matching snapshots do not prove the values correct
+or fix the underlying MFT/driver/firmware interaction. The extra read increases query
+latency. Stable native mismatches log the PCI function, parameter, desired value and
+observed current/next-boot values at info level.
+
 for more information refer to [api-reference](docs/api-reference.md).
 
 #### Example NICDevice

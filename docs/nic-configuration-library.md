@@ -698,6 +698,16 @@ that do not manage Network Bay devices.
 func NewNVConfigUtils() NVConfigUtils
 ```
 
+`QueryNvConfig` prefers the discovered fwctl device. For fwctl queries, it reads two
+separate parsed snapshots with the same parameter selection and array expansion.
+It compares all default, current and next-boot values, including parameter membership,
+and returns an error with an empty query if they differ. Command or parsing failures
+also return no partial query. PCI-address queries remain a single read. Callers must
+handle query errors before deriving desired values or making configuration decisions.
+The comparison detects inconsistent samples; it cannot detect identical corruption
+in both samples or establish firmware read integrity. It also doubles the query work
+for fwctl targets. The constructor and `NVConfigUtils` interface are unchanged.
+
 The built-in implementation also provides
 `SetNvConfigParametersBatchWithContext(ctx, port, params, withDefault, force) (types.ApplyStatus, error)`.
 `ConfigurationManager` uses that optional extension so reconcile cancellation reaches

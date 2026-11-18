@@ -162,7 +162,7 @@ Configurations:                              Default         Current         Nex
 			}
 		})
 
-		It("should handle missing configurations section gracefully", func() {
+		It("should reject output without a configurations section", func() {
 			cmd1 := &execTesting.FakeCmd{}
 			cmd1.OutputScript = append(cmd1.OutputScript,
 				func() ([]byte, []byte, error) {
@@ -187,7 +187,7 @@ Device type:    ConnectX4
 			h.execInterface = fakeExec
 
 			query, err := h.QueryNvConfig(context.TODO(), nvconfigPort(pciAddress), nil)
-			Expect(err).ToNot(HaveOccurred())
+			Expect(err).To(MatchError(ContainSubstring("returned no NVConfig parameters")))
 
 			Expect(query.DefaultConfig).To(BeEmpty())
 			Expect(query.CurrentConfig).To(BeEmpty())

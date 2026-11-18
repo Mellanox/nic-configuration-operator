@@ -195,7 +195,8 @@ func (h configurationManager) verifySpectrumXNVConfigStaged(
 		}
 	}
 	for pci, config := range configs {
-		updateNeeded, _, _ := validateTemplateParamsApplied(map[string]types.NvConfigQuery{pci: config}, desiredParams)
+		updateNeeded, _, _ := validateTemplateParamsApplied(
+			logger.WithValues("device", device.Name), map[string]types.NvConfigQuery{pci: config}, desiredParams)
 		if updateNeeded {
 			return fmt.Errorf("DMS apply did not stage native NVConfig on PCI function %q", pci)
 		}

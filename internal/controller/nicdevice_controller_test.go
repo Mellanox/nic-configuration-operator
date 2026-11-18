@@ -451,10 +451,10 @@ var _ = Describe("NicDeviceReconciler", func() {
 				return device.Status.Conditions
 			}).Should(BeNil())
 		})
-		It("Should result in SpecValidationFailed status if spec validation failed", func() {
+		It("Should report validation failure without starting configuration or releasing maintenance", func() {
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil, errors.New(specValidationFailed))
 
-			createDevice(false, nil)
+			createDevice(true, nil)
 
 			Eventually(getDeviceConditions, timeout).Should(testutils.MatchCondition(metav1.Condition{
 				Type:    consts.ConfigUpdateInProgressCondition,
@@ -462,6 +462,15 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Reason:  consts.SpecValidationFailed,
 				Message: specValidationFailed,
 			}))
+
+			Expect(getLastAppliedStateAnnotation()).To(Equal("some-state"))
+			maintenanceManager.AssertNotCalled(GinkgoT(), "ScheduleMaintenance", mock.Anything)
+			maintenanceManager.AssertNotCalled(GinkgoT(), "MaintenanceAllowed", mock.Anything)
+			configurationManager.AssertNotCalled(GinkgoT(), "ApplyNVConfiguration", mock.Anything, mock.Anything, mock.Anything)
+			configurationManager.AssertNotCalled(GinkgoT(), "ResetNicFirmware", mock.Anything, mock.Anything)
+			configurationManager.AssertNotCalled(GinkgoT(), "ApplyRuntimeConfiguration", mock.Anything, mock.Anything)
+			maintenanceManager.AssertNotCalled(GinkgoT(), "Reboot")
+			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
 		})
 		It("Should result in IncorrectSpec status if spec is incorrect", func() {
 			err := types.IncorrectSpecError("spec error")
@@ -672,9 +681,10 @@ var _ = Describe("NicDeviceReconciler", func() {
 			// Should not reset last applied state annotation if maintenance was not allowed
 			Consistently(lastAppliedStateAnnotationExists).Should(BeTrue())
 		})
-		It("Should result in NonVolatileConfigUpdateFailed status if nv config fails to apply", func() {
-			errorText := "maintenance request failed"
-			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(true, false, nil, nil)
+		It("Should report NV config apply failure without resetting firmware, rebooting or releasing maintenance", func() {
+			GinkgoT().Setenv(consts.FEATURE_GATE_FW_RESET_AFTER_CONFIG_UPDATE, consts.LabelValueTrue)
+			errorText := "NV config query failed during apply"
+			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(true, true, nil, nil)
 			maintenanceManager.On("ScheduleMaintenance", mock.Anything).Return(nil)
 			maintenanceManager.On("MaintenanceAllowed", mock.Anything).Return(true, nil)
 			configurationManager.On("ApplyNVConfiguration", mock.Anything, mock.Anything, mock.Anything).Return((*types.ConfigurationApplyResult)(nil), errors.New(errorText))
@@ -687,6 +697,11 @@ var _ = Describe("NicDeviceReconciler", func() {
 				Reason:  consts.NonVolatileConfigUpdateFailedReason,
 				Message: errorText,
 			}))
+
+			configurationManager.AssertNotCalled(GinkgoT(), "ResetNicFirmware", mock.Anything, mock.Anything)
+			configurationManager.AssertNotCalled(GinkgoT(), "ApplyRuntimeConfiguration", mock.Anything, mock.Anything)
+			maintenanceManager.AssertNotCalled(GinkgoT(), "Reboot")
+			maintenanceManager.AssertNotCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
 		})
 		It("Should result in Pending status and not apply runtime spec if failed to reboot", func() {
 			errorText := "reboot request failed"

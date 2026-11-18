@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strconv"
 
+	"github.com/go-logr/logr"
 	"k8s.io/client-go/tools/record"
 	execUtils "k8s.io/utils/exec"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -128,7 +129,8 @@ func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *
 	}
 	logger.V(2).Info("validating native NVConfig parameters", "device", device.Name, "params", desiredParams)
 
-	configUpdateNeeded, rebootNeeded, unsupportedParams := validateTemplateParamsApplied(nvConfigsForPorts, desiredParams)
+	configUpdateNeeded, rebootNeeded, unsupportedParams := validateTemplateParamsApplied(
+		logger.WithValues("device", device.Name), nvConfigsForPorts, desiredParams)
 	logger.V(2).Info("native NVConfig validation complete",
 		"device", device.Name,
 		"configUpdateNeeded", configUpdateNeeded,
@@ -171,12 +173,12 @@ func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *
 // returns bool - nv config update required (a param's desired value is missing from next boot)
 // returns bool - reboot required
 // returns []string - desired params hidden on the device (absent from NextBootConfig); sorted, deduped
-func validateTemplateParamsApplied(nvConfigsForPorts map[string]types.NvConfigQuery, desiredConfig map[string]string) (bool, bool, []string) {
+func validateTemplateParamsApplied(logger logr.Logger, nvConfigsForPorts map[string]types.NvConfigQuery, desiredConfig map[string]string) (bool, bool, []string) {
 	configUpdateNeeded := false
 	rebootNeeded := false
 	unsupportedSet := map[string]struct{}{}
 
-	for _, nvConfig := range nvConfigsForPorts {
+	for pciAddr, nvConfig := range nvConfigsForPorts {
 		for parameter, desiredValue := range desiredConfig {
 			nextValues, foundInNextBoot := nvConfig.NextBootConfig[parameter]
 			if !foundInNextBoot {
@@ -187,15 +189,18 @@ func validateTemplateParamsApplied(nvConfigsForPorts map[string]types.NvConfigQu
 				unsupportedSet[parameter] = struct{}{}
 				continue
 			}
-			if !nvconfig.ValueMatches(nextValues, desiredValue) {
-				configUpdateNeeded = true
-				rebootNeeded = true
+			currentValues, foundInCurrent := nvConfig.CurrentConfig[parameter]
+			nextMatches := nvconfig.ValueMatches(nextValues, desiredValue)
+			currentMatches := foundInCurrent && nvconfig.ValueMatches(currentValues, desiredValue)
+			if nextMatches && currentMatches {
 				continue
 			}
-			currentValues, foundInCurrent := nvConfig.CurrentConfig[parameter]
-			if !foundInCurrent || !nvconfig.ValueMatches(currentValues, desiredValue) {
-				rebootNeeded = true
-			}
+			logger.Info("NVConfig parameter differs from desired value",
+				"pciAddr", pciAddr, "parameter", parameter, "desiredValue", desiredValue,
+				"currentValues", currentValues, "nextBootValues", nextValues,
+				"currentMatches", currentMatches, "nextBootMatches", nextMatches)
+			configUpdateNeeded = configUpdateNeeded || !nextMatches
+			rebootNeeded = true
 		}
 	}
 
@@ -320,6 +325,7 @@ func (h configurationManager) applySpectrumXNVConfig(
 				}
 			}
 			nativeUpdateNeeded, _, _ := validateTemplateParamsApplied(
+				log.FromContext(ctx).WithValues("device", device.Name),
 				map[string]types.NvConfigQuery{port.PCI: config}, desiredParams)
 			targetUpdateNeeded := updateNeeded
 			if targetUpdateNeeded && !nativeUpdateNeeded && len(device.Status.Ports) > 1 {

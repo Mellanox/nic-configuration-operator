@@ -261,6 +261,7 @@ var _ = Describe("breakout lane DMS workaround", func() {
 
 	It("queries native arrays and remaining typed values without a breakout GET", func() {
 		outputs := []string{`{"num-pfs":2,"num-pfs-pending":2}`, "Configurations: Default Current Next Boot\nMODULE_SPLIT_M0  Array[0..1]  Array[0..1]  Array[0..1]\n", "Configurations: Default Current Next Boot\nMODULE_SPLIT_M0[0]  1  0x2  2\nMODULE_SPLIT_M0[1]  1  2  0x2\n"}
+		outputs = append(outputs, outputs[1:]...)
 		for _, output := range outputs {
 			executor.CommandScript = append(executor.CommandScript, func(cmd string, args ...string) execUtils.Cmd {
 				commands = append(commands, append([]string{cmd}, args...))
@@ -280,6 +281,8 @@ var _ = Describe("breakout lane DMS workaround", func() {
 		Expect(reboot).To(BeFalse())
 		Expect(commands).To(Equal([][]string{
 			{"/opt/mellanox/doca/services/dms/dms-cli", "--json", "-t", "pci/" + pci + "?port=1", "/nvidia/pci", "num-pfs", "num-pfs-pending"},
+			{"mlxconfig", "-d", "/dev/fwctl/fwctl0", "-e", "query", "MODULE_SPLIT_M0"},
+			{"mlxconfig", "-d", "/dev/fwctl/fwctl0", "-e", "query", "MODULE_SPLIT_M0[0..1]"},
 			{"mlxconfig", "-d", "/dev/fwctl/fwctl0", "-e", "query", "MODULE_SPLIT_M0"},
 			{"mlxconfig", "-d", "/dev/fwctl/fwctl0", "-e", "query", "MODULE_SPLIT_M0[0..1]"},
 		}))

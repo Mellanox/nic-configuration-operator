@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"maps"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -89,6 +90,9 @@ func resolveDevice(port v1alpha1.NicDevicePortSpec) string {
 // queryMLXConfig runs a query on mlxconfig to parse out default, current and nextboot configurations
 // might run recursively to expand array parameters' values
 func (h *nvConfigUtils) queryMLXConfig(ctx context.Context, query types.NvConfigQuery, targetDevice string, additionalParameter string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	log.Log.Info(fmt.Sprintf("mlxconfig -d %s query %s", targetDevice, additionalParameter)) // TODO change verbosity
 	valueInBracketsRegex := regexp.MustCompile(`^(.*?)\(([^)]*)\)$`)
 	spaceRe := regexp.MustCompile(`\s{2,}`)
@@ -106,6 +110,7 @@ func (h *nvConfigUtils) queryMLXConfig(ctx context.Context, query types.NvConfig
 	}
 
 	inConfigSection := false
+	parsedParameters := 0
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -151,6 +156,7 @@ func (h *nvConfigUtils) queryMLXConfig(ctx context.Context, query types.NvConfig
 			defaultVal := fields[1]
 			currentVal := fields[2]
 			nextBootVal := fields[3]
+			parsedParameters++
 
 			// If the parameter value is an array, we want to extract values for all indices
 			if strings.HasPrefix(defaultVal, arrayPrefix) {
@@ -168,6 +174,13 @@ func (h *nvConfigUtils) queryMLXConfig(ctx context.Context, query types.NvConfig
 		}
 	}
 
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("failed to read mlxconfig query output for %s: %w", targetDevice, err)
+	}
+	if !inConfigSection || parsedParameters == 0 {
+		return fmt.Errorf("mlxconfig query for %s returned no NVConfig parameters", targetDevice)
+	}
+
 	return nil
 }
 
@@ -176,26 +189,70 @@ func (h *nvConfigUtils) QueryNvConfig(ctx context.Context, port v1alpha1.NicDevi
 	targetDevice := resolveDevice(port)
 	log.Log.Info("ConfigurationUtils.QueryNvConfig()", "pciAddr", port.PCI, "targetDevice", targetDevice)
 
+	query, err := h.queryNvConfigOnce(ctx, targetDevice, parameters)
+	if err != nil || port.FwctlDevice == "" {
+		return query, err
+	}
+
+	// Successful fwctl commands can return inconsistent values under concurrent firmware
+	// access. Check a fresh snapshot before any caller uses defaults or current/pending
+	// values to make configuration decisions. Equal reads do not prove transport integrity.
+	confirmation, err := h.queryNvConfigOnce(ctx, targetDevice, parameters)
+	if err != nil {
+		return types.NewNvConfigQuery(), fmt.Errorf("failed to confirm NVConfig for PCI %s via %s: %w", port.PCI, targetDevice, err)
+	}
+	if err := compareNvConfigSnapshots(query, confirmation); err != nil {
+		return types.NewNvConfigQuery(), fmt.Errorf("inconsistent fwctl NVConfig reads for PCI %s via %s: %w", port.PCI, targetDevice, err)
+	}
+	return query, nil
+}
+
+func (h *nvConfigUtils) queryNvConfigOnce(ctx context.Context, targetDevice string, parameters []string) (types.NvConfigQuery, error) {
 	query := types.NewNvConfigQuery()
 
 	if len(parameters) == 0 {
 		err := h.queryMLXConfig(ctx, query, targetDevice, "")
 		if err != nil {
 			log.Log.Error(err, "Failed to parse mlxconfig query output", "device", targetDevice)
-			return query, err
+			return types.NewNvConfigQuery(), err
 		}
 	} else {
 		for _, param := range parameters {
 			err := h.queryMLXConfig(ctx, query, targetDevice, param)
 			if err != nil {
 				log.Log.Error(err, "Failed to parse mlxconfig query output", "device", targetDevice, "parameter", param)
-				return query, err
+				return types.NewNvConfigQuery(), err
 			}
 		}
 	}
 
 	query.AllParameters = len(parameters) == 0
 	return query, nil
+}
+
+func compareNvConfigSnapshots(first, second types.NvConfigQuery) error {
+	columns := []struct {
+		name   string
+		first  map[string][]string
+		second map[string][]string
+	}{
+		{name: "default", first: first.DefaultConfig, second: second.DefaultConfig},
+		{name: "current", first: first.CurrentConfig, second: second.CurrentConfig},
+		{name: "next boot", first: first.NextBootConfig, second: second.NextBootConfig},
+	}
+	for _, column := range columns {
+		parameters := append(slices.Collect(maps.Keys(column.first)), slices.Collect(maps.Keys(column.second))...)
+		sort.Strings(parameters)
+		for _, parameter := range slices.Compact(parameters) {
+			firstValues, foundFirst := column.first[parameter]
+			secondValues, foundSecond := column.second[parameter]
+			if foundFirst != foundSecond || !slices.Equal(firstValues, secondValues) {
+				return fmt.Errorf("%s parameter %s differs: first=%v (present=%t), second=%v (present=%t)",
+					column.name, parameter, firstValues, foundFirst, secondValues, foundSecond)
+			}
+		}
+	}
+	return nil
 }
 
 // SetNvConfigParameter sets a nv config parameter for a mellanox device
