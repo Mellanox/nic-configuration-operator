@@ -105,6 +105,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 		deviceDiscoveryUtils = &devicediscoveryMocks.DeviceDiscoveryUtils{}
 
 		reconciler = &NicDeviceReconciler{
+			readBootID:           func() (string, error) { return "test-boot", nil },
 			Client:               mgr.GetClient(),
 			Scheme:               mgr.GetScheme(),
 			NodeName:             nodeName,
@@ -480,7 +481,13 @@ var _ = Describe("NicDeviceReconciler", func() {
 		It("Should result in UpdateSuccessful status if nv config updates or reboot are not required", func() {
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(false, false, nil, nil)
 			configurationManager.On("ApplyRuntimeConfiguration", mock.Anything, mock.Anything).Return(&types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusSuccess}, nil)
-			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Return(nil)
+			maintenanceReleased := make(chan struct{}, 1)
+			maintenanceManager.On("ReleaseMaintenance", mock.Anything).Run(func(mock.Arguments) {
+				select {
+				case maintenanceReleased <- struct{}{}:
+				default:
+				}
+			}).Return(nil)
 
 			createDevice(false, nil)
 
@@ -498,7 +505,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			// Should dump the last applied state to annotations
 			Eventually(getLastAppliedStateAnnotation).Should(Equal(string(spec)))
 
-			maintenanceManager.AssertCalled(GinkgoT(), "ReleaseMaintenance", mock.Anything)
+			Eventually(maintenanceReleased, timeout).Should(Receive())
 			maintenanceManager.AssertExpectations(GinkgoT())
 		})
 		//nolint:errcheck
@@ -579,6 +586,8 @@ var _ = Describe("NicDeviceReconciler", func() {
 
 		It("allows prepare NVConfig changes and reboot while configure is deferred", func() {
 			spectrumXManager.On("PreparePlan", mock.Anything, mock.Anything).Return(nil)
+			spectrumXManager.On("GetPreparedPlan", mock.Anything).
+				Return(&spectrumx.Plan{ConfigureError: errors.New("configure deferred until after reboot")}, nil)
 			configurationManager.On("ValidateDeviceNvSpec", mock.Anything, mock.Anything).Return(true, true, nil, nil)
 			configurationManager.On("ApplyNVConfiguration", mock.Anything, mock.Anything, mock.Anything).
 				Return(&types.ConfigurationApplyResult{Status: types.ApplyStatusSuccess, RebootRequired: true}, nil)
@@ -600,7 +609,7 @@ var _ = Describe("NicDeviceReconciler", func() {
 			}))
 			Eventually(rebooted, timeout).Should(Receive())
 			configurationManager.AssertCalled(GinkgoT(), "ApplyNVConfiguration", mock.Anything, mock.Anything, mock.Anything)
-			spectrumXManager.AssertNotCalled(GinkgoT(), "GetPreparedPlan", mock.Anything)
+			spectrumXManager.AssertCalled(GinkgoT(), "GetPreparedPlan", mock.Anything)
 			configurationManager.AssertNotCalled(GinkgoT(), "ApplyRuntimeConfiguration", mock.Anything, mock.Anything)
 		})
 

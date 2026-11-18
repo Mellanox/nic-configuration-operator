@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -64,7 +65,9 @@ var shortRequeueTime = 5 * time.Second
 // NicDeviceReconciler reconciles a NicDevice object
 type NicDeviceReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	APIReader  client.Reader
+	Scheme     *runtime.Scheme
+	readBootID func() (string, error)
 
 	NodeName      string
 	NamespaceName string
@@ -91,6 +94,7 @@ type nicDeviceConfigurationStatus struct {
 	// unsupportedNvParams lists desired nv params that are hidden on this device (absent from
 	// NextBootConfig). Surfaces as PartiallyApplied in the ConfigUpdateInProgress condition.
 	unsupportedNvParams []string
+	runtimeApplied      bool
 }
 
 // Reconcile reconciles the NicConfigurationTemplate object
@@ -105,6 +109,12 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		log.Log.Error(err, "failed to get devices to reconcile")
 		return ctrl.Result{}, err
 	}
+	if err := r.clearRuntimeAttemptsAfterBoot(ctx, configStatuses); err != nil {
+		return ctrl.Result{}, err
+	}
+	configStatuses = slices.DeleteFunc(configStatuses, func(status *nicDeviceConfigurationStatus) bool {
+		return !deviceNeedsReconcile(status.device)
+	})
 
 	// Always reconcile InterfaceNameTemplates to clean up stale udev rules
 	// even when no devices have specs to reconcile
@@ -183,7 +193,7 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		log.Log.Info("firmware is not ready for some devices, requeue to try again later")
 		// If FW is not ready but FW update is not required, we can release maintenance
 		// If FW update is required but failed, the reconcile request would be rescheduled and won't reach this point
-		if !configStatuses.firmwareUpdateRequired() {
+		if !configStatuses.firmwareUpdateRequired() && !configStatuses.runtimeAttemptPending() {
 			err = r.MaintenanceManager.ReleaseMaintenance(ctx)
 			if err != nil {
 				log.Log.Error(err, "failed to release maintenance")
@@ -203,6 +213,10 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		statusErr := r.updateSpectrumXPlanFailureStatus(
 			ctx, planDevices, consts.SpecValidationFailed, planErr)
 		return ctrl.Result{}, errors.Join(planErr, statusErr)
+	}
+	runtimeState, err := r.captureRuntimeState(configStatuses, planDevices)
+	if err != nil {
+		return ctrl.Result{}, err
 	}
 
 	// If FW is ready for all devices, proceed with NIC configuration.
@@ -241,33 +255,7 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{RequeueAfter: longRequeueTime}, nil
 	}
 
-	// Require configure before runtime handling, including its spec-change reboot.
-	// A missing configure target must not trigger another reboot once NVConfig is ready.
-	if planErr := r.validateSpectrumXConfigurePlans(planDevices); planErr != nil {
-		planErr = fmt.Errorf("doSPCX configure plan is not ready: %w", planErr)
-		statusErr := r.updateSpectrumXPlanFailureStatus(
-			ctx, planDevices, consts.SpecValidationFailed, planErr)
-		return ctrl.Result{}, errors.Join(planErr, statusErr)
-	}
-
-	log.Log.Info("applying runtime config")
-	err = runInParallel(ctx, configStatuses, r.applyRuntimeConfig)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-
-	if configStatuses.rebootRequired() {
-		return r.handleReboot(ctx, configStatuses)
-	}
-
-	log.Log.Info("all configuration are successful, releasing maintenance")
-	err = r.MaintenanceManager.ReleaseMaintenance(ctx)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-
-	log.Log.V(2).Info("requeue the request with a big interval to check if the configuration has drifter")
-	return ctrl.Result{RequeueAfter: longRequeueTime * 20}, nil
+	return r.reconcileRuntimeConfiguration(ctx, configStatuses, planDevices, runtimeState)
 }
 
 // reconcileInterfaceNameTemplates collects all devices with InterfaceNameTemplate specs, applies udev rules,
@@ -452,7 +440,7 @@ func (r *NicDeviceReconciler) getDevices(ctx context.Context) (nicDeviceConfigur
 			}
 		}
 
-		if device.Spec.Firmware != nil || device.Spec.Configuration != nil || device.Spec.InterfaceNameTemplate != nil {
+		if deviceNeedsReconcile(&device) {
 			log.Log.V(2).Info("device has non-nil spec, adding it to the list to reconcile", "name", device.Name)
 			configStatuses = append(configStatuses, &nicDeviceConfigurationStatus{
 				device: &devices.Items[i],
@@ -575,57 +563,62 @@ func (r *NicDeviceReconciler) updateSpectrumXPlanFailureStatus(
 // if rebootRequired, sets status condition PendingReboot
 // if status.rebootRequired == true, skips the device
 // returns nil if device's config update was successful, error otherwise
-func (r *NicDeviceReconciler) applyRuntimeConfig(ctx context.Context, status *nicDeviceConfigurationStatus) error {
-	if status.device.Spec.Configuration == nil || status.rebootRequired {
+func (r *NicDeviceReconciler) applyRuntimeConfig(ctx context.Context, status *nicDeviceConfigurationStatus, state *runtimeReconcileState) error {
+	if status.rebootRequired {
 		return nil
 	}
-
-	lastAppliedState, found := status.device.Annotations[consts.LastAppliedStateAnnotation]
-	if found {
-		specJson, err := json.Marshal(status.device.Spec)
+	// Keep the evidence of what was applied separate from fresh persistence objects.
+	applied := status.device.DeepCopy()
+	specJSON, err := json.Marshal(applied.Spec)
+	if err != nil {
+		return err
+	}
+	spec := string(specJSON)
+	pending, hasPending := applied.Annotations[pendingRuntimeStateAnnotation]
+	pendingDiffers := false
+	if hasPending {
+		attempt, err := decodeRuntimeAttempt(pending)
 		if err != nil {
 			return err
 		}
-
-		if string(specJson) != lastAppliedState {
-			log.Log.V(2).Info("last applied state differs, reboot required", "device", status.device.Name)
-			status.rebootRequired = true
-
-			err := r.updateConfigInProgressStatusCondition(ctx, status.device, consts.PendingRebootReason, metav1.ConditionTrue, "")
-			if err != nil {
-				updateErr := r.updateConfigInProgressStatusCondition(ctx, status.device, consts.RuntimeConfigUpdateFailedReason, metav1.ConditionFalse, err.Error())
-				if updateErr != nil {
-					log.Log.Error(err, "failed to update device status condition", "device", status.device.Name)
-				}
-				return err
-			}
-
-			return nil
-		}
+		pendingDiffers = attempt.RebootRequired || attempt.SpecDigest != runtimeSpecDigest(spec)
 	}
-
-	_, err := r.ConfigurationManager.ApplyRuntimeConfiguration(ctx, status.device)
+	previous, hasPrevious := applied.Annotations[consts.LastAppliedStateAnnotation]
+	if pendingDiffers ||
+		(applied.Spec.Configuration != nil && hasPrevious && previous != spec) {
+		status.rebootRequired = true
+		return r.persistRuntimeCondition(ctx, applied, state, metav1.Condition{
+			Type: consts.ConfigUpdateInProgressCondition, Status: metav1.ConditionTrue,
+			Reason: consts.PendingRebootReason, ObservedGeneration: applied.Generation,
+		}, "")
+	}
+	if applied.Spec.Configuration == nil {
+		return nil
+	}
+	if err := r.recordRuntimeAttempt(ctx, applied, spec); err != nil {
+		return err
+	}
+	_, err = r.ConfigurationManager.ApplyRuntimeConfiguration(ctx, applied.DeepCopy())
 	if err != nil {
-		updateErr := r.updateConfigInProgressStatusCondition(ctx, status.device, consts.RuntimeConfigUpdateFailedReason, metav1.ConditionFalse, err.Error())
+		updateErr := r.persistRuntimeCondition(ctx, applied, state, metav1.Condition{
+			Type: consts.ConfigUpdateInProgressCondition, Status: metav1.ConditionFalse,
+			Reason: consts.RuntimeConfigUpdateFailedReason, Message: err.Error(), ObservedGeneration: applied.Generation,
+		}, "")
 		if updateErr != nil {
 			log.Log.Error(err, "failed to update device status condition", "device", status.device.Name)
 		}
 		return err
 	}
 
-	specJson, err := json.Marshal(status.device.Spec)
-	if err != nil {
+	if err := r.persistAppliedSpec(ctx, applied, spec); err != nil {
 		return err
 	}
-
 	if status.device.Annotations == nil {
-		status.device.SetAnnotations(make(map[string]string))
+		status.device.Annotations = make(map[string]string)
 	}
-	status.device.Annotations[consts.LastAppliedStateAnnotation] = string(specJson)
-	err = r.Update(ctx, status.device)
-	if err != nil {
-		return err
-	}
+	status.device.Annotations[consts.LastAppliedStateAnnotation] = spec
+	delete(status.device.Annotations, pendingRuntimeStateAnnotation)
+	status.runtimeApplied = true
 
 	reason := consts.UpdateSuccessfulReason
 	message := ""
@@ -633,28 +626,37 @@ func (r *NicDeviceReconciler) applyRuntimeConfig(ctx context.Context, status *ni
 		reason = consts.PartiallyAppliedReason
 		message = fmt.Sprintf(consts.PartiallyAppliedMessageFmt, strings.Join(status.unsupportedNvParams, ", "))
 	}
-	err = r.updateConfigInProgressStatusCondition(ctx, status.device, reason, metav1.ConditionFalse, message)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return r.persistRuntimeCondition(ctx, applied, state, metav1.Condition{
+		Type: consts.ConfigUpdateInProgressCondition, Status: metav1.ConditionFalse,
+		Reason: reason, Message: message, ObservedGeneration: applied.Generation,
+	}, spec)
 }
 
 // handleReboot schedules maintenance and reboots the node if maintenance is allowed
-// Before rebooting the node, strips LastAppliedState annotations from all devices
+// Before rebooting, replaces applied history with durable reboot intent for all devices.
 // returns true if requeue of the reconcile request is required, false otherwise
 // return err if encountered an error while performing maintenance scheduling / reboot
 func (r *NicDeviceReconciler) handleReboot(ctx context.Context, statuses nicDeviceConfigurationStatuses) (ctrl.Result, error) {
 	log.Log.V(2).Info("reboot required")
+	state, err := r.captureRuntimeState(statuses, nil)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if _, err := r.validateRuntimeState(ctx, state); err != nil {
+		return ctrl.Result{}, err
+	}
 
 	if result, err := r.ensureMaintenance(ctx); result.RequeueAfter != 0 || err != nil {
 		return result, err
 	}
 
-	// We need to strip last applied state annotation before reboot as it resets the runtime configuration
-	err := runInParallel(ctx, statuses, r.stripLastAppliedStateAnnotation)
+	// A reboot resets runtime configuration. Keep intent until a changed boot ID
+	// proves it happened, even when scheduling fails or the daemon stops here.
+	err = runInParallel(ctx, statuses, r.prepareRuntimeStateForReboot)
 	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if _, err := r.validateRuntimeState(ctx, state); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -666,19 +668,6 @@ func (r *NicDeviceReconciler) handleReboot(ctx context.Context, statuses nicDevi
 	}
 
 	return ctrl.Result{}, nil
-}
-
-// stripLastAppliedStateAnnotation deletes the consts.LastAppliedStateAnnotation from device
-// returns error if annotation update failed
-func (r *NicDeviceReconciler) stripLastAppliedStateAnnotation(ctx context.Context, status *nicDeviceConfigurationStatus) error {
-	annotations := status.device.GetAnnotations()
-	if _, found := annotations[consts.LastAppliedStateAnnotation]; !found {
-		return nil
-	}
-
-	delete(annotations, consts.LastAppliedStateAnnotation)
-	status.device.SetAnnotations(annotations)
-	return r.Update(ctx, status.device)
 }
 
 // applyNvConfig applies device's non-volatile spec
@@ -988,6 +977,9 @@ func (r *NicDeviceReconciler) updateStatusCondition(ctx context.Context, device 
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *NicDeviceReconciler) SetupWithManager(mgr ctrl.Manager, watchForMaintenance bool) error {
+	if r.APIReader == nil {
+		r.APIReader = mgr.GetAPIReader()
+	}
 	qHandler := func(q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 		q.Add(reconcile.Request{NamespacedName: k8sTypes.NamespacedName{
 			Namespace: "",

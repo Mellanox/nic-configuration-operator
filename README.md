@@ -369,6 +369,23 @@ The name of the device combines the node name, device type and its PCI device ad
 `ConfigUpdateInProgress` status condition can be used for tracking the state of the FW configuration update on a specific device. If an error occurs during FW configuration update, it will be reflected in this field.
 Before validating runtime configuration, the configuration daemon checks every discovered network interface for carrier. Runtime validation fails only when all interfaces on the NIC report `NO-CARRIER`, and the failure is reflected in `ConfigUpdateInProgress` with reason `RuntimeConfigUpdateFailed` until at least one interface has carrier. This allows available planes to be configured while other planes are disconnected.
 
+Runtime completion retries annotation and condition writes against fresh objects when
+only unrelated metadata or conditions change. A change to desired state, device identity,
+discovery inputs (including network/RDMA names), node device membership, or the prepared
+Spectrum-X plan requires a new validation pass. Such changes can still repeat NV validation.
+The `lastAppliedState` annotation retains the complete spec actually applied, including
+when a newer desired spec arrives during runtime work; that older pass does not report
+success or release maintenance for the newer spec.
+
+Before runtime work, the daemon records a `pendingRuntimeState` annotation containing a
+spec digest and the current kernel boot ID. This records an attempt that may be partial,
+and is replaced by applied history after success. A different desired spec while an
+attempt is pending requires a reboot, including after daemon restarts or failed API writes.
+Before requesting a reboot, the daemon marks the pending state as requiring reboot and
+clears applied history. Pending reboot state survives failed shutdown requests and is
+cleared only after `/proc/sys/kernel/random/boot_id` changes. The daemon must be able to
+read that file; an unreadable boot ID prevents runtime work and reboot scheduling.
+
 for more information refer to [api-reference](docs/api-reference.md).
 
 #### Example NICDevice
