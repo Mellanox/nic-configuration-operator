@@ -139,7 +139,6 @@ var _ = Describe("native RoCE validation", func() {
 				return []byte("Configurations: Default Current Next Boot\nROCE_CC_STEERING_EXT  DISABLED(1)  ENABLED(2)  ENABLED(2)\n"), nil, nil
 			}}}
 		}}
-		executor.CommandScript = append(executor.CommandScript, executor.CommandScript[0])
 		update, reboot, err := validate(nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(update).To(BeFalse())

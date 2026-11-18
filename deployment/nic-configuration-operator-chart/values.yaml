@@ -61,6 +61,9 @@ configDaemon:
     # -- skip a physical NIC when per-device discovery details cannot be read
     # - name: SKIP_DEVICE_ON_DISCOVERY_ERROR
     #   value: "true"
+    # -- use PCI addresses for direct mlxconfig commands
+    # - name: MLXCONFIG_USE_PCI_ADDRESS
+    #   value: "true"
   # -- node selector for the config daemon
   nodeSelector:
     network.nvidia.com/operator.mofed.wait: "false"

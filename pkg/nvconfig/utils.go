@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"maps"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 
@@ -75,24 +74,35 @@ type NVConfigUtils interface {
 	ValidateSystemConf(ctx context.Context, port v1alpha1.NicDevicePortSpec, conf string, asic int) (bool, []string, error)
 }
 
-type nvConfigUtils struct {
-	execInterface execUtils.Interface
+// Options controls device selection for direct mlxconfig commands.
+type Options struct {
+	// UsePCIAddress uses the port's PCI address even when discovery found a fwctl device.
+	// It does not change DMS targets or the discovered port metadata.
+	UsePCIAddress bool
 }
 
-func resolveDevice(port v1alpha1.NicDevicePortSpec) string {
+type nvConfigUtils struct {
+	execInterface execUtils.Interface
+	usePCIAddress bool
+}
+
+func (h *nvConfigUtils) resolveDevice(port v1alpha1.NicDevicePortSpec) (string, error) {
+	if h.usePCIAddress {
+		if strings.TrimSpace(port.PCI) == "" {
+			return "", fmt.Errorf("PCI address is required when mlxconfig PCI-address mode is enabled")
+		}
+		return port.PCI, nil
+	}
 	if port.FwctlDevice != "" {
 		log.Log.V(2).Info("using fwctl device for mlxconfig", "pciAddr", port.PCI, "fwctlDevice", port.FwctlDevice)
-		return port.FwctlDevice
+		return port.FwctlDevice, nil
 	}
-	return port.PCI
+	return port.PCI, nil
 }
 
 // queryMLXConfig runs a query on mlxconfig to parse out default, current and nextboot configurations
 // might run recursively to expand array parameters' values
 func (h *nvConfigUtils) queryMLXConfig(ctx context.Context, query types.NvConfigQuery, targetDevice string, additionalParameter string) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
 	log.Log.Info(fmt.Sprintf("mlxconfig -d %s query %s", targetDevice, additionalParameter)) // TODO change verbosity
 	valueInBracketsRegex := regexp.MustCompile(`^(.*?)\(([^)]*)\)$`)
 	spaceRe := regexp.MustCompile(`\s{2,}`)
@@ -110,7 +120,6 @@ func (h *nvConfigUtils) queryMLXConfig(ctx context.Context, query types.NvConfig
 	}
 
 	inConfigSection := false
-	parsedParameters := 0
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -156,7 +165,6 @@ func (h *nvConfigUtils) queryMLXConfig(ctx context.Context, query types.NvConfig
 			defaultVal := fields[1]
 			currentVal := fields[2]
 			nextBootVal := fields[3]
-			parsedParameters++
 
 			// If the parameter value is an array, we want to extract values for all indices
 			if strings.HasPrefix(defaultVal, arrayPrefix) {
@@ -174,54 +182,31 @@ func (h *nvConfigUtils) queryMLXConfig(ctx context.Context, query types.NvConfig
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("failed to read mlxconfig query output for %s: %w", targetDevice, err)
-	}
-	if !inConfigSection || parsedParameters == 0 {
-		return fmt.Errorf("mlxconfig query for %s returned no NVConfig parameters", targetDevice)
-	}
-
 	return nil
 }
 
 // QueryNvConfig queries nv config for a mellanox device and returns default, current and next boot configs
 func (h *nvConfigUtils) QueryNvConfig(ctx context.Context, port v1alpha1.NicDevicePortSpec, parameters []string) (types.NvConfigQuery, error) {
-	targetDevice := resolveDevice(port)
+	targetDevice, err := h.resolveDevice(port)
+	if err != nil {
+		return types.NewNvConfigQuery(), err
+	}
 	log.Log.Info("ConfigurationUtils.QueryNvConfig()", "pciAddr", port.PCI, "targetDevice", targetDevice)
 
-	query, err := h.queryNvConfigOnce(ctx, targetDevice, parameters)
-	if err != nil || port.FwctlDevice == "" {
-		return query, err
-	}
-
-	// Successful fwctl commands can return inconsistent values under concurrent firmware
-	// access. Check a fresh snapshot before any caller uses defaults or current/pending
-	// values to make configuration decisions. Equal reads do not prove transport integrity.
-	confirmation, err := h.queryNvConfigOnce(ctx, targetDevice, parameters)
-	if err != nil {
-		return types.NewNvConfigQuery(), fmt.Errorf("failed to confirm NVConfig for PCI %s via %s: %w", port.PCI, targetDevice, err)
-	}
-	if err := compareNvConfigSnapshots(query, confirmation); err != nil {
-		return types.NewNvConfigQuery(), fmt.Errorf("inconsistent fwctl NVConfig reads for PCI %s via %s: %w", port.PCI, targetDevice, err)
-	}
-	return query, nil
-}
-
-func (h *nvConfigUtils) queryNvConfigOnce(ctx context.Context, targetDevice string, parameters []string) (types.NvConfigQuery, error) {
 	query := types.NewNvConfigQuery()
 
 	if len(parameters) == 0 {
 		err := h.queryMLXConfig(ctx, query, targetDevice, "")
 		if err != nil {
 			log.Log.Error(err, "Failed to parse mlxconfig query output", "device", targetDevice)
-			return types.NewNvConfigQuery(), err
+			return query, err
 		}
 	} else {
 		for _, param := range parameters {
 			err := h.queryMLXConfig(ctx, query, targetDevice, param)
 			if err != nil {
 				log.Log.Error(err, "Failed to parse mlxconfig query output", "device", targetDevice, "parameter", param)
-				return types.NewNvConfigQuery(), err
+				return query, err
 			}
 		}
 	}
@@ -230,34 +215,12 @@ func (h *nvConfigUtils) queryNvConfigOnce(ctx context.Context, targetDevice stri
 	return query, nil
 }
 
-func compareNvConfigSnapshots(first, second types.NvConfigQuery) error {
-	columns := []struct {
-		name   string
-		first  map[string][]string
-		second map[string][]string
-	}{
-		{name: "default", first: first.DefaultConfig, second: second.DefaultConfig},
-		{name: "current", first: first.CurrentConfig, second: second.CurrentConfig},
-		{name: "next boot", first: first.NextBootConfig, second: second.NextBootConfig},
-	}
-	for _, column := range columns {
-		parameters := append(slices.Collect(maps.Keys(column.first)), slices.Collect(maps.Keys(column.second))...)
-		sort.Strings(parameters)
-		for _, parameter := range slices.Compact(parameters) {
-			firstValues, foundFirst := column.first[parameter]
-			secondValues, foundSecond := column.second[parameter]
-			if foundFirst != foundSecond || !slices.Equal(firstValues, secondValues) {
-				return fmt.Errorf("%s parameter %s differs: first=%v (present=%t), second=%v (present=%t)",
-					column.name, parameter, firstValues, foundFirst, secondValues, foundSecond)
-			}
-		}
-	}
-	return nil
-}
-
 // SetNvConfigParameter sets a nv config parameter for a mellanox device
 func (h *nvConfigUtils) SetNvConfigParameter(port v1alpha1.NicDevicePortSpec, paramName string, paramValue string) error {
-	targetDevice := resolveDevice(port)
+	targetDevice, err := h.resolveDevice(port)
+	if err != nil {
+		return err
+	}
 	log.Log.Info("ConfigurationUtils.SetNvConfigParameter()", "pciAddr", port.PCI, "targetDevice", targetDevice, "paramName", paramName, "paramValue", paramValue)
 
 	cmd := h.execInterface.Command("mlxconfig", "-d", targetDevice, "--yes", "set", paramName+"="+paramValue)
@@ -628,7 +591,10 @@ func systemConfToken(conf string, asic int) string {
 
 // SetSystemConf applies a ConnectX-9 Network Bay system configuration for a single ASIC.
 func (h *nvConfigUtils) SetSystemConf(ctx context.Context, port v1alpha1.NicDevicePortSpec, conf string, asic int, force bool) error {
-	targetDevice := resolveDevice(port)
+	targetDevice, err := h.resolveDevice(port)
+	if err != nil {
+		return err
+	}
 	log.Log.Info("ConfigurationUtils.SetSystemConf()", "pciAddr", port.PCI, "targetDevice", targetDevice, "conf", conf, "asic", asic, "force", force)
 
 	args := []string{"-d", targetDevice, "-y"}
@@ -649,7 +615,10 @@ func (h *nvConfigUtils) SetSystemConf(ctx context.Context, port v1alpha1.NicDevi
 // ValidateSystemConf runs validate_system_conf and returns the overall match bit plus the names of
 // the mismatched params (the MISMATCH rows).
 func (h *nvConfigUtils) ValidateSystemConf(ctx context.Context, port v1alpha1.NicDevicePortSpec, conf string, asic int) (bool, []string, error) {
-	targetDevice := resolveDevice(port)
+	targetDevice, err := h.resolveDevice(port)
+	if err != nil {
+		return false, nil, err
+	}
 	log.Log.Info("ConfigurationUtils.ValidateSystemConf()", "pciAddr", port.PCI, "targetDevice", targetDevice, "conf", conf, "asic", asic)
 
 	args := []string{"-d", targetDevice, "-y", "validate_system_conf", systemConfToken(conf, asic)}
@@ -754,7 +723,10 @@ func parseValidateSystemConf(output []byte) (matches bool, mismatched []string, 
 
 // ResetNvConfig resets NIC's nv config
 func (h *nvConfigUtils) ResetNvConfig(port v1alpha1.NicDevicePortSpec) error {
-	targetDevice := resolveDevice(port)
+	targetDevice, err := h.resolveDevice(port)
+	if err != nil {
+		return err
+	}
 	log.Log.Info("ConfigurationUtils.ResetNvConfig()", "pciAddr", port.PCI, "targetDevice", targetDevice)
 
 	cmd := h.execInterface.Command("mlxconfig", "-d", targetDevice, "--yes", "reset")
@@ -767,7 +739,13 @@ func (h *nvConfigUtils) ResetNvConfig(port v1alpha1.NicDevicePortSpec) error {
 }
 
 func NewNVConfigUtils() NVConfigUtils {
+	return NewNVConfigUtilsWithOptions(Options{})
+}
+
+// NewNVConfigUtilsWithOptions constructs NVConfig utilities with per-instance device selection.
+func NewNVConfigUtilsWithOptions(options Options) NVConfigUtils {
 	return &nvConfigUtils{
 		execInterface: execUtils.New(),
+		usePCIAddress: options.UsePCIAddress,
 	}
 }

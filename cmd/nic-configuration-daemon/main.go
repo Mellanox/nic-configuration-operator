@@ -19,9 +19,11 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"maps"
 	"os"
 	"slices"
+	"strconv"
 	"time"
 
 	maintenanceoperator "github.com/Mellanox/maintenance-operator/api/v1alpha1"
@@ -61,10 +63,30 @@ var (
 
 const nicDeviceSelectorProbeTimeout = 30 * time.Second
 
+const mlxconfigUsePCIAddressEnv = "MLXCONFIG_USE_PCI_ADDRESS"
+
+func nvConfigOptionsFromEnv() (nvconfig.Options, error) {
+	value, found := os.LookupEnv(mlxconfigUsePCIAddressEnv)
+	if !found {
+		return nvconfig.Options{}, nil
+	}
+	usePCIAddress, err := strconv.ParseBool(value)
+	if err != nil {
+		return nvconfig.Options{}, fmt.Errorf("%s must be a boolean: %w", mlxconfigUsePCIAddressEnv, err)
+	}
+	return nvconfig.Options{UsePCIAddress: usePCIAddress}, nil
+}
+
 func main() {
 	ncolog.BindFlags(flag.CommandLine)
 	flag.Parse()
 	ncolog.InitLog()
+
+	nvConfigOptions, err := nvConfigOptionsFromEnv()
+	if err != nil {
+		log.Log.Error(err, "invalid native mlxconfig configuration")
+		os.Exit(1)
+	}
 
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(maintenanceoperator.AddToScheme(scheme))
@@ -140,7 +162,7 @@ func main() {
 	eventRecorder := mgr.GetEventRecorderFor("NicDeviceReconciler")
 
 	hostUtils := host.NewHostUtils()
-	nvConfigUtils := nvconfig.NewNVConfigUtils()
+	nvConfigUtils := nvconfig.NewNVConfigUtilsWithOptions(nvConfigOptions)
 
 	deviceDiscovery := devicediscovery.NewDeviceDiscovery(nodeName, nvConfigUtils)
 
