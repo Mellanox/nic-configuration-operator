@@ -74,7 +74,7 @@ type NicDevicePortSpec struct {
 
 // NicDeviceStatus defines the observed state of NicDevice
 type NicDeviceStatus struct {
-	// Node where the device is located
+	// Node where the device is located. Selectable with a status.node field selector.
 	Node string `json:"node"`
 	// Type of device, e.g. ConnectX7
 	Type string `json:"type"`
@@ -123,6 +123,7 @@ type NicDeviceNetworkBayStatus struct {
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+//+kubebuilder:selectablefield:JSONPath=`.status.node`
 
 // NicDevice is the Schema for the nicdevices API
 type NicDevice struct {
