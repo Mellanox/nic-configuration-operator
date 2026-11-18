@@ -553,3 +553,6 @@ This option controls direct NCO `mlxconfig` targets. DMS operations retain their
 targeting; the option does not disable all fwctl use by DMS, devlink, mlxreg or other
 processes. PCI-address access under concurrent devlink discovery and its latency must
 be qualified on the affected hardware before treating it as a verified workaround.
+PCI-address queries can be substantially slower and may serialize across PFs and NICs,
+delaying validation and maintenance release. Measure full-node convergence against the
+effective maintenance request lifetime; single-PF timings do not establish lifecycle readiness.
