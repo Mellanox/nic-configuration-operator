@@ -92,31 +92,30 @@ func (u *utils) DownloadFile(url, destPath string) error {
 	if err != nil {
 		return fmt.Errorf("could not download file: %w", err)
 	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Log.Error(err, "failed to close HTTP response body")
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("could not download file: bad http response status: %s", resp.Status)
+	}
 
 	out, err := os.Create(destPath)
 	if err != nil {
 		return fmt.Errorf("could not create file: %w", err)
 	}
+	defer func() {
+		if err := out.Close(); err != nil {
+			log.Log.Error(err, "failed to close file")
+		}
+	}()
 
 	_, err = io.Copy(out, resp.Body)
 	if err != nil {
 		return fmt.Errorf("error saving file: %w", err)
 	}
-
-	defer func() {
-		err = out.Close()
-		if err != nil {
-			log.Log.Error(err, "failed to close file")
-		}
-	}()
-
-	defer func() {
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			err := fmt.Errorf("bad http request status: %s", resp.Status)
-			log.Log.Error(err, "failed to finish HTTP request")
-		}
-	}()
 
 	return nil
 }
