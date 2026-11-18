@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
@@ -202,7 +203,7 @@ func (d *deviceDiscoveryUtils) GetRDMADeviceName(pciAddr string) string {
 		return ""
 	}
 
-	log.Log.V(1).Info("Rdma device", "pciAddr", pciAddr, "name", rdmaDevices[0])
+	log.Log.V(ncolog.DebugLevel).Info("Rdma device", "pciAddr", pciAddr, "name", rdmaDevices[0])
 	return rdmaDevices[0]
 }
 
@@ -225,7 +226,7 @@ func (d *deviceDiscoveryUtils) GetFwctlDevice(pciAddr string) string {
 
 	fwctlDevice, err := getFwctlDeviceFromPath(pciDevicesPath, pciAddr)
 	if err != nil {
-		log.Log.V(1).Info("GetFwctlDevice(): fwctl device not found", "pciAddr", pciAddr, "error", err.Error())
+		log.Log.V(ncolog.DebugLevel).Info("GetFwctlDevice(): fwctl device not found", "pciAddr", pciAddr, "error", err.Error())
 		return ""
 	}
 
@@ -278,17 +279,17 @@ func (d *deviceDiscoveryUtils) GetNetworkBayASIC(pciAddr string) (int, bool) {
 	log.Log.Info("HostUtils.GetNetworkBayASIC()", "pciAddr", pciAddr)
 
 	output, err := d.execInterface.Command("mlxreg", "-d", pciAddr, "--reg_name", "MGIR", "-g").CombinedOutput()
-	log.Log.V(2).Info("command output", "command", "mlxreg", "pciAddr", pciAddr, "output", string(output))
+	log.Log.V(ncolog.DebugLevel).Info("command output", "command", "mlxreg", "pciAddr", pciAddr, "output", string(output))
 	if err != nil {
 		// mlxreg may be unavailable or the register unsupported on non-orchid hardware.
 		// Per design, log and skip silently — never block device discovery.
-		log.Log.V(1).Info("GetNetworkBayASIC(): mlxreg failed, treating device as non-orchid", "pciAddr", pciAddr, "error", err.Error())
+		log.Log.V(ncolog.DebugLevel).Info("GetNetworkBayASIC(): mlxreg failed, treating device as non-orchid", "pciAddr", pciAddr, "error", err.Error())
 		return 0, false
 	}
 
 	gaValid, ga, ok := parseMGIRGa(output)
 	if !ok {
-		log.Log.V(1).Info("GetNetworkBayASIC(): could not parse MGIR ga/ga_valid, treating device as non-orchid", "pciAddr", pciAddr)
+		log.Log.V(ncolog.DebugLevel).Info("GetNetworkBayASIC(): could not parse MGIR ga/ga_valid, treating device as non-orchid", "pciAddr", pciAddr)
 		return 0, false
 	}
 	if !gaValid {

@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 )
 
 const metadataFileName = "metadata.json"
@@ -83,7 +84,7 @@ type firmwareProvisioner struct {
 
 // IsFWStorageAvailable checks if the cache storage exists in the pod.
 func (f firmwareProvisioner) IsFWStorageAvailable() error {
-	log.Log.V(2).Info("FirmwareProvisioner.IsFWStorageAvailable()")
+	log.Log.V(ncolog.DebugLevel).Info("FirmwareProvisioner.IsFWStorageAvailable()")
 	_, err := os.Stat(consts.NicFirmwareStorage)
 	return err
 }
@@ -95,7 +96,7 @@ func (f firmwareProvisioner) VerifyCachedBinaries(cacheName string, urls []strin
 	// Nothing to verify if the dir does not exist
 	if _, err := os.Stat(cacheDir); os.IsNotExist(err) {
 		// If cache doesn't exist, there's nothing to validate, we need to process all urls
-		log.Log.V(2).Info("Cache dir doesn't exist, nothing to validate", "cacheDir", cacheDir)
+		log.Log.V(ncolog.DebugLevel).Info("Cache dir doesn't exist, nothing to validate", "cacheDir", cacheDir)
 		return urls, nil
 	} else if err != nil {
 		return nil, err
@@ -126,7 +127,7 @@ func (f firmwareProvisioner) VerifyCachedBinaries(cacheName string, urls []strin
 		files, found := metadata[url]
 		if !found {
 			urlsToProcessAgain = append(urlsToProcessAgain, url)
-			log.Log.V(2).Info("Requested url not found in existing cache, processing it again", "cacheDir", cacheDir, "url", url)
+			log.Log.V(ncolog.DebugLevel).Info("Requested url not found in existing cache, processing it again", "cacheDir", cacheDir, "url", url)
 			continue
 		}
 
@@ -153,7 +154,7 @@ func (f firmwareProvisioner) VerifyCachedBinaries(cacheName string, urls []strin
 				urlsToProcessAgain = append(urlsToProcessAgain, url)
 				delete(metadata, url)
 
-				log.Log.V(2).Info("Files for requested url are missing, processing it again", "cacheDir", cacheDir, "url", url)
+				log.Log.V(ncolog.DebugLevel).Info("Files for requested url are missing, processing it again", "cacheDir", cacheDir, "url", url)
 
 				break
 			}
@@ -198,7 +199,7 @@ func (f firmwareProvisioner) DownloadAndUnzipFirmwareArchives(cacheName string, 
 	}
 
 	log.Log.Info("Downloading firmware zip archives", "cacheDir", firmwareBinariesDir)
-	log.Log.V(2).Info("URLs to process", "urls", urls)
+	log.Log.V(ncolog.DebugLevel).Info("URLs to process", "urls", urls)
 
 	var urlsToFiles fwBinaryMetadata
 
@@ -214,11 +215,11 @@ func (f firmwareProvisioner) DownloadAndUnzipFirmwareArchives(cacheName string, 
 			return err
 		}
 
-		log.Log.V(2).Info("Successfully read the existing metadata file", "metadata", urlsToFiles)
+		log.Log.V(ncolog.DebugLevel).Info("Successfully read the existing metadata file", "metadata", urlsToFiles)
 	}
 
 	for _, url := range urls {
-		log.Log.V(2).Info("Downloading firmware archive", "url", url)
+		log.Log.V(ncolog.DebugLevel).Info("Downloading firmware archive", "url", url)
 
 		archiveLocalPath := filepath.Join(firmwareBinariesDir, filepath.Base(url))
 		err := f.utils.DownloadFile(url, archiveLocalPath)
@@ -227,7 +228,7 @@ func (f firmwareProvisioner) DownloadAndUnzipFirmwareArchives(cacheName string, 
 			return err
 		}
 
-		log.Log.V(2).Info("Unzipping firmware archive", "path", archiveLocalPath)
+		log.Log.V(ncolog.DebugLevel).Info("Unzipping firmware archive", "path", archiveLocalPath)
 
 		files, err := f.utils.UnzipFiles(archiveLocalPath, firmwareBinariesDir)
 		if err != nil {
@@ -251,10 +252,10 @@ func (f firmwareProvisioner) DownloadAndUnzipFirmwareArchives(cacheName string, 
 			return err
 		}
 
-		log.Log.V(2).Info("Unzipped files", "archive", archiveLocalPath, "files", files)
+		log.Log.V(ncolog.DebugLevel).Info("Unzipped files", "archive", archiveLocalPath, "files", files)
 
 		if cleanupArchives {
-			log.Log.V(2).Info("Cleaning up archive", "path", archiveLocalPath)
+			log.Log.V(ncolog.DebugLevel).Info("Cleaning up archive", "path", archiveLocalPath)
 
 			err = os.Remove(archiveLocalPath)
 			if err != nil {
@@ -313,7 +314,7 @@ func (f firmwareProvisioner) AddFirmwareBinariesToCacheByMetadata(cacheName stri
 			return err
 		}
 
-		log.Log.V(2).Info("Processing firmware binary file", "path", sourcePath, "fw version", version, "psid", psid)
+		log.Log.V(ncolog.DebugLevel).Info("Processing firmware binary file", "path", sourcePath, "fw version", version, "psid", psid)
 
 		targetDir := path.Join(firmwareBinariesDir, version, psid)
 
@@ -337,7 +338,7 @@ func (f firmwareProvisioner) AddFirmwareBinariesToCacheByMetadata(cacheName stri
 		targetPath := path.Join(targetDir, entry.Name())
 		err = os.Rename(sourcePath, targetPath)
 
-		log.Log.V(2).Info("Firmware binary file moved to appropriate directory", "sourcePath", sourcePath, "targetPath", targetPath)
+		log.Log.V(ncolog.DebugLevel).Info("Firmware binary file moved to appropriate directory", "sourcePath", sourcePath, "targetPath", targetPath)
 
 		if err != nil {
 			log.Log.Error(err, "failed to place firmware binary file in cache", "cacheName", cacheName, "path", targetPath)
@@ -366,7 +367,7 @@ func (f firmwareProvisioner) ValidateFirmwareBinariesCache(cacheName string) (ma
 		return nil, err
 	}
 
-	log.Log.V(2).Info("Available firmware versions", "cacheDir", firmwareBinariesDir, "versions", firmwareVersions)
+	log.Log.V(ncolog.DebugLevel).Info("Available firmware versions", "cacheDir", firmwareBinariesDir, "versions", firmwareVersions)
 
 	for _, firmwareVersion := range firmwareVersions {
 		if !firmwareVersion.IsDir() {
@@ -382,7 +383,7 @@ func (f firmwareProvisioner) ValidateFirmwareBinariesCache(cacheName string) (ma
 			return nil, err
 		}
 
-		log.Log.V(2).Info("Available PSIDs", "cacheDir", firmwareBinariesDir, "version", firmwareVersion, "psids", psids)
+		log.Log.V(ncolog.DebugLevel).Info("Available PSIDs", "cacheDir", firmwareBinariesDir, "version", firmwareVersion, "psids", psids)
 
 		for _, psid := range psids {
 			if !psid.IsDir() {
@@ -414,7 +415,7 @@ func (f firmwareProvisioner) ValidateFirmwareBinariesCache(cacheName string) (ma
 				}
 
 				binFileFound = true
-				log.Log.V(2).Info("Found .bin file for FW Version / PSID combination", "cacheDir", firmwareBinariesDir, "version", fwVersion, "psid", psid, "name", entry.Name())
+				log.Log.V(ncolog.DebugLevel).Info("Found .bin file for FW Version / PSID combination", "cacheDir", firmwareBinariesDir, "version", fwVersion, "psid", psid, "name", entry.Name())
 			}
 
 			if !binFileFound {
@@ -571,7 +572,7 @@ func (f firmwareProvisioner) downloadFile(cacheDir string, url string, validateE
 		return "", err
 	}
 
-	log.Log.V(2).Info("File downloaded and validated", "path", fileLocalPath)
+	log.Log.V(ncolog.DebugLevel).Info("File downloaded and validated", "path", fileLocalPath)
 
 	// Create new metadata with only this BFB file
 	fileName := filepath.Base(fileLocalPath)

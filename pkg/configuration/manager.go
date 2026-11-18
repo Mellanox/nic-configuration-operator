@@ -30,6 +30,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	"github.com/Mellanox/nic-configuration-operator/pkg/dms"
 	"github.com/Mellanox/nic-configuration-operator/pkg/dmscli"
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 	"github.com/Mellanox/nic-configuration-operator/pkg/nvconfig"
 	"github.com/Mellanox/nic-configuration-operator/pkg/spectrumx"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
@@ -126,10 +127,10 @@ func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *
 		logger.Error(err, "failed to calculate desired nvconfig parameters", "device", device.Name)
 		return false, false, nil, err
 	}
-	logger.V(2).Info("validating native NVConfig parameters", "device", device.Name, "params", desiredParams)
+	logger.V(ncolog.DebugLevel).Info("validating native NVConfig parameters", "device", device.Name, "params", desiredParams)
 
 	configUpdateNeeded, rebootNeeded, unsupportedParams := validateTemplateParamsApplied(nvConfigsForPorts, desiredParams)
-	logger.V(2).Info("native NVConfig validation complete",
+	logger.V(ncolog.DebugLevel).Info("native NVConfig validation complete",
 		"device", device.Name,
 		"configUpdateNeeded", configUpdateNeeded,
 		"rebootNeeded", rebootNeeded,
@@ -155,14 +156,14 @@ func (h configurationManager) ValidateDeviceNvSpec(ctx context.Context, device *
 		}
 		configUpdateNeeded = configUpdateNeeded || planUpdateNeeded
 		rebootNeeded = rebootNeeded || planRebootNeeded
-		logger.V(2).Info("doSPCX NVConfig phase validation complete",
+		logger.V(ncolog.DebugLevel).Info("doSPCX NVConfig phase validation complete",
 			"device", device.Name,
 			"phase", phase,
 			"configUpdateNeeded", planUpdateNeeded,
 			"rebootNeeded", planRebootNeeded)
 	}
 
-	logger.V(2).Info("nv spec validation result", "device", device.Name,
+	logger.V(ncolog.DebugLevel).Info("nv spec validation result", "device", device.Name,
 		"configUpdateNeeded", configUpdateNeeded, "rebootNeeded", rebootNeeded, "unsupportedParams", unsupportedParams)
 	return configUpdateNeeded, rebootNeeded, unsupportedParams, nil
 }
@@ -295,7 +296,7 @@ func (h configurationManager) applySpectrumXNVConfig(
 		if len(diff.unsupported) > 0 {
 			status = types.ApplyStatusPartiallyApplied
 		}
-		log.FromContext(ctx).V(2).Info("combined doSPCX NVConfig apply diff",
+		log.FromContext(ctx).V(ncolog.DebugLevel).Info("combined doSPCX NVConfig apply diff",
 			"device", device.Name, "pciAddr", port.PCI, "phase", phase,
 			"withDefault", options.WithDefault, "force", options.Force,
 			"nativeApplyCount", len(diff.changed), "typedOperationCount", len(typedOperations),
@@ -405,7 +406,7 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 		logger.Error(err, "failed to calculate desired nvconfig parameters", "device", device.Name)
 		return &types.ConfigurationApplyResult{Status: types.ApplyStatusFailed}, err
 	}
-	logger.V(2).Info("native NVConfig desired parameters built", "device", device.Name, "params", desiredParams, "force", options.Force)
+	logger.V(ncolog.DebugLevel).Info("native NVConfig desired parameters built", "device", device.Name, "params", desiredParams, "force", options.Force)
 
 	// Spectrum-X combines template-derived native and typed NVConfig into one
 	// DMS action per PCI function.
@@ -427,7 +428,7 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 		batch := diff.changed
 		hasUnsupportedParams = hasUnsupportedParams || len(diff.unsupported) > 0
 		target := "pci/" + port.PCI
-		logger.V(2).Info("nv config apply diff",
+		logger.V(ncolog.DebugLevel).Info("nv config apply diff",
 			"device", device.Name,
 			"target", target,
 			"withDefault", options.WithDefault,
@@ -443,7 +444,7 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 		if len(batch) == 0 {
 			continue
 		}
-		logger.V(2).Info("applying nv config batch", "device", device.Name, "target", target, "params", batch, "force", options.Force)
+		logger.V(ncolog.DebugLevel).Info("applying nv config batch", "device", device.Name, "target", target, "params", batch, "force", options.Force)
 		applyStatus, err := h.setNvConfigParametersBatch(ctx, port, batch, options.WithDefault, options.Force)
 		if err != nil {
 			logger.Error(err, "Failed to apply nv config parameters", "device", device.Name, "params", batch)
@@ -455,7 +456,7 @@ func (h configurationManager) ApplyNVConfiguration(ctx context.Context, device *
 	}
 
 	if !anyParamsApplied && !hasUnsupportedParams {
-		logger.V(2).Info("nv config already up to date, nothing to apply", "device", device.Name)
+		logger.V(ncolog.DebugLevel).Info("nv config already up to date, nothing to apply", "device", device.Name)
 		return &types.ConfigurationApplyResult{Status: types.ApplyStatusNothingToDo}, nil
 	}
 
@@ -579,7 +580,7 @@ func (h configurationManager) ApplyRuntimeConfiguration(ctx context.Context, dev
 	}
 
 	if genericApplied && spectrumXApplied {
-		logger.V(2).Info("runtime configuration is already applied", "device", device.Name)
+		logger.V(ncolog.DebugLevel).Info("runtime configuration is already applied", "device", device.Name)
 		return &types.RuntimeConfigurationApplyResult{Status: types.ApplyStatusNothingToDo}, nil
 	}
 
@@ -640,7 +641,7 @@ func (h configurationManager) applyGenericRuntimeConfiguration(device *v1alpha1.
 	// Apply per-port runtime settings
 	for _, port := range ports {
 		if port.NetworkInterface == "" {
-			log.Log.V(2).Info("skipping runtime config apply for port with empty NetworkInterface", "device", device.Name, "port", port.PCI)
+			log.Log.V(ncolog.DebugLevel).Info("skipping runtime config apply for port with empty NetworkInterface", "device", device.Name, "port", port.PCI)
 			continue
 		}
 		if err := h.applyPortRuntimeConfig(port.NetworkInterface, device, desired); err != nil {
@@ -722,7 +723,7 @@ func (h configurationManager) applyPortRuntimePerf(iface string, device *v1alpha
 				return err
 			}
 		} else {
-			log.Log.V(2).Info("skipping combinedChannels apply, driver does not expose combined channels", "device", device, "interface", iface)
+			log.Log.V(ncolog.DebugLevel).Info("skipping combinedChannels apply, driver does not expose combined channels", "device", device, "interface", iface)
 		}
 	}
 

@@ -27,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
 
@@ -104,7 +105,7 @@ func (h *hostUtils) DiscoverOfedVersion() string {
 
 // GetHostUptimeSeconds returns the host uptime in seconds
 func (h *hostUtils) GetHostUptimeSeconds() (time.Duration, error) {
-	log.Log.V(2).Info("HostUtils.GetHostUptimeSeconds()")
+	log.Log.V(ncolog.DebugLevel).Info("HostUtils.GetHostUptimeSeconds()")
 	output, err := os.ReadFile("/proc/uptime")
 	if err != nil {
 		log.Log.Error(err, "HostUtils.GetHostUptimeSeconds(): failed to read the system's uptime")

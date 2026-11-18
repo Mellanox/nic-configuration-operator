@@ -33,6 +33,7 @@ import (
 
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	"github.com/Mellanox/nic-configuration-operator/pkg/host"
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 )
 
 func GetMaintenanceRequestEventHandler(nodeName string, qHandler func(q workqueue.TypedRateLimitingInterface[reconcile.Request])) handler.Funcs {
@@ -50,11 +51,11 @@ func GetMaintenanceRequestEventHandler(nodeName string, qHandler func(q workqueu
 			oldReadyCondition := meta.FindStatusCondition(oldNM.Status.Conditions, maintenanceoperator.ConditionTypeReady)
 			newReadyCondition := meta.FindStatusCondition(newNM.Status.Conditions, maintenanceoperator.ConditionTypeReady)
 			if oldReadyCondition == nil || newReadyCondition == nil {
-				log.Log.V(2).Info("couldn't get maintenance request status")
+				log.Log.V(ncolog.DebugLevel).Info("couldn't get maintenance request status")
 				return
 			}
 
-			log.Log.V(2).Info("Maintenance request updated", "status", newReadyCondition.Status, "reason", newReadyCondition.Reason, "message", newReadyCondition.Message)
+			log.Log.V(ncolog.DebugLevel).Info("Maintenance request updated", "status", newReadyCondition.Status, "reason", newReadyCondition.Reason, "message", newReadyCondition.Message)
 
 			if oldReadyCondition.Status == newReadyCondition.Status {
 				return
@@ -160,12 +161,12 @@ func (m maintenanceManager) MaintenanceAllowed(ctx context.Context) (bool, error
 
 	readyCondition := meta.FindStatusCondition(scheduledMaintenance.Status.Conditions, maintenanceoperator.ConditionTypeReady)
 	if readyCondition == nil {
-		log.Log.V(2).Info("couldn't retrieve maintenance condition, retry")
+		log.Log.V(ncolog.DebugLevel).Info("couldn't retrieve maintenance condition, retry")
 		return false, nil
 	}
 
 	if readyCondition.Status != metav1.ConditionTrue {
-		log.Log.V(2).Info("maintenance is not ready yet", "reason", readyCondition.Reason, "message", readyCondition.Message)
+		log.Log.V(ncolog.DebugLevel).Info("maintenance is not ready yet", "reason", readyCondition.Reason, "message", readyCondition.Message)
 		return false, nil
 	}
 

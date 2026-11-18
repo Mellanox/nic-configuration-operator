@@ -50,6 +50,7 @@ import (
 	"github.com/Mellanox/nic-configuration-operator/pkg/firmware"
 	"github.com/Mellanox/nic-configuration-operator/pkg/host"
 	"github.com/Mellanox/nic-configuration-operator/pkg/maintenance"
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 	"github.com/Mellanox/nic-configuration-operator/pkg/spectrumx"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 	"github.com/Mellanox/nic-configuration-operator/pkg/udev"
@@ -115,7 +116,7 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	if len(configStatuses) == 0 {
-		log.Log.V(2).Info("no devices from this node to reconcile")
+		log.Log.V(ncolog.DebugLevel).Info("no devices from this node to reconcile")
 
 		err = r.MaintenanceManager.ReleaseMaintenance(ctx)
 		if err != nil {
@@ -126,7 +127,7 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, nil
 	}
 
-	log.Log.V(2).Info(fmt.Sprintf("reconciling %d NicDevices", len(configStatuses)))
+	log.Log.V(ncolog.DebugLevel).Info(fmt.Sprintf("reconciling %d NicDevices", len(configStatuses)))
 
 	// Next we need to validate the firmware spec of all devices
 	// NicDevices with empty FW specs are skipped during this step
@@ -146,7 +147,7 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// If Firmware is not ready, update NIC configuration status to "Pending Firmware Update"
 	if !configStatuses.firmwareReady() {
-		log.Log.V(2).Info("firmware is not ready for some devices, set PendingFirmwareUpdate status to ConfigUpdateInProgress condition")
+		log.Log.V(ncolog.DebugLevel).Info("firmware is not ready for some devices, set PendingFirmwareUpdate status to ConfigUpdateInProgress condition")
 
 		err = runInParallel(ctx, configStatuses, r.handleConfigurationPendingFirmwareUpdate)
 		if err != nil {
@@ -160,7 +161,7 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 		result, err := r.ensureMaintenance(ctx)
 		if err != nil {
-			log.Log.V(2).Error(err, "failed to schedule maintenance")
+			log.Log.V(ncolog.DebugLevel).Error(err, "failed to schedule maintenance")
 			return ctrl.Result{}, err
 		}
 		if !result.IsZero() {
@@ -217,7 +218,7 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		log.Log.Info("scheduling maintenance for nv config update")
 		result, err := r.ensureMaintenance(ctx)
 		if err != nil {
-			log.Log.V(2).Error(err, "failed to schedule maintenance")
+			log.Log.V(ncolog.DebugLevel).Error(err, "failed to schedule maintenance")
 			return ctrl.Result{}, err
 		}
 		if !result.IsZero() {
@@ -266,7 +267,7 @@ func (r *NicDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
-	log.Log.V(2).Info("requeue the request with a big interval to check if the configuration has drifter")
+	log.Log.V(ncolog.DebugLevel).Info("requeue the request with a big interval to check if the configuration has drifter")
 	return ctrl.Result{RequeueAfter: longRequeueTime * 20}, nil
 }
 
@@ -281,7 +282,7 @@ func (r *NicDeviceReconciler) reconcileInterfaceNameTemplates(ctx context.Contex
 		}
 	}
 
-	log.Log.V(2).Info("Reconciling InterfaceNameTemplate specs", "deviceCount", len(devicesWithTemplates))
+	log.Log.V(ncolog.DebugLevel).Info("Reconciling InterfaceNameTemplate specs", "deviceCount", len(devicesWithTemplates))
 
 	// Apply udev rules for all devices with templates and get expected interface names
 	expectedNames, updated, err := r.UdevManager.ApplyUdevRules(ctx, devicesWithTemplates)
@@ -305,7 +306,7 @@ func (r *NicDeviceReconciler) reconcileInterfaceNameTemplates(ctx context.Contex
 			port := &device.Status.Ports[i]
 			expected, exists := expectedNames[port.PCI]
 			if !exists {
-				log.Log.V(2).Info("expected interface names not found for port, skipping the check", "device", device.Name, "port", port.PCI)
+				log.Log.V(ncolog.DebugLevel).Info("expected interface names not found for port, skipping the check", "device", device.Name, "port", port.PCI)
 				continue
 			}
 
@@ -411,13 +412,13 @@ func (r *NicDeviceReconciler) getDevices(ctx context.Context) (nicDeviceConfigur
 		return nil, err
 	}
 
-	log.Log.V(2).Info("listed devices from this node", "count", len(devices.Items))
+	log.Log.V(ncolog.DebugLevel).Info("listed devices from this node", "count", len(devices.Items))
 
 	configStatuses := nicDeviceConfigurationStatuses{}
 
 	for i, device := range devices.Items {
 		if device.Spec.Firmware == nil {
-			log.Log.V(2).Info("device has no firmware spec", "name", device.Name)
+			log.Log.V(ncolog.DebugLevel).Info("device has no firmware spec", "name", device.Name)
 			statusCondition := meta.FindStatusCondition(device.Status.Conditions, consts.FirmwareUpdateInProgressCondition)
 			if statusCondition == nil || statusCondition.Reason != consts.DeviceFirmwareSpecEmptyReason {
 				err = r.updateFirmwareUpdateInProgressStatusCondition(ctx, &device, consts.DeviceFirmwareSpecEmptyReason, metav1.ConditionFalse, "")
@@ -429,7 +430,7 @@ func (r *NicDeviceReconciler) getDevices(ctx context.Context) (nicDeviceConfigur
 		}
 
 		if device.Spec.Configuration == nil {
-			log.Log.V(2).Info("device has no configuration spec", "name", device.Name)
+			log.Log.V(ncolog.DebugLevel).Info("device has no configuration spec", "name", device.Name)
 
 			statusCondition := meta.FindStatusCondition(device.Status.Conditions, consts.ConfigUpdateInProgressCondition)
 			if statusCondition == nil || statusCondition.Reason != consts.DeviceConfigSpecEmptyReason {
@@ -453,7 +454,7 @@ func (r *NicDeviceReconciler) getDevices(ctx context.Context) (nicDeviceConfigur
 		}
 
 		if device.Spec.Firmware != nil || device.Spec.Configuration != nil || device.Spec.InterfaceNameTemplate != nil {
-			log.Log.V(2).Info("device has non-nil spec, adding it to the list to reconcile", "name", device.Name)
+			log.Log.V(ncolog.DebugLevel).Info("device has non-nil spec, adding it to the list to reconcile", "name", device.Name)
 			configStatuses = append(configStatuses, &nicDeviceConfigurationStatus{
 				device: &devices.Items[i],
 			})
@@ -477,7 +478,7 @@ func (r *NicDeviceReconciler) ensureMaintenance(ctx context.Context) (ctrl.Resul
 		return ctrl.Result{}, err
 	}
 	if !maintenanceAllowed {
-		log.Log.V(2).Info("maintenance not allowed yet, exiting for now")
+		log.Log.V(ncolog.DebugLevel).Info("maintenance not allowed yet, exiting for now")
 		// Maintenance not yet allowed, waiting until then
 		return ctrl.Result{RequeueAfter: longRequeueTime}, nil
 	}
@@ -588,7 +589,7 @@ func (r *NicDeviceReconciler) applyRuntimeConfig(ctx context.Context, status *ni
 		}
 
 		if string(specJson) != lastAppliedState {
-			log.Log.V(2).Info("last applied state differs, reboot required", "device", status.device.Name)
+			log.Log.V(ncolog.DebugLevel).Info("last applied state differs, reboot required", "device", status.device.Name)
 			status.rebootRequired = true
 
 			err := r.updateConfigInProgressStatusCondition(ctx, status.device, consts.PendingRebootReason, metav1.ConditionTrue, "")
@@ -646,7 +647,7 @@ func (r *NicDeviceReconciler) applyRuntimeConfig(ctx context.Context, status *ni
 // returns true if requeue of the reconcile request is required, false otherwise
 // return err if encountered an error while performing maintenance scheduling / reboot
 func (r *NicDeviceReconciler) handleReboot(ctx context.Context, statuses nicDeviceConfigurationStatuses) (ctrl.Result, error) {
-	log.Log.V(2).Info("reboot required")
+	log.Log.V(ncolog.DebugLevel).Info("reboot required")
 
 	if result, err := r.ensureMaintenance(ctx); result.RequeueAfter != 0 || err != nil {
 		return result, err
@@ -658,7 +659,7 @@ func (r *NicDeviceReconciler) handleReboot(ctx context.Context, statuses nicDevi
 		return ctrl.Result{}, err
 	}
 
-	log.Log.V(2).Info("maintenance allowed, scheduling reboot")
+	log.Log.V(ncolog.DebugLevel).Info("maintenance allowed, scheduling reboot")
 
 	err = r.MaintenanceManager.Reboot()
 	if err != nil {
@@ -762,14 +763,14 @@ func (r *NicDeviceReconciler) handleConfigurationSpecValidation(ctx context.Cont
 		return err
 	}
 
-	log.Log.V(2).Info("nv spec validation complete for device", "device", status.device.Name, "nvConfigUpdateRequired", nvConfigUpdateRequired, "rebootRequired", rebootRequired, "unsupportedNvParams", unsupportedNvParams)
+	log.Log.V(ncolog.DebugLevel).Info("nv spec validation complete for device", "device", status.device.Name, "nvConfigUpdateRequired", nvConfigUpdateRequired, "rebootRequired", rebootRequired, "unsupportedNvParams", unsupportedNvParams)
 
 	status.nvConfigUpdateRequired = nvConfigUpdateRequired
 	status.rebootRequired = rebootRequired
 	status.unsupportedNvParams = unsupportedNvParams
 
 	if nvConfigUpdateRequired {
-		log.Log.V(2).Info("update started for device", "device", status.device.Name)
+		log.Log.V(ncolog.DebugLevel).Info("update started for device", "device", status.device.Name)
 		err = r.updateConfigInProgressStatusCondition(ctx, status.device, consts.UpdateStartedReason, metav1.ConditionTrue, "")
 		if err != nil {
 			return err
@@ -822,7 +823,7 @@ func (r *NicDeviceReconciler) handleConfigurationSpecValidation(ctx context.Cont
 			return errors.New(consts.FwConfigNotAppliedAfterRebootErrorMsg)
 		default:
 			// If reboot hasn't happened yet, proceed as normal and set PendingReboot status
-			log.Log.V(2).Info("reboot pending for device", "device", status.device.Name)
+			log.Log.V(ncolog.DebugLevel).Info("reboot pending for device", "device", status.device.Name)
 			err = r.updateConfigInProgressStatusCondition(ctx, status.device, consts.PendingRebootReason, metav1.ConditionTrue, "")
 			if err != nil {
 				return err
@@ -843,7 +844,7 @@ func (r *NicDeviceReconciler) handleFirmwareValidation(ctx context.Context, stat
 	}
 
 	requestedFirmwareVersion, err := r.FirmwareManager.ValidateRequestedFirmwareSource(ctx, status.device)
-	log.Log.V(2).Info("firmware source validation complete for device", "device", status.device.Name, "err", err)
+	log.Log.V(ncolog.DebugLevel).Info("firmware source validation complete for device", "device", status.device.Name, "err", err)
 
 	status.requestedFirmwareVersion = requestedFirmwareVersion
 	status.firmwareValidationSuccessful = err == nil
@@ -897,7 +898,7 @@ func (r *NicDeviceReconciler) handleFirmwareUpdate(ctx context.Context, status *
 	}
 
 	if status.firmwareUpToDate() {
-		log.Log.V(2).Info("firmware matches the requested version", "device", status.device.Name)
+		log.Log.V(ncolog.DebugLevel).Info("firmware matches the requested version", "device", status.device.Name)
 		return r.updateFirmwareUpdateInProgressStatusCondition(ctx, status.device, consts.DeviceFwMatchReason, metav1.ConditionFalse, consts.DeviceFwMatchMessage)
 	}
 
@@ -948,10 +949,10 @@ func (r *NicDeviceReconciler) handleConfigurationPendingFirmwareUpdate(ctx conte
 	}
 
 	if status.firmwareReady() {
-		log.Log.V(2).Info("device's NIC configuration is pending FW update on other devices", "device", status.device.Name)
+		log.Log.V(ncolog.DebugLevel).Info("device's NIC configuration is pending FW update on other devices", "device", status.device.Name)
 		return r.updateConfigInProgressStatusCondition(ctx, status.device, consts.PendingFirmwareUpdateReason, metav1.ConditionFalse, consts.PendingOtherFirmwareUpdateMessage)
 	} else {
-		log.Log.V(2).Info("device's NIC configuration is pending own FW update", "device", status.device.Name)
+		log.Log.V(ncolog.DebugLevel).Info("device's NIC configuration is pending own FW update", "device", status.device.Name)
 		return r.updateConfigInProgressStatusCondition(ctx, status.device, consts.PendingFirmwareUpdateReason, metav1.ConditionFalse, consts.PendingOwnFirmwareUpdateMessage)
 	}
 }
@@ -980,7 +981,7 @@ func (r *NicDeviceReconciler) updateStatusCondition(ctx context.Context, device 
 	var err error
 	if changed {
 		err = r.Client.Status().Update(ctx, device)
-		log.Log.V(2).Info("updating status condition for device", "device", device.Name, "type", conditionType, "reason", reason, "err", err)
+		log.Log.V(ncolog.DebugLevel).Info("updating status condition for device", "device", device.Name, "type", conditionType, "reason", reason, "err", err)
 	}
 
 	return err
@@ -1087,11 +1088,11 @@ func (p nicDeviceConfigurationStatuses) nvConfigReadyForAll() bool {
 	for _, result := range p {
 		if result.nvConfigUpdateRequired || result.rebootRequired {
 			nvConfigReadyForAll = false
-			log.Log.V(2).Info("nv config not ready for device", "device", result.device)
+			log.Log.V(ncolog.DebugLevel).Info("nv config not ready for device", "device", result.device)
 		}
 	}
 
-	log.Log.V(2).Info("nv config ready for all devices", "ready", nvConfigReadyForAll)
+	log.Log.V(ncolog.DebugLevel).Info("nv config ready for all devices", "ready", nvConfigReadyForAll)
 	return nvConfigReadyForAll
 }
 
@@ -1101,7 +1102,7 @@ func (p nicDeviceConfigurationStatuses) rebootRequired() bool {
 	for _, result := range p {
 		if result.rebootRequired {
 			rebootRequiredForSome = true
-			log.Log.V(2).Info("reboot required for device", "device", result.device)
+			log.Log.V(ncolog.DebugLevel).Info("reboot required for device", "device", result.device)
 		}
 	}
 
@@ -1118,7 +1119,7 @@ func (p nicDeviceConfigurationStatuses) nvConfigUpdateRequired() bool {
 	}
 
 	if nvConfigUpdateRequiredForSome {
-		log.Log.V(2).Info("nv config change required for some devices")
+		log.Log.V(ncolog.DebugLevel).Info("nv config change required for some devices")
 	}
 
 	return nvConfigUpdateRequiredForSome
@@ -1143,12 +1144,12 @@ func (s nicDeviceConfigurationStatus) firmwareReady() bool {
 func (p nicDeviceConfigurationStatuses) firmwareUpdateRequired() bool {
 	for _, result := range p {
 		if result.firmwareUpdateRequired() {
-			log.Log.V(2).Info("firmware update required for device", "device", result.device)
+			log.Log.V(ncolog.DebugLevel).Info("firmware update required for device", "device", result.device)
 			return true
 		}
 	}
 
-	log.Log.V(2).Info("firmware update not required for all devices")
+	log.Log.V(ncolog.DebugLevel).Info("firmware update not required for all devices")
 	return false
 }
 
@@ -1156,11 +1157,11 @@ func (p nicDeviceConfigurationStatuses) firmwareUpdateRequired() bool {
 func (p nicDeviceConfigurationStatuses) firmwareReady() bool {
 	for _, result := range p {
 		if !result.firmwareReady() {
-			log.Log.V(2).Info("firmware not ready for device", "device", result.device)
+			log.Log.V(ncolog.DebugLevel).Info("firmware not ready for device", "device", result.device)
 			return false
 		}
 	}
 
-	log.Log.V(2).Info("firmware ready for all devices")
+	log.Log.V(ncolog.DebugLevel).Info("firmware ready for all devices")
 	return true
 }

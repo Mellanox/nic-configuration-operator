@@ -27,6 +27,7 @@ import (
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/dmscli"
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 	"github.com/Mellanox/nic-configuration-operator/pkg/spectrumx"
 )
 
@@ -84,7 +85,7 @@ func (h configurationManager) validateSpectrumXRuntimeConfig(
 				return false, fmt.Errorf("PCI function %q has no RDMA interface", port.PCI)
 			}
 			if !h.spectrumXConfigManager.IsDocaSpcXCCRunning(port.RdmaInterface) {
-				log.FromContext(ctx).V(2).Info("required DOCA SPC-X CC process is not running", "rdma", port.RdmaInterface)
+				log.FromContext(ctx).V(ncolog.DebugLevel).Info("required DOCA SPC-X CC process is not running", "rdma", port.RdmaInterface)
 				return false, nil
 			}
 		}
@@ -125,7 +126,7 @@ func (h configurationManager) validateSpectrumXRuntimeGroup(
 	lastWriteBatches map[spectrumXRuntimeWriteKey]int,
 ) (bool, error) {
 	for batchIndex, batch := range batches {
-		log.FromContext(ctx).V(2).Info("validating doSPCX runtime configuration group",
+		log.FromContext(ctx).V(ncolog.DebugLevel).Info("validating doSPCX runtime configuration group",
 			"device", device.Name, "group", group.Name, "scope", batch.scope,
 			"targetClass", batch.targetClass, "operations", len(batch.operations), "targets", len(batch.targets))
 		for _, target := range batch.targets {
@@ -136,7 +137,7 @@ func (h configurationManager) validateSpectrumXRuntimeGroup(
 				batch.operations, batchOffset+batchIndex, target.name, lastWriteBatches)
 			queries, desiredValues := spectrumXRuntimeQueries(operations)
 			if len(queries) == 0 {
-				log.FromContext(ctx).V(2).Info("skipping doSPCX runtime validation batch",
+				log.FromContext(ctx).V(ncolog.DebugLevel).Info("skipping doSPCX runtime validation batch",
 					"device", device.Name, "group", group.Name, "scope", batch.scope,
 					"targetClass", batch.targetClass, "target", target.name,
 					"reason", "all values are shadowed by a later batch or are write-only")
@@ -278,7 +279,7 @@ func spectrumXRuntimeOperationBatches(
 		return nil, fmt.Errorf("cannot select ports for doSPCX runtime group %q on a nil device", group.Name)
 	}
 	if len(group.Operations) == 0 {
-		log.FromContext(ctx).V(2).Info("skipping doSPCX runtime configuration group",
+		log.FromContext(ctx).V(ncolog.DebugLevel).Info("skipping doSPCX runtime configuration group",
 			"device", device.Name, "group", group.Name, "reason", "group has no operations")
 		return nil, nil
 	}
@@ -294,7 +295,7 @@ func spectrumXRuntimeOperationBatches(
 		}
 		targetClass := strings.TrimSpace(operation.TargetClass)
 		if reason := spectrumXRuntimeOperationFilterReason(operationScope, targetClass); reason != "" {
-			log.FromContext(ctx).V(2).Info("skipping doSPCX runtime operation",
+			log.FromContext(ctx).V(ncolog.DebugLevel).Info("skipping doSPCX runtime operation",
 				"device", device.Name, "group", group.Name, "path", operation.Path,
 				"scope", operationScope, "targetClass", targetClass, "reason", reason)
 			continue
@@ -317,7 +318,7 @@ func spectrumXRuntimeOperationBatches(
 		batches[len(batches)-1].operations = append(batches[len(batches)-1].operations, operation)
 	}
 	if len(group.Operations) > 0 && len(batches) == 0 {
-		log.FromContext(ctx).V(2).Info("skipping doSPCX runtime configuration group",
+		log.FromContext(ctx).V(ncolog.DebugLevel).Info("skipping doSPCX runtime configuration group",
 			"device", device.Name, "group", group.Name,
 			"reason", "all operations were filtered by scope or target class")
 	}
@@ -381,7 +382,7 @@ func resolveTargets(
 		rdma := strings.TrimSpace(port.RdmaInterface)
 		if scope == spectrumXRuntimeScopePerRDMABond || targetGroup == spectrumXRuntimeTargetPFRDMAScope {
 			if rdma == "" {
-				log.Log.V(2).Info("skipping doSPCX runtime target",
+				log.Log.V(ncolog.DebugLevel).Info("skipping doSPCX runtime target",
 					"device", device.Name, "pci", port.PCI, "scope", scope, "targetGroup", targetGroup,
 					"reason", "PCI function has no RDMA interface required by scope or target group")
 				continue
@@ -389,7 +390,7 @@ func resolveTargets(
 		}
 		if scope == spectrumXRuntimeScopePerRDMABond {
 			if _, found := seenRDMABonds[rdma]; found {
-				log.Log.V(2).Info("skipping doSPCX runtime target",
+				log.Log.V(ncolog.DebugLevel).Info("skipping doSPCX runtime target",
 					"device", device.Name, "pci", port.PCI, "scope", scope, "targetGroup", targetGroup,
 					"rdma", rdma, "reason", "RDMA bond already has a representative target")
 				continue
@@ -515,7 +516,7 @@ func (h configurationManager) validateSpectrumXRuntimeTargetWithSysfs(
 				}
 				desired := desiredValues[query.Path][leaf]
 				if !dmscli.XPathValuesEqual(actual, desired) {
-					log.FromContext(ctx).V(2).Info("doSPCX runtime value differs",
+					log.FromContext(ctx).V(ncolog.DebugLevel).Info("doSPCX runtime value differs",
 						"target", target, "path", query.Path, "leaf", leaf, "current", actual, "desired", desired)
 					return false, nil
 				}

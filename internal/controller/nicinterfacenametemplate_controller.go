@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha1 "github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 	"github.com/Mellanox/nic-configuration-operator/pkg/udev"
 )
 
@@ -72,7 +73,7 @@ func (r *NicInterfaceNameTemplateReconciler) Reconcile(ctx context.Context, req 
 		reqLog.Error(err, "Failed to list NicInterfaceNameTemplates")
 		return ctrl.Result{}, err
 	}
-	reqLog.V(2).Info("Listed NicInterfaceNameTemplates", "count", len(templateList.Items))
+	reqLog.V(ncolog.DebugLevel).Info("Listed NicInterfaceNameTemplates", "count", len(templateList.Items))
 
 	var matchingTemplates []v1alpha1.NicInterfaceNameTemplate
 	for _, template := range templateList.Items {
@@ -80,7 +81,7 @@ func (r *NicInterfaceNameTemplateReconciler) Reconcile(ctx context.Context, req 
 			matchingTemplates = append(matchingTemplates, template)
 		}
 	}
-	reqLog.V(2).Info("Found matching templates", "count", len(matchingTemplates))
+	reqLog.V(ncolog.DebugLevel).Info("Found matching templates", "count", len(matchingTemplates))
 
 	selectorFields := fields.OneTermEqualSelector("status.node", r.NodeName)
 
@@ -93,7 +94,7 @@ func (r *NicInterfaceNameTemplateReconciler) Reconcile(ctx context.Context, req 
 	}
 
 	nodeDevices := deviceList.Items
-	reqLog.V(2).Info("Found devices on this node", "count", len(nodeDevices))
+	reqLog.V(ncolog.DebugLevel).Info("Found devices on this node", "count", len(nodeDevices))
 
 	sort.Slice(matchingTemplates, func(i, j int) bool {
 		if matchingTemplates[i].Namespace == matchingTemplates[j].Namespace {

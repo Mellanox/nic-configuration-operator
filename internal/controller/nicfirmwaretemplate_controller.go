@@ -31,6 +31,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha1 "github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
+
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 )
 
 const nicFirmwareTemplateSyncEventName = "nic-firmware-template-sync-event"
@@ -58,7 +60,7 @@ func (r *NicFirmwareTemplateReconciler) Reconcile(ctx context.Context, req ctrl.
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	log.Log.V(2).Info("Listed templates", "templates", templateList.Items)
+	log.Log.V(ncolog.DebugLevel).Info("Listed templates", "templates", templateList.Items)
 
 	templates := []nicTemplate{}
 	for _, template := range templateList.Items {
@@ -101,7 +103,7 @@ func (t *nicFirmwareTemplate) getStatus() *v1alpha1.NicTemplateStatus {
 }
 
 func (t *nicFirmwareTemplate) applyToDevice(device *v1alpha1.NicDevice) bool {
-	log.Log.V(2).Info(fmt.Sprintf("Applying template %s to device %s", t.template.Name, device.Name))
+	log.Log.V(ncolog.DebugLevel).Info(fmt.Sprintf("Applying template %s to device %s", t.template.Name, device.Name))
 
 	updateSpec := false
 

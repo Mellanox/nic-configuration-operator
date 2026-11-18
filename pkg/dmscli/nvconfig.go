@@ -26,6 +26,7 @@ import (
 	"github.com/go-logr/logr"
 	execUtils "k8s.io/utils/exec"
 
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 	"github.com/Mellanox/nic-configuration-operator/pkg/utils"
 )
 
@@ -102,7 +103,7 @@ func ApplyNVConfig(ctx context.Context, execInterface execUtils.Interface, reque
 		"stdout", boundedCommandOutput(output.Stdout),
 	}
 	fields = appendCommandStderr(fields, output.Stderr, commandErr)
-	logr.FromContextOrDiscard(ctx).V(2).Info("command output", fields...)
+	logr.FromContextOrDiscard(ctx).V(ncolog.DebugLevel).Info("command output", fields...)
 
 	result, decodeErr := decodeApplyNVConfigResult(output.Stdout)
 	if commandErr != nil {

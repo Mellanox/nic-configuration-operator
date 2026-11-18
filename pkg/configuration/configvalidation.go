@@ -24,6 +24,7 @@ import (
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
+	"github.com/Mellanox/nic-configuration-operator/pkg/ncolog"
 	"github.com/Mellanox/nic-configuration-operator/pkg/types"
 )
 
@@ -339,7 +340,7 @@ func (v *configValidationImpl) RuntimeConfigApplied(device *v1alpha1.NicDevice) 
 	validatedAnyPort := false
 	for _, port := range ports {
 		if port.NetworkInterface == "" {
-			log.Log.V(2).Info("skipping runtime config validation for port with empty NetworkInterface", "device", device.Name, "port", port.PCI)
+			log.Log.V(ncolog.DebugLevel).Info("skipping runtime config validation for port with empty NetworkInterface", "device", device.Name, "port", port.PCI)
 			continue
 		}
 		validatedAnyPort = true
