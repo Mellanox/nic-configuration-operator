@@ -71,16 +71,30 @@ type NVConfigUtils interface {
 	ValidateSystemConf(ctx context.Context, port v1alpha1.NicDevicePortSpec, conf string, asic int) (bool, []string, error)
 }
 
-type nvConfigUtils struct {
-	execInterface execUtils.Interface
+// Options controls device selection for direct mlxconfig commands.
+type Options struct {
+	// UsePCIAddress uses the port's PCI address even when discovery found a fwctl device.
+	// It does not change DMS targets or the discovered port metadata.
+	UsePCIAddress bool
 }
 
-func resolveDevice(port v1alpha1.NicDevicePortSpec) string {
+type nvConfigUtils struct {
+	execInterface execUtils.Interface
+	usePCIAddress bool
+}
+
+func (h *nvConfigUtils) resolveDevice(port v1alpha1.NicDevicePortSpec) (string, error) {
+	if h.usePCIAddress {
+		if strings.TrimSpace(port.PCI) == "" {
+			return "", fmt.Errorf("PCI address is required when mlxconfig PCI-address mode is enabled")
+		}
+		return port.PCI, nil
+	}
 	if port.FwctlDevice != "" {
 		log.Log.V(2).Info("using fwctl device for mlxconfig", "pciAddr", port.PCI, "fwctlDevice", port.FwctlDevice)
-		return port.FwctlDevice
+		return port.FwctlDevice, nil
 	}
-	return port.PCI
+	return port.PCI, nil
 }
 
 // queryMLXConfig runs a query on mlxconfig to parse out default, current and nextboot configurations
@@ -170,7 +184,10 @@ func (h *nvConfigUtils) queryMLXConfig(ctx context.Context, query types.NvConfig
 
 // QueryNvConfig queries nv config for a mellanox device and returns default, current and next boot configs
 func (h *nvConfigUtils) QueryNvConfig(ctx context.Context, port v1alpha1.NicDevicePortSpec, parameters []string) (types.NvConfigQuery, error) {
-	targetDevice := resolveDevice(port)
+	targetDevice, err := h.resolveDevice(port)
+	if err != nil {
+		return types.NewNvConfigQuery(), err
+	}
 	log.Log.Info("ConfigurationUtils.QueryNvConfig()", "pciAddr", port.PCI, "targetDevice", targetDevice)
 
 	query := types.NewNvConfigQuery()
@@ -196,7 +213,10 @@ func (h *nvConfigUtils) QueryNvConfig(ctx context.Context, port v1alpha1.NicDevi
 
 // SetNvConfigParameter sets a nv config parameter for a mellanox device
 func (h *nvConfigUtils) SetNvConfigParameter(port v1alpha1.NicDevicePortSpec, paramName string, paramValue string) error {
-	targetDevice := resolveDevice(port)
+	targetDevice, err := h.resolveDevice(port)
+	if err != nil {
+		return err
+	}
 	log.Log.Info("ConfigurationUtils.SetNvConfigParameter()", "pciAddr", port.PCI, "targetDevice", targetDevice, "paramName", paramName, "paramValue", paramValue)
 
 	cmd := h.execInterface.Command("mlxconfig", "-d", targetDevice, "--yes", "set", paramName+"="+paramValue)
@@ -220,7 +240,10 @@ func parseSetNvConfigParametersBatchStatus(output []byte, withDefault bool) type
 
 // SetNvConfigParametersBatch sets multiple nv config parameters for a mellanox device in a single mlxconfig call
 func (h *nvConfigUtils) SetNvConfigParametersBatch(port v1alpha1.NicDevicePortSpec, params map[string]string, withDefault bool, force bool) (types.ApplyStatus, error) {
-	targetDevice := resolveDevice(port)
+	targetDevice, err := h.resolveDevice(port)
+	if err != nil {
+		return types.ApplyStatusFailed, err
+	}
 	log.Log.Info("ConfigurationUtils.SetNvConfigParametersBatch()", "pciAddr", port.PCI, "targetDevice", targetDevice, "params", params, "withDefault", withDefault, "force", force)
 
 	if len(params) == 0 {
@@ -268,7 +291,10 @@ func systemConfToken(conf string, asic int) string {
 
 // SetSystemConf applies a ConnectX-9 Network Bay system configuration for a single ASIC.
 func (h *nvConfigUtils) SetSystemConf(ctx context.Context, port v1alpha1.NicDevicePortSpec, conf string, asic int, force bool) error {
-	targetDevice := resolveDevice(port)
+	targetDevice, err := h.resolveDevice(port)
+	if err != nil {
+		return err
+	}
 	log.Log.Info("ConfigurationUtils.SetSystemConf()", "pciAddr", port.PCI, "targetDevice", targetDevice, "conf", conf, "asic", asic, "force", force)
 
 	args := []string{"-d", targetDevice, "-y"}
@@ -289,7 +315,10 @@ func (h *nvConfigUtils) SetSystemConf(ctx context.Context, port v1alpha1.NicDevi
 // ValidateSystemConf runs validate_system_conf and returns the overall match bit plus the names of
 // the mismatched params (the MISMATCH rows).
 func (h *nvConfigUtils) ValidateSystemConf(ctx context.Context, port v1alpha1.NicDevicePortSpec, conf string, asic int) (bool, []string, error) {
-	targetDevice := resolveDevice(port)
+	targetDevice, err := h.resolveDevice(port)
+	if err != nil {
+		return false, nil, err
+	}
 	log.Log.Info("ConfigurationUtils.ValidateSystemConf()", "pciAddr", port.PCI, "targetDevice", targetDevice, "conf", conf, "asic", asic)
 
 	args := []string{"-d", targetDevice, "-y", "validate_system_conf", systemConfToken(conf, asic)}
@@ -394,7 +423,10 @@ func parseValidateSystemConf(output []byte) (matches bool, mismatched []string, 
 
 // ResetNvConfig resets NIC's nv config
 func (h *nvConfigUtils) ResetNvConfig(port v1alpha1.NicDevicePortSpec) error {
-	targetDevice := resolveDevice(port)
+	targetDevice, err := h.resolveDevice(port)
+	if err != nil {
+		return err
+	}
 	log.Log.Info("ConfigurationUtils.ResetNvConfig()", "pciAddr", port.PCI, "targetDevice", targetDevice)
 
 	cmd := h.execInterface.Command("mlxconfig", "-d", targetDevice, "--yes", "reset")
@@ -407,7 +439,13 @@ func (h *nvConfigUtils) ResetNvConfig(port v1alpha1.NicDevicePortSpec) error {
 }
 
 func NewNVConfigUtils() NVConfigUtils {
+	return NewNVConfigUtilsWithOptions(Options{})
+}
+
+// NewNVConfigUtilsWithOptions constructs NVConfig utilities with per-instance device selection.
+func NewNVConfigUtilsWithOptions(options Options) NVConfigUtils {
 	return &nvConfigUtils{
 		execInterface: execUtils.New(),
+		usePCIAddress: options.UsePCIAddress,
 	}
 }

@@ -391,7 +391,28 @@ type SystemConfParamsProvider interface {
 **Constructor:**
 ```go
 func NewNVConfigUtils() NVConfigUtils
+func NewNVConfigUtilsWithOptions(options Options) NVConfigUtils
+
+type Options struct {
+    UsePCIAddress bool
+}
 ```
+
+`NewNVConfigUtils()` and zero-value options preserve fwctl preference, selecting PCI
+when no fwctl device was discovered. `NewNVConfigUtilsWithOptions(Options{UsePCIAddress: true})`
+uses `port.PCI` for every direct `mlxconfig` command: full/selected queries and recursive
+array expansion, single-parameter and batch set, reset, system-configuration set/validation and
+profile resolution. A missing PCI address fails before command execution in PCI mode.
+Commands are not retried through another target on error, and the input port metadata
+is preserved. The option belongs to each utility instance; library constructors do
+not read environment variables. The existing constructor and `NVConfigUtils` interface
+remain compatible, including the built-in implementation's optional capabilities.
+
+The daemon reads `MLXCONFIG_USE_PCI_ADDRESS` once at startup and passes the parsed
+boolean to this constructor. Library callers select the option explicitly. This is
+target selection, not firmware-response validation: it does not establish PCI-path
+correctness under concurrent devlink access. DMS operations retain
+their own targets and transport selection.
 
 **Batch command format:**
 ```
@@ -399,7 +420,8 @@ mlxconfig -d <device> --yes [--force] set PARAM1=VAL1 PARAM2=VAL2 ...
 mlxconfig -d <device> -e --with_default -y [--force] set PARAM1=VAL1 PARAM2=VAL2 ...
 ```
 Parameter names are sorted for deterministic command generation.
-`<device>` is `port.FwctlDevice` when discovered, otherwise `port.PCI`.
+`<device>` is `port.PCI` when `UsePCIAddress` is enabled; otherwise it is
+`port.FwctlDevice` when discovered, falling back to `port.PCI`.
 
 **System profile command format (ConnectX-9 Network Bay):**
 ```
