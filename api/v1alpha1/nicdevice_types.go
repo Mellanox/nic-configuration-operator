@@ -70,6 +70,10 @@ type NicDevicePortSpec struct {
 	NetworkInterface string `json:"networkInterface,omitempty"`
 	// RdmaInterface is the name of the rdma interface for this port, e.g. mlx5_1
 	RdmaInterface string `json:"rdmaInterface,omitempty"`
+	// LinkState is the operational carrier state of the port's interface: up, no-carrier or down
+	// +kubebuilder:validation:Enum=up;no-carrier;down
+	// +optional
+	LinkState string `json:"linkState,omitempty"`
 }
 
 // NicDeviceStatus defines the observed state of NicDevice

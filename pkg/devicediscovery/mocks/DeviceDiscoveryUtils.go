@@ -67,6 +67,24 @@ func (_m *DeviceDiscoveryUtils) GetInterfaceName(pciAddr string) string {
 	return r0
 }
 
+// GetLinkState provides a mock function with given fields: interfaceName
+func (_m *DeviceDiscoveryUtils) GetLinkState(interfaceName string) string {
+	ret := _m.Called(interfaceName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetLinkState")
+	}
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func(string) string); ok {
+		r0 = rf(interfaceName)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
 // GetFwctlDevice provides a mock function with given fields: pciAddr
 func (_m *DeviceDiscoveryUtils) GetFwctlDevice(pciAddr string) string {
 	ret := _m.Called(pciAddr)

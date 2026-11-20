@@ -38,6 +38,7 @@ var _ = Describe("DeviceDiscovery", func() {
 		mockUtils    mocks.DeviceDiscoveryUtils
 		manager      *deviceDiscovery
 		fwctlDevices map[string]string
+		linkStates   map[string]string
 	)
 
 	BeforeEach(func() {
@@ -46,6 +47,13 @@ var _ = Describe("DeviceDiscovery", func() {
 		fwctlDevices = map[string]string{}
 		mockUtils.On("GetFwctlDevice", mock.Anything).Return(func(pciAddr string) string {
 			return fwctlDevices[pciAddr]
+		}).Maybe()
+		linkStates = map[string]string{}
+		mockUtils.On("GetLinkState", mock.Anything).Return(func(interfaceName string) string {
+			if state, ok := linkStates[interfaceName]; ok {
+				return state
+			}
+			return consts.LinkStateUp
 		}).Maybe()
 		manager = &deviceDiscovery{utils: &mockUtils, nodeName: "test-node"}
 	})
@@ -165,6 +173,7 @@ var _ = Describe("DeviceDiscovery", func() {
 					Expect(status.PSID).To(Equal("psid"))
 					Expect(status.Ports).To(Equal([]v1alpha1.NicDevicePortSpec{{
 						PCI: "0000:00:00.0", FwctlDevice: "", NetworkInterface: "eth0", RdmaInterface: "mlx5_0",
+						LinkState: consts.LinkStateUp,
 					}}))
 					Expect(manager.SkippedDevices()).To(BeEmpty())
 					Expect(manager.IncompleteDevices()).To(BeEmpty())
@@ -231,6 +240,7 @@ var _ = Describe("DeviceDiscovery", func() {
 							PCI:              "0000:00:00.0",
 							NetworkInterface: "eth0",
 							RdmaInterface:    "mlx5_0",
+							LinkState:        consts.LinkStateUp,
 						},
 					},
 				}
@@ -239,6 +249,27 @@ var _ = Describe("DeviceDiscovery", func() {
 				Expect(devices["0000:00:00"].Status).To(Equal(expectedDeviceStatus))
 				// Verify that the returned device has the correct nodeName
 				Expect(devices["0000:00:00"].Status.Node).To(Equal("test-node"))
+
+				mockUtils.AssertExpectations(GinkgoT())
+			})
+
+			It("should report the port link state", func() {
+				mockUtils.On("IsSriovVF", "0000:00:00.0").Return(false)
+				mockUtils.On("GetVPD", "0000:00:00.0").
+					Return(&types.VPD{PartNumber: "part-number", SerialNumber: "serial-number", ModelName: ""}, nil)
+				mockUtils.On("GetFirmwareVersionAndPSID", "0000:00:00.0").
+					Return("fw-version", "psid", nil)
+				mockUtils.On("GetInterfaceName", "0000:00:00.0").
+					Return("eth0")
+				mockUtils.On("GetRDMADeviceName", "0000:00:00.0").
+					Return("mlx5_0")
+				linkStates["eth0"] = consts.LinkStateNoCarrier
+
+				devices, err := manager.DiscoverNicDevices()
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(devices).To(HaveKey("0000:00:00"))
+				Expect(devices["0000:00:00"].Status.Ports[0].LinkState).To(Equal(consts.LinkStateNoCarrier))
 
 				mockUtils.AssertExpectations(GinkgoT())
 			})
@@ -295,6 +326,7 @@ var _ = Describe("DeviceDiscovery", func() {
 						PCI:              "0000:00:00.0",
 						NetworkInterface: "eth0",
 						RdmaInterface:    "mlx5_0",
+						LinkState:        consts.LinkStateUp,
 					},
 				},
 			}
@@ -427,6 +459,7 @@ var _ = Describe("DeviceDiscovery", func() {
 						PCI:              "0000:00:00.0",
 						NetworkInterface: "eth0",
 						RdmaInterface:    "mlx5_0",
+						LinkState:        consts.LinkStateUp,
 					},
 				},
 			}
@@ -446,6 +479,7 @@ var _ = Describe("DeviceDiscovery", func() {
 						PCI:              "0000:01:00.0",
 						NetworkInterface: "eth1",
 						RdmaInterface:    "mlx5_1",
+						LinkState:        consts.LinkStateUp,
 					},
 				},
 			}
@@ -595,11 +629,13 @@ var _ = Describe("DeviceDiscovery", func() {
 						PCI:              "0000:00:00.0",
 						NetworkInterface: "eth0",
 						RdmaInterface:    "mlx5_0",
+						LinkState:        consts.LinkStateUp,
 					},
 					{
 						PCI:              "0000:00:00.1",
 						NetworkInterface: "eth1",
 						RdmaInterface:    "mlx5_1",
+						LinkState:        consts.LinkStateUp,
 					},
 				},
 			}

@@ -180,6 +180,7 @@ func (d *deviceDiscovery) DiscoverNicDevices() (map[string]v1alpha1.NicDevice, e
 			FwctlDevice:      fwctlDevice,
 			NetworkInterface: networkInterface,
 			RdmaInterface:    rdmaInterface,
+			LinkState:        d.utils.GetLinkState(networkInterface),
 		})
 
 		// ConnectX-9 Network Bay ("orchid") detection. Orchid-ness is a fixed hardware

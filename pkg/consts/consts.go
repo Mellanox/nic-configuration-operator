@@ -206,6 +206,13 @@ const (
 	NetworkBayImbalanceReason = "NetworkBayImbalance"
 	// NetworkBayBalancedReason indicates a networkBay template matched whole Network Bays (healthy state)
 	NetworkBayBalancedReason = "NetworkBayBalanced"
+
+	// LinkStateUp indicates the port interface is admin up with carrier present
+	LinkStateUp = "up"
+	// LinkStateNoCarrier indicates the port interface is admin up without carrier
+	LinkStateNoCarrier = "no-carrier"
+	// LinkStateDown indicates the port interface is admin down
+	LinkStateDown = "down"
 )
 
 // PortParam returns the nvconfig parameter name for the given port-indexed
