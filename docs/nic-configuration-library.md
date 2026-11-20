@@ -696,7 +696,28 @@ that do not manage Network Bay devices.
 **Constructor:**
 ```go
 func NewNVConfigUtils() NVConfigUtils
+func NewNVConfigUtilsWithOptions(options Options) NVConfigUtils
+
+type Options struct {
+    UsePCIAddress bool
+}
 ```
+
+`NewNVConfigUtils()` and zero-value options preserve fwctl preference, selecting PCI
+when no fwctl device was discovered. `NewNVConfigUtilsWithOptions(Options{UsePCIAddress: true})`
+uses `port.PCI` for every direct `mlxconfig` command: full/selected queries and recursive
+array expansion, single-parameter set, reset, system-configuration set/validation and
+profile resolution. A missing PCI address fails before command execution in PCI mode.
+Commands are not retried through another target on error, and the input port metadata
+is preserved. The option belongs to each utility instance; library constructors do
+not read environment variables. The existing constructor and `NVConfigUtils` interface
+remain compatible, including the built-in implementation's optional capabilities.
+
+The daemon reads `MLXCONFIG_USE_PCI_ADDRESS` once at startup and passes the parsed
+boolean to this constructor. Library callers select the option explicitly. This is
+target selection, not firmware-response validation: it does not establish PCI-path
+correctness under concurrent devlink access. DMS operations described below retain
+their own targets and transport selection.
 
 The built-in implementation also provides
 `SetNvConfigParametersBatchWithContext(ctx, port, params, withDefault, force) (types.ApplyStatus, error)`.
