@@ -59,12 +59,18 @@ var _ = Describe("NVConfigUtils", func() {
 
 	Describe("resolveDevice", func() {
 		It("prefers fwctl when discovered", func() {
+			h := &nvConfigUtils{usePCIAddress: false}
 			port := v1alpha1.NicDevicePortSpec{PCI: "0000:3b:00.0", FwctlDevice: "/dev/fwctl/fwctl0"}
-			Expect(resolveDevice(port)).To(Equal("/dev/fwctl/fwctl0"))
+			target, err := h.resolveDevice(port)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(target).To(Equal("/dev/fwctl/fwctl0"))
 		})
 
 		It("falls back to PCI when fwctl is empty", func() {
-			Expect(resolveDevice(nvconfigPort("0000:3b:00.0"))).To(Equal("0000:3b:00.0"))
+			h := &nvConfigUtils{usePCIAddress: false}
+			target, err := h.resolveDevice(nvconfigPort("0000:3b:00.0"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(target).To(Equal("0000:3b:00.0"))
 		})
 	})
 

@@ -369,6 +369,9 @@ The name of the device combines the node name, device type and its PCI device ad
 `ConfigUpdateInProgress` status condition can be used for tracking the state of the FW configuration update on a specific device. If an error occurs during FW configuration update, it will be reflected in this field.
 Before validating runtime configuration, the configuration daemon checks every discovered network interface for carrier. Runtime validation fails only when all interfaces on the NIC report `NO-CARRIER`, and the failure is reflected in `ConfigUpdateInProgress` with reason `RuntimeConfigUpdateFailed` until at least one interface has carrier. This allows available planes to be configured while other planes are disconnected.
 
+Native NVConfig mismatches log the device, PCI function, parameter, desired value and
+observed current/next-boot values at info level.
+
 for more information refer to [api-reference](docs/api-reference.md).
 
 #### Example NICDevice
@@ -518,3 +521,38 @@ Supported flags:
 * `SKIP_VM_CHECK`=`true`: pass `--skip_vm_check` to `mlxfwreset` resetting NIC firmware while running on VMs.
 
 * `SKIP_DEVICE_ON_DISCOVERY_ERROR`=`true`: skip a physical NIC during device discovery when firmware/PSID lookup or BlueField operation-mode lookup fails. When unset, these errors fail discovery so the daemon retries. Existing `NicDevice` CRs are preserved for skipped devices to avoid delete/recreate churn during transient per-device discovery failures.
+
+* `MLXCONFIG_USE_PCI_ADDRESS`=`true`: use each port's PCI address for every direct
+  `mlxconfig` command issued by the daemon, even when a fwctl device was discovered.
+  This includes queries and array expansion, single-parameter writes, NVConfig reset,
+  and system-configuration read/set/validation. Unset or `false` retains fwctl
+  preference with PCI selection when no fwctl device exists. Invalid explicit boolean
+  values stop startup. PCI mode requires a nonempty PCI address and never retries
+  through fwctl after failure. Discovery continues to report the actual fwctl device.
+
+For Network Operator, add the environment entry to the existing `NicClusterPolicy`:
+
+```yaml
+spec:
+  nicConfigurationOperator:
+    env:
+      - name: MLXCONFIG_USE_PCI_ADDRESS
+        value: "true"
+```
+
+For the standalone NIC Configuration Operator chart, use:
+
+```yaml
+configDaemon:
+  env:
+    - name: MLXCONFIG_USE_PCI_ADDRESS
+      value: "true"
+```
+
+This option controls direct NCO `mlxconfig` targets. DMS operations retain their own
+targeting; the option does not disable all fwctl use by DMS, devlink, mlxreg or other
+processes. PCI-address access under concurrent devlink discovery and its latency must
+be qualified on the affected hardware before treating it as a verified workaround.
+PCI-address queries can be substantially slower and may serialize across PFs and NICs,
+delaying validation and maintenance release. Measure full-node convergence against the
+effective maintenance request lifetime; single-PF timings do not establish lifecycle readiness.
