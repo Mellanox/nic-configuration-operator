@@ -48,7 +48,10 @@ var _ SystemConfParamsProvider = (*nvConfigUtils)(nil)
 // assignments. Array ranges are expanded so callers can merge individual keys with explicit values.
 func (h *nvConfigUtils) GetSystemConfParams(
 	ctx context.Context, port v1alpha1.NicDevicePortSpec, conf string, asic int) (map[string]string, error) {
-	targetDevice := resolveDevice(port)
+	targetDevice, err := h.resolveDevice(port)
+	if err != nil {
+		return nil, err
+	}
 	log.Log.Info("ConfigurationUtils.GetSystemConfParams()", "pciAddr", port.PCI, "targetDevice", targetDevice, "conf", conf, "asic", asic)
 
 	output, err := h.execInterface.CommandContext(ctx, "mlxconfig", "-d", targetDevice, "show_system_conf").CombinedOutput()
