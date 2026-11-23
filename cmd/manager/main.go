@@ -35,6 +35,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	libfirmware "github.com/Mellanox/dms-lib/pkg/firmware"
 	configurationnetv1alpha1 "github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/internal/controller"
 	"github.com/Mellanox/nic-configuration-operator/pkg/firmware"
@@ -155,10 +156,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	firmwareBackend, err := libfirmware.NewManager(libfirmware.Options{})
+	if err != nil {
+		setupLog.Error(err, "initialize firmware library")
+		os.Exit(1)
+	}
+
 	if err = (&controller.NicFirmwareSourceReconciler{
 		Client:              mgr.GetClient(),
 		Scheme:              mgr.GetScheme(),
-		FirmwareProvisioner: firmware.NewFirmwareProvisioner(),
+		FirmwareProvisioner: firmware.NewFirmwareProvisioner(firmwareBackend),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "NicFirmwareSource")
 		os.Exit(1)

@@ -1,0 +1,350 @@
+# Copyright 2026 NVIDIA CORPORATION & AFFILIATES
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.0
+  name: dmsplanparams.dms.nvidia.com
+spec:
+  group: dms.nvidia.com
+  names:
+    kind: DMSPlanParams
+    listKind: DMSPlanParamsList
+    plural: dmsplanparams
+    singular: dmsplanparams
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: DMSPlanSpec selects nodes, a structured blueprint and planner
+              parameters.
+            properties:
+              blueprintRef:
+                description: BlueprintRef names a same-namespace ConfigMap containing
+                  data["blueprint.yaml"].
+                minLength: 1
+                type: string
+              nodeSelector:
+                additionalProperties:
+                  type: string
+                description: NodeSelector is required; an explicit empty map selects
+                  all nodes.
+                type: object
+              overlay:
+                type: string
+              parameters:
+                additionalProperties:
+                  type: string
+                description: Parameters supplies additional blueprint-declared values.
+                  Typed fields own reserved keys.
+                type: object
+                x-kubernetes-validations:
+                - message: use the planes, overlay and spxgs fields instead of reserved
+                    parameter keys
+                  rule: '!has(self.planes) && !has(self.overlay) && !has(self.SP_XGS)'
+              planes:
+                format: int32
+                minimum: 1
+                type: integer
+              platformType:
+                type: string
+              profile:
+                type: string
+              spxgs:
+                type: boolean
+            required:
+            - blueprintRef
+            - nodeSelector
+            type: object
+          status:
+            description: DMSPlanStatus records binding resolution; it does not certify
+              service or NIC readiness.
+            properties:
+              blueprintDigest:
+                type: string
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              observedGeneration:
+                format: int64
+                type: integer
+              targetMapByHost:
+                additionalProperties:
+                  description: HostTargetMap binds output to a node incarnation, generation
+                    and exact blueprint digest.
+                  properties:
+                    blueprintDigest:
+                      type: string
+                    conditions:
+                      items:
+                        description: Condition contains details for one aspect of
+                          the current state of this API Resource.
+                        properties:
+                          lastTransitionTime:
+                            description: |-
+                              lastTransitionTime is the last time the condition transitioned from one status to another.
+                              This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                            format: date-time
+                            type: string
+                          message:
+                            description: |-
+                              message is a human readable message indicating details about the transition.
+                              This may be an empty string.
+                            maxLength: 32768
+                            type: string
+                          observedGeneration:
+                            description: |-
+                              observedGeneration represents the .metadata.generation that the condition was set based upon.
+                              For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                              with respect to the current state of the instance.
+                            format: int64
+                            minimum: 0
+                            type: integer
+                          reason:
+                            description: |-
+                              reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                              Producers of specific condition types may define expected values and meanings for this field,
+                              and whether the values are considered a guaranteed API.
+                              The value should be a CamelCase string.
+                              This field may not be empty.
+                            maxLength: 1024
+                            minLength: 1
+                            pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                            type: string
+                          status:
+                            description: status of the condition, one of True, False,
+                              Unknown.
+                            enum:
+                            - "True"
+                            - "False"
+                            - Unknown
+                            type: string
+                          type:
+                            description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                            maxLength: 316
+                            pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                            type: string
+                        required:
+                        - lastTransitionTime
+                        - message
+                        - reason
+                        - status
+                        - type
+                        type: object
+                      type: array
+                      x-kubernetes-list-map-keys:
+                      - type
+                      x-kubernetes-list-type: map
+                    defaults:
+                      description: Defaults preserves arbitrary renderer values, including
+                        explicit null entries.
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    description:
+                      type: string
+                    inventory_stage:
+                      type: string
+                    nodeUID:
+                      description: |-
+                        UID is a type that holds unique ID values, including UUIDs.  Because we
+                        don't ONLY use UUIDs, this is an alias to string.  Being a type captures
+                        intent and helps make sure that UIDs and names do not get conflated.
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      type: integer
+                    platform_type:
+                      type: string
+                    post_breakout:
+                      description: TargetMapStage preserves targets and complete renderer-specific
+                        device records.
+                      properties:
+                        devices:
+                          description: Devices contains complete JSON object records;
+                            nested values remain unpruned.
+                          items:
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                          type: array
+                        targets:
+                          items:
+                            description: TargetEntry is a logical target; projected
+                              post-breakout BDFs are not observed hardware.
+                            properties:
+                              bdf:
+                                type: string
+                              device_id:
+                                type: string
+                              id:
+                                type: string
+                              mlx5:
+                                type: string
+                              netdev:
+                                type: string
+                              network:
+                                type: string
+                              nic_index_in_rail:
+                                format: int32
+                                type: integer
+                              pci_bus:
+                                type: string
+                              physical_label:
+                                type: string
+                              plane:
+                                format: int32
+                                type: integer
+                              rail:
+                                format: int32
+                                type: integer
+                              rdma_dev:
+                                type: string
+                              role:
+                                type: string
+                            type: object
+                          type: array
+                      type: object
+                    pre_breakout:
+                      description: TargetMapStage preserves targets and complete renderer-specific
+                        device records.
+                      properties:
+                        devices:
+                          description: Devices contains complete JSON object records;
+                            nested values remain unpruned.
+                          items:
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                          type: array
+                        targets:
+                          items:
+                            description: TargetEntry is a logical target; projected
+                              post-breakout BDFs are not observed hardware.
+                            properties:
+                              bdf:
+                                type: string
+                              device_id:
+                                type: string
+                              id:
+                                type: string
+                              mlx5:
+                                type: string
+                              netdev:
+                                type: string
+                              network:
+                                type: string
+                              nic_index_in_rail:
+                                format: int32
+                                type: integer
+                              pci_bus:
+                                type: string
+                              physical_label:
+                                type: string
+                              plane:
+                                format: int32
+                                type: integer
+                              rail:
+                                format: int32
+                                type: integer
+                              rdma_dev:
+                                type: string
+                              role:
+                                type: string
+                            type: object
+                          type: array
+                      type: object
+                    runtime:
+                      description: Runtime preserves arbitrary renderer values, including
+                        explicit null entries.
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    schema_version:
+                      format: int32
+                      type: integer
+                  required:
+                  - schema_version
+                  type: object
+                type: object
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

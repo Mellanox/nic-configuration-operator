@@ -2,23 +2,22 @@
 
 Copyright 2026 NVIDIA CORPORATION & AFFILIATES
 
-This document compares the effective parameters in the current doSPCX plan with
+This historical comparison records the effective parameters in the former NCO doSPCX plan with
 the legacy Spectrum-X profile supplied as
 `ra2.3-spectrum-x-k8s-profile-configmap.yaml`.
 
 ## Comparison scope
 
-The comparison selects the configuration used by the current test deployment:
+The comparison used the following test configuration:
 
 - ConnectX-8 (`1023`)
 - legacy `hwplb`, corresponding to doSPCX HWMP
 - two planes/PFs
 - no overlay, corresponding to the legacy `pureL3` IPG selection
 
-The doSPCX inputs are represented by:
-
-- `pkg/spectrumx/dospcx/testdata/semantic/prepare-plan.json`
-- `pkg/spectrumx/dospcx/testdata/semantic/configure-plan.json`
+The former NCO planner fixtures were removed with the duplicate planner. Current
+Spectrum-X configuration uses dms-lib with DMSPlanParams and a structured blueprint;
+see [shared plan configuration](dms-plan-configuration.md).
 
 Only effective configuration parameters are compared. Profile and plan schema
 versions are intentionally outside the scope of this document.

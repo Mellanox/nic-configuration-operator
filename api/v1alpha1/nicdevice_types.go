@@ -20,9 +20,9 @@ import (
 )
 
 // NicDeviceConfigurationSpec contains desired configuration of the NIC
-// +kubebuilder:validation:XValidation:rule="!has(self.planRef)",message="planRef requires DMS library integration"
+// +kubebuilder:validation:XValidation:rule="!has(self.planRef) || !has(self.resetToDefault) || !self.resetToDefault",message="planRef cannot be combined with resetToDefault"
 type NicDeviceConfigurationSpec struct {
-	// PlanRef selects shared DMS plan parameters; enabled with the library integration.
+	// PlanRef is copied unchanged from the matching configuration template.
 	// +optional
 	PlanRef *DMSPlanReference `json:"planRef,omitempty"`
 	// ResetToDefault specifies whether node agent needs to perform a reset flow.

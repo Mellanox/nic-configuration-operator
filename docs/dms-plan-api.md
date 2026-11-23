@@ -13,8 +13,9 @@ NicConfigurationTemplate; NicDevice.configuration carries the same reference.
 SpectrumXRailPoolConfig references a plan in its own namespace with
 `spec.dmsPlanParamsRef`.
 
-This API preparation does not enable plan execution. Admission rejects nonempty
-plan references until the dependent library integration is installed. Existing
-configuration remains unchanged. The integration removes those temporary
-restrictions and NCO's obsolete `template.spectrumXOptimized` section together
-with its implementation, so this API-only change remains buildable and safe.
+Plan references are enabled by the DMS library integration. NCO accepts a
+plan-only template or ordinary template settings as explicit overrides, and
+rejects combining a plan reference with resetToDefault. The obsolete
+`template.spectrumXOptimized` section is removed. Spectrum-X Operator obtains
+xplane service configuration from the selected plan while preserving its
+existing rail-networking inputs and readiness gates.
