@@ -92,8 +92,8 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.3 // indirect
 )
 
-replace github.com/Mellanox/dms-lib => gitlab-master.nvidia.com/cloud-orchestration/dms-blueprints-lib.git/lib v0.0.0-20261123084337-79e474e6d794
+replace github.com/Mellanox/dms-lib => dms-lib-repository.invalid/dms-blueprints-lib.git/lib v0.0.0-20261123084337-79e474e6d794
 
-replace github.com/Mellanox/dms-lib/api => gitlab-master.nvidia.com/cloud-orchestration/dms-blueprints-lib.git/lib/api v0.0.0-20261123084337-79e474e6d794
+replace github.com/Mellanox/dms-lib/api => dms-lib-repository.invalid/dms-blueprints-lib.git/lib/api v0.0.0-20261123084337-79e474e6d794
 
-replace nvidia.com/doca/dms/doSpcx => gitlab-master.nvidia.com/cloud-orchestration/dms-blueprints-lib.git/doSpcx v0.0.0-20261123084337-79e474e6d794
+replace nvidia.com/doca/dms/doSpcx => dms-lib-repository.invalid/dms-blueprints-lib.git/doSpcx v0.0.0-20261123084337-79e474e6d794

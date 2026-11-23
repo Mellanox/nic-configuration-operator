@@ -41,9 +41,17 @@ through versioned replacements to the GitLab `dms-blueprints-lib.git/lib`,
 packages directly; configuration uses the installed `dms-cli`. No separately
 packaged planner process or local module replacement is required.
 
-Dependency download needs GitLab repository read access. Docker builds accept
-the existing BuildKit `netrc` secret; credentials are not copied into the image.
-Public CI without GitLab network access and credentials cannot fetch this pin.
+Set the GitLab project's CI/CD variable `DMS_LIB_REPOSITORY` to the private
+Git repository path in `host/group/project.git` form. The STIG build jobs
+substitute it into the Go module and checksum files in the job checkout.
+The existing `GITLAB_USERNAME` and `GITLAB_TOKEN` need read access to that
+repository. BuildKit receives those credentials through the `netrc` secret.
+
+For a local build, set the same variable and run
+`sh hack/resolve-dms-lib-repository.sh` in a disposable checkout before running
+Go or Docker. Set `GOPRIVATE` to the repository host for Go, or pass
+`--build-arg GOPRIVATE` and `--secret id=netrc,src=/path/to/netrc` to Docker.
+The repository placeholder belongs in the committed files.
 
 ## Validation boundary
 
