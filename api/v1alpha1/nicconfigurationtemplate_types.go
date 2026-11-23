@@ -209,12 +209,26 @@ type ConfigurationTemplateSpec struct {
 	Force bool `json:"force,omitempty"`
 }
 
+// DMSPlanReference identifies shared plan parameters and their host bindings.
+type DMSPlanReference struct {
+	// Namespace containing the DMSPlanParams and its referenced blueprint ConfigMap.
+	// +kubebuilder:validation:MinLength=1
+	Namespace string `json:"namespace"`
+	// Name of the DMSPlanParams object.
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+}
+
 // NicConfigurationTemplateSpec defines the desired state of NicConfigurationTemplate
 // +kubebuilder:validation:XValidation:rule="!(has(self.template.spectrumXOptimized) && self.template.spectrumXOptimized.enabled) || (self.nicSelector.nicType == '1021' || self.nicSelector.nicType == '1023' || self.nicSelector.nicType == '1025' || self.nicSelector.nicType == 'a2dc')",message="spectrumXOptimized can be enabled only for ConnectX-7, ConnectX-8, ConnectX-9 or BlueField-3 SuperNICs"
 // +kubebuilder:validation:XValidation:rule="!has(self.template.spectrumXOptimized) || !has(self.template.spectrumXOptimized.multiplaneMode) || self.nicSelector.nicType != '1021' || self.template.spectrumXOptimized.multiplaneMode == 'none'",message="ConnectX-7 (NicType 1021) supports only single-plane Spectrum-X (multiplaneMode none)"
 // +kubebuilder:validation:XValidation:rule="!has(self.template.spectrumXOptimized) || !has(self.template.spectrumXOptimized.multiplaneMode) || self.template.spectrumXOptimized.multiplaneMode != 'hwplb' || self.nicSelector.nicType == '1023' || self.nicSelector.nicType == '1025'",message="hwplb MultiplaneMode can only be enabled for ConnectX-8 (NicType 1023) or ConnectX-9 (NicType 1025)"
 // +kubebuilder:validation:XValidation:rule="!has(self.template.networkBay) || self.nicSelector.nicType == '1025'",message="networkBay can only be configured for ConnectX-9 (NicType 1025)"
+// +kubebuilder:validation:XValidation:rule="!has(self.planRef)",message="planRef requires DMS library integration"
 type NicConfigurationTemplateSpec struct {
+	// PlanRef selects shared DMS plan parameters; enabled with the library integration.
+	// +optional
+	PlanRef *DMSPlanReference `json:"planRef,omitempty"`
 	// NodeSelector contains labels required on the node. When empty, the template will be applied to matching devices on all nodes.
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
 	// NIC selector configuration
