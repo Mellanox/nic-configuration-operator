@@ -1,3 +1,5 @@
+<!-- Copyright 2026 NVIDIA CORPORATION & AFFILIATES -->
+
 # Shared DMS plan API
 
 The shared `DMSPlanParams` kind is namespaced (`dms.nvidia.com/v1alpha1`).
