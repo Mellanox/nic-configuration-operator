@@ -214,7 +214,12 @@ type ConfigurationTemplateSpec struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.template.spectrumXOptimized) || !has(self.template.spectrumXOptimized.multiplaneMode) || self.nicSelector.nicType != '1021' || self.template.spectrumXOptimized.multiplaneMode == 'none'",message="ConnectX-7 (NicType 1021) supports only single-plane Spectrum-X (multiplaneMode none)"
 // +kubebuilder:validation:XValidation:rule="!has(self.template.spectrumXOptimized) || !has(self.template.spectrumXOptimized.multiplaneMode) || self.template.spectrumXOptimized.multiplaneMode != 'hwplb' || self.nicSelector.nicType == '1023' || self.nicSelector.nicType == '1025'",message="hwplb MultiplaneMode can only be enabled for ConnectX-8 (NicType 1023) or ConnectX-9 (NicType 1025)"
 // +kubebuilder:validation:XValidation:rule="!has(self.template.networkBay) || self.nicSelector.nicType == '1025'",message="networkBay can only be configured for ConnectX-9 (NicType 1025)"
+// +kubebuilder:validation:XValidation:rule="!has(self.planRef)",message="planRef requires DMS library integration"
 type NicConfigurationTemplateSpec struct {
+	// PlanRef names a DMSPlanParams in the same namespace.
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+	PlanRef string `json:"planRef,omitempty"`
 	// NodeSelector contains labels required on the node. When empty, the template will be applied to matching devices on all nodes.
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
 	// NIC selector configuration

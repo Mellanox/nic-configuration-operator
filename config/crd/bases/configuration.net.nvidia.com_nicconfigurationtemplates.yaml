@@ -77,6 +77,10 @@ spec:
                 description: NodeSelector contains labels required on the node. When
                   empty, the template will be applied to matching devices on all nodes.
                 type: object
+              planRef:
+                description: PlanRef names a DMSPlanParams in the same namespace.
+                minLength: 1
+                type: string
               resetToDefault:
                 default: false
                 description: |-
@@ -374,6 +378,8 @@ spec:
             - message: networkBay can only be configured for ConnectX-9 (NicType 1025)
               rule: '!has(self.template.networkBay) || self.nicSelector.nicType ==
                 ''1025'''
+            - message: planRef requires DMS library integration
+              rule: '!has(self.planRef)'
           status:
             description: Defines the observed state of NicConfigurationTemplate
             properties:

@@ -79,6 +79,13 @@ var _ = Describe("NicConfigurationTemplate CEL validation", func() {
 		}
 	}
 
+	It("rejects plan references until library execution is available", func() {
+		obj := newNicConfigurationTemplate("plan-api-only", "Ethernet", 8, nil)
+		obj.Spec.PlanRef = "plan"
+		Expect(k8sClient.Create(ctx, obj)).To(MatchError(ContainSubstring("planRef requires DMS library integration")))
+		device := &NicDevice{ObjectMeta: metav1.ObjectMeta{Name: "plan-api-only", Namespace: "default"}, Spec: NicDeviceSpec{Configuration: &NicDeviceConfigurationSpec{PlanRef: obj.Spec.PlanRef, Template: obj.Spec.Template}}}
+		Expect(k8sClient.Create(ctx, device)).To(MatchError(ContainSubstring("planRef requires DMS library integration")))
+	})
 	It("allows nil SpectrumXOptimized", func() {
 		obj := newNicConfigurationTemplate("spcx-nil", "Ethernet", 8, nil)
 		Expect(k8sClient.Create(ctx, obj)).To(Succeed())

@@ -43,6 +43,10 @@ spec:
                 description: Configuration specifies the configuration requested by
                   NicConfigurationTemplate
                 properties:
+                  planRef:
+                    description: PlanRef names a DMSPlanParams in the same namespace.
+                    minLength: 1
+                    type: string
                   resetToDefault:
                     description: |-
                       ResetToDefault specifies whether node agent needs to perform a reset flow.
@@ -319,6 +323,9 @@ spec:
                         NAME[1], ...)
                       rule: '!has(self.rawNvConfig) || self.rawNvConfig.all(p, !p.name.matches(''.*[[][0-9]+[.][.][0-9]+[]].*''))'
                 type: object
+                x-kubernetes-validations:
+                - message: planRef requires DMS library integration
+                  rule: '!has(self.planRef)'
               firmware:
                 description: Firmware specifies the fw upgrade policy requested by
                   NicFirmwareTemplate
