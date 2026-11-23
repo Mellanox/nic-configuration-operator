@@ -99,7 +99,7 @@ spec:
   * Can only be enabled when `pciPerformanceOptimized` is enabled
   * Both the numeric values and their string aliases, supported by NVConfig, are allowed (e.g. `REAL_TIME_CLOCK_ENABLE=False`, `REAL_TIME_CLOCK_ENABLE=0`).
   * For per port parameters (suffix `_P1`, `_P2`) parameters with `_P2` suffix are ignored if the device is single port.
-* `planRef`: selects a shared DMSPlanParams object by namespace and name. Template settings become explicit overrides on the compiled plan.
+* `planRef`: names a shared DMSPlanParams in the same namespace. Template settings become explicit overrides on the compiled plan.
 
 For ordinary templates without `planRef`, omitted non-volatile configuration settings retain the existing policy of restoring device defaults. Omitted settings in a plan-backed template do not override the plan.
 

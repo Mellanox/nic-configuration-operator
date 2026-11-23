@@ -41,6 +41,4 @@ spec:
     feature.node.kubernetes.io/network-sriov.capable: "true"
   nicSelector:
     nicType: "a2dc"
-  planRef:
-    namespace: nvidia-network-operator
-    name: spectrum-x
+  planRef: spectrum-x

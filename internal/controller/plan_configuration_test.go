@@ -96,7 +96,7 @@ var _ = Describe("DMS plan configuration", func() {
 		// Another host can be unresolved without blocking this host's binding.
 		params.Status.Conditions = []metav1.Condition{{Type: "Resolved", Status: metav1.ConditionFalse, Reason: "OtherHost", LastTransitionTime: metav1.Now()}}
 		Expect(c.Status().Update(ctx, params)).To(Succeed())
-		nic := &v1alpha1.NicDevice{ObjectMeta: metav1.ObjectMeta{Name: "selected", Namespace: namespace.Name}, Spec: v1alpha1.NicDeviceSpec{Configuration: &v1alpha1.NicDeviceConfigurationSpec{PlanRef: &v1alpha1.DMSPlanReference{Name: params.Name, Namespace: namespace.Name}}}}
+		nic := &v1alpha1.NicDevice{ObjectMeta: metav1.ObjectMeta{Name: "selected", Namespace: namespace.Name}, Spec: v1alpha1.NicDeviceSpec{Configuration: &v1alpha1.NicDeviceConfigurationSpec{PlanRef: params.Name}}}
 		Expect(c.Create(ctx, nic)).To(Succeed())
 		nic.Status.Ports = []v1alpha1.NicDevicePortSpec{{PCI: "0000:03:00.0"}}
 		Expect(c.Status().Update(ctx, nic)).To(Succeed())
@@ -174,18 +174,37 @@ var _ = Describe("DMS plan configuration", func() {
 		Entry("unknown artifact", plan.Requirement{Stage: "prepare", Group: "breakout", Kind: "artifact", Reference: "unknown"}, false),
 		Entry("unknown external dependency", plan.Requirement{Stage: "configure", Group: "cc", Kind: "dependency", Reference: "unknown"}, false),
 	)
+	It("matches plan-backed templates only to devices in their namespace", func() {
+		template := &nicConfigurationTemplate{template: v1alpha1.NicConfigurationTemplate{
+			ObjectMeta: metav1.ObjectMeta{Namespace: namespace.Name},
+			Spec: v1alpha1.NicConfigurationTemplateSpec{
+				PlanRef:     params.Name,
+				NicSelector: &v1alpha1.NicSelectorSpec{NicType: "1023"},
+			},
+		}}
+		nic := status.device.DeepCopy()
+		nic.Status.Type = "1023"
+		Expect(deviceMatchesConfigurationTemplateSelectors(nic, template, node)).To(BeTrue())
+
+		nic.Namespace = "default"
+		Expect(deviceMatchesConfigurationTemplateSelectors(nic, template, node)).To(BeFalse())
+
+		template.template.Spec.PlanRef = ""
+		Expect(deviceMatchesConfigurationTemplateSelectors(nic, template, node)).To(BeTrue())
+	})
+
 	It("copies plan-only intent without retaining a legacy template", func() {
 		status.device.Spec.Configuration.Template = &v1alpha1.ConfigurationTemplateSpec{NumVfs: 8}
-		template := &nicConfigurationTemplate{template: v1alpha1.NicConfigurationTemplate{Spec: v1alpha1.NicConfigurationTemplateSpec{PlanRef: &v1alpha1.DMSPlanReference{Namespace: namespace.Name, Name: "different"}}}}
+		template := &nicConfigurationTemplate{template: v1alpha1.NicConfigurationTemplate{Spec: v1alpha1.NicConfigurationTemplateSpec{PlanRef: "different"}}}
 		Expect(template.applyToDevice(status.device)).To(BeTrue())
 		Expect(status.device.Spec.Configuration.Template).To(BeNil())
 		Expect(status.device.Spec.Configuration.PlanRef).To(Equal(template.template.Spec.PlanRef))
-		template.template.Spec.PlanRef.Name = "mutated"
-		Expect(status.device.Spec.Configuration.PlanRef.Name).To(Equal("different"))
+		template.template.Spec.PlanRef = "mutated"
+		Expect(status.device.Spec.Configuration.PlanRef).To(Equal("different"))
 	})
 
 	It("leaves ordinary configuration independent of optional plan APIs", func() {
-		status.device.Spec.Configuration.PlanRef = nil
+		status.device.Spec.Configuration.PlanRef = ""
 		status.device.Spec.Configuration.Template = &v1alpha1.ConfigurationTemplateSpec{}
 		r.APIReader = nil
 		library.defaults = func(device.Port) (map[string]string, error) { return nil, nil }
@@ -211,7 +230,7 @@ var _ = Describe("DMS plan configuration", func() {
 		Expect(planned[0].runtime.Ports[0].RoCEMode).NotTo(BeNil())
 		Expect(planned[0].runtime.Ports[0].CableLengthMeters).NotTo(BeNil())
 		Expect(planned[0].runtime.Ports[0].RXRingSize).NotTo(BeNil())
-		status.device.Spec.Configuration.PlanRef = nil
+		status.device.Spec.Configuration.PlanRef = ""
 		_, ordinary, err := r.preparePlanConfigurations(ctx, nicDeviceConfigurationStatuses{status})
 		Expect(err).NotTo(HaveOccurred())
 		port := ordinary[0].runtime.Ports[0]
@@ -222,7 +241,7 @@ var _ = Describe("DMS plan configuration", func() {
 		Expect(port.Trust).To(Equal(ptr.To("dscp")))
 	})
 	It("keeps ordinary Force NV queries in the compatibility path", func() {
-		status.device.Spec.Configuration.PlanRef = nil
+		status.device.Spec.Configuration.PlanRef = ""
 		status.device.Spec.Configuration.Template = &v1alpha1.ConfigurationTemplateSpec{Force: true}
 		library.defaults = func(device.Port) (map[string]string, error) {
 			Fail("ordinary Force must not query library defaults")
@@ -235,7 +254,7 @@ var _ = Describe("DMS plan configuration", func() {
 		Expect(groups[0].nv.Overrides["rail0"]).To(BeEmpty())
 	})
 	DescribeTable("keeps ordinary ASIC runtime independent of paired NV grouping", func(networkBay bool, failure string) {
-		status.device.Spec.Configuration.PlanRef = nil
+		status.device.Spec.Configuration.PlanRef = ""
 		status.device.Spec.Configuration.Template = &v1alpha1.ConfigurationTemplateSpec{LinkType: "Ethernet", PciPerformanceOptimized: &v1alpha1.PciPerformanceOptimizedSpec{Enabled: true}}
 		if networkBay {
 			status.device.Spec.Configuration.Template.LinkType = ""

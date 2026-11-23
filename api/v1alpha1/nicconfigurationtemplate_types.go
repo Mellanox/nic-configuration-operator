@@ -172,24 +172,16 @@ type ConfigurationTemplateSpec struct {
 	Force bool `json:"force,omitempty"`
 }
 
-// DMSPlanReference identifies shared plan parameters and their host bindings.
-type DMSPlanReference struct {
-	// Namespace containing the DMSPlanParams and its referenced blueprint ConfigMap.
-	// +kubebuilder:validation:MinLength=1
-	Namespace string `json:"namespace"`
-	// Name of the DMSPlanParams object.
-	// +kubebuilder:validation:MinLength=1
-	Name string `json:"name"`
-}
-
 // NicConfigurationTemplateSpec defines the desired state of NicConfigurationTemplate
 // +kubebuilder:validation:XValidation:rule="!has(self.template) || (!has(self.template.networkBay) || self.nicSelector.nicType == '1025')",message="networkBay can only be configured for ConnectX-9 (NicType 1025)"
 // +kubebuilder:validation:XValidation:rule="!has(self.planRef) || !self.resetToDefault",message="planRef cannot be combined with resetToDefault"
 // +kubebuilder:validation:XValidation:rule="has(self.template) || has(self.planRef) || self.resetToDefault",message="template, planRef or resetToDefault is required"
 type NicConfigurationTemplateSpec struct {
-	// PlanRef selects the shared DMS plan. Template fields become explicit overrides.
+	// PlanRef names a DMSPlanParams in the same namespace.
+	// Template fields become explicit overrides.
 	// +optional
-	PlanRef *DMSPlanReference `json:"planRef,omitempty"`
+	// +kubebuilder:validation:MinLength=1
+	PlanRef string `json:"planRef,omitempty"`
 	// NodeSelector contains labels required on the node. When empty, the template will be applied to matching devices on all nodes.
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
 	// NIC selector configuration

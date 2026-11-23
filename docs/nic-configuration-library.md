@@ -637,11 +637,11 @@ type QosSpec struct {
 }
 ```
 
-### DMSPlanReference
+### DMS plan references
 
 Spectrum-X configuration uses `NicConfigurationTemplate.spec.planRef` and
-`NicDevice.spec.configuration.planRef`, both containing required `namespace` and
-`name` strings identifying DMSPlanParams. Ordinary template fields become explicit
+`NicDevice.spec.configuration.planRef`, both optional name strings identifying
+DMSPlanParams in the same namespace. Ordinary template fields become explicit
 overrides. The obsolete SpectrumXOptimizedSpec and NCO planner APIs are removed;
 external consumers must migrate to dms-lib.
 See [DMS plan configuration](dms-plan-configuration.md).

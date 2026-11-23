@@ -78,23 +78,24 @@ var _ = Describe("NicConfigurationTemplate CEL validation", func() {
 	It("accepts plan-only templates and devices and ordinary overrides", func() {
 		obj := newNicConfigurationTemplate("plan-only", 0)
 		obj.Spec.Template = nil
-		obj.Spec.PlanRef = &DMSPlanReference{Namespace: "default", Name: "host-plan"}
+		obj.Spec.PlanRef = "host-plan"
 		Expect(k8sClient.Create(ctx, obj)).To(Succeed())
 		nic := &NicDevice{ObjectMeta: metav1.ObjectMeta{Name: "plan-device", Namespace: "default"}, Spec: NicDeviceSpec{Configuration: &NicDeviceConfigurationSpec{PlanRef: obj.Spec.PlanRef}}}
 		Expect(k8sClient.Create(ctx, nic)).To(Succeed())
 		obj = newNicConfigurationTemplate("plan-overrides", 1)
-		obj.Spec.PlanRef = &DMSPlanReference{Namespace: "default", Name: "host-plan"}
+		obj.Spec.PlanRef = "host-plan"
 		obj.Spec.Template.RawNvConfig = []NvConfigParam{{Name: "SRIOV_EN", Value: "1"}}
 		Expect(k8sClient.Create(ctx, obj)).To(Succeed())
 	})
 
-	It("rejects reset combined with a plan and incomplete references", func() {
+	It("rejects reset combined with a plan and configurations without intent", func() {
 		obj := newNicConfigurationTemplate("plan-reset", 0)
-		obj.Spec.PlanRef = &DMSPlanReference{Namespace: "default", Name: "host-plan"}
+		obj.Spec.PlanRef = "host-plan"
 		obj.Spec.ResetToDefault = true
 		Expect(k8sClient.Create(ctx, obj)).NotTo(Succeed())
 		obj = newNicConfigurationTemplate("plan-empty-ref", 0)
-		obj.Spec.PlanRef = &DMSPlanReference{Name: "host-plan"}
+		obj.Spec.PlanRef = ""
+		obj.Spec.Template = nil
 		Expect(k8sClient.Create(ctx, obj)).NotTo(Succeed())
 	})
 

@@ -41,6 +41,4 @@ spec:
     feature.node.kubernetes.io/network-sriov.capable: "true"
   nicSelector:
     nicType: "1023"
-  planRef:
-    namespace: nvidia-network-operator
-    name: spectrum-x-multiplane
+  planRef: spectrum-x-multiplane

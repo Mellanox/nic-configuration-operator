@@ -62,11 +62,11 @@ func (r *NicDeviceReconciler) preparePlanConfigurations(ctx context.Context, sta
 		spec := status.device.Spec.Configuration
 		ref := types.NamespacedName{}
 		var compiled *plan.Plan
-		if spec.PlanRef != nil {
+		if spec.PlanRef != "" {
 			if r.APIReader == nil {
 				return nil, nil, fmt.Errorf("DMS plan API reader is not initialized")
 			}
-			ref = types.NamespacedName{Namespace: spec.PlanRef.Namespace, Name: spec.PlanRef.Name}
+			ref = types.NamespacedName{Namespace: status.device.Namespace, Name: spec.PlanRef}
 			compiled = plans[ref]
 			if compiled == nil {
 				compiled, err = r.resolveConfigurationPlan(ctx, ref, inventory)
@@ -135,7 +135,7 @@ func selectConfigurationStatuses(statuses nicDeviceConfigurationStatuses) (nicDe
 	selected := nicDeviceConfigurationStatuses{}
 	for _, status := range statuses {
 		spec := status.device.Spec.Configuration
-		if spec != nil && spec.ResetToDefault && spec.PlanRef != nil {
+		if spec != nil && spec.ResetToDefault && spec.PlanRef != "" {
 			return nil, nil, fmt.Errorf("device %s: planRef cannot reset to default", status.device.Name)
 		}
 		if spec == nil || spec.ResetToDefault {
@@ -143,9 +143,6 @@ func selectConfigurationStatuses(statuses nicDeviceConfigurationStatuses) (nicDe
 			continue
 		}
 
-		if spec.PlanRef != nil && (spec.PlanRef.Name == "" || spec.PlanRef.Namespace == "") {
-			return nil, nil, fmt.Errorf("device %s: planRef requires namespace/name and cannot reset to default", status.device.Name)
-		}
 		selected = append(selected, status)
 	}
 	return legacy, selected, nil

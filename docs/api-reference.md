@@ -78,38 +78,6 @@ ConfigurationTemplateSpec is a set of configurations for the NICs
 </tbody>
 </table>
 
-### DMSPlanReference
-
-(*Appears on:*[NicConfigurationTemplateSpec](#NicConfigurationTemplateSpec),
-[NicDeviceConfigurationSpec](#NicDeviceConfigurationSpec))
-
-DMSPlanReference identifies shared plan parameters and their host bindings.
-
-<table>
-<colgroup>
-<col style="width: 50%" />
-<col style="width: 50%" />
-</colgroup>
-<thead>
-<tr>
-<th>Field</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>namespace</code><br />
-<em>string</em></td>
-<td><p>Namespace containing the DMSPlanParams and its referenced blueprint ConfigMap.</p></td>
-</tr>
-<tr>
-<td><code>name</code><br />
-<em>string</em></td>
-<td><p>Name of the DMSPlanParams object.</p></td>
-</tr>
-</tbody>
-</table>
-
 ### ECNSpec
 
 (*Appears on:*[QosSpec](#QosSpec))
@@ -323,9 +291,9 @@ NicConfigurationTemplateSpec defines the desired state of NicConfigurationTempla
 <tbody>
 <tr>
 <td><code>planRef</code><br />
-<em><a href="#DMSPlanReference">DMSPlanReference</a></em></td>
+<em>string</em></td>
 <td><em>(Optional)</em>
-<p>PlanRef selects the shared DMS plan. Template fields become explicit overrides.</p></td>
+<p>PlanRef names a DMSPlanParams in the same namespace. Template fields become explicit overrides.</p></td>
 </tr>
 <tr>
 <td><code>nodeSelector</code><br />
@@ -430,9 +398,9 @@ NicDeviceConfigurationSpec contains desired configuration of the NIC
 <tbody>
 <tr>
 <td><code>planRef</code><br />
-<em><a href="#DMSPlanReference">DMSPlanReference</a></em></td>
+<em>string</em></td>
 <td><em>(Optional)</em>
-<p>PlanRef is copied unchanged from the matching configuration template.</p></td>
+<p>PlanRef names a DMSPlanParams in the same namespace.</p></td>
 </tr>
 <tr>
 <td><code>resetToDefault</code><br />
@@ -1355,4 +1323,4 @@ RuntimePerformanceOptimizedSpec specifies runtime NIC performance tuning applied
 
 ## Shared DMS plan input
 
-`NicConfigurationTemplate.spec.planRef` and `NicDevice.spec.configuration.planRef` contain required `namespace` and `name` strings identifying a DMSPlanParams object. The template body is optional with a reference. Reset-to-default cannot be combined with a reference. The obsolete SpectrumXOptimizedSpec and spectrumXOptimized field are removed. See [DMS plan configuration](dms-plan-configuration.md) for migration, selection and activation behavior.
+`NicConfigurationTemplate.spec.planRef` and `NicDevice.spec.configuration.planRef` are optional name strings identifying a DMSPlanParams in the same namespace. The template body is optional with a reference. Reset-to-default cannot be combined with a reference. The obsolete SpectrumXOptimizedSpec and spectrumXOptimized field are removed. See [DMS plan configuration](dms-plan-configuration.md) for migration, selection and activation behavior.

@@ -131,9 +131,9 @@ func (t *nicConfigurationTemplate) applyToDevice(device *v1alpha1.NicDevice) boo
 		device.Spec.Configuration = &v1alpha1.NicDeviceConfigurationSpec{}
 	}
 
-	if !reflect.DeepEqual(device.Spec.Configuration.PlanRef, t.template.Spec.PlanRef) {
+	if device.Spec.Configuration.PlanRef != t.template.Spec.PlanRef {
 		updateSpec = true
-		device.Spec.Configuration.PlanRef = t.template.Spec.PlanRef.DeepCopy()
+		device.Spec.Configuration.PlanRef = t.template.Spec.PlanRef
 	}
 
 	if device.Spec.Configuration.ResetToDefault != t.template.Spec.ResetToDefault {

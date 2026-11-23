@@ -14,9 +14,7 @@ spec:
   nicSelector:
     nicType: "1023"
     pciAddresses: ["0000:64:00.0"]
-  planRef:
-    namespace: default
-    name: spectrum-x-plan
+  planRef: spectrum-x-plan
   template:
     numVfs: 1
     linkType: Ethernet
@@ -28,16 +26,10 @@ spec:
 The API addition is:
 
 ```go
-type DMSPlanReference struct {
-    Namespace string `json:"namespace"`
-    Name      string `json:"name"`
-}
-
-// Both NicConfigurationTemplateSpec and NicDeviceConfigurationSpec contain:
-// PlanRef *DMSPlanReference `json:"planRef,omitempty"`
+PlanRef string `json:"planRef,omitempty"`
 ```
 
-`planRef` has required `namespace` and `name` fields and is copied unchanged into `NicDevice.spec.configuration.planRef`. The `template` field may be omitted for a plan-only request. An existing template's `numVfs: 0` remains intent to configure zero VFs. `force` retains its existing meaning. Reset-to-default cannot be combined with a plan reference and keeps its existing separate flow.
+`planRef` names a DMSPlanParams in the template namespace. NCO copies the name into `NicDevice.spec.configuration.planRef` for matching devices in that namespace and resolves it there. The `template` field may be omitted for a plan-only request. An existing template's `numVfs: 0` remains intent to configure zero VFs. `force` retains its existing meaning. Reset-to-default cannot be combined with a plan reference and keeps its existing separate flow.
 
 `spectrumXOptimized` (including `enabled: false`) and the old tarball ConfigMap input are obsolete. Use planRef and DMSPlanParams instead. NCO no longer runs the tarball data reconciler or its duplicate plan compilation path. Ordinary templates without a plan reference use the same library execution flow with no compiled plan. NCO preserves omitted-default translation and filters unsupported raw parameters separately on each observed PF before delegating writes. Reset-to-default and ordinary forced NV updates retain narrowly bounded compatibility paths; ordinary runtime still uses the library. The typed `SpectrumXOptimizedSpec`, NCO planner API and tarball installation API are removed. External Go consumers, including DPF, require coordinated migration to dms-lib; this change does not edit those repositories.
 
