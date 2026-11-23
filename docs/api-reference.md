@@ -59,12 +59,6 @@ ConfigurationTemplateSpec is a set of configurations for the NICs
 <td><p>Runtime NIC performance tuning (ring buffers, channels, LRO) applied via ethtool</p></td>
 </tr>
 <tr>
-<td><code>spectrumXOptimized</code><br />
-<em><a href="#SpectrumXOptimizedSpec">SpectrumXOptimizedSpec</a></em></td>
-<td><p>Spectrum-X optimization settings. Works only with linkType==Ethernet &amp;&amp; numVfs==1.
-Temporarily cannot be combined with rawNvConfig or networkBay.</p></td>
-</tr>
-<tr>
 <td><code>networkBay</code><br />
 <em><a href="#NetworkBaySpec">NetworkBaySpec</a></em></td>
 <td><em>(Optional)</em>
@@ -296,6 +290,12 @@ NicConfigurationTemplateSpec defines the desired state of NicConfigurationTempla
 </thead>
 <tbody>
 <tr>
+<td><code>planRef</code><br />
+<em>string</em></td>
+<td><em>(Optional)</em>
+<p>PlanRef names a DMSPlanParams in the same namespace. Template fields become explicit overrides.</p></td>
+</tr>
+<tr>
 <td><code>nodeSelector</code><br />
 <em>map[string]string</em></td>
 <td><p>NodeSelector contains labels required on the node. When empty, the template will be applied to matching devices on all nodes.</p></td>
@@ -396,6 +396,12 @@ NicDeviceConfigurationSpec contains desired configuration of the NIC
 </tr>
 </thead>
 <tbody>
+<tr>
+<td><code>planRef</code><br />
+<em>string</em></td>
+<td><em>(Optional)</em>
+<p>PlanRef names a DMSPlanParams in the same namespace.</p></td>
+</tr>
 <tr>
 <td><code>resetToDefault</code><br />
 <em>bool</em></td>
@@ -1311,61 +1317,10 @@ RuntimePerformanceOptimizedSpec specifies runtime NIC performance tuning applied
 </tbody>
 </table>
 
-### SpectrumXOptimizedSpec
-
-(*Appears on:*[ConfigurationTemplateSpec](#ConfigurationTemplateSpec))
-
-SpectrumXOptimizedSpec enables Spectrum-X specific optimizations
-
-<table>
-<colgroup>
-<col style="width: 50%" />
-<col style="width: 50%" />
-</colgroup>
-<thead>
-<tr>
-<th>Field</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>enabled</code><br />
-<em>bool</em></td>
-<td><p>Optimize Spectrum X</p></td>
-</tr>
-<tr>
-<td><code>version</code><br />
-<em>string</em></td>
-<td><p>Version of the Spectrum-X architecture passed to the doSPCX planner.</p></td>
-</tr>
-<tr>
-<td><code>platformType</code><br />
-<em>string</em></td>
-<td><em>(Optional)</em>
-<p>Platform type used by the doSPCX planner to select a recipe from the supplied profile.</p></td>
-</tr>
-<tr>
-<td><code>overlay</code><br />
-<em>string</em></td>
-<td><em>(Optional)</em>
-<p>Overlay mode to be configured Can be “l3” or “none”</p></td>
-</tr>
-<tr>
-<td><code>multiplaneMode</code><br />
-<em>string</em></td>
-<td><em>(Optional)</em>
-<p>Multiplane mode to be configured Can be “none”, “swplb”, or “hwplb”</p></td>
-</tr>
-<tr>
-<td><code>numberOfPlanes</code><br />
-<em>int</em></td>
-<td><em>(Optional)</em>
-<p>Number of planes to be configured</p></td>
-</tr>
-</tbody>
-</table>
-
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-*Generated with `gen-crd-api-reference-docs` on git commit `800cfa3`.*
+*Generated with `gen-crd-api-reference-docs` on git commit `181a9b0`.*
+
+## Shared DMS plan input
+
+`NicConfigurationTemplate.spec.planRef` and `NicDevice.spec.configuration.planRef` are optional name strings identifying a DMSPlanParams in the same namespace. The template body is optional with a reference. Reset-to-default cannot be combined with a reference. The obsolete SpectrumXOptimizedSpec and spectrumXOptimized field are removed. See [DMS plan configuration](dms-plan-configuration.md) for migration, selection and activation behavior.

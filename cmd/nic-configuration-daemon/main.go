@@ -20,17 +20,12 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"maps"
 	"os"
-	"slices"
 	"strconv"
 	"time"
 
 	maintenanceoperator "github.com/Mellanox/maintenance-operator/api/v1alpha1"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/selection"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -41,12 +36,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
+	dmsv1 "github.com/Mellanox/dms-lib/api/v1alpha1"
+	dmsconfiguration "github.com/Mellanox/dms-lib/pkg/configuration"
+	"github.com/Mellanox/dms-lib/pkg/device"
+	libfirmware "github.com/Mellanox/dms-lib/pkg/firmware"
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/Mellanox/nic-configuration-operator/internal/controller"
 	"github.com/Mellanox/nic-configuration-operator/pkg/configuration"
 	"github.com/Mellanox/nic-configuration-operator/pkg/consts"
 	"github.com/Mellanox/nic-configuration-operator/pkg/devicediscovery"
-	"github.com/Mellanox/nic-configuration-operator/pkg/dms"
 	"github.com/Mellanox/nic-configuration-operator/pkg/firmware"
 	"github.com/Mellanox/nic-configuration-operator/pkg/helper"
 	"github.com/Mellanox/nic-configuration-operator/pkg/host"
@@ -91,27 +89,18 @@ func main() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(maintenanceoperator.AddToScheme(scheme))
 	utilruntime.Must(v1alpha1.AddToScheme(scheme))
-
-	// Restrict the cached ConfigMap informer to objects carrying the doSPCX data label
-	// (any value), so the daemon doesn't watch/cache every ConfigMap in the cluster. The
-	// firmware-map ConfigMap is read via a raw client (helper.InitNicFwMapFromConfigMap), not
-	// the cached client, so this narrowing is safe.
-	dospcxDataReq, err := labels.NewRequirement(consts.DospcxDataLabel, selection.Exists, nil)
-	if err != nil {
-		log.Log.Error(err, "unable to build doSPCX data label selector")
-		os.Exit(1)
-	}
+	utilruntime.Must(dmsv1.AddToScheme(scheme))
 
 	// Get the pod name and namespace from the environment variables
 	nodeName := os.Getenv("NODE_NAME")
 	if nodeName == "" {
-		log.Log.Error(err, "NODE_NAME env var required but not set")
+		log.Log.Error(nil, "NODE_NAME env var required but not set")
 		os.Exit(1)
 	}
 
 	namespace := os.Getenv("NAMESPACE")
 	if namespace == "" {
-		log.Log.Error(err, "NAMESPACE env var required but not set")
+		log.Log.Error(nil, "NAMESPACE env var required but not set")
 		os.Exit(1)
 	}
 
@@ -130,11 +119,7 @@ func main() {
 			"to keep daemon memory independent of cluster size", "node", nodeName)
 	}
 
-	byObject := map[client.Object]cache.ByObject{
-		&corev1.ConfigMap{}: {
-			Label: labels.NewSelector().Add(*dospcxDataReq),
-		},
-	}
+	byObject := make(map[client.Object]cache.ByObject)
 	controller.AddNodeScopedCacheObjects(byObject, nodeName, scopeNicDevices)
 
 	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
@@ -164,35 +149,26 @@ func main() {
 	hostUtils := host.NewHostUtils()
 	nvConfigUtils := nvconfig.NewNVConfigUtilsWithOptions(nvConfigOptions)
 
-	deviceDiscovery := devicediscovery.NewDeviceDiscovery(nodeName, nvConfigUtils)
+	deviceDiscovery := devicediscovery.NewDeviceDiscovery(nodeName)
 
-	// Initialize DMS server
-	dmsServer := dms.NewDMSServer()
-
-	// Start DMS server for all discovered devices
-	devices, err := deviceDiscovery.DiscoverNicDevices()
+	firmwareBackend, err := libfirmware.NewManager(libfirmware.Options{})
 	if err != nil {
-		log.Log.Error(err, "failed to discover NIC devices")
+		log.Log.Error(err, "initialize firmware library")
 		os.Exit(1)
 	}
-
-	if err := dmsServer.StartDMSServer(slices.Collect(maps.Values(devices))); err != nil {
-		log.Log.Error(err, "failed to start DMS server")
-		os.Exit(1)
-	}
-
-	// Ensure DMS server is stopped when the program exits
-	defer func() {
-		if err := dmsServer.StopDMSServer(); err != nil {
-			log.Log.Error(err, "failed to stop DMS server")
-		}
-	}()
 
 	spectrumXConfigManager := spectrumx.NewSpectrumXConfigManager()
+	planConfiguration, err := dmsconfiguration.NewManager(dmsconfiguration.Options{
+		NativeUsePCIAddress: nvConfigOptions.UsePCIAddress,
+	})
+	if err != nil {
+		log.Log.Error(err, "initialize DMS configuration library")
+		os.Exit(1)
+	}
 	configurationManager := configuration.NewConfigurationManager(
-		eventRecorder, dmsServer, nvConfigUtils, spectrumXConfigManager)
+		nvConfigUtils, planConfiguration, firmwareBackend)
 	maintenanceManager := maintenance.New(mgr.GetClient(), hostUtils, nodeName, namespace)
-	firmwareManager := firmware.NewFirmwareManager(mgr.GetClient(), dmsServer, namespace)
+	firmwareManager := firmware.NewFirmwareManager(mgr.GetClient(), firmwareBackend, namespace)
 
 	if err := initNicFwMap(namespace); err != nil {
 		log.Log.Error(err, "unable to init NicFwMap")
@@ -209,18 +185,24 @@ func main() {
 	udevManager := udev.NewUdevManager()
 
 	nicDeviceReconciler := controller.NicDeviceReconciler{
-		Client:               mgr.GetClient(),
-		Scheme:               mgr.GetScheme(),
-		NodeName:             nodeName,
-		NamespaceName:        namespace,
-		ConfigurationManager: configurationManager,
-		MaintenanceManager:   maintenanceManager,
-		FirmwareManager:      firmwareManager,
-		EventRecorder:        eventRecorder,
-		SpectrumXManager:     spectrumXConfigManager,
-		HostUtils:            hostUtils,
-		UdevManager:          udevManager,
-		DeviceDiscoveryUtils: devicediscovery.NewDeviceDiscoveryUtils(),
+		Client:            mgr.GetClient(),
+		APIReader:         mgr.GetAPIReader(),
+		PlanConfiguration: planConfiguration,
+		DiscoverPlanDevices: func(ctx context.Context) (device.Inventory, error) {
+			return device.Discover(ctx, device.Options{})
+		},
+		Scheme:                    mgr.GetScheme(),
+		NodeName:                  nodeName,
+		NamespaceName:             namespace,
+		ConfigurationManager:      configurationManager,
+		CheckRuntimePrerequisites: configuration.ValidateRuntimePrerequisites,
+		MaintenanceManager:        maintenanceManager,
+		FirmwareManager:           firmwareManager,
+		EventRecorder:             eventRecorder,
+		SpectrumXManager:          spectrumXConfigManager,
+		HostUtils:                 hostUtils,
+		UdevManager:               udevManager,
+		ReadInterfaceNames:        device.ReadInterfaceNames,
 	}
 	err = nicDeviceReconciler.SetupWithManager(mgr, true)
 	if err != nil {
@@ -236,16 +218,6 @@ func main() {
 	}
 	if err = nicInterfaceNameTemplateReconciler.SetupWithManager(mgr); err != nil {
 		log.Log.Error(err, "unable to create controller", "controller", "NicInterfaceNameTemplateReconciler")
-		os.Exit(1)
-	}
-
-	dospcxDataReconciler := &controller.DospcxDataReconciler{
-		Client:           mgr.GetClient(),
-		Scheme:           mgr.GetScheme(),
-		SpectrumXManager: spectrumXConfigManager,
-	}
-	if err = dospcxDataReconciler.SetupWithManager(mgr); err != nil {
-		log.Log.Error(err, "unable to create controller", "controller", "DospcxDataReconciler")
 		os.Exit(1)
 	}
 

@@ -20,7 +20,7 @@ import (
 )
 
 // NicDeviceConfigurationSpec contains desired configuration of the NIC
-// +kubebuilder:validation:XValidation:rule="!has(self.planRef)",message="planRef requires DMS library integration"
+// +kubebuilder:validation:XValidation:rule="!has(self.planRef) || !has(self.resetToDefault) || !self.resetToDefault",message="planRef cannot be combined with resetToDefault"
 type NicDeviceConfigurationSpec struct {
 	// PlanRef names a DMSPlanParams in the same namespace.
 	// +optional

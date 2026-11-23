@@ -26,17 +26,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
-	"github.com/Mellanox/nic-configuration-operator/pkg/spectrumx/dospcx"
 )
 
 const docaSpcXCCExecutable = "/opt/mellanox/doca/tools/doca_spcx_cc"
 
 var ccStartupWait = 3 * time.Second
 
-// SpectrumXManager owns the doSPCX lifecycle and the DOCA SPC-X CC processes.
+// SpectrumXManager owns the DOCA SPC-X CC processes.
 type SpectrumXManager interface {
-	PlanManager
-	BlueprintsDataManager
 	// RunDocaSpcXCC launches and tracks the DOCA SPC-X CC process for a port.
 	RunDocaSpcXCC(port v1alpha1.NicDevicePortSpec) error
 	// IsDocaSpcXCCRunning reports whether a tracked process completed startup and is alive.
@@ -48,7 +45,6 @@ type SpectrumXManager interface {
 var _ SpectrumXManager = (*spectrumXConfigManager)(nil)
 
 type spectrumXConfigManager struct {
-	dospcxManager dospcxLifecycle
 	execInterface execUtils.Interface
 
 	ccProcessesMutex  sync.Mutex
@@ -172,11 +168,10 @@ func (m *spectrumXConfigManager) GetCCTerminationChannel() <-chan string {
 	return m.ccTerminationChan
 }
 
-// NewSpectrumXConfigManager creates the doSPCX and CC lifecycle manager.
+// NewSpectrumXConfigManager creates the CC process manager.
 func NewSpectrumXConfigManager() SpectrumXManager {
 	execInterface := execUtils.New()
 	return &spectrumXConfigManager{
-		dospcxManager:     dospcx.NewManager(execInterface),
 		execInterface:     execInterface,
 		ccProcesses:       make(map[string]*ccProcess),
 		ccTerminationChan: make(chan string, 10),

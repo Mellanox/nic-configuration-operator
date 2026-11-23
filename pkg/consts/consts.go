@@ -117,25 +117,10 @@ const (
 
 	SupportedNicFirmwareConfigmap = "nic-configuration-operator-supported-nic-firmware"
 
-	// DospcxDataLabel selects the ConfigMap that carries the doSPCX data bundle.
-	// The value remains compatible with the published dospcx-data artifact.
-	DospcxDataLabel = "network.nvidia.com/operator.nic-configuration.spectrum-x-profile"
-	// DospcxDataConfigMapFormatKey identifies the doSPCX data bundle format.
-	DospcxDataConfigMapFormatKey = "format"
-	// DospcxDataConfigMapFormat is the supported doSPCX data bundle format.
-	DospcxDataConfigMapFormat = "dospcx-data.tar.gz/v1"
-	// DospcxDataConfigMapArchiveKey holds the gzip-compressed doSPCX data tar archive.
-	DospcxDataConfigMapArchiveKey = "dospcx-data.tar.gz"
-	// DospcxDataCommitAnnotation records the dospcx-data source commit.
-	DospcxDataCommitAnnotation = "configuration.net.nvidia.com/dospcx-data-commit"
-	// DospcxDataRefAnnotation records the dospcx-data source ref.
-	DospcxDataRefAnnotation = "configuration.net.nvidia.com/dospcx-data-ref"
-	// DospcxDataTreeAnnotation records the Git tree containing the packaged data directory.
-	DospcxDataTreeAnnotation = "configuration.net.nvidia.com/dospcx-data-tree"
-	Mlx5ModuleVersionPath    = "/sys/bus/pci/drivers/mlx5_core/module/version"
-	Mlx5CoreDriverName       = "mlx5_core"
-	PCIDevicesSysfsPath      = "/sys/bus/pci/devices"
-	Mlx5CoreDriverBindPath   = "/sys/bus/pci/drivers/mlx5_core/bind"
+	Mlx5ModuleVersionPath  = "/sys/bus/pci/drivers/mlx5_core/module/version"
+	Mlx5CoreDriverName     = "mlx5_core"
+	PCIDevicesSysfsPath    = "/sys/bus/pci/devices"
+	Mlx5CoreDriverBindPath = "/sys/bus/pci/drivers/mlx5_core/bind"
 
 	FwConfigNotAppliedAfterRebootErrorMsg = "firmware configuration failed to apply after reboot"
 

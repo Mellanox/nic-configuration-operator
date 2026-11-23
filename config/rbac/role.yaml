@@ -78,6 +78,12 @@ rules:
   - patch
   - update
 - apiGroups:
+  - dms.nvidia.com
+  resources:
+  - dmsplanparams
+  verbs:
+  - get
+- apiGroups:
   - maintenance.nvidia.com
   resources:
   - nodemaintenances

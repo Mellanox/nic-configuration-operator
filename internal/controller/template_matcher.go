@@ -49,9 +49,9 @@ type nicTemplate interface {
 	getObject() client.Object
 }
 
-func matchDevicesToTemplates(ctx context.Context, client client.Client, recorder record.EventRecorder, templates []nicTemplate, clearDeviceSpec clearDeviceSpecFunc) error {
+func matchDevicesToTemplates(ctx context.Context, k8sClient client.Client, recorder record.EventRecorder, templates []nicTemplate, clearDeviceSpec clearDeviceSpecFunc) error {
 	deviceList := &v1alpha1.NicDeviceList{}
-	err := client.List(ctx, deviceList)
+	err := k8sClient.List(ctx, deviceList)
 	if err != nil {
 		log.Log.Error(err, "Failed to list NicDevices")
 		return err
@@ -59,7 +59,7 @@ func matchDevicesToTemplates(ctx context.Context, client client.Client, recorder
 	log.Log.V(2).Info("Listed devices", "count", len(deviceList.Items))
 
 	nodeList := &v1.NodeList{}
-	err = client.List(ctx, nodeList)
+	err = k8sClient.List(ctx, nodeList)
 	if err != nil {
 		log.Log.Error(err, "Failed to list cluster nodes")
 		return err
@@ -73,10 +73,11 @@ func matchDevicesToTemplates(ctx context.Context, client client.Client, recorder
 
 	// Precompute, per Network Bay template, the set of nodes whose matched devices do not form
 	// whole bays (see §7). Devices on a rejected node must not receive the template's spec.
-	bayRejectedNodes := map[string]map[string]string{} // templateName -> nodeName -> reason
+	bayRejectedNodes := map[client.ObjectKey]map[string]string{} // template -> nodeName -> reason
 	for _, template := range templates {
 		if template.networkBayRequested() {
-			bayRejectedNodes[template.getName()] = computeNetworkBayRejectedNodes(template, templates, deviceList.Items, nodeMap)
+			key := client.ObjectKeyFromObject(template.getObject())
+			bayRejectedNodes[key] = computeNetworkBayRejectedNodes(template, templates, deviceList.Items, nodeMap)
 		}
 	}
 
@@ -104,7 +105,7 @@ func matchDevicesToTemplates(ctx context.Context, client client.Client, recorder
 
 			clearDeviceSpec(&device)
 
-			err = client.Update(ctx, &device)
+			err = k8sClient.Update(ctx, &device)
 			if err != nil {
 				log.Log.Error(err, "Failed to update device's spec", "device", device)
 				return err
@@ -121,7 +122,7 @@ func matchDevicesToTemplates(ctx context.Context, client client.Client, recorder
 			joinedTemplateNames := strings.Join(templateNames, ",")
 			err = fmt.Errorf("device matches several configuration templates: %s, %s", device.Name, joinedTemplateNames)
 			log.Log.Error(err, "Device matches several configuration templates, deleting its spec and emitting an error event", "device", device.Name)
-			err = handleErrorSeveralMatchingTemplates(ctx, client, recorder, &device, joinedTemplateNames, clearDeviceSpec)
+			err = handleErrorSeveralMatchingTemplates(ctx, k8sClient, recorder, &device, joinedTemplateNames, clearDeviceSpec)
 			if err != nil {
 				log.Log.Error(err, "Failed to emit warning about multiple templates matching one device", "templates", joinedTemplateNames)
 				return err
@@ -131,12 +132,12 @@ func matchDevicesToTemplates(ctx context.Context, client client.Client, recorder
 
 			// Network Bay templates must match a whole bay on a node. If this device's node was
 			// rejected, do not apply the spec — clear it and surface the imbalance instead.
-			if rejected, ok := bayRejectedNodes[matchingTemplate.getName()]; ok {
+			if rejected, ok := bayRejectedNodes[client.ObjectKeyFromObject(matchingTemplate.getObject())]; ok {
 				if reason, isRejected := rejected[device.Status.Node]; isRejected {
 					log.Log.Info("Network Bay template does not match a whole bay on node, rejecting device",
 						"device", device.Name, "node", device.Status.Node, "reason", reason)
 					dropDeviceFromStatus(device.Name, matchingTemplate)
-					if err := handleNetworkBayImbalance(ctx, client, &device, reason, clearDeviceSpec); err != nil {
+					if err := handleNetworkBayImbalance(ctx, k8sClient, &device, reason, clearDeviceSpec); err != nil {
 						return err
 					}
 					continue
@@ -150,7 +151,7 @@ func matchDevicesToTemplates(ctx context.Context, client client.Client, recorder
 
 			updateRequired := matchingTemplate.applyToDevice(&device)
 			if updateRequired {
-				err := client.Update(ctx, &device)
+				err := k8sClient.Update(ctx, &device)
 				if err != nil {
 					log.Log.Error(err, "Failed to update NicDevice spec", "device", device.Name)
 					return err
@@ -160,7 +161,7 @@ func matchDevicesToTemplates(ctx context.Context, client client.Client, recorder
 			// If this device was previously rejected for a Network Bay imbalance that has since
 			// resolved (e.g. the sibling ASIC finished discovery), clear the stale device condition.
 			if matchingTemplate.networkBayRequested() {
-				if err := clearNetworkBayImbalanceCondition(ctx, client, &device); err != nil {
+				if err := clearNetworkBayImbalanceCondition(ctx, k8sClient, &device); err != nil {
 					return err
 				}
 			}
@@ -172,7 +173,7 @@ func matchDevicesToTemplates(ctx context.Context, client client.Client, recorder
 		if !template.networkBayRequested() {
 			continue
 		}
-		setNetworkBayTemplateCondition(recorder, template, bayRejectedNodes[template.getName()])
+		setNetworkBayTemplateCondition(recorder, template, bayRejectedNodes[client.ObjectKeyFromObject(template.getObject())])
 	}
 
 	return nil
@@ -353,6 +354,12 @@ func handleErrorSeveralMatchingTemplates(ctx context.Context, client client.Clie
 }
 
 func deviceMatchesConfigurationTemplateSelectors(device *v1alpha1.NicDevice, template nicTemplate, node *v1.Node) bool {
+	// A plan reference is resolved in the device namespace after copying.
+	if config, ok := template.(*nicConfigurationTemplate); ok &&
+		config.template.Spec.PlanRef != "" && config.template.Namespace != device.Namespace {
+		return false
+	}
+
 	if !nodeMatchesNodeSelector(node, template.getNodeSelector()) {
 		return false
 	}

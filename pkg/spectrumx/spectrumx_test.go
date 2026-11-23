@@ -72,12 +72,11 @@ var _ = Describe("SpectrumXManager", func() {
 		ccStartupWait = originalStartupWait
 	})
 
-	It("constructs the doSPCX lifecycle internally", func() {
+	It("constructs the CC process manager", func() {
 		manager := NewSpectrumXConfigManager()
 		implementation, ok := manager.(*spectrumXConfigManager)
 
 		Expect(ok).To(BeTrue())
-		Expect(implementation.dospcxManager).NotTo(BeNil())
 		Expect(implementation.execInterface).NotTo(BeNil())
 	})
 
