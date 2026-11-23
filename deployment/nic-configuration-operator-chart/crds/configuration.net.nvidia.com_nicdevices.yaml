@@ -44,22 +44,9 @@ spec:
                   NicConfigurationTemplate
                 properties:
                   planRef:
-                    description: PlanRef selects shared DMS plan parameters; enabled
-                      with the library integration.
-                    properties:
-                      name:
-                        description: Name of the DMSPlanParams object.
-                        minLength: 1
-                        type: string
-                      namespace:
-                        description: Namespace containing the DMSPlanParams and its
-                          referenced blueprint ConfigMap.
-                        minLength: 1
-                        type: string
-                    required:
-                    - name
-                    - namespace
-                    type: object
+                    description: PlanRef names a DMSPlanParams in the same namespace.
+                    minLength: 1
+                    type: string
                   resetToDefault:
                     description: |-
                       ResetToDefault specifies whether node agent needs to perform a reset flow.
