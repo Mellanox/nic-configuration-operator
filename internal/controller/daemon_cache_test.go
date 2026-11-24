@@ -45,14 +45,14 @@ import (
 const otherNodeName = "other-node"
 
 func createNodeScopedManager() manager.Manager {
-	byObject := map[client.Object]cache.ByObject{}
-	AddNodeScopedCacheObjects(byObject, nodeName, true)
+	cacheSelectors := map[client.Object]cache.ByObject{}
+	AddNodeScopedCacheObjects(cacheSelectors, nodeName, true)
 
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:     scheme.Scheme,
 		Metrics:    metricsserver.Options{BindAddress: "0"},
 		Controller: config.Controller{SkipNameValidation: ptr.To(true)},
-		Cache:      cache.Options{ByObject: byObject},
+		Cache:      cache.Options{ByObject: cacheSelectors},
 	})
 	Expect(err).NotTo(HaveOccurred())
 

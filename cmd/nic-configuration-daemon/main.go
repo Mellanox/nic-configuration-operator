@@ -130,19 +130,19 @@ func main() {
 			"to keep daemon memory independent of cluster size", "node", nodeName)
 	}
 
-	byObject := map[client.Object]cache.ByObject{
+	cacheSelectors := map[client.Object]cache.ByObject{
 		&corev1.ConfigMap{}: {
 			Label: labels.NewSelector().Add(*dospcxDataReq),
 		},
 	}
-	controller.AddNodeScopedCacheObjects(byObject, nodeName, scopeNicDevices)
+	controller.AddNodeScopedCacheObjects(cacheSelectors, nodeName, scopeNicDevices)
 
 	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme: scheme,
 		// Setting bind address to 0 disables the health probe / metrics server
 		HealthProbeBindAddress: "0",
 		Metrics:                metricsserver.Options{BindAddress: "0"},
-		Cache:                  cache.Options{ByObject: byObject},
+		Cache:                  cache.Options{ByObject: cacheSelectors},
 	})
 	if err != nil {
 		log.Log.Error(err, "unable to create manager")
